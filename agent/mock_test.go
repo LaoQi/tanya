@@ -118,6 +118,6 @@ func (m *mockLLM) config() *Config {
 	cfg := defaultConfig()
 	cfg.BaseURL = m.server.URL
 	cfg.APIKey = "test-key"
-	cfg.SessionDir = m.t.TempDir()
+	cfg.GlobalSession = m.t.TempDir()
 	return cfg
 }

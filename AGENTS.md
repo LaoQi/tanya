@@ -15,7 +15,7 @@
 
 ```
 main.go            入口、flag 子命令、ask 单发
-repl.go            REPL 抽象（package main）：循环、斜杠命令、提示符、shell 执行确认
+repl.go            REPL 抽象（package main）：循环、斜杠命令、提示符、Ctrl+C 中断
 agent/config.go    配置加载：默认值 < ~/.config/tanyan/config.yaml < env(TANYA_*)
 agent/llm.go       OpenAI 兼容 client（SSE 流式 + tool_calls 增量合并 + usage 捕获）
 agent/agent.go     对话 loop、上下文估算、会话持久化
@@ -42,10 +42,10 @@ go run . ask "你好"   # 单发冒烟（需配置 api_key）
 
 ## 关键行为
 
-- shell 工具默认执行前终端确认 `y/n/a`，`shell.auto_approve: true` 关闭
+- shell 工具免确认直接执行
 - 本地不设上下文上限与轮数上限，不做裁剪；超限等错误由 API 直接暴露
 - token 用量优先取 API 实报 usage（`stream_options.include_usage`），缺失时本地粗估兜底；实时显示在 REPL 提示符
-- 会话 JSONL 落盘于 `~/.local/share/tanyan/sessions/`，记录完整历史
+- 会话存储模式（`-m local/global/auto`，yaml `session_mode`、env `TANYA_SESSION_MODE` 可配，默认 auto）：local 存 `<cwd>/.tanya/sessions/`，global 存 `~/.local/share/tanyan/sessions/<workspace-id>/`（按启动目录可读路径+短哈希划分），auto 检测 `.tanya/` 存在与否自动选择；记录完整历史
 - REPL 斜杠命令：`/help` `/new` `/sessions` `/load` `/context` `/model` `/exit`
 
 ## Git

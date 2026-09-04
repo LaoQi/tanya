@@ -32,8 +32,6 @@ func TestLoadConfigYAML(t *testing.T) {
 	content := `
 model: yaml-model
 temperature: 0.3
-shell:
-  auto_approve: true
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -45,9 +43,6 @@ shell:
 	if cfg.Model != "yaml-model" || cfg.Temperature != 0.3 {
 		t.Errorf("yaml 覆盖失败: %+v", cfg)
 	}
-	if !cfg.Shell.AutoApprove {
-		t.Error("shell.auto_approve 未生效")
-	}
 }
 
 func TestLoadConfigEnvOverride(t *testing.T) {
@@ -57,7 +52,6 @@ func TestLoadConfigEnvOverride(t *testing.T) {
 	}
 	t.Setenv("TANYA_MODEL", "env-model")
 	t.Setenv("TANYA_API_KEY", "env-key")
-	t.Setenv("TANYA_SHELL_AUTO_APPROVE", "1")
 	cfg, err := LoadConfig(path)
 	if err != nil {
 		t.Fatal(err)
@@ -67,9 +61,6 @@ func TestLoadConfigEnvOverride(t *testing.T) {
 	}
 	if cfg.APIKey != "env-key" {
 		t.Errorf("TANYA_API_KEY 未生效")
-	}
-	if !cfg.Shell.AutoApprove {
-		t.Error("TANYA_SHELL_AUTO_APPROVE 未生效")
 	}
 }
 

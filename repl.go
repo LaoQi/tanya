@@ -21,7 +21,7 @@ const helpText = `斜杠命令：
   /context         显示上下文占用
   /model [name]    无参显示当前模型；带名切换模型
   /exit            退出
-直接输入文本与 AI 对话；shell 命令执行前会请求确认（y/n/a）。
+直接输入文本与 AI 对话；shell 工具直接执行，无需确认。
 `
 
 type REPL struct {
@@ -34,9 +34,7 @@ func NewREPL(a *agent.Agent) (*REPL, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &REPL{agent: a, rl: rl}
-	a.SetConfirm(r.confirmShell)
-	return r, nil
+	return &REPL{agent: a, rl: rl}, nil
 }
 
 func (r *REPL) Close() { r.rl.Close() }
@@ -44,7 +42,7 @@ func (r *REPL) Close() { r.rl.Close() }
 func (r *REPL) Run() error {
 	fmt.Println("tanyan - 极简 CLI Agent，输入 /help 查看命令")
 	for {
-		r.rl.SetPrompt(fmt.Sprintf("\033[32m%s(%s)>\033[0m ", shortCwd(), r.agent.PromptUsage()))
+		r.rl.SetPrompt(fmt.Sprintf("\033[32m%s(%s|%s)>\033[0m ", shortCwd(), r.agent.Model(), r.agent.PromptUsage()))
 		line, err := r.rl.Readline()
 		if err == readline.ErrInterrupt {
 			if len(line) == 0 {
@@ -97,26 +95,6 @@ func interruptContext() (context.Context, func()) {
 	}
 }
 
-func (r *REPL) confirmShell(cmd string) string {
-	old := r.rl.Config.Prompt
-	r.rl.SetPrompt(fmt.Sprintf("\n\033[33m[确认] 执行命令:\n%s\n允许？[y]是 / [n]否 / [a]本会话不再询问: \033[0m", cmd))
-	defer r.rl.SetPrompt(old)
-	for {
-		line, err := r.rl.Readline()
-		if err != nil {
-			return "n"
-		}
-		switch strings.ToLower(strings.TrimSpace(line)) {
-		case "y", "yes":
-			return "y"
-		case "a":
-			return "a"
-		default:
-			return "n"
-		}
-	}
-}
-
 func (r *REPL) handleCommand(line string) bool {
 	parts := strings.Fields(line)
 	switch parts[0] {
@@ -159,7 +137,6 @@ func (r *REPL) handleCommand(line string) bool {
 			break
 		}
 		r.agent.SetModel(parts[1])
-		fmt.Println("模型已切换为", parts[1])
 	default:
 		fmt.Println("未知命令，输入 /help 查看")
 	}

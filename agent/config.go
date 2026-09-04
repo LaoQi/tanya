@@ -10,27 +10,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type ShellConfig struct {
-	AutoApprove bool `yaml:"auto_approve"`
-}
-
 type Config struct {
-	BaseURL      string      `yaml:"base_url"`
-	APIKey       string      `yaml:"api_key"`
-	Model        string      `yaml:"model"`
-	Temperature  float64     `yaml:"temperature"`
-	SystemPrompt string      `yaml:"system_prompt"`
-	SessionDir   string      `yaml:"session_dir"`
-	Shell        ShellConfig `yaml:"shell"`
+	BaseURL       string  `yaml:"base_url"`
+	APIKey        string  `yaml:"api_key"`
+	Model         string  `yaml:"model"`
+	Temperature   float64 `yaml:"temperature"`
+	SystemPrompt  string  `yaml:"system_prompt"`
+	GlobalSession string  `yaml:"global_session"`
+	SessionMode   string  `yaml:"session_mode"`
 }
 
 func defaultConfig() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
-		BaseURL:     "https://api.openai.com/v1",
-		Model:       "deepseek-v4-flash",
-		Temperature: 0.7,
-		SessionDir:  filepath.Join(home, ".local", "share", "tanyan", "sessions"),
+		BaseURL:       "https://api.openai.com/v1",
+		Model:         "deepseek-v4-flash",
+		Temperature:   0.7,
+		GlobalSession: filepath.Join(home, ".local", "share", "tanyan", "sessions"),
 	}
 }
 
@@ -64,10 +60,10 @@ func LoadConfig(path string) (*Config, error) {
 			cfg.Temperature = f
 		}
 	}
-	if v := os.Getenv("TANYA_SHELL_AUTO_APPROVE"); v == "true" || v == "1" {
-		cfg.Shell.AutoApprove = true
+	if v := os.Getenv("TANYA_SESSION_MODE"); v != "" {
+		cfg.SessionMode = v
 	}
-	cfg.SessionDir = expandHome(cfg.SessionDir)
+	cfg.GlobalSession = expandHome(cfg.GlobalSession)
 	return cfg, nil
 }
 

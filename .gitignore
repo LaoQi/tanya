@@ -1,3 +1,4 @@
 /tanyan
 *.test
 *.out
+.tanya/
