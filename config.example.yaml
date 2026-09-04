@@ -3,6 +3,7 @@ api_key: ""
 model: deepseek-v4-flash
 temperature: 0.7
 system_prompt: ""
-session_dir: ~/.local/share/tanyan/sessions
-shell:
-  auto_approve: false
+# global 模式会话基础目录，实际存放于 <global_session>/<workspace-id>/
+global_session: ~/.local/share/tanyan/sessions
+# 会话存储模式：auto（默认，存在 .tanya/ 则 local）/ local / global
+session_mode: auto

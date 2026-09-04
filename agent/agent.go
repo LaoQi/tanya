@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,32 +16,77 @@ import (
 
 const DefaultSystemPrompt = "你是 tanyan，一个运行在命令行中的极简中文 AI 助手。回答简洁直接。需要执行系统操作时优先使用 run_shell 工具。"
 
-type ConfirmFunc func(command string) string
-
 type Agent struct {
 	cfg         *Config
 	client      *Client
 	history     []Message
-	confirm     ConfirmFunc
-	autoApprove bool
+	sessionDir  string
 	sessionPath string
 	saved       int
 	lastUsage   *Usage
 	OnTool      func(name, args, result string)
 }
 
-func New(cfg *Config, confirm ConfirmFunc) (*Agent, error) {
-	if err := os.MkdirAll(cfg.SessionDir, 0o755); err != nil {
+func New(cfg *Config) (*Agent, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	sessionDir := resolveSessionDir(cfg, cwd)
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		return nil, err
 	}
 	a := &Agent{
-		cfg:         cfg,
-		client:      NewClient(cfg),
-		confirm:     confirm,
-		autoApprove: cfg.Shell.AutoApprove,
+		cfg:        cfg,
+		client:     NewClient(cfg),
+		sessionDir: sessionDir,
 	}
 	a.NewSession()
 	return a, nil
+}
+
+func resolveSessionDir(cfg *Config, cwd string) string {
+	mode := cfg.SessionMode
+	if mode == "" {
+		mode = "auto"
+	}
+	localBase := filepath.Join(cwd, ".tanya")
+	switch mode {
+	case "local":
+		return filepath.Join(localBase, "sessions")
+	case "global":
+		return filepath.Join(cfg.GlobalSession, workspaceID(cwd))
+	default:
+		if isDir(localBase) {
+			return filepath.Join(localBase, "sessions")
+		}
+		return filepath.Join(cfg.GlobalSession, workspaceID(cwd))
+	}
+}
+
+func isDir(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
+}
+
+func workspaceID(dir string) string {
+	var b strings.Builder
+	for _, r := range dir {
+		switch {
+		case r == '/' || r == filepath.Separator:
+			b.WriteByte('-')
+		case r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	name := strings.Trim(b.String(), "-")
+	if name == "" {
+		name = "root"
+	}
+	sum := sha256.Sum256([]byte(dir))
+	return fmt.Sprintf("%s-%s", name, hex.EncodeToString(sum[:4]))
 }
 
 func (a *Agent) systemPrompt() string {
@@ -52,7 +99,7 @@ func (a *Agent) systemPrompt() string {
 func (a *Agent) NewSession() {
 	a.history = nil
 	a.saved = 0
-	a.sessionPath = filepath.Join(a.cfg.SessionDir, time.Now().Format("20060102-150405")+".jsonl")
+	a.sessionPath = filepath.Join(a.sessionDir, time.Now().Format("20060102-150405")+".jsonl")
 }
 
 func (a *Agent) Ask(ctx context.Context, input string, onDelta func(string)) error {
@@ -93,17 +140,6 @@ func (a *Agent) dispatch(tc ToolCall) string {
 		}
 		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 			return "error: 参数解析失败: " + err.Error()
-		}
-		if !a.autoApprove {
-			if a.confirm == nil {
-				return "error: 未设置确认回调，拒绝执行 shell 命令"
-			}
-			switch a.confirm(args.Command) {
-			case "a":
-				a.autoApprove = true
-			case "n":
-				return "error: 用户拒绝了该命令的执行"
-			}
 		}
 		return RunShell(args.Command, args.Timeout)
 	}
@@ -168,8 +204,6 @@ func formatTokens(n int) string {
 	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
 
-func (a *Agent) SetConfirm(confirm ConfirmFunc) { a.confirm = confirm }
-
 func (a *Agent) Model() string { return a.cfg.Model }
 
 func (a *Agent) SetModel(m string) { a.cfg.Model = m }
@@ -197,7 +231,7 @@ func (a *Agent) LoadSession(id string) error {
 	if strings.ContainsAny(id, "/\\") || strings.Contains(id, "..") {
 		return fmt.Errorf("非法会话 id")
 	}
-	path := filepath.Join(a.cfg.SessionDir, id+".jsonl")
+	path := filepath.Join(a.sessionDir, id+".jsonl")
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("会话不存在: %s", id)
@@ -226,7 +260,7 @@ type SessionInfo struct {
 }
 
 func (a *Agent) ListSessions() ([]SessionInfo, error) {
-	entries, err := os.ReadDir(a.cfg.SessionDir)
+	entries, err := os.ReadDir(a.sessionDir)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +277,7 @@ func (a *Agent) ListSessions() ([]SessionInfo, error) {
 			ID:      strings.TrimSuffix(e.Name(), ".jsonl"),
 			ModTime: info.ModTime(),
 		}
-		if f, err := os.Open(filepath.Join(a.cfg.SessionDir, e.Name())); err == nil {
+		if f, err := os.Open(filepath.Join(a.sessionDir, e.Name())); err == nil {
 			dec := json.NewDecoder(f)
 			for {
 				var m Message

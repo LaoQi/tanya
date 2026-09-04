@@ -54,7 +54,7 @@ agent/         package agent：全部核心逻辑
 - 参数：`command`（必填）、`timeout`（默认 60s，上限 300s）
 - 实现：`bash -c`，捕获 stdout/stderr/退出码
 - 输出截断：单项超 30000 字节时保留头 80% + 尾 20%，中间标注截断量
-- **确认机制**：默认执行前终端展示命令，等待 `y`（执行）/ `n`（拒绝，结果回填"用户拒绝"）/ `a`（本会话不再询问）；`shell.auto_approve: true` 关闭确认
+- **免确认直接执行**（早期版本有 y/n/a 确认机制，已移除）
 
 ### builtin（builtin.go）
 
@@ -74,7 +74,11 @@ agent/         package agent：全部核心逻辑
 ## 会话
 
 - 每次启动/`/new` 开启新会话，id 为启动时间戳（`20060102-150405`）
-- 落盘：`~/.local/share/tanyan/sessions/<id>.jsonl`，每轮结束追加写入新消息（一行一条 Message JSON）
+- 存储模式（CLI `-m` > env `TANYA_SESSION_MODE` > 配置 `session_mode`，默认 auto）：
+  - `auto`：当前目录存在 `.tanya/` → local，否则 global
+  - `local`：`<启动目录>/.tanya/sessions/`（.tanya 本身即项目隔离，不叠加 workspace-id）
+  - `global`：`global_session/<workspace-id>/`，workspace-id 由启动目录派生（可读路径转义 + 短哈希）
+- 落盘：`<timestamp>.jsonl`，每轮结束追加写入新消息（一行一条 Message JSON）
 - JSONL 记录完整历史（回放/审计用）
 - `/sessions` 列出（id、时间、消息数、首条用户消息摘要），`/load <id>` 恢复继续对话；id 校验拒绝路径穿越
 
@@ -89,8 +93,10 @@ agent/         package agent：全部核心逻辑
 | `model` | `deepseek-v4-flash` | 模型名 |
 | `temperature` | 0.7 | |
 | `system_prompt` | 内置简短中文提示 | |
-| `session_dir` | `~/.local/share/tanyan/sessions` | 支持 `~` 展开 |
-| `shell.auto_approve` | false | shell 免确认 |
+| `global_session` | `~/.local/share/tanyan/sessions` | global 模式会话基础目录，支持 `~` 展开 |
+| `session_mode` | `auto` | 会话存储模式 auto/local/global |
+
+shell 免确认直接执行。
 
 ## 测试
 

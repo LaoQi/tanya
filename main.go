@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -11,17 +10,9 @@ import (
 	"github.com/LaoQi/tanyan/agent"
 )
 
-func stdinConfirm(cmd string) string {
-	fmt.Printf("\n[确认] 执行命令:\n%s\n允许？[y/N]: ", cmd)
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	if strings.ToLower(strings.TrimSpace(line)) == "y" {
-		return "y"
-	}
-	return "n"
-}
-
 func main() {
 	configPath := flag.String("c", "", "配置文件路径（默认 ~/.config/tanyan/config.yaml）")
+	sessionMode := flag.String("m", "", "会话存储模式 local/global/auto（默认 auto）")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*configPath)
@@ -29,7 +20,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "错误:", err)
 		os.Exit(1)
 	}
-	a, err := agent.New(cfg, nil)
+	if *sessionMode != "" {
+		cfg.SessionMode = *sessionMode
+	}
+	a, err := agent.New(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "错误:", err)
 		os.Exit(1)
@@ -49,7 +43,6 @@ func main() {
 			fmt.Fprintln(os.Stderr, "用法: tanyan ask \"问题\"")
 			os.Exit(1)
 		}
-		a.SetConfirm(stdinConfirm)
 		ctx, done := interruptContext()
 		err := a.Ask(ctx, q, func(s string) { fmt.Print(s) })
 		done()

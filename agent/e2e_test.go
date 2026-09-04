@@ -8,7 +8,7 @@ import (
 
 func TestAskSingleTurn(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "这是回答"})
-	a, err := New(m.config(), nil)
+	a, err := New(m.config())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,8 +36,7 @@ func TestAskShellToolLoop(t *testing.T) {
 		mockStep{content: "执行完毕"},
 	)
 	cfg := m.config()
-	cfg.Shell.AutoApprove = true
-	a, err := New(cfg, nil)
+	a, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,29 +68,12 @@ func TestAskShellToolLoop(t *testing.T) {
 	}
 }
 
-func TestAskShellRejected(t *testing.T) {
-	m := newMockLLM(t,
-		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "run_shell", args: `{"command":"rm -rf /tmp/x"}`}}},
-		mockStep{content: "好的"},
-	)
-	a, err := New(m.config(), func(cmd string) string { return "n" })
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := a.Ask(context.Background(), "删文件", nil); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(a.history[2].Content, "拒绝") {
-		t.Errorf("拒绝后 tool 结果: %q", a.history[2].Content)
-	}
-}
-
 func TestAskBuiltinToolLoop(t *testing.T) {
 	m := newMockLLM(t,
 		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "calc", args: `{"expression":"6*7"}`}}},
 		mockStep{content: "42"},
 	)
-	a, err := New(m.config(), nil)
+	a, err := New(m.config())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +87,7 @@ func TestAskBuiltinToolLoop(t *testing.T) {
 
 func TestAskUsageFallback(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "回答"})
-	a, err := New(m.config(), nil)
+	a, err := New(m.config())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +107,7 @@ func TestAskUsageFallback(t *testing.T) {
 
 func TestAskUsageReal(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "回答", usage: &Usage{PromptTokens: 1500, CompletionTokens: 10, TotalTokens: 1510}})
-	a, err := New(m.config(), nil)
+	a, err := New(m.config())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +127,7 @@ func TestAskUnknownTool(t *testing.T) {
 		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "hack", args: `{}`}}},
 		mockStep{content: "end"},
 	)
-	a, err := New(m.config(), nil)
+	a, err := New(m.config())
 	if err != nil {
 		t.Fatal(err)
 	}
