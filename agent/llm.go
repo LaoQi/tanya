@@ -25,6 +25,24 @@ type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	CacheHitTokens   int `json:"prompt_cache_hit_tokens,omitempty"`
+	CacheMissTokens  int `json:"prompt_cache_miss_tokens,omitempty"`
+
+	PromptTokensDetails *promptTokensDetails `json:"prompt_tokens_details,omitempty"`
+}
+
+type promptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+func (u *Usage) cacheHit() int {
+	if u.CacheHitTokens > 0 {
+		return u.CacheHitTokens
+	}
+	if u.PromptTokensDetails != nil {
+		return u.PromptTokensDetails.CachedTokens
+	}
+	return 0
 }
 
 type ToolCall struct {

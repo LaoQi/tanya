@@ -10,14 +10,21 @@ import (
 )
 
 func TestRenderPrompt(t *testing.T) {
-	got := renderPrompt("{cwd} {model} {usage} →", "~/p/t", "m1", "123")
-	if got != "~/p/t m1 123 →" {
+	got := renderPrompt("{cwd} {model} {usage} {cache} →", "~/p/t", "m1", "123", "980/1.2k")
+	if got != "~/p/t m1 123 980/1.2k →" {
 		t.Errorf("got %q", got)
 	}
 }
 
+func TestRenderPromptCacheEmpty(t *testing.T) {
+	got := renderPrompt("{usage}|{cache}", "p", "m", "1", "")
+	if got != "1|" {
+		t.Errorf("无缓存数据 {cache} 应渲染为空: %q", got)
+	}
+}
+
 func TestRenderPromptUnknownKept(t *testing.T) {
-	got := renderPrompt("{cwd} {date}", "p", "m", "1")
+	got := renderPrompt("{cwd} {date}", "p", "m", "1", "")
 	if !strings.Contains(got, "{date}") {
 		t.Errorf("未知占位符应保留原样: %q", got)
 	}

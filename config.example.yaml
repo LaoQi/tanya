@@ -2,10 +2,9 @@ base_url: https://api.openai.com/v1
 api_key: ""
 model: deepseek-v4-flash
 temperature: 0.7
-system_prompt: ""
 # 出站请求 User-Agent（伪装，避免厂商风控）
 user_agent: "pi/0.85.0 (linux; node/v22.14.0; x64)"
-# REPL 提示符模板，占位符：{cwd} 短路径 / {model} 模型 / {usage} 上下文 token（yaml 双引号内 \x1b 为 ESC）
+# REPL 提示符模板，占位符：{cwd} 短路径 / {model} 模型 / {usage} 上下文 token / {cache} 缓存命中（yaml 双引号内 \x1b 为 ESC）
 prompt: "\x1b[37m{cwd}\x1b[0m \x1b[34m{model}\x1b[0m \x1b[32m{usage}>\x1b[0m "
 # global 模式会话基础目录，实际存放于 <global_session>/<workspace-id>/
 global_session: ~/.local/share/tanyan/sessions

@@ -7,11 +7,27 @@ import (
 	"testing"
 )
 
+func isolatePromptEnv(t *testing.T) {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(old)
+	})
+}
+
 func newTestAgent(t *testing.T) *Agent {
 	t.Helper()
+	isolatePromptEnv(t)
 	cfg := defaultConfig()
 	cfg.GlobalSession = t.TempDir()
-	cfg.SystemPrompt = "sys"
 	a, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +47,8 @@ func TestHistoryAccessor(t *testing.T) {
 	}
 }
 
-func TestEstimateTokens(t *testing.T) {	if got := estimateTokens("你好"); got != 2 {
+func TestEstimateTokens(t *testing.T) {
+	if got := estimateTokens("你好"); got != 2 {
 		t.Errorf("中文: got %d", got)
 	}
 	if got := estimateTokens("abc"); got != 1 {
@@ -260,5 +277,195 @@ func TestSetModel(t *testing.T) {
 	a.SetModel("new-model")
 	if a.Model() != "new-model" {
 		t.Error("模型切换失败")
+	}
+}
+
+func writeAgents(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSystemPromptAgents(t *testing.T) {
+	a := newTestAgent(t)
+	if a.systemPrompt() != DefaultSystemPrompt {
+		t.Errorf("无 AGENTS.md 应仅默认提示: %q", a.systemPrompt())
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeAgents(t, filepath.Join(cwd, "AGENTS.md"), "项目规则 A\n")
+	a.NewSession()
+	want := DefaultSystemPrompt + "\n\n# 项目说明（AGENTS.md）\n\n项目规则 A"
+	if a.systemPrompt() != want {
+		t.Errorf("工作区注入异常: %q", a.systemPrompt())
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config", "tanyan"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeAgents(t, filepath.Join(home, ".config", "tanyan", "AGENTS.md"), "全局规则 G")
+	a.NewSession()
+	want = DefaultSystemPrompt +
+		"\n\n# 全局说明（~/.config/tanyan/AGENTS.md）\n\n全局规则 G" +
+		"\n\n# 项目说明（AGENTS.md）\n\n项目规则 A"
+	if a.systemPrompt() != want {
+		t.Errorf("双层组装异常: %q", a.systemPrompt())
+	}
+}
+
+func TestSystemPromptBlankFile(t *testing.T) {
+	a := newTestAgent(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeAgents(t, filepath.Join(cwd, "AGENTS.md"), "  \n\t\n")
+	a.NewSession()
+	if a.systemPrompt() != DefaultSystemPrompt {
+		t.Errorf("空白文件应视为不存在: %q", a.systemPrompt())
+	}
+}
+
+func TestSystemPromptFrozen(t *testing.T) {
+	a := newTestAgent(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeAgents(t, filepath.Join(cwd, "AGENTS.md"), "规则 v1")
+	a.NewSession()
+	before := a.systemPrompt()
+	writeAgents(t, filepath.Join(cwd, "AGENTS.md"), "规则 v2")
+	if a.systemPrompt() != before {
+		t.Error("会话内快照应冻结")
+	}
+	a.NewSession()
+	if !strings.Contains(a.systemPrompt(), "规则 v2") {
+		t.Errorf("新会话应重读最新文件: %q", a.systemPrompt())
+	}
+}
+
+func TestSaveLoadSystemSnapshot(t *testing.T) {
+	a := newTestAgent(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeAgents(t, filepath.Join(cwd, "AGENTS.md"), "规则 v1")
+	a.NewSession()
+	a.history = []Message{
+		{Role: "user", Content: "问题一"},
+		{Role: "assistant", Content: "回答一"},
+	}
+	if err := a.save(); err != nil {
+		t.Fatal(err)
+	}
+	id := strings.TrimSuffix(filepath.Base(a.sessionPath), ".jsonl")
+
+	writeAgents(t, filepath.Join(cwd, "AGENTS.md"), "规则 v2")
+	b := newTestAgent(t)
+	b.sessionDir = a.sessionDir
+	if err := b.LoadSession(id); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.history) != 2 {
+		t.Fatalf("载入历史数: %d", len(b.history))
+	}
+	if !strings.Contains(b.systemPrompt(), "规则 v1") {
+		t.Errorf("应还原文件内快照而非重读: %q", b.systemPrompt())
+	}
+
+	b.history = append(b.history, Message{Role: "user", Content: "问题二"})
+	if err := b.save(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(b.sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(data), `"role":"system"`); got != 1 {
+		t.Errorf("system 行应仅 1 条: %d", got)
+	}
+	c := newTestAgent(t)
+	c.sessionDir = a.sessionDir
+	if err := c.LoadSession(id); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.history) != 3 {
+		t.Errorf("追加保存后应为 3 条: %d", len(c.history))
+	}
+	if !strings.Contains(c.systemPrompt(), "规则 v1") {
+		t.Errorf("二次载入快照: %q", c.systemPrompt())
+	}
+}
+
+func TestLoadSessionLegacyFormat(t *testing.T) {
+	a := newTestAgent(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeAgents(t, filepath.Join(cwd, "AGENTS.md"), "旧规则")
+	legacy := filepath.Join(a.sessionDir, "20260101-090000.jsonl")
+	content := `{"role":"user","content":"历史问题"}` + "\n" + `{"role":"assistant","content":"历史回答"}` + "\n"
+	if err := os.WriteFile(legacy, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.LoadSession("20260101-090000"); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.history) != 2 {
+		t.Fatalf("旧格式载入历史数: %d", len(a.history))
+	}
+	if !strings.Contains(a.systemPrompt(), "旧规则") {
+		t.Errorf("旧格式应回退快照当前文件: %q", a.systemPrompt())
+	}
+}
+
+func TestListSessionsSkipsSystemLine(t *testing.T) {
+	a := newTestAgent(t)
+	content := `{"role":"system","content":"sys"}` + "\n" +
+		`{"role":"user","content":"标题问题"}` + "\n" +
+		`{"role":"assistant","content":"好"}` + "\n"
+	p := filepath.Join(a.sessionDir, "20260101-100000.jsonl")
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list, err := a.ListSessions()
+	if err != nil || len(list) != 1 {
+		t.Fatalf("列表异常: %+v %v", list, err)
+	}
+	if list[0].Msgs != 2 {
+		t.Errorf("system 行不应计入条数: %d", list[0].Msgs)
+	}
+	if list[0].Summary != "标题问题" {
+		t.Errorf("标题应取首条 user: %q", list[0].Summary)
+	}
+}
+
+func TestPromptCache(t *testing.T) {
+	a := newTestAgent(t)
+	if a.PromptCache() != "" {
+		t.Error("无 usage 应为空")
+	}
+	a.lastUsage = &Usage{PromptTokens: 1200, CacheHitTokens: 980}
+	if got := a.PromptCache(); got != "980/1.2k" {
+		t.Errorf("DeepSeek 风格: got %q", got)
+	}
+	a.lastUsage = &Usage{PromptTokens: 1200, PromptTokensDetails: &promptTokensDetails{CachedTokens: 600}}
+	if got := a.PromptCache(); got != "600/1.2k" {
+		t.Errorf("OpenAI 风格: got %q", got)
+	}
+	a.lastUsage = &Usage{PromptTokens: 1200}
+	if a.PromptCache() != "" {
+		t.Error("无缓存数据应为空")
 	}
 }

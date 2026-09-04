@@ -26,6 +26,14 @@ const helpText = `斜杠命令：
 直接输入文本与 AI 对话；shell 工具直接执行，无需确认。
 `
 
+const welcomText = `
+██████ ▄████▄ ███  ██ ██  ██ ▄████▄ 
+  ██   ██▄▄██ ██ ▀▄██  ▀██▀  ██▄▄██ 
+  ██   ██  ██ ██   ██   ██   ██  ██ 
+
+输入 /help 查看命令
+`
+
 type REPL struct {
 	agent     *agent.Agent
 	ed        *readline.Editor
@@ -46,26 +54,27 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 	return &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl}, nil
 }
 
-func renderPrompt(tpl, cwd, model, usage string) string {
+func renderPrompt(tpl, cwd, model, usage, cache string) string {
 	return strings.NewReplacer(
 		"{cwd}", cwd,
 		"{model}", model,
 		"{usage}", usage,
+		"{cache}", cache,
 	).Replace(tpl)
 }
 
 func (r *REPL) Close() {}
 
 func (r *REPL) Run() error {
-	fmt.Println("tanyan - 极简 CLI Agent，输入 /help 查看命令")
+	fmt.Print(welcomText)
 	for {
-		prompt := renderPrompt(r.promptTpl, shortCwd(), r.agent.Model(), r.agent.PromptUsage())
+		prompt := renderPrompt(r.promptTpl, shortCwd(), r.agent.Model(), r.agent.PromptUsage(), r.agent.PromptCache())
 		line, err := r.ed.Readline(prompt)
 		if err == readline.ErrInterrupt {
 			continue
 		}
 		if err == io.EOF {
-			fmt.Println("再见")
+			fmt.Println("Bye")
 			return nil
 		}
 		if err != nil {
