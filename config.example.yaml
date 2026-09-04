@@ -1,0 +1,8 @@
+base_url: https://api.openai.com/v1
+api_key: ""
+model: deepseek-v4-flash
+temperature: 0.7
+system_prompt: ""
+session_dir: ~/.local/share/tanyan/sessions
+shell:
+  auto_approve: false

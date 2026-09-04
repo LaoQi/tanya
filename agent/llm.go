@@ -1,0 +1,198 @@
+package agent
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"sort"
+	"strings"
+)
+
+type Message struct {
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Name       string     `json:"name,omitempty"`
+	Usage      *Usage     `json:"-"`
+}
+
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+type ToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+type ToolDef struct {
+	Type     string `json:"type"`
+	Function struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		Parameters  json.RawMessage `json:"parameters"`
+	} `json:"function"`
+}
+
+type Client struct {
+	cfg  *Config
+	http *http.Client
+}
+
+func NewClient(cfg *Config) *Client {
+	return &Client{cfg: cfg, http: &http.Client{}}
+}
+
+type chatRequest struct {
+	Model         string         `json:"model"`
+	Messages      []Message      `json:"messages"`
+	Temperature   float64        `json:"temperature,omitempty"`
+	Tools         []ToolDef      `json:"tools,omitempty"`
+	Stream        bool           `json:"stream"`
+	StreamOptions *streamOptions `json:"stream_options,omitempty"`
+}
+
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
+type streamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content   string `json:"content"`
+			ToolCalls []struct {
+				Index    int    `json:"index"`
+				ID       string `json:"id"`
+				Type     string `json:"type"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"delta"`
+	} `json:"choices"`
+	Usage *Usage `json:"usage"`
+}
+
+func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta func(string)) (*Message, error) {
+	if c.cfg.APIKey == "" {
+		return nil, fmt.Errorf("未配置 api_key（请写入配置文件或设置环境变量 TANYA_API_KEY）")
+	}
+	body, err := json.Marshal(chatRequest{
+		Model:         c.cfg.Model,
+		Messages:      messages,
+		Temperature:   c.cfg.Temperature,
+		Tools:         ToolDefs(),
+		Stream:        true,
+		StreamOptions: &streamOptions{IncludeUsage: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	url := strings.TrimSuffix(c.cfg.BaseURL, "/") + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("API 错误 %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
+	msg := &Message{Role: "assistant"}
+	var usage *Usage
+	type toolAcc struct {
+		id, typ, name, args string
+	}
+	accs := map[int]*toolAcc{}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(line[len("data:"):])
+		if data == "[DONE]" {
+			break
+		}
+		var chunk streamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+		if chunk.Usage != nil {
+			usage = chunk.Usage
+		}
+		for _, ch := range chunk.Choices {
+			if ch.Delta.Content != "" {
+				msg.Content += ch.Delta.Content
+				if onDelta != nil {
+					onDelta(ch.Delta.Content)
+				}
+			}
+			for _, tc := range ch.Delta.ToolCalls {
+				a := accs[tc.Index]
+				if a == nil {
+					a = &toolAcc{}
+					accs[tc.Index] = a
+				}
+				if tc.ID != "" {
+					a.id = tc.ID
+				}
+				if tc.Type != "" {
+					a.typ = tc.Type
+				}
+				if tc.Function.Name != "" {
+					a.name = tc.Function.Name
+				}
+				a.args += tc.Function.Arguments
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("读取流失败: %w", err)
+	}
+	msg.Usage = usage
+
+	if len(accs) > 0 {
+		idxs := make([]int, 0, len(accs))
+		for i := range accs {
+			idxs = append(idxs, i)
+		}
+		sort.Ints(idxs)
+		for _, i := range idxs {
+			a := accs[i]
+			var tc ToolCall
+			tc.ID = a.id
+			tc.Type = a.typ
+			if tc.Type == "" {
+				tc.Type = "function"
+			}
+			tc.Function.Name = a.name
+			tc.Function.Arguments = a.args
+			msg.ToolCalls = append(msg.ToolCalls, tc)
+		}
+	}
+	return msg, nil
+}
