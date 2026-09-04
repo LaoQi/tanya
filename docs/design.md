@@ -79,8 +79,16 @@ agent/         package agent：全部核心逻辑
   - `local`：`<启动目录>/.tanya/sessions/`（.tanya 本身即项目隔离，不叠加 workspace-id）
   - `global`：`global_session/<workspace-id>/`，workspace-id 由启动目录派生（可读路径转义 + 短哈希）
 - 落盘：`<timestamp>.jsonl`，每轮结束追加写入新消息（一行一条 Message JSON）
+- 首行持久化 system prompt 快照（`{"role":"system",...}`），`/load` 还原后前缀与当初逐字节一致；旧格式文件（无 system 首行）回退为载入时快照当前 AGENTS.md
 - JSONL 记录完整历史（回放/审计用）
-- `/sessions` 列出（id、时间、消息数、首条用户消息摘要），`/load <id>` 恢复继续对话；id 校验拒绝路径穿越
+- `/sessions` 列出（id、时间、消息数、首条用户消息摘要），`/load <id>` 恢复继续对话；id 校验拒绝路径穿越；system 行不计入消息数
+
+## 系统提示与缓存友好
+
+- 组装规则：`DefaultSystemPrompt`（内置，固定不可配）+ 全局 `~/.config/tanyan/AGENTS.md`（存在时）+ 工作区 `./AGENTS.md`（存在时），各段以 `# 全局说明`/`# 项目说明` 标题分隔
+- 快照机制：`/new`（NewSession）与 `/load`（LoadSession）时刻读取 AGENTS.md 组装快照；会话进行中零文件 IO，快照冻结
+- 缓存收益：history 全程 append-only，同一会话内 messages 前缀逐字节不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中
+- usage 捕获缓存命中（DeepSeek `prompt_cache_hit_tokens` / OpenAI `prompt_tokens_details.cached_tokens`），REPL 提示符 `{cache}` 占位符显示 `命中/总量`，无数据渲染为空
 
 ## 配置
 
@@ -92,7 +100,6 @@ agent/         package agent：全部核心逻辑
 | `api_key` | 空 | 密钥（建议用 env 注入） |
 | `model` | `deepseek-v4-flash` | 模型名 |
 | `temperature` | 0.7 | |
-| `system_prompt` | 内置简短中文提示 | |
 | `global_session` | `~/.local/share/tanyan/sessions` | global 模式会话基础目录，支持 `~` 展开 |
 | `session_mode` | `auto` | 会话存储模式 auto/local/global |
 

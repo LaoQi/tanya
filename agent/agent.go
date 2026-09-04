@@ -22,16 +22,19 @@ const DefaultSystemPrompt = `你是 tanyan（兼容 Pi/opencode），运行在�
 坚持迭代直到任务完成：修改后主动验证（编译、测试、运行），确认无误再收尾。`
 
 type Agent struct {
-	cfg          *Config
-	client       *Client
-	history      []Message
-	sessionDir   string
-	sessionPath  string
-	saved        int
-	lastUsage    *Usage
-	sessionCache map[string]SessionInfo
-	sessionStat  map[string]sessionFileStat
-	OnTool       func(name, args, result string)
+	cfg            *Config
+	client         *Client
+	history        []Message
+	cwd            string
+	promptSnapshot string
+	sessionDir     string
+	sessionPath    string
+	saved          int
+	systemSaved    bool
+	lastUsage      *Usage
+	sessionCache   map[string]SessionInfo
+	sessionStat    map[string]sessionFileStat
+	OnTool         func(name, args, result string)
 }
 
 type sessionFileStat struct {
@@ -51,6 +54,7 @@ func New(cfg *Config) (*Agent, error) {
 	a := &Agent{
 		cfg:          cfg,
 		client:       NewClient(cfg),
+		cwd:          cwd,
 		sessionDir:   sessionDir,
 		sessionCache: map[string]SessionInfo{},
 		sessionStat:  map[string]sessionFileStat{},
@@ -104,16 +108,39 @@ func workspaceID(dir string) string {
 	return fmt.Sprintf("%s-%s", name, hex.EncodeToString(sum[:4]))
 }
 
-func (a *Agent) systemPrompt() string {
-	if a.cfg.SystemPrompt != "" {
-		return a.cfg.SystemPrompt
+func globalAgentsPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "tanyan", "AGENTS.md")
+}
+
+func readAgentsFile(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
 	}
-	return DefaultSystemPrompt
+	return strings.TrimSpace(string(b))
+}
+
+func buildSystemPrompt(cwd string) string {
+	prompt := DefaultSystemPrompt
+	if global := readAgentsFile(globalAgentsPath()); global != "" {
+		prompt += "\n\n# 全局说明（~/.config/tanyan/AGENTS.md）\n\n" + global
+	}
+	if project := readAgentsFile(filepath.Join(cwd, "AGENTS.md")); project != "" {
+		prompt += "\n\n# 项目说明（AGENTS.md）\n\n" + project
+	}
+	return prompt
+}
+
+func (a *Agent) systemPrompt() string {
+	return a.promptSnapshot
 }
 
 func (a *Agent) NewSession() {
 	a.history = nil
 	a.saved = 0
+	a.systemSaved = false
+	a.promptSnapshot = buildSystemPrompt(a.cwd)
 	a.sessionPath = filepath.Join(a.sessionDir, time.Now().Format("20060102-150405")+".jsonl")
 }
 
@@ -212,6 +239,17 @@ func (a *Agent) PromptUsage() string {
 	return "~" + formatTokens(a.totalTokens())
 }
 
+func (a *Agent) PromptCache() string {
+	if a.lastUsage == nil {
+		return ""
+	}
+	hit := a.lastUsage.cacheHit()
+	if hit <= 0 {
+		return ""
+	}
+	return formatTokens(hit) + "/" + formatTokens(a.lastUsage.PromptTokens)
+}
+
 func formatTokens(n int) string {
 	if n < 1000 {
 		return fmt.Sprintf("%d", n)
@@ -237,6 +275,12 @@ func (a *Agent) save() error {
 	}
 	defer f.Close()
 	enc := json.NewEncoder(f)
+	if !a.systemSaved {
+		if err := enc.Encode(Message{Role: "system", Content: a.promptSnapshot}); err != nil {
+			return err
+		}
+		a.systemSaved = true
+	}
 	for _, m := range a.history[a.saved:] {
 		if err := enc.Encode(m); err != nil {
 			return err
@@ -265,9 +309,19 @@ func (a *Agent) LoadSession(id string) error {
 		}
 		msgs = append(msgs, m)
 	}
-	a.history = msgs
+	var history []Message
+	if len(msgs) > 0 && msgs[0].Role == "system" && msgs[0].Content != "" {
+		a.promptSnapshot = msgs[0].Content
+		history = msgs[1:]
+		a.systemSaved = true
+	} else {
+		a.promptSnapshot = buildSystemPrompt(a.cwd)
+		history = msgs
+		a.systemSaved = false
+	}
+	a.history = history
 	a.sessionPath = path
-	a.saved = len(msgs)
+	a.saved = len(history)
 	return nil
 }
 
@@ -336,16 +390,21 @@ func scanSession(path, id string, modTime time.Time) SessionInfo {
 		if len(line) == 0 {
 			continue
 		}
+		var m Message
+		if json.Unmarshal(line, &m) != nil {
+			si.Msgs++
+			continue
+		}
+		if m.Role == "system" {
+			continue
+		}
 		si.Msgs++
-		if si.Summary == "" {
-			var m Message
-			if json.Unmarshal(line, &m) == nil && m.Role == "user" && m.Content != "" {
-				s := strings.ReplaceAll(m.Content, "\n", " ")
-				if utf8.RuneCountInString(s) > 30 {
-					s = string([]rune(s)[:30]) + "..."
-				}
-				si.Summary = s
+		if si.Summary == "" && m.Role == "user" && m.Content != "" {
+			s := strings.ReplaceAll(m.Content, "\n", " ")
+			if utf8.RuneCountInString(s) > 30 {
+				s = string([]rune(s)[:30]) + "..."
 			}
+			si.Summary = s
 		}
 	}
 	return si

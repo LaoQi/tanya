@@ -7,8 +7,9 @@
 - OpenAI 兼容接口（OpenAI / DeepSeek / GLM / Ollama / vLLM 等），SSE 流式输出
 - 以 shell 为核心的工具体系：模型可直接执行 bash 命令
 - 内置轻量工具：`get_time` / `get_env` / `calc`
-- 会话持久化与恢复（JSONL，记录完整历史）
-- token 用量实时显示在提示符（API 实报优先，本地估算兜底）
+- 会话持久化与恢复（JSONL，记录完整历史，system 快照随会话冻结）
+- token 用量实时显示在提示符（API 实报优先，本地估算兜底），支持显示缓存命中
+- AGENTS.md 项目说明自动注入系统提示（全局 + 工作区双层，会话级快照保证 prompt cache 友好）
 - 依赖仅 2 个，核心逻辑测试覆盖率 90%+
 
 ## 安装
@@ -66,6 +67,19 @@ REPL 斜杠命令：
 | `/exit` | 退出 |
 
 会话按启动目录划分工作区（global 模式），`/sessions` 只显示当前项目的会话。
+
+## AGENTS.md 注入
+
+系统提示 = 内置默认提示（固定）+ 全局说明 + 项目说明，后两者来自：
+
+| 层级 | 路径 | 标题 |
+|---|---|---|
+| 全局 | `~/.config/tanyan/AGENTS.md` | `# 全局说明（~/.config/tanyan/AGENTS.md）` |
+| 工作区 | `<启动目录>/AGENTS.md` | `# 项目说明（AGENTS.md）` |
+
+- 文件不存在或内容为空白则跳过该层；组装在会话开始（`/new`、`/load`、启动）时刻快照，会话进行中不再读取文件
+- history 全程追加，同一会话内请求前缀逐字节不变，prompt cache（DeepSeek/OpenAI）逐轮命中
+- 缓存命中量可在提示符模板中用 `{cache}` 占位符显示（如 `980/1.2k`），无数据渲染为空
 
 ## 工具
 

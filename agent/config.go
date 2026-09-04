@@ -15,7 +15,6 @@ type Config struct {
 	APIKey        string  `yaml:"api_key"`
 	Model         string  `yaml:"model"`
 	Temperature   float64 `yaml:"temperature"`
-	SystemPrompt  string  `yaml:"system_prompt"`
 	Prompt        string  `yaml:"prompt"`
 	UserAgent     string  `yaml:"user_agent"`
 	GlobalSession string  `yaml:"global_session"`
