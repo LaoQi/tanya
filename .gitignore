@@ -2,3 +2,4 @@
 *.test
 *.out
 .tanya/
+config.yaml

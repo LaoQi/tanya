@@ -2,9 +2,51 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestListModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		fmt.Fprint(w, `{"data":[{"id":"model-b"},{"id":"model-a"},{"id":""}]}`)
+	}))
+	defer srv.Close()
+	cfg := defaultConfig()
+	cfg.BaseURL = srv.URL
+	cfg.APIKey = "test-key"
+	ids, err := NewClient(cfg).ListModels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || ids[0] != "model-a" || ids[1] != "model-b" {
+		t.Errorf("应为排序后非空列表: %v", ids)
+	}
+}
+
+func TestListModelsAPIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusBadGateway)
+	}))
+	defer srv.Close()
+	cfg := defaultConfig()
+	cfg.BaseURL = srv.URL
+	cfg.APIKey = "test-key"
+	_, err := NewClient(cfg).ListModels()
+	if err == nil || !strings.Contains(err.Error(), "502") {
+		t.Errorf("应返回错误: %v", err)
+	}
+}
 
 func TestChatStreamContent(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "你好，世界"})

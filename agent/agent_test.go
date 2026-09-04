@@ -19,8 +19,19 @@ func newTestAgent(t *testing.T) *Agent {
 	return a
 }
 
-func TestEstimateTokens(t *testing.T) {
-	if got := estimateTokens("你好"); got != 2 {
+func TestHistoryAccessor(t *testing.T) {
+	a := newTestAgent(t)
+	if len(a.History()) != 0 {
+		t.Error("新会话应为空")
+	}
+	a.history = []Message{{Role: "user", Content: "q1"}, {Role: "assistant", Content: "a1"}}
+	h := a.History()
+	if len(h) != 2 || h[0].Content != "q1" || h[1].Role != "assistant" {
+		t.Errorf("History 异常: %+v", h)
+	}
+}
+
+func TestEstimateTokens(t *testing.T) {	if got := estimateTokens("你好"); got != 2 {
 		t.Errorf("中文: got %d", got)
 	}
 	if got := estimateTokens("abc"); got != 1 {
@@ -105,6 +116,44 @@ func TestListSessions(t *testing.T) {
 	}
 	if list[1].Msgs != 2 || list[1].Summary != "第一个会话" {
 		t.Errorf("会话信息异常: %+v", list[1])
+	}
+}
+
+func TestListSessionsIncrementalRefresh(t *testing.T) {
+	a := newTestAgent(t)
+	p := filepath.Join(a.sessionDir, "20260101-100000.jsonl")
+	if err := os.WriteFile(p, []byte(`{"role":"user","content":"第一条"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list, err := a.ListSessions()
+	if err != nil || len(list) != 1 || list[0].Msgs != 1 {
+		t.Fatalf("初始列表异常: %+v %v", list, err)
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"role":"assistant","content":"好"}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	list, err = a.ListSessions()
+	if err != nil || list[0].Msgs != 2 {
+		t.Errorf("追加后条数应刷新: %+v %v", list, err)
+	}
+	if err := os.WriteFile(filepath.Join(a.sessionDir, "20260102-100000.jsonl"), []byte(`{"role":"user","content":"第二条"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list, err = a.ListSessions()
+	if err != nil || len(list) != 2 {
+		t.Errorf("新文件应立即可见: %+v %v", list, err)
+	}
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	list, err = a.ListSessions()
+	if err != nil || len(list) != 1 || list[0].ID != "20260102-100000" {
+		t.Errorf("删除后应从列表移除: %+v %v", list, err)
 	}
 }
 

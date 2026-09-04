@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanyan/repl"
 )
 
 func main() {
@@ -43,7 +44,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "用法: tanyan ask \"问题\"")
 			os.Exit(1)
 		}
-		ctx, done := interruptContext()
+		ctx, done := repl.InterruptContext()
 		err := a.Ask(ctx, q, func(s string) { fmt.Print(s) })
 		done()
 		if err != nil {
@@ -54,7 +55,7 @@ func main() {
 		return
 	}
 
-	r, err := NewREPL(a)
+	r, err := repl.NewREPL(a, cfg.Prompt)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "错误:", err)
 		os.Exit(1)

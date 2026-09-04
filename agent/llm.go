@@ -85,6 +85,44 @@ type streamChunk struct {
 	Usage *Usage `json:"usage"`
 }
 
+func (c *Client) ListModels() ([]string, error) {
+	if c.cfg.APIKey == "" {
+		return nil, fmt.Errorf("未配置 api_key（请写入配置文件或设置环境变量 TANYA_API_KEY）")
+	}
+	url := strings.TrimSuffix(c.cfg.BaseURL, "/") + "/models"
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	req.Header.Set("User-Agent", c.cfg.UserAgent)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("API 错误 %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var out struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("解析模型列表失败: %w", err)
+	}
+	ids := make([]string, 0, len(out.Data))
+	for _, m := range out.Data {
+		if m.ID != "" {
+			ids = append(ids, m.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
 func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta func(string)) (*Message, error) {
 	if c.cfg.APIKey == "" {
 		return nil, fmt.Errorf("未配置 api_key（请写入配置文件或设置环境变量 TANYA_API_KEY）")
@@ -108,6 +146,7 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta fun
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("User-Agent", c.cfg.UserAgent)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
