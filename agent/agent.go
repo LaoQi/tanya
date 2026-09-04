@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,17 +15,28 @@ import (
 	"unicode/utf8"
 )
 
-const DefaultSystemPrompt = "你是 tanyan，一个运行在命令行中的极简中文 AI 助手。回答简洁直接。需要执行系统操作时优先使用 run_shell 工具。"
+const DefaultSystemPrompt = `你是 tanyan（兼容 Pi/opencode），运行在终端中的极简编码代理。
+通过 run_shell 工具读取文件、执行命令、修改代码，完成用户交给的任务。
+回答简洁直接；调用工具前用一句话说明要做什么；操作文件时明确显示路径。
+文件操作（ls、rg、find、cat 等）优先通过 run_shell 执行。
+坚持迭代直到任务完成：修改后主动验证（编译、测试、运行），确认无误再收尾。`
 
 type Agent struct {
-	cfg         *Config
-	client      *Client
-	history     []Message
-	sessionDir  string
-	sessionPath string
-	saved       int
-	lastUsage   *Usage
-	OnTool      func(name, args, result string)
+	cfg          *Config
+	client       *Client
+	history      []Message
+	sessionDir   string
+	sessionPath  string
+	saved        int
+	lastUsage    *Usage
+	sessionCache map[string]SessionInfo
+	sessionStat  map[string]sessionFileStat
+	OnTool       func(name, args, result string)
+}
+
+type sessionFileStat struct {
+	mtime time.Time
+	size  int64
 }
 
 func New(cfg *Config) (*Agent, error) {
@@ -37,11 +49,14 @@ func New(cfg *Config) (*Agent, error) {
 		return nil, err
 	}
 	a := &Agent{
-		cfg:        cfg,
-		client:     NewClient(cfg),
-		sessionDir: sessionDir,
+		cfg:          cfg,
+		client:       NewClient(cfg),
+		sessionDir:   sessionDir,
+		sessionCache: map[string]SessionInfo{},
+		sessionStat:  map[string]sessionFileStat{},
 	}
 	a.NewSession()
+	a.refreshSessions()
 	return a, nil
 }
 
@@ -208,6 +223,10 @@ func (a *Agent) Model() string { return a.cfg.Model }
 
 func (a *Agent) SetModel(m string) { a.cfg.Model = m }
 
+func (a *Agent) History() []Message { return a.history }
+
+func (a *Agent) ListModels() ([]string, error) { return a.client.ListModels() }
+
 func (a *Agent) save() error {
 	if a.saved >= len(a.history) {
 		return nil
@@ -260,11 +279,23 @@ type SessionInfo struct {
 }
 
 func (a *Agent) ListSessions() ([]SessionInfo, error) {
-	entries, err := os.ReadDir(a.sessionDir)
-	if err != nil {
+	if err := a.refreshSessions(); err != nil {
 		return nil, err
 	}
-	var list []SessionInfo
+	list := make([]SessionInfo, 0, len(a.sessionCache))
+	for _, si := range a.sessionCache {
+		list = append(list, si)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].ID > list[j].ID })
+	return list, nil
+}
+
+func (a *Agent) refreshSessions() error {
+	entries, err := os.ReadDir(a.sessionDir)
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
 			continue
@@ -273,32 +304,51 @@ func (a *Agent) ListSessions() ([]SessionInfo, error) {
 		if err != nil {
 			continue
 		}
-		si := SessionInfo{
-			ID:      strings.TrimSuffix(e.Name(), ".jsonl"),
-			ModTime: info.ModTime(),
+		id := strings.TrimSuffix(e.Name(), ".jsonl")
+		seen[id] = true
+		st := sessionFileStat{mtime: info.ModTime(), size: info.Size()}
+		if old, ok := a.sessionStat[id]; ok && old == st {
+			continue
 		}
-		if f, err := os.Open(filepath.Join(a.sessionDir, e.Name())); err == nil {
-			dec := json.NewDecoder(f)
-			for {
-				var m Message
-				if err := dec.Decode(&m); err != nil {
-					break
-				}
-				si.Msgs++
-				if si.Summary == "" && m.Role == "user" {
-					s := strings.ReplaceAll(m.Content, "\n", " ")
-					if utf8.RuneCountInString(s) > 30 {
-						s = string([]rune(s)[:30]) + "..."
-					}
-					si.Summary = s
-				}
-			}
-			f.Close()
-		}
-		list = append(list, si)
+		a.sessionStat[id] = st
+		a.sessionCache[id] = scanSession(filepath.Join(a.sessionDir, e.Name()), id, info.ModTime())
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].ID > list[j].ID })
-	return list, nil
+	for id := range a.sessionStat {
+		if !seen[id] {
+			delete(a.sessionStat, id)
+			delete(a.sessionCache, id)
+		}
+	}
+	return nil
+}
+
+func scanSession(path, id string, modTime time.Time) SessionInfo {
+	si := SessionInfo{ID: id, ModTime: modTime}
+	f, err := os.Open(path)
+	if err != nil {
+		return si
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		si.Msgs++
+		if si.Summary == "" {
+			var m Message
+			if json.Unmarshal(line, &m) == nil && m.Role == "user" && m.Content != "" {
+				s := strings.ReplaceAll(m.Content, "\n", " ")
+				if utf8.RuneCountInString(s) > 30 {
+					s = string([]rune(s)[:30]) + "..."
+				}
+				si.Summary = s
+			}
+		}
+	}
+	return si
 }
 
 func ToolDefs() []ToolDef {

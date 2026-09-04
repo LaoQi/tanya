@@ -1,6 +1,10 @@
 package agent
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +18,12 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if cfg.Temperature != 0.7 {
 		t.Errorf("默认数值异常: %+v", cfg)
+	}
+	if cfg.Prompt != DefaultPrompt || !strings.Contains(cfg.Prompt, "{cwd}") {
+		t.Errorf("默认 prompt 模板异常: %q", cfg.Prompt)
+	}
+	if cfg.UserAgent != DefaultUserAgent || !strings.HasPrefix(cfg.UserAgent, "pi/") {
+		t.Errorf("默认 UA 异常: %q", cfg.UserAgent)
 	}
 }
 
@@ -71,6 +81,57 @@ func TestLoadConfigInvalidYAML(t *testing.T) {
 	}
 	if _, err := LoadConfig(path); err == nil {
 		t.Error("非法 yaml 应报错")
+	}
+}
+
+func TestLoadConfigPrompt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("prompt: \"\\x1b[35m{model} >\\x1b[0m \"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Prompt != "\x1b[35m{model} >\x1b[0m " {
+		t.Errorf("yaml \\x1b 转义解析失败: %q", cfg.Prompt)
+	}
+	t.Setenv("TANYA_PROMPT", "[{cwd}] ")
+	cfg, err = LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Prompt != "[{cwd}] " {
+		t.Errorf("TANYA_PROMPT 应覆盖 yaml: %q", cfg.Prompt)
+	}
+}
+
+func TestUserAgentHeader(t *testing.T) {
+	var ua, modelUA string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		ua = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	})
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		modelUA = r.Header.Get("User-Agent")
+		fmt.Fprint(w, `{"data":[{"id":"m1"}]}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	cfg := defaultConfig()
+	cfg.BaseURL = srv.URL + "/v1"
+	cfg.APIKey = "test-key"
+	c := NewClient(cfg)
+	if _, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ListModels(); err != nil {
+		t.Fatal(err)
+	}
+	if ua != DefaultUserAgent || modelUA != DefaultUserAgent {
+		t.Errorf("UA 头异常: chat=%q models=%q", ua, modelUA)
 	}
 }
 
