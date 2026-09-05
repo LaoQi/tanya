@@ -38,6 +38,7 @@ type Editor struct {
 	pos      int
 	prompt   string
 	kill     string
+	prevRows int
 }
 
 func NewEditor(term Terminal, raw bool) *Editor {
@@ -85,6 +86,7 @@ func (e *Editor) Readline(prompt string) (string, error) {
 	e.pos = 0
 	e.histIdx = len(e.history)
 	e.draft = ""
+	e.prevRows = 0
 	e.render("")
 	for {
 		ev, err := e.term.ReadKey()
@@ -105,6 +107,7 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 	case KeyEnter:
 		line := string(e.buf)
 		fmt.Fprint(e.out, "\r\n")
+		e.prevRows = 0
 		if strings.TrimSpace(line) != "" {
 			e.history = append(e.history, line)
 		}
@@ -150,6 +153,7 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 		e.transpose()
 	case KeyCtrlL:
 		fmt.Fprint(e.out, "\x1b[2J\x1b[H")
+		e.prevRows = 0
 	case KeyAltB:
 		e.pos = e.wordBack(e.pos)
 	case KeyAltF:
@@ -166,10 +170,12 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 		e.buf = nil
 		e.pos = 0
 		fmt.Fprint(e.out, "\r\n")
+		e.prevRows = 0
 		return true, "", ErrInterrupt
 	case KeyCtrlD:
 		if len(e.buf) == 0 {
 			fmt.Fprint(e.out, "\r\n")
+			e.prevRows = 0
 			return true, "", io.EOF
 		}
 		if e.pos < len(e.buf) {
@@ -214,6 +220,7 @@ func (e *Editor) tabComplete() {
 	for _, c := range cands {
 		fmt.Fprintf(e.out, "  %s\r\n", c.display())
 	}
+	e.prevRows = 0
 }
 
 func commonPrefix(ss []string) string {
@@ -300,13 +307,39 @@ func (e *Editor) histNext() {
 }
 
 func (e *Editor) render(extra string) {
-	cur := stringWidth(stripANSI(e.prompt)) + stringWidth(string(e.buf[:e.pos]))
 	line := e.prompt + string(e.buf)
 	if e.ghost != "" && e.pos == len(e.buf) {
 		line += "\x1b[90m" + e.ghost + "\x1b[0m"
 	}
-	fmt.Fprint(e.out, "\r\x1b[K"+line)
-	if cur > 0 {
-		fmt.Fprint(e.out, "\r\x1b["+strconv.Itoa(cur)+"C")
+	cur := stringWidth(stripANSI(e.prompt)) + stringWidth(string(e.buf[:e.pos]))
+	size, ok := e.term.Size()
+	if !ok || size.Cols <= 0 {
+		fmt.Fprint(e.out, "\r\x1b[K"+line)
+		if cur > 0 {
+			fmt.Fprint(e.out, "\r\x1b["+strconv.Itoa(cur)+"C")
+		}
+		return
 	}
+	cols := size.Cols
+	var b strings.Builder
+	b.WriteString("\r")
+	if e.prevRows > 1 {
+		b.WriteString("\x1b[" + strconv.Itoa(e.prevRows-1) + "A")
+	}
+	b.WriteString("\x1b[J")
+	b.WriteString(line)
+	total := stringWidth(stripANSI(line))
+	rows := (total + cols - 1) / cols
+	if rows < 1 {
+		rows = 1
+	}
+	if up := rows - 1 - cur/cols; up > 0 {
+		b.WriteString("\x1b[" + strconv.Itoa(up) + "A")
+	}
+	b.WriteString("\r")
+	if col := cur % cols; col > 0 {
+		b.WriteString("\x1b[" + strconv.Itoa(col) + "C")
+	}
+	e.prevRows = rows
+	fmt.Fprint(e.out, b.String())
 }
