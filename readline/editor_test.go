@@ -13,11 +13,18 @@ type fakeTerm struct {
 	out      *bytes.Buffer
 	raw      bool
 	rawCalls int
+	cols     int
 }
 
-func (f *fakeTerm) Raw() error         { f.raw = true; f.rawCalls++; return nil }
-func (f *fakeTerm) Restore()           { f.raw = false }
-func (f *fakeTerm) Size() (Size, bool) { return Size{Cols: 80, Rows: 24}, true }
+func (f *fakeTerm) Raw() error { f.raw = true; f.rawCalls++; return nil }
+func (f *fakeTerm) Restore()   { f.raw = false }
+func (f *fakeTerm) Size() (Size, bool) {
+	cols := f.cols
+	if cols <= 0 {
+		cols = 80
+	}
+	return Size{Cols: cols, Rows: 24}, true
+}
 func (f *fakeTerm) ReadKey() (KeyEvent, error) {
 	if len(f.events) == 0 {
 		return KeyEvent{}, io.EOF
@@ -211,5 +218,48 @@ func TestEditorCtrlBFAndCtrlL(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "\x1b[2J\x1b[H") {
 		t.Errorf("Ctrl+L 应清屏: %q", out.String())
+	}
+}
+
+func TestEditorRenderWrap(t *testing.T) {
+	f := &fakeTerm{cols: 10, out: &bytes.Buffer{}}
+	f.events = append(runes("abcdefghij"), KeyEvent{Code: KeyEnter})
+	ed := NewEditor(f, true)
+	ed.SetOutput(f.out)
+	if _, err := ed.Readline("> "); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(f.out.String(), "\r\x1b[1A\x1b[J") {
+		t.Errorf("换行后重渲染应上移并清屏: %q", f.out.String())
+	}
+	if f.out.String() == "" {
+		t.Fatal("无输出")
+	}
+}
+
+func TestEditorRenderWrapCursorHome(t *testing.T) {
+	ft := &fakeTerm{cols: 10, out: &bytes.Buffer{}}
+	ft.events = append(runes("abcdefghij"), KeyEvent{Code: KeyHome}, KeyEvent{Code: KeyEnter})
+	ed := NewEditor(ft, true)
+	ed.SetOutput(ft.out)
+	if _, err := ed.Readline("> "); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(ft.out.String(), "\x1b[1A\r\x1b[2C") {
+		t.Errorf("Home 后光标应上移一行定位到 prompt 后: %q", ft.out.String())
+	}
+}
+
+func TestEditorRenderExactCols(t *testing.T) {
+	ft := &fakeTerm{cols: 10, out: &bytes.Buffer{}}
+	ft.events = append(runes("abcdefghijkl"), KeyEvent{Code: KeyEnter})
+	ed := NewEditor(ft, true)
+	ed.SetOutput(ft.out)
+	if _, err := ed.Readline("12345678"); err != nil {
+		t.Fatal(err)
+	}
+	out := ft.out.String()
+	if !strings.Contains(out, "\r\x1b[1A\x1b[J") {
+		t.Errorf("整列数倍行数应正确跟踪: %q", out)
 	}
 }

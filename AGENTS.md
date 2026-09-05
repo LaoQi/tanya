@@ -19,7 +19,7 @@ main.go            入口、flag 子命令、ask 单发
 repl/repl.go       REPL 循环、斜杠命令、提示符模板渲染、InterruptContext（Ctrl+C 中断）
 repl/completer.go  ghost 建议与 Tab 补全数据源（/load 候选 Display 带时间/条数/简介）
 repl/picker.go     /load 会话方向键选择菜单与非 TTY 序号降级
-readline/editor.go    行编辑器（缓冲/光标/历史/渲染）、ErrInterrupt；快捷键：Ctrl+A/E/B/F/U/K/W/Y/T/L、Alt+B/F（词移动，按空白分词）、Home/End/方向键
+readline/editor.go    行编辑器（缓冲/光标/历史/渲染）、ErrInterrupt；快捷键：Ctrl+A/E/B/F/U/K/W/Y/T/L、Alt+B/F（词移动，按空白分词）、Home/End/方向键；render 多行感知（prevRows 跟踪占用行数，重渲染上移清屏，光标按 ⌈宽/列⌉ 跨行定位，Size 不可用退化单行）
 readline/keys.go      按键解析状态机（ESC 序列/控制键/UTF-8）
 readline/terminal*.go Terminal 接口、unix termios raw mode、Windows 占位、非 TTY 降级
 readline/width.go     字符宽度表与 ANSI 剥离
