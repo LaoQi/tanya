@@ -65,11 +65,11 @@ func TestRunShellTimeoutClamp(t *testing.T) {
 }
 
 func TestRunShellTruncation(t *testing.T) {
-	got := RunShell(context.Background(), "head -c 40000 /dev/zero | tr '\\0' 'a'", 30)
-	if !strings.Contains(got, "截断") {
-		t.Errorf("应包含截断标记: len=%d", len(got))
+	got := RunShell(context.Background(), "head -c 200000 /dev/zero | tr '\\0' 'a'", 30)
+	if !strings.Contains(got, "中间截断 150000 字节") {
+		t.Errorf("应包含中间截断标记: len=%d", len(got))
 	}
-	if len(got) > shellMaxOutput+200 {
+	if len(got) > 2*shellMaxOutput+200 {
 		t.Errorf("截断后仍过长: %d", len(got))
 	}
 }
@@ -99,24 +99,34 @@ func TestRunShellWaitDelay(t *testing.T) {
 }
 
 func TestLimitedBuffer(t *testing.T) {
-	var b limitedBuffer
+	var chunks []ShellChunk
+	c := streamCapture{chunks: &chunks}
 	full := strings.Repeat("a", shellMaxOutput+500)
-	if n, err := b.Write([]byte(full)); err != nil || n != len(full) {
+	if n, err := c.Write([]byte(full)); err != nil || n != len(full) {
 		t.Fatalf("Write 返回 n=%d err=%v", n, err)
 	}
-	if len(b.buf) != shellMaxOutput {
-		t.Errorf("缓冲应封顶 %d，实际 %d", shellMaxOutput, len(b.buf))
+	c.finish()
+	if len(chunks) != 1 || len(chunks[0].Data) != shellMaxOutput+500 || chunks[0].Truncated != 0 {
+		t.Fatalf("连续数据应合并为单一 chunk: %+v（len=%d）", chunks, len(chunks[0].Data))
 	}
-	if b.dropped != 500 {
-		t.Errorf("丢弃计数应 500，实际 %d", b.dropped)
+	var chunks2 []ShellChunk
+	c2 := streamCapture{chunks: &chunks2}
+	c2.Write([]byte("x"))
+	c2.Write([]byte(strings.Repeat("a", shellMaxOutput*2)))
+	c2.finish()
+	if len(chunks2) != 2 {
+		t.Fatalf("应产出 2 chunk，实际 %d", len(chunks2))
 	}
-	var sb strings.Builder
-	b.report(&sb, "stdout")
-	out := sb.String()
-	if !strings.Contains(out, "截断 500 字节") {
-		t.Errorf("got %q", out)
+	if len(chunks2[0].Data) != shellMaxOutput || chunks2[0].Truncated != 0 {
+		t.Errorf("chunk[0] 异常: len=%d trunc=%d", len(chunks2[0].Data), chunks2[0].Truncated)
 	}
-	if strings.Count(out, "a") != shellMaxOutput {
-		t.Errorf("输出长度应 %d", shellMaxOutput)
+	if len(chunks2[1].Data) != shellMaxOutput/2+1 || chunks2[1].Truncated != shellMaxOutput/2 {
+		t.Errorf("chunk[1] 异常: len=%d trunc=%d", len(chunks2[1].Data), chunks2[1].Truncated)
+	}
+	var chunks3 []ShellChunk
+	c3 := streamCapture{chunks: &chunks3}
+	c3.finish()
+	if len(chunks3) != 0 {
+		t.Errorf("空流不应产出 chunk: %+v", chunks3)
 	}
 }

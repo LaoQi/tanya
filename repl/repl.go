@@ -41,6 +41,7 @@ type REPL struct {
 	term      readline.Terminal
 	raw       bool
 	promptTpl string
+	onDelta   func(string)
 }
 
 func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
@@ -52,7 +53,11 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 	if promptTpl == "" {
 		promptTpl = agent.DefaultPrompt
 	}
-	return &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl}, nil
+	r := &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl, onDelta: func(s string) { fmt.Print(s) }}
+	if a != nil {
+		r.onDelta = WireToolView(a, func() int { return toolWidth(term) }, a.ToolOutputLines())
+	}
+	return r, nil
 }
 
 func renderPrompt(tpl, cwd, model, usage, cache, cacheRate string) string {
@@ -93,7 +98,7 @@ func (r *REPL) Run() error {
 			continue
 		}
 		ctx, done := InterruptContext()
-		err = r.agent.Ask(ctx, line, func(s string) { fmt.Print(s) })
+		err = r.agent.Ask(ctx, line, r.onDelta)
 		done()
 		fmt.Println()
 		if err != nil {

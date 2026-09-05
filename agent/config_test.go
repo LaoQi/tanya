@@ -147,3 +147,38 @@ func TestExpandHome(t *testing.T) {
 		t.Error("单独的 ~ 不在展开范围")
 	}
 }
+
+func TestToolOutputLines(t *testing.T) {
+	if cfg := defaultConfig(); cfg.ToolOutputLines != 20 {
+		t.Errorf("默认应为 20: %d", cfg.ToolOutputLines)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("tool_output_lines: 5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ToolOutputLines != 5 {
+		t.Errorf("yaml 覆盖失败: %d", cfg.ToolOutputLines)
+	}
+	if err := os.WriteFile(path, []byte("tool_output_lines: -3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ToolOutputLines != 20 {
+		t.Errorf("非法值应回退 20: %d", cfg.ToolOutputLines)
+	}
+	t.Setenv("TANYA_TOOL_OUTPUT_LINES", "7")
+	cfg, err = LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ToolOutputLines != 7 {
+		t.Errorf("env 覆盖失败: %d", cfg.ToolOutputLines)
+	}
+}
