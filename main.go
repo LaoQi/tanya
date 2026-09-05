@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/repl"
@@ -29,13 +28,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "错误:", err)
 		os.Exit(1)
 	}
-	a.OnTool = func(name, args, result string) {
-		r := strings.ReplaceAll(result, "\n", " ")
-		if utf8.RuneCountInString(r) > 120 {
-			r = string([]rune(r)[:120]) + "..."
-		}
-		fmt.Printf("\n\033[90m[tool] %s(%s) => %s\033[0m\n", name, args, r)
-	}
+	repl.WireToolView(a, func() int { return repl.ToolWidth() }, a.ToolOutputLines())
 
 	args := flag.Args()
 	if len(args) > 0 && args[0] == "ask" {

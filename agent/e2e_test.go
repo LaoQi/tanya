@@ -41,7 +41,9 @@ func TestAskShellToolLoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	var toolEvents []string
-	a.OnTool = func(name, args, result string) { toolEvents = append(toolEvents, name) }
+	var startEvents []string
+	a.OnToolStart = func(name, args string) { startEvents = append(startEvents, name+":"+args) }
+	a.OnToolEnd = func(name, args string, res ToolResult) { toolEvents = append(toolEvents, name) }
 
 	if err := a.Ask(context.Background(), "测试 shell", nil); err != nil {
 		t.Fatal(err)
@@ -57,7 +59,10 @@ func TestAskShellToolLoop(t *testing.T) {
 		t.Errorf("tool 结果: %q", toolMsg.Content)
 	}
 	if len(toolEvents) != 1 || toolEvents[0] != "run_shell" {
-		t.Errorf("OnTool 回调: %v", toolEvents)
+		t.Errorf("OnToolEnd 回调: %v", toolEvents)
+	}
+	if len(startEvents) != 1 || !strings.Contains(startEvents[0], "hello-tool") {
+		t.Errorf("OnToolStart 回调: %v", startEvents)
 	}
 	if len(m.reqs) != 2 {
 		t.Fatalf("请求数: %d", len(m.reqs))

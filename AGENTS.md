@@ -19,14 +19,15 @@ main.go            入口、flag 子命令、ask 单发
 repl/repl.go       REPL 循环、斜杠命令、提示符模板渲染、InterruptContext（Ctrl+C 中断）
 repl/completer.go  ghost 建议与 Tab 补全数据源（/load 候选 Display 带时间/条数/简介）
 repl/picker.go     /load 会话方向键选择菜单与非 TTY 序号降级
+repl/toolview.go   工具调用块状渲染（RenderToolStart/End、shellView/textView、WireToolView 接线、ToolWidth 终端宽度探测）
 readline/editor.go    行编辑器（缓冲/光标/历史/渲染）、ErrInterrupt；快捷键：Ctrl+A/E/B/F/U/K/W/Y/T/L、Alt+B/F（词移动，按空白分词）、Home/End/方向键；render 多行感知（prevRows 跟踪占用行数，重渲染上移清屏，光标按 ⌈宽/列⌉ 跨行定位，Size 不可用退化单行）
 readline/keys.go      按键解析状态机（ESC 序列/控制键/UTF-8）
 readline/terminal*.go Terminal 接口、unix termios raw mode、Windows 占位、非 TTY 降级
-readline/width.go     字符宽度表与 ANSI 剥离
+readline/width.go     字符宽度表、ANSI 剥离与按显示宽度截断（Truncate，~ 后缀）
 agent/config.go    配置加载：默认值 < ~/.config/tanyan/config.yaml < env(TANYA_*)
 agent/llm.go       OpenAI 兼容 client（SSE 流式 + tool_calls 增量合并 + usage 捕获 + /models 列表获取）
 agent/agent.go     对话 loop、上下文估算、会话持久化
-agent/shell.go     run_shell 工具（bash -c、超时、输出截断）
+agent/shell.go     run_shell 工具（bash -c、超时、streamCapture 头尾截断、ShellResult 结构化返回）
 agent/builtin.go   内置小工具：get_time / get_env / calc
 ```
 
@@ -50,6 +51,8 @@ go run . ask "你好"   # 单发冒烟（需配置 api_key）
 ## 关键行为
 
 - shell 工具免确认直接执行
+- 工具调用渲染：`OnToolStart`/`OnToolEnd` 回调驱动（`OnToolStart` 在 dispatch 内触发），repl 包 `WireToolView` 接线为块状视图——`● 工具名 命令 (耗时)` 标题行 + 缩进输出（stderr 行加 `2|` 前缀）+ `↳` 状态行；显示行数上限 `tool_output_lines`（yaml / env `TANYA_TOOL_OUTPUT_LINES`，默认 20，范围 1-1000），超出保留头 3 行 + 尾 2 行；`ToolResult` 结构区分 `ShellResult` 与纯文本，发回模型的 content 由 `Content()` 拼回文本
+- shell 输出捕获：stdout/stderr 各经 `streamCapture` 保留头 30000 字节 + 尾 30000 字节滚动窗口，中间字节计数丢弃；`ShellResult` 结构含 Command/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Duration
 - 本地不设上下文上限与轮数上限，不做裁剪；超限等错误由 API 直接暴露
 - 系统提示组装（缓存友好）：`DefaultSystemPrompt` 固定基础（`system_prompt` 配置项已移除）+ 全局 `~/.config/tanyan/AGENTS.md` + 工作区 `./AGENTS.md`（标题段 `# 全局说明`/`# 项目说明`，文件缺失/空白跳过）；`NewSession`/`LoadSession` 时刻快照，会话内零文件 IO 冻结，history append-only 保证请求前缀逐字节稳定命中 prompt cache
 - 会话持久化：jsonl 首行写 system 快照（`systemSaved` 标志防重复），`/load` 还原快照；旧格式（无 system 首行）回退载入时快照当前 AGENTS.md，且保持不补写；system 行不计入 `/sessions` 条数与标题

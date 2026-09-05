@@ -34,7 +34,8 @@ type Agent struct {
 	lastUsage      *Usage
 	sessionCache   map[string]SessionInfo
 	sessionStat    map[string]sessionFileStat
-	OnTool         func(name, args, result string)
+	OnToolStart    func(name, args string)
+	OnToolEnd      func(name, args string, res ToolResult)
 }
 
 type sessionFileStat struct {
@@ -159,36 +160,51 @@ func (a *Agent) Ask(ctx context.Context, input string, onDelta func(string)) err
 			break
 		}
 		for _, tc := range resp.ToolCalls {
-			result := a.dispatch(ctx, tc)
-			if a.OnTool != nil {
-				a.OnTool(tc.Function.Name, tc.Function.Arguments, result)
+			res := a.dispatch(ctx, tc)
+			if a.OnToolEnd != nil {
+				a.OnToolEnd(tc.Function.Name, tc.Function.Arguments, res)
 			}
 			a.history = append(a.history, Message{
 				Role:       "tool",
 				ToolCallID: tc.ID,
 				Name:       tc.Function.Name,
-				Content:    result,
+				Content:    res.Content(),
 			})
 		}
 	}
 	return a.save()
 }
 
-func (a *Agent) dispatch(ctx context.Context, tc ToolCall) string {
+type ToolResult struct {
+	Shell *ShellResult
+	Text  string
+}
+
+func (r ToolResult) Content() string {
+	if r.Shell != nil {
+		return r.Shell.String()
+	}
+	return r.Text
+}
+
+func (a *Agent) dispatch(ctx context.Context, tc ToolCall) ToolResult {
+	if a.OnToolStart != nil {
+		a.OnToolStart(tc.Function.Name, tc.Function.Arguments)
+	}
 	if tc.Function.Name == "run_shell" {
 		var args struct {
 			Command string `json:"command"`
 			Timeout int    `json:"timeout"`
 		}
 		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-			return "error: 参数解析失败: " + err.Error()
+			return ToolResult{Text: "error: 参数解析失败: " + err.Error()}
 		}
-		return RunShell(ctx, args.Command, args.Timeout)
+		return ToolResult{Shell: RunShellResult(ctx, args.Command, args.Timeout)}
 	}
-	if result, ok := DispatchBuiltin(tc.Function.Name, tc.Function.Arguments); ok {
-		return result
+	if text, ok := DispatchBuiltin(tc.Function.Name, tc.Function.Arguments); ok {
+		return ToolResult{Text: text}
 	}
-	return "error: 未知工具 " + tc.Function.Name
+	return ToolResult{Text: "error: 未知工具 " + tc.Function.Name}
 }
 
 func (a *Agent) buildMessages() []Message {
@@ -444,4 +460,11 @@ func ToolDefs() []ToolDef {
 			"计算四则运算表达式，支持 + - * / % 与括号",
 			`{"type":"object","properties":{"expression":{"type":"string","description":"算数表达式，如 (1+2)*3/4"}},"required":["expression"]}`),
 	}
+}
+
+func (a *Agent) ToolOutputLines() int {
+	if a.cfg == nil || a.cfg.ToolOutputLines < 1 {
+		return 20
+	}
+	return a.cfg.ToolOutputLines
 }

@@ -10,3 +10,6 @@ prompt: "\x1b[37m{cwd}\x1b[0m \x1b[34m{model}\x1b[0m \x1b[32m{usage}\x1b[0m \x1b
 global_session: ~/.local/share/tanyan/sessions
 # 会话存储模式：auto（默认，存在 .tanya/ 则 local）/ local / global
 session_mode: auto
+
+# 工具输出在终端最多显示的行数（超出后仅显示头 3 行 + 尾 2 行与总数提示），范围 1-1000
+tool_output_lines: 20

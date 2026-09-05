@@ -11,14 +11,15 @@ import (
 )
 
 type Config struct {
-	BaseURL       string  `yaml:"base_url"`
-	APIKey        string  `yaml:"api_key"`
-	Model         string  `yaml:"model"`
-	Temperature   float64 `yaml:"temperature"`
-	Prompt        string  `yaml:"prompt"`
-	UserAgent     string  `yaml:"user_agent"`
-	GlobalSession string  `yaml:"global_session"`
-	SessionMode   string  `yaml:"session_mode"`
+	BaseURL         string  `yaml:"base_url"`
+	APIKey          string  `yaml:"api_key"`
+	Model           string  `yaml:"model"`
+	Temperature     float64 `yaml:"temperature"`
+	Prompt          string  `yaml:"prompt"`
+	UserAgent       string  `yaml:"user_agent"`
+	GlobalSession   string  `yaml:"global_session"`
+	SessionMode     string  `yaml:"session_mode"`
+	ToolOutputLines int     `yaml:"tool_output_lines"`
 }
 
 const DefaultPrompt = "\x1b[37m{cwd}\x1b[0m \x1b[34m{model}\x1b[0m \x1b[32m{usage}>\x1b[0m "
@@ -28,12 +29,13 @@ const DefaultUserAgent = "pi/0.85.0 (linux; node/v22.14.0; x64)"
 func defaultConfig() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
-		BaseURL:       "https://api.openai.com/v1",
-		Model:         "deepseek-v4-flash",
-		Temperature:   0.7,
-		Prompt:        DefaultPrompt,
-		UserAgent:     DefaultUserAgent,
-		GlobalSession: filepath.Join(home, ".local", "share", "tanyan", "sessions"),
+		BaseURL:         "https://api.openai.com/v1",
+		Model:           "deepseek-v4-flash",
+		Temperature:     0.7,
+		Prompt:          DefaultPrompt,
+		UserAgent:       DefaultUserAgent,
+		GlobalSession:   filepath.Join(home, ".local", "share", "tanyan", "sessions"),
+		ToolOutputLines: 20,
 	}
 }
 
@@ -75,6 +77,14 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if v := os.Getenv("TANYA_USER_AGENT"); v != "" {
 		cfg.UserAgent = v
+	}
+	if v := os.Getenv("TANYA_TOOL_OUTPUT_LINES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.ToolOutputLines = n
+		}
+	}
+	if cfg.ToolOutputLines < 1 || cfg.ToolOutputLines > 1000 {
+		cfg.ToolOutputLines = 20
 	}
 	if cfg.Prompt == "" {
 		cfg.Prompt = DefaultPrompt

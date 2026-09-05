@@ -52,8 +52,9 @@ agent/         package agent：全部核心逻辑
 ### run_shell（shell.go）
 
 - 参数：`command`（必填）、`timeout`（默认 60s，上限 300s）
-- 实现：`bash -c`，捕获 stdout/stderr/退出码
-- 输出截断：单项超 30000 字节时保留头 80% + 尾 20%，中间标注截断量
+- 实现：`bash -c`，捕获 stdout/stderr/退出码/耗时（`ShellResult` 结构化返回）
+- 输出捕获：stdout/stderr 各保留头 30000 字节 + 尾 30000 字节（`streamCapture` 滚动窗口），中间字节计数丢弃，模型仍可见首尾内容
+- 回调：`OnToolStart`（执行前，标题行 + `⋯`）/ `OnToolEnd`（执行后，结构化 `ToolResult`），渲染在 repl 包 `toolview.go`
 - **免确认直接执行**（早期版本有 y/n/a 确认机制，已移除）
 
 ### builtin（builtin.go）

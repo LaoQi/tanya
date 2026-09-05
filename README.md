@@ -35,7 +35,7 @@ api_key: "sk-..."
 model: deepseek-v4-flash
 ```
 
-环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_SESSION_MODE`。
+环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_SESSION_MODE` / `TANYA_TOOL_OUTPUT_LINES`。
 
 ## 使用
 
@@ -82,6 +82,8 @@ REPL 斜杠命令：
 - 提示符模板支持两个缓存占位符：`{cache}` 缓存命中量（如 `980/1.2k`）、`{cache_rate}` 缓存命中率（保留两位小数，如 `81.67%`），无数据均渲染为空，默认模板不含缓存段
 
 ## 工具
+
+工具执行以无色块状格式显示：`● 工具名 命令 (耗时)` 标题行 + 缩进输出行（stderr 行加 `2|` 前缀）+ `↳` 状态行（退出码/超时/中断），默认最多显示 20 行（`tool_output_lines` 可配，1-1000），超出仅保留头 3 行 + 尾 2 行并提示通过 `/history n` 查看完整输出；执行开始即打印标题行（`⋯` 标记进行中）。
 
 | 工具 | 确认 | 说明 |
 |---|---|---|

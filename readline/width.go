@@ -64,3 +64,21 @@ func stripANSI(s string) string {
 func stringWidthANSI(s string) int {
 	return stringWidth(stripANSI(s))
 }
+
+func Truncate(s string, w int) string {
+	if stringWidth(s) <= w {
+		return s
+	}
+	var b strings.Builder
+	cur := 0
+	for _, r := range s {
+		rw := runeWidth(r)
+		if cur+rw > w-1 {
+			break
+		}
+		b.WriteRune(r)
+		cur += rw
+	}
+	b.WriteByte('~')
+	return b.String()
+}
