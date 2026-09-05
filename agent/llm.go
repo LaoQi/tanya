@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 )
 
 type Message struct {
@@ -108,7 +109,9 @@ func (c *Client) ListModels() ([]string, error) {
 		return nil, fmt.Errorf("未配置 api_key（请写入配置文件或设置环境变量 TANYA_API_KEY）")
 	}
 	url := strings.TrimSuffix(c.cfg.BaseURL, "/") + "/models"
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}

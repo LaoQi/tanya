@@ -32,6 +32,7 @@ const welcomText = `
   ██   ██  ██ ██   ██   ██   ██  ██ 
 
 输入 /help 查看命令
+
 `
 
 type REPL struct {
@@ -54,12 +55,13 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 	return &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl}, nil
 }
 
-func renderPrompt(tpl, cwd, model, usage, cache string) string {
+func renderPrompt(tpl, cwd, model, usage, cache, cacheRate string) string {
 	return strings.NewReplacer(
 		"{cwd}", cwd,
 		"{model}", model,
 		"{usage}", usage,
 		"{cache}", cache,
+		"{cache_rate}", cacheRate,
 	).Replace(tpl)
 }
 
@@ -68,7 +70,7 @@ func (r *REPL) Close() {}
 func (r *REPL) Run() error {
 	fmt.Print(welcomText)
 	for {
-		prompt := renderPrompt(r.promptTpl, shortCwd(), r.agent.Model(), r.agent.PromptUsage(), r.agent.PromptCache())
+		prompt := renderPrompt(r.promptTpl, shortCwd(), r.agent.Model(), r.agent.PromptUsage(), r.agent.PromptCache(), r.agent.PromptCacheRate())
 		line, err := r.ed.Readline(prompt)
 		if err == readline.ErrInterrupt {
 			continue
