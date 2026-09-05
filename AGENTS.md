@@ -57,7 +57,7 @@ go run . ask "你好"   # 单发冒烟（需配置 api_key）
 - 会话存储模式（`-m local/global/auto`，yaml `session_mode`、env `TANYA_SESSION_MODE` 可配，默认 auto）：local 存 `<cwd>/.tanya/sessions/`，global 存 `~/.local/share/tanyan/sessions/<workspace-id>/`（按启动目录可读路径+短哈希划分），auto 检测 `.tanya/` 存在与否自动选择；记录完整历史
 - 会话列表扫描：`agent.New` 启动时预扫描填充缓存；`ListSessions` 按 (mtime,size) 增量刷新，仅重扫变化的文件；每文件 `bufio` 逐行计数条数、仅解码至首条 user 消息取摘要
 - REPL 斜杠命令：`/help` `/new` `/sessions` `/load` `/context` `/history` `/model` `/exit`；`/history` 无参截断列表（单行 120 rune）、`/history n` 全量查看单条、`/history all` 全量显示；`/model` 无参实时调接口列出可用模型（`*` 标注当前，失败仍显示当前模型），带参直接切换不校验；`/model ` 支持补全（接口列表在 REPL 内首次加载后缓存，失败不重试）
-- REPL 提示符模板（yaml `prompt`、env `TANYA_PROMPT` 可配，空值回退默认）：占位符 `{cwd}` 短路径 / `{model}` 模型 / `{usage}` 上下文 token / `{cache}` 缓存命中（无数据渲染为空），未知占位符原样保留；颜色由模板自带（yaml 双引号内用 `\x1b`），默认 `\x1b[37m{cwd}\x1b[0m \x1b[34m{model}\x1b[0m \x1b[32m{usage}>\x1b[0m `（路径白 / 模型蓝 / 上下文绿）
+- REPL 提示符模板（yaml `prompt`、env `TANYA_PROMPT` 可配，空值回退默认）：占位符 `{cwd}` 短路径 / `{model}` 模型 / `{usage}` 上下文 token / `{cache}` 缓存命中 / `{cache_rate}` 缓存命中率（两位小数，如 `81.67%`，无数据渲染为空），未知占位符原样保留；颜色由模板自带（yaml 双引号内用 `\x1b`），默认 `\x1b[37m{cwd}\x1b[0m \x1b[34m{model}\x1b[0m \x1b[32m{usage}>\x1b[0m `（路径白 / 模型蓝 / 上下文绿；缓存占位符存在但默认模板不含）
 
 ## Git
 

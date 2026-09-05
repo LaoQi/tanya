@@ -88,7 +88,7 @@ agent/         package agent：全部核心逻辑
 - 组装规则：`DefaultSystemPrompt`（内置，固定不可配）+ 全局 `~/.config/tanyan/AGENTS.md`（存在时）+ 工作区 `./AGENTS.md`（存在时），各段以 `# 全局说明`/`# 项目说明` 标题分隔
 - 快照机制：`/new`（NewSession）与 `/load`（LoadSession）时刻读取 AGENTS.md 组装快照；会话进行中零文件 IO，快照冻结
 - 缓存收益：history 全程 append-only，同一会话内 messages 前缀逐字节不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中
-- usage 捕获缓存命中（DeepSeek `prompt_cache_hit_tokens` / OpenAI `prompt_tokens_details.cached_tokens`），REPL 提示符 `{cache}` 占位符显示 `命中/总量`，无数据渲染为空
+- usage 捕获缓存命中（DeepSeek `prompt_cache_hit_tokens` / OpenAI `prompt_tokens_details.cached_tokens`），REPL 提示符 `{cache}` 占位符显示 `命中/总量`（如 `980/1.2k`）、`{cache_rate}` 显示命中率（保留两位小数，如 `81.67%`），无数据渲染为空
 
 ## 配置
 

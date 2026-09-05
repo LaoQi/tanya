@@ -469,3 +469,22 @@ func TestPromptCache(t *testing.T) {
 		t.Error("无缓存数据应为空")
 	}
 }
+
+func TestPromptCacheRate(t *testing.T) {
+	a := newTestAgent(t)
+	if a.PromptCacheRate() != "" {
+		t.Error("无 usage 应为空")
+	}
+	a.lastUsage = &Usage{PromptTokens: 1200, CacheHitTokens: 980}
+	if got := a.PromptCacheRate(); got != "81.67%" {
+		t.Errorf("DeepSeek 风格: got %q", got)
+	}
+	a.lastUsage = &Usage{PromptTokens: 1200, PromptTokensDetails: &promptTokensDetails{CachedTokens: 600}}
+	if got := a.PromptCacheRate(); got != "50.00%" {
+		t.Errorf("OpenAI 风格: got %q", got)
+	}
+	a.lastUsage = &Usage{PromptTokens: 1200}
+	if a.PromptCacheRate() != "" {
+		t.Error("无缓存数据应为空")
+	}
+}

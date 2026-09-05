@@ -159,7 +159,7 @@ func (a *Agent) Ask(ctx context.Context, input string, onDelta func(string)) err
 			break
 		}
 		for _, tc := range resp.ToolCalls {
-			result := a.dispatch(tc)
+			result := a.dispatch(ctx, tc)
 			if a.OnTool != nil {
 				a.OnTool(tc.Function.Name, tc.Function.Arguments, result)
 			}
@@ -174,7 +174,7 @@ func (a *Agent) Ask(ctx context.Context, input string, onDelta func(string)) err
 	return a.save()
 }
 
-func (a *Agent) dispatch(tc ToolCall) string {
+func (a *Agent) dispatch(ctx context.Context, tc ToolCall) string {
 	if tc.Function.Name == "run_shell" {
 		var args struct {
 			Command string `json:"command"`
@@ -183,7 +183,7 @@ func (a *Agent) dispatch(tc ToolCall) string {
 		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 			return "error: 参数解析失败: " + err.Error()
 		}
-		return RunShell(args.Command, args.Timeout)
+		return RunShell(ctx, args.Command, args.Timeout)
 	}
 	if result, ok := DispatchBuiltin(tc.Function.Name, tc.Function.Arguments); ok {
 		return result
@@ -248,6 +248,17 @@ func (a *Agent) PromptCache() string {
 		return ""
 	}
 	return formatTokens(hit) + "/" + formatTokens(a.lastUsage.PromptTokens)
+}
+
+func (a *Agent) PromptCacheRate() string {
+	if a.lastUsage == nil {
+		return ""
+	}
+	hit := a.lastUsage.cacheHit()
+	if hit <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%.2f%%", float64(hit)/float64(a.lastUsage.PromptTokens)*100)
 }
 
 func formatTokens(n int) string {
