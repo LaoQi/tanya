@@ -204,6 +204,7 @@ func (r *REPL) handleCommand(line string) bool {
 				fmt.Println("错误:", err)
 			} else {
 				fmt.Println("已载入会话", parts[1])
+				r.warnLegacyPrompt()
 			}
 			break
 		}
@@ -338,6 +339,13 @@ func (r *REPL) loadSessionInteractive() {
 		return
 	}
 	fmt.Println("已载入会话", list[idx].ID)
+	r.warnLegacyPrompt()
+}
+
+func (r *REPL) warnLegacyPrompt() {
+	if r.agent.LegacyPrompt() {
+		fmt.Println("提示: 旧版本会话已冻结历史环境信息；建议 /new 开启新会话")
+	}
 }
 
 func shortCwd() string {

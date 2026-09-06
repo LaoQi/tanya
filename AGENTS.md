@@ -25,8 +25,9 @@ repl/spinner.go    braille 等待动画
 readline/*         自研终端输入层（editor 行编辑/历史/Tab 补全菜单 / keys 按键解析 / terminal raw mode 与 KeyWatcher 按键监听 / width 显示宽度与截断）
 agent/config.go    配置加载（默认值 < ~/.config/tanyan/config.yaml < env TANYA_*）
 agent/llm.go       OpenAI 兼容 client（SSE 流式 + tool_calls 增量合并 + usage 捕获）
-agent/agent.go     对话 loop、上下文估算、会话持久化
-agent/shell.go     run_shell 工具（streamCapture 头尾截断、ShellResult 结构化返回）
+agent/agent.go     对话 loop、上下文估算、会话持久化（prompt 规则/事实分离：快照存规则，请求时实时拼接环境段）
+agent/envprobe.go  环境探针（envSection 纯函数：平台 + cwd + run_shell 执行契约 + 工作区标记，恒定注入无开关）
+agent/shell.go     run_shell 工具（streamCapture 头尾截断、ShellResult 结构化返回、执行契约常量单一事实源）
 agent/builtin.go   内置小工具：get_time / get_env / calc
 ```
 

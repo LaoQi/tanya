@@ -488,3 +488,59 @@ func TestPromptCacheRate(t *testing.T) {
 		t.Error("无缓存数据应为空")
 	}
 }
+
+func TestRuntimePromptAppendsEnv(t *testing.T) {
+	a := newTestAgent(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.probe = fakeProbe("/usr/bin/bash", "go.mod")
+	want := a.systemPrompt() + "\n\n" + envSection(cwd, a.probe)
+	if a.runtimePrompt() != want {
+		t.Errorf("runtimePrompt 拼接异常:\n got %q\nwant %q", a.runtimePrompt(), want)
+	}
+}
+
+func TestRuntimePromptNilProbe(t *testing.T) {
+	a := newTestAgent(t)
+	a.probe = nil
+	if a.runtimePrompt() != a.systemPrompt() {
+		t.Error("probe 为 nil 时 runtimePrompt 应退化为 persistPrompt")
+	}
+}
+
+func TestLegacyPromptFlag(t *testing.T) {
+	assertLegacy := func(firstLine string) {
+		t.Helper()
+		a := newTestAgent(t)
+		path := filepath.Join(a.sessionDir, "20260101-080000.jsonl")
+		content := firstLine + "\n" + `{"role":"user","content":"q"}` + "\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.LoadSession("20260101-080000"); err != nil {
+			t.Fatal(err)
+		}
+		if got := a.LegacyPrompt(); got != true {
+			t.Errorf("旧格式应识别 legacy: %v", got)
+		}
+	}
+	assertLegacy(`{"role":"system","content":"规则\n\n## 运行环境\n\n- 系统: linux"}`)
+	assertLegacy(`{"role":"system","content":"规则\n\n## 可用工具\n\n- run_shell"}`)
+}
+
+func TestLegacyPromptFlagNewFormat(t *testing.T) {
+	a := newTestAgent(t)
+	path := filepath.Join(a.sessionDir, "20260101-080100.jsonl")
+	content := `{"role":"system","content":"规则"}` + "\n" + `{"role":"user","content":"q"}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.LoadSession("20260101-080100"); err != nil {
+		t.Fatal(err)
+	}
+	if a.LegacyPrompt() {
+		t.Error("新格式不应标记 legacy")
+	}
+}

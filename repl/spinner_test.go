@@ -55,7 +55,7 @@ func TestSpinnerStopTimeout(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(2*time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("stop 应在有界超时后返回而不是永久阻塞")
 	}
 	if sp.active {

@@ -14,8 +14,8 @@ type fakeWatchTerm struct {
 	restored bool
 }
 
-func (f *fakeWatchTerm) Raw() error  { return nil }
-func (f *fakeWatchTerm) Restore()    { f.restored = true }
+func (f *fakeWatchTerm) Raw() error { return nil }
+func (f *fakeWatchTerm) Restore()   { f.restored = true }
 func (f *fakeWatchTerm) Size() (readline.Size, bool) {
 	return readline.Size{}, false
 }

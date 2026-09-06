@@ -26,7 +26,9 @@ type Agent struct {
 	client         *Client
 	history        []Message
 	cwd            string
+	probe          envProbeFunc
 	promptSnapshot string
+	legacySystem   bool
 	sessionDir     string
 	sessionPath    string
 	saved          int
@@ -65,6 +67,7 @@ func New(cfg *Config) (*Agent, error) {
 		cfg:          cfg,
 		client:       NewClient(cfg),
 		cwd:          cwd,
+		probe:        defaultEnvProbe,
 		sessionDir:   sessionDir,
 		sessionCache: map[string]SessionInfo{},
 		sessionStat:  map[string]sessionFileStat{},
@@ -146,9 +149,26 @@ func (a *Agent) systemPrompt() string {
 	return a.promptSnapshot
 }
 
+func (a *Agent) LegacyPrompt() bool {
+	return a.legacySystem
+}
+
+func isLegacyPrompt(p string) bool {
+	return strings.Contains(p, "## 运行环境") || strings.Contains(p, "## 可用工具")
+}
+
+func (a *Agent) runtimePrompt() string {
+	p := a.promptSnapshot
+	if a.probe != nil {
+		p += "\n\n" + envSection(a.cwd, a.probe)
+	}
+	return p
+}
+
 func (a *Agent) NewSession() {
 	a.history = nil
 	a.saved = 0
+	a.legacySystem = false
 	a.systemSaved = false
 	a.promptSnapshot = buildSystemPrompt(a.cwd)
 	a.sessionPath = filepath.Join(a.sessionDir, time.Now().Format("20060102-150405")+".jsonl")
@@ -247,7 +267,7 @@ func (a *Agent) dispatch(ctx context.Context, tc ToolCall) ToolResult {
 
 func (a *Agent) buildMessages() []Message {
 	msgs := make([]Message, 0, len(a.history)+1)
-	msgs = append(msgs, Message{Role: "system", Content: a.systemPrompt()})
+	msgs = append(msgs, Message{Role: "system", Content: a.runtimePrompt()})
 	msgs = append(msgs, a.history...)
 	return msgs
 }
@@ -265,7 +285,7 @@ func estimateTokens(s string) int {
 }
 
 func (a *Agent) totalTokens() int {
-	t := estimateTokens(a.systemPrompt())
+	t := estimateTokens(a.runtimePrompt())
 	for _, m := range a.history {
 		t += estimateTokens(m.Content)
 		for _, tc := range m.ToolCalls {
@@ -379,10 +399,12 @@ func (a *Agent) LoadSession(id string) error {
 		a.promptSnapshot = msgs[0].Content
 		history = msgs[1:]
 		a.systemSaved = true
+		a.legacySystem = isLegacyPrompt(msgs[0].Content)
 	} else {
 		a.promptSnapshot = buildSystemPrompt(a.cwd)
 		history = msgs
 		a.systemSaved = false
+		a.legacySystem = false
 	}
 	a.history = history
 	a.sessionPath = path

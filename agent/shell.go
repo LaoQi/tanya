@@ -8,9 +8,14 @@ import (
 	"time"
 )
 
-const shellMaxOutput = 30000
-
-const shellWaitDelay = 2 * time.Second
+const (
+	shellCommand      = "bash"
+	shellArg          = "-c"
+	shellMaxOutput    = 30000
+	shellWaitDelay    = 2 * time.Second
+	shellTimeoutSec   = 60
+	shellTimeoutLimit = 300
+)
 
 type ShellResult struct {
 	Command     string
@@ -121,17 +126,17 @@ func RunShell(ctx context.Context, command string, timeoutSec int) string {
 
 func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellResult {
 	if timeoutSec <= 0 {
-		timeoutSec = 60
+		timeoutSec = shellTimeoutSec
 	}
-	if timeoutSec > 300 {
-		timeoutSec = 300
+	if timeoutSec > shellTimeoutLimit {
+		timeoutSec = shellTimeoutLimit
 	}
 	res := &ShellResult{Command: command}
 	start := time.Now()
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, "bash", "-c", command)
+	cmd := exec.CommandContext(runCtx, shellCommand, shellArg, command)
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.WaitDelay = shellWaitDelay
