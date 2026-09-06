@@ -155,7 +155,16 @@ func (a *Agent) NewSession() {
 }
 
 func (a *Agent) Ask(ctx context.Context, input string, onDelta func(string)) error {
+	mark := len(a.history)
 	a.history = append(a.history, Message{Role: "user", Content: input})
+	if err := a.runTurn(ctx, onDelta); err != nil {
+		a.history = a.history[:mark]
+		return err
+	}
+	return a.save()
+}
+
+func (a *Agent) runTurn(ctx context.Context, onDelta func(string)) error {
 	for {
 		if a.OnRequestStart != nil {
 			a.OnRequestStart()
@@ -201,7 +210,7 @@ func (a *Agent) Ask(ctx context.Context, input string, onDelta func(string)) err
 			})
 		}
 	}
-	return a.save()
+	return nil
 }
 
 type ToolResult struct {

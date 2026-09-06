@@ -2,6 +2,8 @@ package repl
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"sync"
 	"time"
 )
@@ -10,18 +12,21 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 
 const spinnerInterval = 100 * time.Millisecond
 
+const spinnerStopTimeout = 200 * time.Millisecond
+
 type spinRender func(elapsed time.Duration, frame string) string
 
 type spinner struct {
 	mu      *sync.Mutex
 	tty     bool
+	out     io.Writer
 	stopCh  chan struct{}
 	stopped chan struct{}
 	active  bool
 }
 
 func newSpinner(mu *sync.Mutex, tty bool) *spinner {
-	return &spinner{mu: mu, tty: tty}
+	return &spinner{mu: mu, tty: tty, out: os.Stdout}
 }
 
 func (s *spinner) start(render spinRender) {
@@ -42,7 +47,7 @@ func (s *spinner) loop(start time.Time, render spinRender) {
 	frame := 0
 	for {
 		s.mu.Lock()
-		fmt.Print("\r\x1b[K" + render(time.Since(start), spinnerFrames[frame%len(spinnerFrames)]))
+		fmt.Fprint(s.out, "\r\x1b[K"+render(time.Since(start), spinnerFrames[frame%len(spinnerFrames)]))
 		s.mu.Unlock()
 		frame++
 		select {
@@ -58,11 +63,18 @@ func (s *spinner) stop() {
 		return
 	}
 	close(s.stopCh)
-	<-s.stopped
+	clean := false
+	select {
+	case <-s.stopped:
+		clean = true
+	case <-time.After(spinnerStopTimeout):
+	}
 	s.active = false
-	s.mu.Lock()
-	fmt.Print("\r\x1b[K")
-	s.mu.Unlock()
+	if clean {
+		s.mu.Lock()
+		fmt.Fprint(s.out, "\r\x1b[K")
+		s.mu.Unlock()
+	}
 }
 
 func spinElapsed(d time.Duration) string {
