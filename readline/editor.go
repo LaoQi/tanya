@@ -25,20 +25,22 @@ func (c Completion) display() string {
 }
 
 type Editor struct {
-	term     Terminal
-	raw      bool
-	history  []string
-	draft    string
-	histIdx  int
-	complete func(line string) []Completion
-	ghostFn  func(line string) string
-	ghost    string
-	out      io.Writer
-	buf      []rune
-	pos      int
-	prompt   string
-	kill     string
-	prevRows int
+	term      Terminal
+	raw       bool
+	history   []string
+	draft     string
+	histIdx   int
+	complete  func(line string) []Completion
+	ghostFn   func(line string) string
+	ghost     string
+	out       io.Writer
+	buf       []rune
+	pos       int
+	prompt    string
+	kill      string
+	cursorRow int
+	menu      []Completion
+	menuIdx   int
 }
 
 func NewEditor(term Terminal, raw bool) *Editor {
@@ -86,7 +88,8 @@ func (e *Editor) Readline(prompt string) (string, error) {
 	e.pos = 0
 	e.histIdx = len(e.history)
 	e.draft = ""
-	e.prevRows = 0
+	e.cursorRow = 0
+	e.menu = nil
 	e.render("")
 	for {
 		ev, err := e.term.ReadKey()
@@ -101,13 +104,37 @@ func (e *Editor) Readline(prompt string) (string, error) {
 }
 
 func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
+	if len(e.menu) > 0 {
+		switch ev.Code {
+		case KeyDown, KeyTab:
+			e.menuIdx = (e.menuIdx + 1) % len(e.menu)
+			e.render("")
+			return false, "", nil
+		case KeyUp:
+			e.menuIdx = (e.menuIdx - 1 + len(e.menu)) % len(e.menu)
+			e.render("")
+			return false, "", nil
+		case KeyEsc:
+			e.menu = nil
+			e.render("")
+			return false, "", nil
+		case KeyEnter:
+			e.setBuf(e.menu[e.menuIdx].Insert)
+			e.menu = nil
+			e.refreshGhost()
+			e.render("")
+			return false, "", nil
+		default:
+			e.menu = nil
+		}
+	}
 	switch ev.Code {
 	case KeyRune:
 		e.insert(ev.Rune)
 	case KeyEnter:
 		line := string(e.buf)
 		fmt.Fprint(e.out, "\r\n")
-		e.prevRows = 0
+		e.cursorRow = 0
 		if strings.TrimSpace(line) != "" {
 			e.history = append(e.history, line)
 		}
@@ -153,7 +180,7 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 		e.transpose()
 	case KeyCtrlL:
 		fmt.Fprint(e.out, "\x1b[2J\x1b[H")
-		e.prevRows = 0
+		e.cursorRow = 0
 	case KeyAltB:
 		e.pos = e.wordBack(e.pos)
 	case KeyAltF:
@@ -170,12 +197,12 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 		e.buf = nil
 		e.pos = 0
 		fmt.Fprint(e.out, "\r\n")
-		e.prevRows = 0
+		e.cursorRow = 0
 		return true, "", ErrInterrupt
 	case KeyCtrlD:
 		if len(e.buf) == 0 {
 			fmt.Fprint(e.out, "\r\n")
-			e.prevRows = 0
+			e.cursorRow = 0
 			return true, "", io.EOF
 		}
 		if e.pos < len(e.buf) {
@@ -216,11 +243,42 @@ func (e *Editor) tabComplete() {
 		e.setBuf(common)
 		return
 	}
-	fmt.Fprint(e.out, "\r\n")
-	for _, c := range cands {
-		fmt.Fprintf(e.out, "  %s\r\n", c.display())
+	if _, ok := e.term.Size(); !ok {
+		return
 	}
-	e.prevRows = 0
+	e.menu = cands
+	e.menuIdx = 0
+}
+
+const menuMax = 8
+
+func (e *Editor) menuLines(cols int) []string {
+	if len(e.menu) == 0 {
+		return nil
+	}
+	start := 0
+	if len(e.menu) > menuMax {
+		start = e.menuIdx - menuMax/2
+		if start < 0 {
+			start = 0
+		}
+		if max := len(e.menu) - menuMax; start > max {
+			start = max
+		}
+	}
+	end := start + menuMax
+	if end > len(e.menu) {
+		end = len(e.menu)
+	}
+	out := make([]string, 0, end-start)
+	for i := start; i < end; i++ {
+		item := "  " + e.menu[i].display()
+		if i == e.menuIdx {
+			item = "  \x1b[7m" + e.menu[i].display() + "\x1b[0m"
+		}
+		out = append(out, Truncate(item, cols))
+	}
+	return out
 }
 
 func commonPrefix(ss []string) string {
@@ -323,8 +381,8 @@ func (e *Editor) render(extra string) {
 	cols := size.Cols
 	var b strings.Builder
 	b.WriteString("\r")
-	if e.prevRows > 1 {
-		b.WriteString("\x1b[" + strconv.Itoa(e.prevRows-1) + "A")
+	if e.cursorRow > 0 {
+		b.WriteString("\x1b[" + strconv.Itoa(e.cursorRow) + "A")
 	}
 	b.WriteString("\x1b[J")
 	b.WriteString(line)
@@ -333,13 +391,18 @@ func (e *Editor) render(extra string) {
 	if rows < 1 {
 		rows = 1
 	}
-	if up := rows - 1 - cur/cols; up > 0 {
+	menu := e.menuLines(cols)
+	for _, ml := range menu {
+		b.WriteString("\r\n" + ml)
+	}
+	up := rows - 1 - cur/cols + len(menu)
+	if up > 0 {
 		b.WriteString("\x1b[" + strconv.Itoa(up) + "A")
 	}
 	b.WriteString("\r")
 	if col := cur % cols; col > 0 {
 		b.WriteString("\x1b[" + strconv.Itoa(col) + "C")
 	}
-	e.prevRows = rows
+	e.cursorRow = cur / cols
 	fmt.Fprint(e.out, b.String())
 }

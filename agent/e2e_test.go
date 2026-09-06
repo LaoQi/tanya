@@ -127,6 +127,68 @@ func TestAskUsageReal(t *testing.T) {
 	}
 }
 
+func TestAskRequestCallbacks(t *testing.T) {
+	m := newMockLLM(t,
+		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "calc", args: `{"expression":"1+1"}`}}},
+		mockStep{content: "2", usage: &Usage{PromptTokens: 1200, CompletionTokens: 5, TotalTokens: 1205}},
+	)
+	a, err := New(m.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var starts int
+	var infos []ResponseInfo
+	a.OnRequestStart = func() { starts++ }
+	a.OnResponse = func(info ResponseInfo) { infos = append(infos, info) }
+	if err := a.Ask(context.Background(), "算一下", nil); err != nil {
+		t.Fatal(err)
+	}
+	if starts != 2 || len(infos) != 2 {
+		t.Fatalf("回调次数: starts=%d responses=%d", starts, len(infos))
+	}
+	for i, info := range infos {
+		if info.Duration <= 0 {
+			t.Errorf("infos[%d] Duration 应 >0: %v", i, info.Duration)
+		}
+		if info.TTFT <= 0 {
+			t.Errorf("infos[%d] TTFT 应 >0: %v", i, info.TTFT)
+		}
+	}
+	if infos[0].Usage != nil {
+		t.Errorf("首轮无 usage，应本地估算: %+v", infos[0].Usage)
+	}
+	if infos[0].ContextTokens <= 0 {
+		t.Errorf("首轮 ContextTokens 应本地估算 >0: %d", infos[0].ContextTokens)
+	}
+	if infos[1].Usage == nil || infos[1].Usage.PromptTokens != 1200 {
+		t.Errorf("次轮 Usage 透传: %+v", infos[1].Usage)
+	}
+	if infos[1].ContextTokens != 1200 {
+		t.Errorf("次轮 ContextTokens 应取 prompt tokens: %d", infos[1].ContextTokens)
+	}
+}
+
+func TestAskRequestCallbackOnError(t *testing.T) {
+	m := newMockLLM(t, mockStep{status: 500})
+	a, err := New(m.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var starts int
+	var infos []ResponseInfo
+	a.OnRequestStart = func() { starts++ }
+	a.OnResponse = func(info ResponseInfo) { infos = append(infos, info) }
+	if err := a.Ask(context.Background(), "问题", nil); err == nil {
+		t.Fatal("应返回错误")
+	}
+	if starts != 1 || len(infos) != 1 {
+		t.Fatalf("出错路径也应回调: starts=%d responses=%d", starts, len(infos))
+	}
+	if infos[0].Duration <= 0 || infos[0].Usage != nil {
+		t.Errorf("出错路径 info: %+v", infos[0])
+	}
+}
+
 func TestAskUnknownTool(t *testing.T) {
 	m := newMockLLM(t,
 		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "hack", args: `{}`}}},
