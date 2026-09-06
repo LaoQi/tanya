@@ -115,7 +115,6 @@ func InterruptContext() (context.Context, func()) {
 	go func() {
 		select {
 		case <-ch:
-			fmt.Println("\n^C")
 			cancel()
 		case <-ctx.Done():
 		}
