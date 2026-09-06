@@ -55,7 +55,7 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 	}
 	r := &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl, onDelta: func(s string) { fmt.Print(s) }}
 	if a != nil {
-		r.onDelta = WireToolView(a, func() int { return toolWidth(term) }, a.ToolOutputLines())
+		r.onDelta = WireToolView(a, func() int { return toolWidth(term) }, a.ToolOutputLines(), raw)
 	}
 	return r, nil
 }

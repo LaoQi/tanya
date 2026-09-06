@@ -10,7 +10,7 @@ import (
 
 func TestRenderToolStart(t *testing.T) {
 	got := RenderToolStart("run_shell", `{"command":"ls -la","timeout":60}`, 80)
-	if !strings.Contains(got, "● run_shell") || !strings.Contains(got, "ls -la") || !strings.Contains(got, "⋯") {
+	if !strings.Contains(got, "▸ run_shell") || !strings.Contains(got, "ls -la") || !strings.Contains(got, "⋯") {
 		t.Errorf("got %q", got)
 	}
 	if !strings.HasPrefix(got, "\n") || !strings.HasSuffix(got, "\n") {
@@ -28,14 +28,15 @@ func TestRenderToolStartBadJSON(t *testing.T) {
 func TestRenderToolEndShortOutput(t *testing.T) {
 	res := agent.ToolResult{Shell: &agent.ShellResult{
 		Stdout:   []agent.ShellChunk{{Data: "line1\nline2\nline3\n"}},
+		Duration: 250 * time.Millisecond,
 		ExitCode: 0,
 	}}
-	got := RenderToolEnd("run_shell", `{"command":"ls"}`, res, 80, 20)
+	got := RenderToolEnd("run_shell", `{"command":"ls"}`, res, 80, 20, false)
 	if !strings.Contains(got, "line1") || !strings.Contains(got, "line3") {
 		t.Errorf("got %q", got)
 	}
-	if strings.Contains(got, "省略") || strings.Contains(got, "exit") {
-		t.Errorf("短输出不应有截断提示或状态行: %q", got)
+	if !strings.Contains(got, "↳ exit 0 · 250ms · 3 行") {
+		t.Errorf("成功也应有完整状态行: %q", got)
 	}
 }
 
@@ -47,7 +48,7 @@ func TestRenderToolEndLongOutput(t *testing.T) {
 	res := agent.ToolResult{Shell: &agent.ShellResult{
 		Stdout: []agent.ShellChunk{{Data: sb.String()}},
 	}}
-	got := RenderToolEnd("run_shell", `{"command":"seq"}`, res, 80, 20)
+	got := RenderToolEnd("run_shell", `{"command":"seq"}`, res, 80, 20, false)
 	if strings.Contains(got, "L4x\n") || strings.Contains(got, "L28") {
 		t.Errorf("中段行应被省略: %q", got)
 	}
@@ -64,7 +65,7 @@ func TestRenderToolEndFailStatus(t *testing.T) {
 		Stderr:   []agent.ShellChunk{{Data: "oops"}},
 		ExitCode: 2,
 	}}
-	got := RenderToolEnd("run_shell", `{"command":"false"}`, res, 80, 20)
+	got := RenderToolEnd("run_shell", `{"command":"false"}`, res, 80, 20, false)
 	if !strings.Contains(got, "2| oops") {
 		t.Errorf("stderr 应带 2| 标记: %q", got)
 	}
@@ -75,12 +76,12 @@ func TestRenderToolEndFailStatus(t *testing.T) {
 
 func TestRenderToolEndTimeoutInterrupt(t *testing.T) {
 	res := agent.ToolResult{Shell: &agent.ShellResult{TimedOut: true, Duration: 3 * time.Second}}
-	got := RenderToolEnd("run_shell", `{"command":"sleep"}`, res, 80, 20)
+	got := RenderToolEnd("run_shell", `{"command":"sleep"}`, res, 80, 20, false)
 	if !strings.Contains(got, "执行超时") || !strings.Contains(got, "3.0s") {
 		t.Errorf("got %q", got)
 	}
 	res2 := agent.ToolResult{Shell: &agent.ShellResult{Interrupted: true}}
-	if got := RenderToolEnd("run_shell", `{}`, res2, 80, 20); !strings.Contains(got, "已中断") {
+	if got := RenderToolEnd("run_shell", `{}`, res2, 80, 20, false); !strings.Contains(got, "已中断") {
 		t.Errorf("got %q", got)
 	}
 }
@@ -89,9 +90,9 @@ func TestRenderToolEndTruncateLongLine(t *testing.T) {
 	res := agent.ToolResult{Shell: &agent.ShellResult{
 		Stdout: []agent.ShellChunk{{Data: strings.Repeat("a", 200) + "\n"}},
 	}}
-	got := RenderToolEnd("run_shell", `{"command":"cat"}`, res, 80, 20)
-	if n := strings.Count(got, "\n"); n != 3 {
-		t.Errorf("应为前导空行+标题+正文 3 行，实际 %d: %q", n, got)
+	got := RenderToolEnd("run_shell", `{"command":"cat"}`, res, 80, 20, false)
+	if n := strings.Count(got, "\n"); n != 4 {
+		t.Errorf("应为前导空行+标题+正文+状态行 4 行，实际 %d: %q", n, got)
 	}
 	if !strings.Contains(got, "~") {
 		t.Errorf("超长行应以 ~ 结尾截断: %q", got)
@@ -100,8 +101,8 @@ func TestRenderToolEndTruncateLongLine(t *testing.T) {
 
 func TestRenderToolEndBuiltin(t *testing.T) {
 	res := agent.ToolResult{Text: "1700000000 +0800 CST"}
-	got := RenderToolEnd("get_time", `{}`, res, 80, 20)
-	if !strings.Contains(got, "● get_time") || !strings.Contains(got, "1700000000") {
+	got := RenderToolEnd("get_time", `{}`, res, 80, 20, false)
+	if !strings.Contains(got, "▸ get_time") || !strings.Contains(got, "1700000000") {
 		t.Errorf("got %q", got)
 	}
 	if strings.Contains(got, "{}") {
@@ -111,7 +112,7 @@ func TestRenderToolEndBuiltin(t *testing.T) {
 
 func TestRenderToolEndBuiltinError(t *testing.T) {
 	res := agent.ToolResult{Text: "error: 除数为零"}
-	got := RenderToolEnd("calc", `{"expression":"1/0"}`, res, 80, 20)
+	got := RenderToolEnd("calc", `{"expression":"1/0"}`, res, 80, 20, false)
 	if !strings.Contains(got, "error: 除数为零") {
 		t.Errorf("got %q", got)
 	}
@@ -124,7 +125,7 @@ func TestRenderToolEndTruncationMarker(t *testing.T) {
 			{Data: "tail\n", Truncated: 9999},
 		},
 	}}
-	got := RenderToolEnd("run_shell", `{}`, res, 80, 20)
+	got := RenderToolEnd("run_shell", `{}`, res, 80, 20, false)
 	if !strings.Contains(got, "中间省略 9999 字节") {
 		t.Errorf("应显示中间截断标记: %q", got)
 	}
@@ -133,5 +134,74 @@ func TestRenderToolEndTruncationMarker(t *testing.T) {
 func TestToolWidthFallback(t *testing.T) {
 	if w := ToolWidth(); w <= 0 {
 		t.Errorf("宽度应回退 80: %d", w)
+	}
+}
+
+func TestDim(t *testing.T) {
+	if got := dim("abc", false); got != "abc" {
+		t.Errorf("非 TTY 不应着色: %q", got)
+	}
+	if got := dim("abc", true); got != "\x1b[90mabc\x1b[0m" {
+		t.Errorf("TTY 应包暗灰: %q", got)
+	}
+	if got := tint("abc", ansiInfo, true); got != "\x1b[94mabc\x1b[0m" {
+		t.Errorf("tint 亮蓝异常: %q", got)
+	}
+	if got := tint("abc", ansiInfo, false); got != "abc" {
+		t.Errorf("tint 非 TTY 不应着色: %q", got)
+	}
+}
+
+func TestRenderToolEndInline(t *testing.T) {
+	res := agent.ToolResult{Shell: &agent.ShellResult{
+		Stdout:   []agent.ShellChunk{{Data: "ok\n"}},
+		Duration: 300 * time.Millisecond,
+	}}
+	got := RenderToolEndInline("run_shell", `{"command":"echo ok"}`, res, 80, 20, true)
+	if !strings.HasPrefix(got, "\x1b[1A\r\x1b[K▸ run_shell") {
+		t.Errorf("应以上移重绘开头: %q", got)
+	}
+	if !strings.Contains(got, "\x1b[94m  ↳ exit 0 · 300ms · 1 行") || !strings.Contains(got, "  ok\n") {
+		t.Errorf("状态行应亮蓝且含耗时行数: %q", got)
+	}
+}
+
+func TestRenderResponseInfoFull(t *testing.T) {
+	info := agent.ResponseInfo{
+		Duration: 3200 * time.Millisecond,
+		TTFT:     800 * time.Millisecond,
+		Usage: &agent.Usage{
+			PromptTokens:     12300,
+			CompletionTokens: 1200,
+			CacheHitTokens:   10045,
+		},
+		ContextTokens: 12300,
+	}
+	got := RenderResponseInfo(info, 80)
+	for _, want := range []string{"↳", "TTFT 800ms", "3.2s", "prompt 12.3k", "completion 1.2k", "缓存 81.67%"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("缺少 %q: %q", want, got)
+		}
+	}
+}
+
+func TestRenderResponseInfoEstimate(t *testing.T) {
+	info := agent.ResponseInfo{Duration: 1500 * time.Millisecond, ContextTokens: 800}
+	got := RenderResponseInfo(info, 80)
+	if !strings.Contains(got, "上下文 ~800") {
+		t.Errorf("无 usage 应显示本地估算: %q", got)
+	}
+	if strings.Contains(got, "prompt") || strings.Contains(got, "缓存") {
+		t.Errorf("无 usage 不应显示 prompt/缓存: %q", got)
+	}
+}
+
+func TestRenderResponseInfoErrorPath(t *testing.T) {
+	got := RenderResponseInfo(agent.ResponseInfo{Duration: 500 * time.Millisecond}, 80)
+	if !strings.Contains(got, "↳ 500ms") {
+		t.Errorf("出错路径应仅显示耗时: %q", got)
+	}
+	if got := RenderResponseInfo(agent.ResponseInfo{}, 80); got != "" {
+		t.Errorf("全空 info 应无输出: %q", got)
 	}
 }

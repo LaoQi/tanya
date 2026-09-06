@@ -115,7 +115,7 @@ func TestTabCommonPrefix(t *testing.T) {
 
 func TestTabListCandidates(t *testing.T) {
 	ed, _, out := newFakeEditor(
-		append(runes("/s"), KeyEvent{Code: KeyTab}, KeyEvent{Code: KeyEnter})...,
+		append(runes("/s"), KeyEvent{Code: KeyTab}, KeyEvent{Code: KeyEnter}, KeyEvent{Code: KeyEnter})...,
 	)
 	ed.SetOutput(out)
 	ed.SetComplete(func(line string) []Completion {
@@ -124,8 +124,12 @@ func TestTabListCandidates(t *testing.T) {
 		}
 		return nil
 	})
-	if _, err := ed.Readline("> "); err != nil {
+	line, err := ed.Readline("> ")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if line != "/sessions" {
+		t.Errorf("菜单打开时 Enter 应插入选中项而非提交: %q", line)
 	}
 	if !strings.Contains(out.String(), "/sessions") || !strings.Contains(out.String(), "/xyz") {
 		t.Errorf("无公共前缀时应列出候选: %q", out.String())

@@ -36,6 +36,15 @@ type Agent struct {
 	sessionStat    map[string]sessionFileStat
 	OnToolStart    func(name, args string)
 	OnToolEnd      func(name, args string, res ToolResult)
+	OnRequestStart func()
+	OnResponse     func(info ResponseInfo)
+}
+
+type ResponseInfo struct {
+	Duration      time.Duration
+	TTFT          time.Duration
+	Usage         *Usage
+	ContextTokens int
 }
 
 type sessionFileStat struct {
@@ -148,7 +157,27 @@ func (a *Agent) NewSession() {
 func (a *Agent) Ask(ctx context.Context, input string, onDelta func(string)) error {
 	a.history = append(a.history, Message{Role: "user", Content: input})
 	for {
+		if a.OnRequestStart != nil {
+			a.OnRequestStart()
+		}
+		start := time.Now()
 		resp, err := a.client.ChatStream(ctx, a.buildMessages(), onDelta)
+		if a.OnResponse != nil {
+			info := ResponseInfo{Duration: time.Since(start)}
+			if err == nil {
+				if resp.Stat != nil {
+					info.Duration = resp.Stat.Duration
+					info.TTFT = resp.Stat.TTFT
+				}
+				info.Usage = resp.Usage
+				if resp.Usage != nil {
+					info.ContextTokens = resp.Usage.PromptTokens
+				} else {
+					info.ContextTokens = a.totalTokens()
+				}
+			}
+			a.OnResponse(info)
+		}
 		if err != nil {
 			return err
 		}
@@ -259,7 +288,7 @@ func (a *Agent) PromptCache() string {
 	if a.lastUsage == nil {
 		return ""
 	}
-	hit := a.lastUsage.cacheHit()
+	hit := a.lastUsage.CacheHit()
 	if hit <= 0 {
 		return ""
 	}
@@ -270,7 +299,7 @@ func (a *Agent) PromptCacheRate() string {
 	if a.lastUsage == nil {
 		return ""
 	}
-	hit := a.lastUsage.cacheHit()
+	hit := a.lastUsage.CacheHit()
 	if hit <= 0 {
 		return ""
 	}

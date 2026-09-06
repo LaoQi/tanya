@@ -14,12 +14,18 @@ import (
 )
 
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	Usage      *Usage     `json:"-"`
+	Role       string       `json:"role"`
+	Content    string       `json:"content,omitempty"`
+	ToolCalls  []ToolCall   `json:"tool_calls,omitempty"`
+	ToolCallID string       `json:"tool_call_id,omitempty"`
+	Name       string       `json:"name,omitempty"`
+	Usage      *Usage       `json:"-"`
+	Stat       *RequestStat `json:"-"`
+}
+
+type RequestStat struct {
+	Duration time.Duration
+	TTFT     time.Duration
 }
 
 type Usage struct {
@@ -36,7 +42,7 @@ type promptTokensDetails struct {
 	CachedTokens int `json:"cached_tokens"`
 }
 
-func (u *Usage) cacheHit() int {
+func (u *Usage) CacheHit() int {
 	if u.CacheHitTokens > 0 {
 		return u.CacheHitTokens
 	}
@@ -169,6 +175,7 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta fun
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("User-Agent", c.cfg.UserAgent)
 
+	start := time.Now()
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -180,6 +187,7 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta fun
 	}
 
 	msg := &Message{Role: "assistant"}
+	var ttft time.Duration
 	var usage *Usage
 	type toolAcc struct {
 		id, typ, name, args string
@@ -200,6 +208,9 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta fun
 		var chunk streamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
+		}
+		if ttft == 0 && (len(chunk.Choices) > 0 || chunk.Usage != nil) {
+			ttft = time.Since(start)
 		}
 		if chunk.Usage != nil {
 			usage = chunk.Usage
@@ -234,6 +245,7 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta fun
 		return nil, fmt.Errorf("读取流失败: %w", err)
 	}
 	msg.Usage = usage
+	msg.Stat = &RequestStat{Duration: time.Since(start), TTFT: ttft}
 
 	if len(accs) > 0 {
 		idxs := make([]int, 0, len(accs))

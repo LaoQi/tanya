@@ -3,7 +3,9 @@ package repl
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LaoQi/tanyan/agent"
@@ -13,7 +15,23 @@ import (
 const (
 	toolHeadLines = 3
 	toolTailLines = 2
+
+	ansiDim    = "\x1b[90m"
+	ansiOrange = "\x1b[33m"
+	ansiInfo   = "\x1b[94m"
+	ansiReset  = "\x1b[0m"
 )
+
+func tint(s, code string, tty bool) string {
+	if !tty {
+		return s
+	}
+	return code + s + ansiReset
+}
+
+func dim(s string, tty bool) string {
+	return tint(s, ansiDim, tty)
+}
 
 type tagLine struct {
 	text   string
@@ -30,25 +48,33 @@ func toolWidth(term readline.Terminal) int {
 }
 
 func RenderToolStart(name, args string, width int) string {
-	return fmt.Sprintf("\n● %s %s ⋯\n", name, readline.Truncate(toolArgsDisplay(name, args), width))
+	return fmt.Sprintf("\n▸ %s %s ⋯\n", name, readline.Truncate(toolArgsDisplay(name, args), width))
 }
 
-func RenderToolEnd(name, args string, res agent.ToolResult, width, maxLines int) string {
-	var b strings.Builder
+func toolEndTitle(name, args string, res agent.ToolResult) string {
 	title := name
 	if disp := toolArgsDisplay(name, args); disp != "" {
 		title += "  " + disp
 	}
-	if res.Shell != nil {
-		if d := toolDuration(res.Shell.Duration); d != "" {
-			title += "  " + d
-		}
-	}
-	b.WriteString("\n● " + readline.Truncate(title, width) + "\n")
+	return title
+}
+
+func toolEndBody(res agent.ToolResult, width, maxLines int, tty bool) string {
+	var b strings.Builder
 	var lines []string
 	status := ""
 	if res.Shell != nil {
-		lines, status = shellView(res.Shell, width, maxLines)
+		var total int
+		var trunc bool
+		lines, status, total, trunc = shellView(res.Shell, width, maxLines)
+		parts := []string{status, respDuration(res.Shell.Duration)}
+		switch {
+		case trunc:
+			parts = append(parts, fmt.Sprintf("共 %d 行", total))
+		case total > 0:
+			parts = append(parts, fmt.Sprintf("%d 行", total))
+		}
+		status = strings.Join(parts, " · ")
 	} else {
 		lines, status = textView(res.Text, width, maxLines)
 	}
@@ -56,9 +82,61 @@ func RenderToolEnd(name, args string, res agent.ToolResult, width, maxLines int)
 		b.WriteString("  " + l + "\n")
 	}
 	if status != "" {
-		b.WriteString("  ↳ " + status + "\n")
+		if tty {
+			b.WriteString("\x1b[94m  ↳ " + status + "\x1b[0m\n")
+		} else {
+			b.WriteString("  ↳ " + status + "\n")
+		}
 	}
 	return b.String()
+}
+
+func RenderToolEnd(name, args string, res agent.ToolResult, width, maxLines int, tty bool) string {
+	return "\n▸ " + readline.Truncate(toolEndTitle(name, args, res), width) + "\n" + toolEndBody(res, width, maxLines, tty)
+}
+
+func RenderToolEndInline(name, args string, res agent.ToolResult, width, maxLines int, tty bool) string {
+	return "\x1b[1A\r\x1b[K▸ " + readline.Truncate(toolEndTitle(name, args, res), width) + "\n" + toolEndBody(res, width, maxLines, tty)
+}
+
+func RenderResponseInfo(info agent.ResponseInfo, width int) string {
+	var parts []string
+	if info.TTFT > 0 {
+		parts = append(parts, "TTFT "+respDuration(info.TTFT))
+	}
+	if info.Duration > 0 {
+		parts = append(parts, respDuration(info.Duration))
+	}
+	if info.Usage != nil {
+		u := info.Usage
+		parts = append(parts, "prompt "+shortTokens(u.PromptTokens))
+		if u.CompletionTokens > 0 {
+			parts = append(parts, "completion "+shortTokens(u.CompletionTokens))
+		}
+		if hit := u.CacheHit(); hit > 0 && u.PromptTokens > 0 {
+			parts = append(parts, fmt.Sprintf("缓存 %.2f%%", float64(hit)/float64(u.PromptTokens)*100))
+		}
+	} else if info.ContextTokens > 0 {
+		parts = append(parts, "上下文 ~"+shortTokens(info.ContextTokens))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "  ↳ " + readline.Truncate(strings.Join(parts, " · "), width-4) + "\n"
+}
+
+func respDuration(d time.Duration) string {
+	if d >= time.Second {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	return fmt.Sprintf("%dms", d.Milliseconds())
+}
+
+func shortTokens(n int) string {
+	if n < 1000 {
+		return strconv.Itoa(n)
+	}
+	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
 
 func toolArgsDisplay(name, args string) string {
@@ -74,17 +152,7 @@ func toolArgsDisplay(name, args string) string {
 	return args
 }
 
-func toolDuration(d time.Duration) string {
-	switch {
-	case d >= time.Second:
-		return fmt.Sprintf("(%.1fs)", d.Seconds())
-	case d >= time.Millisecond:
-		return fmt.Sprintf("(%dms)", d.Milliseconds())
-	}
-	return ""
-}
-
-func shellView(r *agent.ShellResult, width, maxLines int) ([]string, string) {
+func shellView(r *agent.ShellResult, width, maxLines int) ([]string, string, int, bool) {
 	stdoutLines := chunkLines(r.Stdout)
 	stderrLines := chunkLines(r.Stderr)
 	total := len(stdoutLines) + len(stderrLines)
@@ -96,13 +164,13 @@ func shellView(r *agent.ShellResult, width, maxLines int) ([]string, string) {
 		tagged = append(tagged, tagLine{l, true})
 	}
 	view := tagged
-	trunc := total > maxLines
-	if trunc {
+	trunc := false
+	if total > maxLines {
 		if toolHeadLines+toolTailLines >= total {
 			view = tagged
-			trunc = false
 		} else {
 			view = append(append([]tagLine{}, tagged[:toolHeadLines]...), tagged[total-toolTailLines:]...)
+			trunc = true
 		}
 	}
 	lines := make([]string, 0, len(view))
@@ -113,11 +181,7 @@ func shellView(r *agent.ShellResult, width, maxLines int) ([]string, string) {
 		}
 		lines = append(lines, readline.Truncate(s, width))
 	}
-	status := shellStatus(r)
-	if trunc {
-		status += fmt.Sprintf("（共 %d 行，已省略部分，完整输出 /history n）", total)
-	}
-	return lines, status
+	return lines, shellStatus(r), total, trunc
 }
 
 func chunkLines(chunks []agent.ShellChunk) []string {
@@ -142,10 +206,8 @@ func shellStatus(r *agent.ShellResult) string {
 		return "执行超时"
 	case r.Err != "":
 		return "错误: " + r.Err
-	case r.ExitCode != 0:
-		return fmt.Sprintf("exit %d", r.ExitCode)
 	}
-	return ""
+	return fmt.Sprintf("exit %d", r.ExitCode)
 }
 
 func textView(text string, width, maxLines int) ([]string, string) {
@@ -164,34 +226,84 @@ func textView(text string, width, maxLines int) ([]string, string) {
 		out[i] = readline.Truncate(l, width)
 	}
 	if trunc {
-		return out, fmt.Sprintf("已省略 %d 行，完整内容 /history n", len(lines)-maxLines)
+		return out, fmt.Sprintf("共 %d 行", len(lines))
 	}
 	return out, ""
 }
 
-func WireToolView(a *agent.Agent, width func() int, maxLines int) func(string) {
+func WireToolView(a *agent.Agent, width func() int, maxLines int, tty bool) func(string) {
+	var mu sync.Mutex
+	sp := newSpinner(&mu, tty)
 	toolJustEnded := false
+	lineDirty := false
+	a.OnRequestStart = func() {
+		sp.start(func(elapsed time.Duration, frame string) string {
+			return ansiOrange + frame + " 等待响应 " + spinElapsed(elapsed) + ansiReset
+		})
+	}
+	a.OnResponse = func(info agent.ResponseInfo) {
+		sp.stop()
+		mu.Lock()
+		if lineDirty {
+			fmt.Println()
+			lineDirty = false
+		}
+		fmt.Print(tint(RenderResponseInfo(info, width()), ansiInfo, tty))
+		mu.Unlock()
+	}
 	a.OnToolStart = func(name, args string) {
-		fmt.Print(RenderToolStart(name, args, width()))
+		sp.stop()
+		mu.Lock()
+		fmt.Print(dim(RenderToolStart(name, args, width()), tty))
+		mu.Unlock()
+		lineDirty = false
+		sp.start(func(elapsed time.Duration, frame string) string {
+			return ansiOrange + "  " + frame + " 执行中 " + spinElapsed(elapsed) + ansiReset
+		})
 	}
 	a.OnToolEnd = func(name, args string, res agent.ToolResult) {
-		fmt.Print(RenderToolEnd(name, args, res, width(), maxLines))
+		sp.stop()
+		mu.Lock()
+		if tty {
+			fmt.Print(dim(RenderToolEndInline(name, args, res, width(), maxLines, true), true))
+		} else {
+			fmt.Print(RenderToolEnd(name, args, res, width(), maxLines, false))
+		}
+		mu.Unlock()
 		toolJustEnded = true
+		lineDirty = false
 	}
 	return func(s string) {
-		if toolJustEnded && s != "" {
+		if s == "" {
+			return
+		}
+		sp.stop()
+		mu.Lock()
+		if toolJustEnded {
 			fmt.Println()
 			toolJustEnded = false
 		}
 		fmt.Print(s)
+		lineDirty = !strings.HasSuffix(s, "\n")
+		mu.Unlock()
 	}
 }
 
 var toolTerm readline.Terminal
+var toolTTY bool
 
 func ToolWidth() int {
-	if toolTerm == nil {
-		toolTerm, _ = readline.NewTerminal()
-	}
+	ensureToolTerm()
 	return toolWidth(toolTerm)
+}
+
+func ToolTTY() bool {
+	ensureToolTerm()
+	return toolTTY
+}
+
+func ensureToolTerm() {
+	if toolTerm == nil {
+		toolTerm, toolTTY = readline.NewTerminal()
+	}
 }
