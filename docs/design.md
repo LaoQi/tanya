@@ -24,7 +24,7 @@ readline/          package readline：自研终端输入层（editor / keys / te
 - `tanyan`：交互 REPL，维护内存 messages 历史，SSE 逐 token 流式输出
 - `tanyan ask "问题"`：单发，输出后退出
 - 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式
-- Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）
+- Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）。REPL 路径不依赖 tty ISIG 产生 SIGINT：Ask 期间切到 WatchRaw（输入 raw、保留 OPOST），watcher goroutine 经 `KeyWatcher.ReadKeyUntil` 监听 Ctrl+C 直接 cancel ctx，信号处理仅作兜底；`ask` 单发路径仍用 signal.Notify。依赖环境 termios 的旧实现会在 ISIG 被关闭的终端（被上层程序污染的 tty）下完全失效
 
 ## LLM 接入
 

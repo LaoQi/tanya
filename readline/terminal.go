@@ -9,6 +9,8 @@ import (
 
 var ErrUnsupported = errors.New("input: raw mode unsupported on this platform")
 
+var ErrWatchStopped = errors.New("input: key watch stopped")
+
 type Size struct {
 	Cols int
 	Rows int
@@ -19,6 +21,11 @@ type Terminal interface {
 	Restore()
 	ReadKey() (KeyEvent, error)
 	Size() (Size, bool)
+}
+
+type KeyWatcher interface {
+	WatchRaw() error
+	ReadKeyUntil(stop <-chan struct{}) (KeyEvent, error)
 }
 
 func NewTerminal() (Terminal, bool) {
