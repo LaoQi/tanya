@@ -17,12 +17,12 @@
 
 ```
 main.go            入口、flag 子命令、ask 单发
-repl/repl.go       REPL 循环、斜杠命令、提示符模板渲染、InterruptContext
+repl/repl.go       REPL 循环、斜杠命令、提示符模板渲染、InterruptContext（ask 单发用 signal；REPL 用按键 watcher 中断）
 repl/completer.go  ghost 建议与 Tab 补全数据源
 repl/picker.go     /load 会话方向键选择菜单（非 TTY 序号降级）
 repl/toolview.go   工具块状渲染与回调接线
 repl/spinner.go    braille 等待动画
-readline/*         自研终端输入层（editor 行编辑/历史/Tab 补全菜单 / keys 按键解析 / terminal raw mode / width 显示宽度与截断）
+readline/*         自研终端输入层（editor 行编辑/历史/Tab 补全菜单 / keys 按键解析 / terminal raw mode 与 KeyWatcher 按键监听 / width 显示宽度与截断）
 agent/config.go    配置加载（默认值 < ~/.config/tanyan/config.yaml < env TANYA_*）
 agent/llm.go       OpenAI 兼容 client（SSE 流式 + tool_calls 增量合并 + usage 捕获）
 agent/agent.go     对话 loop、上下文估算、会话持久化

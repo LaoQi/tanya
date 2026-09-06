@@ -22,7 +22,7 @@ func newUnixTerminal() (Terminal, error) {
 	return t, nil
 }
 
-func (t *unixTerminal) Raw() error {
+func (t *unixTerminal) setRaw(keepOutput bool) error {
 	saved, err := unix.IoctlGetTermios(int(os.Stdin.Fd()), unix.TCGETS)
 	if err != nil {
 		return err
@@ -32,13 +32,25 @@ func (t *unixTerminal) Raw() error {
 	raw.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP |
 		unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON
 	raw.Lflag &^= unix.ECHO | unix.ICANON | unix.ISIG | unix.IEXTEN
-	raw.Oflag &^= unix.OPOST
+	if !keepOutput {
+		raw.Oflag &^= unix.OPOST
+	}
 	raw.Cc[unix.VMIN] = 0
 	raw.Cc[unix.VTIME] = 1
-	if err := unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETS, &raw); err != nil {
+	if err := unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETSF, &raw); err != nil {
 		return err
 	}
+	t.queue = nil
+	t.parser = keyParser{}
 	return nil
+}
+
+func (t *unixTerminal) Raw() error {
+	return t.setRaw(false)
+}
+
+func (t *unixTerminal) WatchRaw() error {
+	return t.setRaw(true)
 }
 
 func (t *unixTerminal) Restore() {
@@ -89,4 +101,34 @@ func (t *unixTerminal) ReadKey() (KeyEvent, error) {
 	ev := t.queue[0]
 	t.queue = t.queue[1:]
 	return ev, nil
+}
+
+func (t *unixTerminal) ReadKeyUntil(stop <-chan struct{}) (KeyEvent, error) {
+	buf := make([]byte, 256)
+	for {
+		select {
+		case <-stop:
+			return KeyEvent{}, ErrWatchStopped
+		default:
+		}
+		if len(t.queue) > 0 {
+			ev := t.queue[0]
+			t.queue = t.queue[1:]
+			return ev, nil
+		}
+		n, err := t.readChunk(buf)
+		if err != nil {
+			if err == unix.EINTR {
+				continue
+			}
+			return KeyEvent{}, err
+		}
+		if n > 0 {
+			t.queue = append(t.queue, t.parser.feed(buf[:n])...)
+			continue
+		}
+		if t.parser.needsMore() {
+			t.queue = append(t.queue, t.parser.flush()...)
+		}
+	}
 }
