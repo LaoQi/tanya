@@ -98,7 +98,8 @@ readline/          package readline：自研终端输入层（editor / keys / te
 ## 系统提示与缓存友好
 
 - 组装规则：`DefaultSystemPrompt`（内置，固定不可配，`system_prompt` 配置项已移除）+ 全局 `~/.config/tanyan/AGENTS.md`（存在时）+ 工作区 `./AGENTS.md`（存在时），各段以 `# 全局说明`/`# 项目说明` 标题分隔，文件缺失/空白跳过
-- 快照机制：`/new` 与 `/load` 时刻读取 AGENTS.md 组装快照；会话进行中零文件 IO，快照冻结
+- 规则与事实分离：persistPrompt（上述规则）在 `/new`/`/load` 时组装并冻结进会话首行；每次请求的 system = persistPrompt + `envSection(cwd)`（环境事实实时拼在末尾，不持久化、不冻结）
+- 快照机制：`/new` 与 `/load` 时刻读取 AGENTS.md 组装快照；会话进行中零文件 IO，快照冻结；旧格式会话（system 首行含历史环境段）原样保留并标记，`/load` 时提示 `/new`
 - 缓存收益：history 全程 append-only，同一会话内 messages 前缀逐字节不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中
 - 缓存命中捕获（DeepSeek `prompt_cache_hit_tokens` / OpenAI `prompt_tokens_details.cached_tokens`）经 `PromptCache()`/`PromptCacheRate()` 供提示符占位符显示
 
@@ -146,3 +147,23 @@ env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERA
 ## 测试
 
 标准库 `testing` + `httptest` mock LLM（`agent/mock_test.go`，脚本化 `mockStep`，content/arguments 多 chunk 发送以覆盖流式合并）。覆盖 calc/shell/config/SSE 解析/trim/会话往返/Ask 全链路/回调。readline 用 fakeTerm 注入按键，真实终端行为 pty 人工验证。repl 覆盖渲染纯函数与非 TTY 降级。
+
+## 环境探针（envprobe）
+
+- 定位：只注入模型无法廉价自探的最小事实集——平台事实与 run_shell 执行契约；工具清单不注入 prompt（function calling 已完整提供），工具版本/分支/目录列表等易变信息模型可按需自探，一律不预注入
+- 组装：`runtimePrompt()` = persistPrompt（规则，冻结）+ 空行 + `envSection(cwd, probe)`（实时拼在末尾）；环境注入恒定生效，无配置开关（曾有 `probe` 配置项，review 后移除）
+- 输出格式（约 6 行紧凑键值，全部源自 `runtime` 与 `shell.go` 常量，同 cwd 下字节级确定）：
+
+  ```
+  # 环境
+  OS: linux/amd64
+  CWD: ~/Project/tanya
+  SHELL: /usr/bin/bash -c（非交互，无 TTY）
+  TIMEOUT: 默认 60s，上限 300s
+  OUTPUT: stdout/stderr 头尾各 30KB，中间截断
+  WORKSPACE: go.mod, Makefile
+  ```
+
+- 事实源单一：SHELL/TIMEOUT/OUTPUT 三行由 `shell.go` 导出的执行契约常量程序化生成（`shellCommand`/`shellArg`/`shellTimeoutSec`/`shellTimeoutLimit`/`shellMaxOutput`），无第二份硬编码描述
+- 探测机制：`envSection` 为纯函数，事实经注入的 `envProbeFunc` 取得；真实 probe 仅探测 bash 路径（`exec.LookPath`，包级缓存一次）与 WORKSPACE 固定标记文件（`os.Stat`，8 种标志文件固定顺序）；主路径零 exec、零易变信息
+- 可测性：分层测试——persistPrompt 只含规则 / envSection 注入 fake probe 断言渲染 / runtimePrompt 拼接（probe 为 nil 时退化） / 同参数两次渲染字节相等
