@@ -19,8 +19,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Temperature != 0.7 {
 		t.Errorf("默认数值异常: %+v", cfg)
 	}
-	if cfg.Prompt != DefaultPrompt || !strings.Contains(cfg.Prompt, "{cwd}") {
-		t.Errorf("默认 prompt 模板异常: %q", cfg.Prompt)
+	if !strings.Contains(DefaultPrompt, "{cwd}") || !strings.Contains(DefaultPrompt, "{stat}") {
+		t.Errorf("默认 prompt 模板异常: %q", DefaultPrompt)
 	}
 	if cfg.UserAgent != DefaultUserAgent || !strings.HasPrefix(cfg.UserAgent, "pi/") {
 		t.Errorf("默认 UA 异常: %q", cfg.UserAgent)
@@ -84,25 +84,17 @@ func TestLoadConfigInvalidYAML(t *testing.T) {
 	}
 }
 
-func TestLoadConfigPrompt(t *testing.T) {
+func TestLoadConfigPromptIgnored(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("prompt: \"\\x1b[35m{model} >\\x1b[0m \"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Prompt != "\x1b[35m{model} >\x1b[0m " {
-		t.Errorf("yaml \\x1b 转义解析失败: %q", cfg.Prompt)
-	}
 	t.Setenv("TANYA_PROMPT", "[{cwd}] ")
-	cfg, err = LoadConfig(path)
-	if err != nil {
+	if _, err := LoadConfig(path); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Prompt != "[{cwd}] " {
-		t.Errorf("TANYA_PROMPT 应覆盖 yaml: %q", cfg.Prompt)
+	if !strings.Contains(DefaultPrompt, "{stat}") {
+		t.Errorf("默认模板应为富版: %q", DefaultPrompt)
 	}
 }
 

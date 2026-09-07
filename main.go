@@ -48,7 +48,7 @@ func main() {
 		return
 	}
 
-	r, err := repl.NewREPL(a, cfg.Prompt)
+	r, err := repl.NewREPL(a, agent.DefaultPrompt)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "错误:", err)
 		os.Exit(1)

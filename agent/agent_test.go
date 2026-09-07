@@ -457,11 +457,11 @@ func TestPromptCache(t *testing.T) {
 		t.Error("无 usage 应为空")
 	}
 	a.lastUsage = &Usage{PromptTokens: 1200, CacheHitTokens: 980}
-	if got := a.PromptCache(); got != "980/1.2k" {
+	if got := a.PromptCache(); got != "980" {
 		t.Errorf("DeepSeek 风格: got %q", got)
 	}
 	a.lastUsage = &Usage{PromptTokens: 1200, PromptTokensDetails: &promptTokensDetails{CachedTokens: 600}}
-	if got := a.PromptCache(); got != "600/1.2k" {
+	if got := a.PromptCache(); got != "600" {
 		t.Errorf("OpenAI 风格: got %q", got)
 	}
 	a.lastUsage = &Usage{PromptTokens: 1200}
@@ -486,6 +486,25 @@ func TestPromptCacheRate(t *testing.T) {
 	a.lastUsage = &Usage{PromptTokens: 1200}
 	if a.PromptCacheRate() != "" {
 		t.Error("无缓存数据应为空")
+	}
+}
+
+func TestPromptSummary(t *testing.T) {
+	a := newTestAgent(t)
+	if got := a.PromptSummary(); got != a.PromptUsage() {
+		t.Errorf("无 usage 应仅显示估算总量: %q", got)
+	}
+	a.lastUsage = &Usage{PromptTokens: 1200}
+	if got := a.PromptSummary(); got != "1.2k" {
+		t.Errorf("无缓存应仅显示总量: %q", got)
+	}
+	a.lastUsage = &Usage{PromptTokens: 1200, CacheHitTokens: 980}
+	if got := a.PromptSummary(); got != "980/1.2k 81.67%" {
+		t.Errorf("有缓存应为 缓存/总量 命中率: %q", got)
+	}
+	a.lastUsage = &Usage{PromptTokens: 1200, PromptTokensDetails: &promptTokensDetails{CachedTokens: 600}}
+	if got := a.PromptSummary(); got != "600/1.2k 50.00%" {
+		t.Errorf("OpenAI 风格: %q", got)
 	}
 }
 
