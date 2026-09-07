@@ -10,23 +10,30 @@ import (
 )
 
 func TestRenderPrompt(t *testing.T) {
-	got := renderPrompt("{cwd} {model} {usage} {cache} {cache_rate} {stat} →", "~/p/t", "m1", "123", "980", "81.67%", "980/12.3k 81.67%")
-	if got != "~/p/t m1 123 980 81.67% 980/12.3k 81.67% →" {
+	got := renderPrompt("{cwd} {model} {effort} {usage} {cache} {cache_rate} {stat} →", "~/p/t", "m1", "high", "123", "980", "81.67%", "980/12.3k 81.67%")
+	if got != "~/p/t m1 high 123 980 81.67% 980/12.3k 81.67% →" {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestRenderPromptCacheEmpty(t *testing.T) {
-	got := renderPrompt("{usage}|{cache}|{cache_rate}|{stat}", "p", "m", "1", "", "", "")
+	got := renderPrompt("{usage}|{cache}|{cache_rate}|{stat}", "p", "m", "", "1", "", "", "")
 	if got != "1|||" {
 		t.Errorf("无缓存数据 {cache} 应渲染为空: %q", got)
 	}
 }
 
 func TestRenderPromptUnknownKept(t *testing.T) {
-	got := renderPrompt("{cwd} {date}", "p", "m", "1", "", "", "")
+	got := renderPrompt("{cwd} {date}", "p", "m", "", "1", "", "", "")
 	if !strings.Contains(got, "{date}") {
 		t.Errorf("未知占位符应保留原样: %q", got)
+	}
+}
+
+func TestRenderPromptEffortEmpty(t *testing.T) {
+	got := renderPrompt("{model}[{effort}]", "p", "m", "", "1", "", "", "")
+	if got != "m[]" {
+		t.Errorf("未设置思考等级时 {effort} 应渲染为空: %q", got)
 	}
 }
 
