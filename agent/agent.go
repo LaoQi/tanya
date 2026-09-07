@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +20,10 @@ const DefaultSystemPrompt = `你是 tanyan（兼容 Pi/opencode），运行在�
 通过 run_shell 工具读取文件、执行命令、修改代码，完成用户交给的任务。
 回答简洁直接；调用工具前用一句话说明要做什么；操作文件时明确显示路径。
 文件操作（ls、rg、find、cat 等）优先通过 run_shell 执行。
+坚持迭代直到任务完成：修改后主动验证（编译、测试、运行），确认无误再收尾。`
+
+const NoShellSystemPrompt = `你是 tanyan（兼容 Pi/opencode），运行在终端中的极简编码代理。
+回答简洁直接；操作文件时明确显示路径。
 坚持迭代直到任务完成：修改后主动验证（编译、测试、运行），确认无误再收尾。`
 
 type Agent struct {
@@ -55,6 +60,7 @@ type sessionFileStat struct {
 }
 
 func New(cfg *Config) (*Agent, error) {
+	InitShell(cfg.Shell)
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -136,6 +142,9 @@ func readAgentsFile(path string) string {
 
 func buildSystemPrompt(cwd string) string {
 	prompt := DefaultSystemPrompt
+	if ShellRuntime().profile == nil {
+		prompt = NoShellSystemPrompt
+	}
 	if global := readAgentsFile(globalAgentsPath()); global != "" {
 		prompt += "\n\n# 全局说明（~/.config/tanyan/AGENTS.md）\n\n" + global
 	}
@@ -513,10 +522,11 @@ func ToolDefs() []ToolDef {
 		t.Function.Parameters = json.RawMessage(params)
 		return t
 	}
-	return []ToolDef{
-		def("run_shell",
-			"在 Linux bash 中执行 shell 命令，返回 stdout/stderr/退出码。读文件、搜索、运行程序等系统操作都用它。",
-			`{"type":"object","properties":{"command":{"type":"string","description":"要执行的 bash 命令"},"timeout":{"type":"integer","description":"超时秒数，默认 60，最大 300"}},"required":["command"]}`),
+	var defs []ToolDef
+	if rt := ShellRuntime(); rt.profile != nil {
+		defs = append(defs, def("run_shell", runShellDesc(rt), runShellParams()))
+	}
+	return append(defs,
 		def("get_time",
 			"获取当前日期时间（含时区）",
 			`{"type":"object","properties":{}}`),
@@ -526,7 +536,29 @@ func ToolDefs() []ToolDef {
 		def("calc",
 			"计算四则运算表达式，支持 + - * / % 与括号",
 			`{"type":"object","properties":{"expression":{"type":"string","description":"算数表达式，如 (1+2)*3/4"}},"required":["expression"]}`),
+	)
+}
+
+func runShellDesc(rt *shellRuntime) string {
+	var b strings.Builder
+	switch rt.profile.Kind {
+	case KindPowerShell:
+		fmt.Fprintf(&b, "在 %s pwsh 中执行命令（PowerShell 语法）", runtime.GOOS)
+	case KindCmd:
+		fmt.Fprintf(&b, "在 %s cmd 中执行命令（cmd 语法）", runtime.GOOS)
+	default:
+		fmt.Fprintf(&b, "在 %s %s 中执行 shell 命令", runtime.GOOS, rt.profile.Name)
 	}
+	b.WriteString("，返回 stdout/stderr/退出码。读文件、搜索、文本处理等系统操作都用它。")
+	if len(rt.programs) > 0 {
+		b.WriteString("可用程序: " + strings.Join(rt.programs, ", "))
+	}
+	return b.String()
+}
+
+func runShellParams() string {
+	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"timeout":{"type":"integer","description":"超时秒数，默认 %d，最大 %d"}},"required":["command"]}`,
+		shellTimeoutSec, shellTimeoutLimit)
 }
 
 func (a *Agent) ToolOutputLines() int {

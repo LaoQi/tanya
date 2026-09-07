@@ -48,8 +48,13 @@ readline/          package readline：自研终端输入层（editor / keys / te
 
 ### run_shell（shell.go）
 
-- 参数：`command`（必填）、`timeout`（默认 60s，上限 300s）
-- 实现：`bash -c`，捕获 stdout/stderr/退出码/耗时（`ShellResult` 结构化返回：Command/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Duration）
+- 参数：`command`（必填）、`timeout`（默认 60s，上限 900s）
+- 实现：按 `shellProfile` 组装命令（posix `<path> -c`、powershell `<path> -NoProfile -NonInteractive -Command`、cmd `<path> /d /s /c`），捕获 stdout/stderr/退出码/耗时（`ShellResult` 结构化返回：Command/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Duration）
+- shell 解析（`InitShell`，Agent 构造时一次性执行并缓存）：
+  - 优先级：配置覆盖（`config.yaml shell:` / env `TANYA_SHELL`，名字或绝对路径，任意 shell 名允许，未知 basename 按 posix `-c` 处理）> 平台自动探测
+  - 自动探测：windows 仅 `pwsh`（强制 PowerShell 7，不回退 5.1/cmd）；linux/darwin `bash` → `sh` → `ash`
+  - 全部落空（含配置的 shell 不存在）：降级不报错，profile 为 nil，仅不注册 run_shell（ToolDefs 条件注册、env 段无 SHELL/TIMEOUT/OUTPUT 行、system prompt 退化为 `NoShellSystemPrompt`），dispatch 调用返回错误文案
+- 程序探测：profile 就绪后对固定清单（ls/cat/head/tail/grep/rg/fd/sed/awk/find/sort/wc/cut/tr/xargs/git/curl/wget/go/node/python）逐个 LookPath，存在的拼入 run_shell 工具描述 `可用程序: ...`，仅在工具描述出现，不重复注入 env 段
 - 输出捕获：stdout/stderr 各保留头 30000 字节 + 尾 30000 字节（`streamCapture` 滚动窗口），中间字节计数丢弃，模型仍可见首尾内容
 - 回调：`OnToolStart`（dispatch 内触发）/ `OnToolEnd`（结构化 `ToolResult`：Shell/Text 二选一，发回模型的 content 由 `Content()` 拼回文本），渲染在 repl 包 `toolview.go`
 - **免确认直接执行**（早期版本有 y/n/a 确认机制，已移除）
@@ -159,11 +164,11 @@ env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERA
   OS: linux/amd64
   CWD: ~/Project/tanya
   SHELL: /usr/bin/bash -c（非交互，无 TTY）
-  TIMEOUT: 默认 60s，上限 300s
+  TIMEOUT: 默认 60s，上限 900s
   OUTPUT: stdout/stderr 头尾各 30KB，中间截断
   WORKSPACE: go.mod, Makefile
   ```
 
-- 事实源单一：SHELL/TIMEOUT/OUTPUT 三行由 `shell.go` 导出的执行契约常量程序化生成（`shellCommand`/`shellArg`/`shellTimeoutSec`/`shellTimeoutLimit`/`shellMaxOutput`），无第二份硬编码描述
-- 探测机制：`envSection` 为纯函数，事实经注入的 `envProbeFunc` 取得；真实 probe 仅探测 bash 路径（`exec.LookPath`，包级缓存一次）与 WORKSPACE 固定标记文件（`os.Stat`，8 种标志文件固定顺序）；主路径零 exec、零易变信息
+- 事实源单一：SHELL/TIMEOUT/OUTPUT 三行由解析后的 `shellProfile` 与 `shell.go` 常量程序化生成（`invocation()`/`shellTimeoutSec`/`shellTimeoutLimit`/`shellMaxOutput`），无第二份硬编码描述；shell 不可用时三行整体省略
+- 探测机制：`envSection` 为纯函数，WORKSPACE 标记文件（`os.Stat`，8 种标志文件固定顺序）经注入的 `envProbeFunc` 取得；shell 契约读包级 `ShellRuntime()`（`InitShell` 在 Agent 构造时解析缓存，envprobe 不再自行 LookPath）；主路径零 exec、零易变信息
 - 可测性：分层测试——persistPrompt 只含规则 / envSection 注入 fake probe 断言渲染 / runtimePrompt 拼接（probe 为 nil 时退化） / 同参数两次渲染字节相等

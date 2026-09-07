@@ -19,6 +19,7 @@ type Config struct {
 	GlobalSession   string  `yaml:"global_session"`
 	SessionMode     string  `yaml:"session_mode"`
 	ToolOutputLines int     `yaml:"tool_output_lines"`
+	Shell           string  `yaml:"shell"`
 }
 
 const DefaultPrompt = "\x1b[37m{cwd}\x1b[0m \x1b[34m{model}\x1b[0m \x1b[33m{stat}\x1b[0m \x1b[37m>\x1b[0m "
@@ -72,6 +73,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if v := os.Getenv("TANYA_USER_AGENT"); v != "" {
 		cfg.UserAgent = v
+	}
+	if v := os.Getenv("TANYA_SHELL"); v != "" {
+		cfg.Shell = v
 	}
 	if v := os.Getenv("TANYA_TOOL_OUTPUT_LINES"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {

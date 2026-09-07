@@ -4,18 +4,147 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
-	shellCommand      = "bash"
-	shellArg          = "-c"
 	shellMaxOutput    = 30000
 	shellWaitDelay    = 2 * time.Second
 	shellTimeoutSec   = 60
-	shellTimeoutLimit = 300
+	shellTimeoutLimit = 900
 )
+
+type ShellKind int
+
+const (
+	KindPosix ShellKind = iota
+	KindPowerShell
+	KindCmd
+)
+
+type shellProfile struct {
+	Path      string
+	Name      string
+	Kind      ShellKind
+	ExtraArgs []string
+}
+
+func (p *shellProfile) arg() string {
+	switch p.Kind {
+	case KindPowerShell:
+		return "-Command"
+	case KindCmd:
+		return "/c"
+	default:
+		return "-c"
+	}
+}
+
+func (p *shellProfile) invocation() string {
+	parts := make([]string, 0, len(p.ExtraArgs)+2)
+	parts = append(parts, p.Path)
+	parts = append(parts, p.ExtraArgs...)
+	parts = append(parts, p.arg())
+	return strings.Join(parts, " ")
+}
+
+var shellPrograms = []string{
+	"ls", "cat", "head", "tail", "grep", "rg", "fd", "sed", "awk",
+	"find", "sort", "wc", "cut", "tr", "xargs",
+	"git", "curl", "wget", "go", "node", "python",
+}
+
+type shellRuntime struct {
+	profile  *shellProfile
+	programs []string
+}
+
+var (
+	shellRuntimeMu  sync.Mutex
+	shellRuntimeCur *shellRuntime
+	shellRuntimeSet bool
+)
+
+func InitShell(override string) {
+	shellRuntimeMu.Lock()
+	defer shellRuntimeMu.Unlock()
+	if shellRuntimeSet {
+		return
+	}
+	shellRuntimeCur = resolveShellRuntime(override, runtime.GOOS, exec.LookPath)
+	shellRuntimeSet = true
+}
+
+func ShellRuntime() *shellRuntime {
+	shellRuntimeMu.Lock()
+	defer shellRuntimeMu.Unlock()
+	if !shellRuntimeSet {
+		shellRuntimeCur = resolveShellRuntime("", runtime.GOOS, exec.LookPath)
+		shellRuntimeSet = true
+	}
+	return shellRuntimeCur
+}
+
+func resolveShellRuntime(override, goos string, lookPath func(string) (string, error)) *shellRuntime {
+	rt := &shellRuntime{}
+	rt.profile = resolveProfile(override, goos, lookPath)
+	if rt.profile != nil {
+		rt.programs = probePrograms(lookPath)
+	}
+	return rt
+}
+
+func resolveProfile(override, goos string, lookPath func(string) (string, error)) *shellProfile {
+	if override != "" {
+		if p, err := lookPath(override); err == nil {
+			return newProfile(p)
+		}
+		return nil
+	}
+	var candidates []string
+	if goos == "windows" {
+		candidates = []string{"pwsh"}
+	} else {
+		candidates = []string{"bash", "sh", "ash"}
+	}
+	for _, name := range candidates {
+		if p, err := lookPath(name); err == nil {
+			return newProfile(p)
+		}
+	}
+	return nil
+}
+
+func newProfile(path string) *shellProfile {
+	name := strings.ToLower(filepath.Base(strings.ReplaceAll(path, `\`, "/")))
+	name = strings.TrimSuffix(name, ".exe")
+	p := &shellProfile{Path: path, Name: name}
+	switch name {
+	case "powershell", "pwsh":
+		p.Kind = KindPowerShell
+		p.ExtraArgs = []string{"-NoProfile", "-NonInteractive"}
+	case "cmd":
+		p.Kind = KindCmd
+		p.ExtraArgs = []string{"/d", "/s"}
+	default:
+		p.Kind = KindPosix
+	}
+	return p
+}
+
+func probePrograms(lookPath func(string) (string, error)) []string {
+	var found []string
+	for _, name := range shellPrograms {
+		if _, err := lookPath(name); err == nil {
+			found = append(found, name)
+		}
+	}
+	return found
+}
 
 type ShellResult struct {
 	Command     string
@@ -132,11 +261,19 @@ func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellR
 		timeoutSec = shellTimeoutLimit
 	}
 	res := &ShellResult{Command: command}
+	profile := ShellRuntime().profile
+	if profile == nil {
+		res.Err = "run_shell 不可用（未找到可执行 shell）"
+		return res
+	}
 	start := time.Now()
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, shellCommand, shellArg, command)
+	args := make([]string, 0, len(profile.ExtraArgs)+2)
+	args = append(args, profile.ExtraArgs...)
+	args = append(args, profile.arg(), command)
+	cmd := exec.CommandContext(runCtx, profile.Path, args...)
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.WaitDelay = shellWaitDelay
