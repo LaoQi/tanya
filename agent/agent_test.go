@@ -514,7 +514,7 @@ func TestRuntimePromptAppendsEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.probe = fakeProbe("/usr/bin/bash", "go.mod")
+	a.probe = fakeProbe("go.mod")
 	want := a.systemPrompt() + "\n\n" + envSection(cwd, a.probe)
 	if a.runtimePrompt() != want {
 		t.Errorf("runtimePrompt 拼接异常:\n got %q\nwant %q", a.runtimePrompt(), want)

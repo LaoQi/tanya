@@ -8,19 +8,20 @@ import (
 	"testing"
 )
 
-func fakeProbe(bashPath, workspace string) envProbeFunc {
+func fakeProbe(workspace string) envProbeFunc {
 	return func(string) envProbeData {
-		return envProbeData{bashPath: bashPath, workspace: workspace}
+		return envProbeData{workspace: workspace}
 	}
 }
 
 func TestEnvSectionFull(t *testing.T) {
-	out := envSection("/home/u/proj", fakeProbe("/usr/bin/bash", "go.mod, Makefile"))
+	withShellRuntime(t, &shellRuntime{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}})
+	out := envSection("/home/u/proj", fakeProbe("go.mod, Makefile"))
 	wantSub := []string{
 		"# 环境",
 		"OS: " + runtime.GOOS + "/" + runtime.GOARCH,
 		"SHELL: /usr/bin/bash -c（非交互，无 TTY）",
-		"TIMEOUT: 默认 60s，上限 300s",
+		"TIMEOUT: 默认 60s，上限 900s",
 		"OUTPUT: stdout/stderr 头尾各 30KB，中间截断",
 		"WORKSPACE: go.mod, Makefile",
 	}
@@ -31,10 +32,13 @@ func TestEnvSectionFull(t *testing.T) {
 	}
 }
 
-func TestEnvSectionFallbacks(t *testing.T) {
-	out := envSection("/tmp/x", fakeProbe("", ""))
-	if !strings.Contains(out, "SHELL: bash -c（非交互，无 TTY）") {
-		t.Errorf("无 bash 路径应回退 bash: %q", out)
+func TestEnvSectionNoShell(t *testing.T) {
+	withShellRuntime(t, &shellRuntime{})
+	out := envSection("/tmp/x", fakeProbe(""))
+	for _, line := range []string{"SHELL:", "TIMEOUT:", "OUTPUT:"} {
+		if strings.Contains(out, line) {
+			t.Errorf("无 shell 不应输出 %s 行: %q", line, out)
+		}
 	}
 	if strings.Contains(out, "WORKSPACE:") {
 		t.Errorf("无标记应省略 WORKSPACE 行: %q", out)
@@ -42,8 +46,9 @@ func TestEnvSectionFallbacks(t *testing.T) {
 }
 
 func TestEnvSectionDeterministic(t *testing.T) {
+	withShellRuntime(t, &shellRuntime{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}})
 	cwd := "/home/u/proj"
-	probe := fakeProbe("/usr/bin/bash", "go.mod")
+	probe := fakeProbe("go.mod")
 	if envSection(cwd, probe) != envSection(cwd, probe) {
 		t.Error("同参数两次渲染应字节相同")
 	}
@@ -78,13 +83,5 @@ func TestShortPath(t *testing.T) {
 	}
 	if got := shortPath("/usr/share"); got != "/usr/share" {
 		t.Errorf("外部路径应原样: %q", got)
-	}
-}
-
-func TestDefaultEnvProbeBashCached(t *testing.T) {
-	d1 := defaultEnvProbe(".")
-	d2 := defaultEnvProbe(".")
-	if d1.bashPath != d2.bashPath {
-		t.Error("bash 路径应包级缓存一致")
 	}
 }

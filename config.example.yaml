@@ -12,3 +12,7 @@ session_mode: auto
 
 # 工具输出在终端最多显示的行数（超出后仅显示头 3 行 + 尾 2 行与总数提示），范围 1-1000
 tool_output_lines: 20
+
+# run_shell 使用的 shell：名字或绝对路径（如 zsh、/usr/bin/fish），缺省自动探测
+# Windows 仅用 pwsh；Linux/macOS 依次尝试 bash → sh → ash；找不到则不注册 run_shell
+# shell: bash

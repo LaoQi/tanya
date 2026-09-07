@@ -74,6 +74,31 @@ func TestLoadConfigEnvOverride(t *testing.T) {
 	}
 }
 
+func TestLoadConfigShell(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("shell: zsh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Shell != "zsh" {
+		t.Errorf("yaml shell 覆盖失败: %q", cfg.Shell)
+	}
+	t.Setenv("TANYA_SHELL", "/usr/bin/fish")
+	cfg, err = LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Shell != "/usr/bin/fish" {
+		t.Errorf("env 应覆盖 yaml: %q", cfg.Shell)
+	}
+	if cfg := defaultConfig(); cfg.Shell != "" {
+		t.Errorf("默认 shell 应为空（自动探测）: %q", cfg.Shell)
+	}
+}
+
 func TestLoadConfigInvalidYAML(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("model: [unclosed"), 0o644); err != nil {

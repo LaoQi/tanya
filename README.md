@@ -5,7 +5,7 @@
 ## 特性
 
 - OpenAI 兼容接口（OpenAI / DeepSeek / GLM / Ollama / vLLM 等），SSE 流式输出
-- 以 shell 为核心的工具体系：模型可直接执行 bash 命令
+- 以 shell 为核心的工具体系：模型可直接执行 shell 命令（自动适配平台：Linux/macOS bash/sh/ash，Windows pwsh；`shell` 配置可指定任意 shell）
 - 内置轻量工具：`get_time` / `get_env` / `calc`
 - 会话持久化与恢复（JSONL，记录完整历史，system 快照随会话冻结）
 - token 用量实时显示在提示符（API 实报优先，本地估算兜底），支持显示缓存命中
@@ -35,7 +35,9 @@ api_key: "sk-..."
 model: deepseek-v4-flash
 ```
 
-环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES`。
+环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES` / `TANYA_SHELL`。
+
+`shell` 配置项（env `TANYA_SHELL`）指定 run_shell 使用的 shell，支持名字或绝对路径（如 `zsh`、`/usr/bin/fish`）；缺省自动探测：Windows 用 pwsh，Linux/macOS 依次尝试 bash → sh → ash。全部落空时正常启动，仅不注册 run_shell 工具。
 
 ## 使用
 
@@ -78,7 +80,7 @@ REPL 斜杠命令：
 | 工作区 | `<启动目录>/AGENTS.md` | `# 项目说明（AGENTS.md）` |
 
 - 文件不存在或内容为空白则跳过该层；组装在会话开始（`/new`、`/load`、启动）时刻快照，会话进行中不再读取文件
-- 每次请求的 system prompt 末尾实时拼接环境段（OS/CWD/bash 执行契约/工作区标记），不进快照、不持久化，模型可据此构造 `run_shell` 命令
+- 每次请求的 system prompt 末尾实时拼接环境段（OS/CWD/shell 执行契约/工作区标记），不进快照、不持久化，模型可据此构造 `run_shell` 命令
 - history 全程追加，同一会话内请求前缀逐字节不变，prompt cache（DeepSeek/OpenAI）逐轮命中
 - 提示符模板内置固定（不可配），占位符：`{cwd}` 短路径 / `{model}` 模型 / `{usage}` 上下文 token / `{cache}` 缓存命中量（如 `980`）/ `{cache_rate}` 缓存命中率（两位小数，如 `81.67%`）/ `{stat}` 组合用量——无缓存数据时仅总量（如 `12.3k`），有缓存时 `缓存/总量 命中率`（如 `980/12.3k 81.67%`），独立占位符无数据均渲染为空
 
@@ -90,7 +92,7 @@ TTY 下带等待动画：LLM 请求等待期间显示 `⠋ 等待响应 3s`（�
 
 | 工具 | 确认 | 说明 |
 |---|---|---|
-| `run_shell` | 免确认 | bash 执行命令，超时 60s，输出截断 30000 字节 |
+| `run_shell` | 免确认 | shell 执行命令（按平台自动选择，超时 60s 默认/900s 上限），输出截断 30000 字节 |
 | `get_time` | 免 | 当前时间 |
 | `get_env` | 免 | 环境变量查询（敏感变量名拒绝） |
 | `calc` | 免 | 四则运算求值 |
