@@ -126,8 +126,8 @@ readline/          package readline：自研终端输入层（editor / keys / te
 ### 提示符模板
 
 - 提示符模板内置固定不可配（`prompt` 配置项与 `TANYA_PROMPT` 已移除，yaml 残留键被忽略），未知占位符原样保留
-- 占位符：`{cwd}` 短路径 / `{model}` 模型 / `{usage}` 上下文 token（API 实报或 `~` 估算）/ `{cache}` 缓存命中量 / `{cache_rate}` 缓存命中率（两位小数，无数据渲染为空）/ `{stat}` 组合用量——无缓存仅总量，有缓存为 `缓存/总量 命中率`
-- 默认 `\x1b[37m{cwd}\x1b[0m \x1b[34m{model}\x1b[0m \x1b[33m{stat}\x1b[0m \x1b[37m>\x1b[0m `（路径白 / 模型蓝 / 用量黄 / 提示符白）
+- 占位符：`{cwd}` 短路径 / `{model}` 模型 / `{effort}` 思考等级（`ReasoningEffort()`，未设置渲染为空）/ `{usage}` 上下文 token（API 实报或 `~` 估算）/ `{cache}` 缓存命中量 / `{cache_rate}` 缓存命中率（两位小数，无数据渲染为空）/ `{stat}` 组合用量——无缓存仅总量，有缓存为 `缓存/总量 命中率`
+- 默认 `\x1b[37m{cwd}\x1b[0m \x1b[34m{model}\x1b[0m \x1b[33m{effort}\x1b[0m \x1b[32m{stat}\x1b[0m \x1b[37m>\x1b[0m `（路径白 / 模型蓝 / 思考黄 / 用量绿 / 提示符白）
 
 ### 终端输入（readline 包）
 
