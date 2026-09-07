@@ -8,7 +8,13 @@ import (
 	"github.com/LaoQi/tanyan/readline"
 )
 
-var slashCommands = []string{"/help", "/new", "/sessions", "/load", "/context", "/history", "/model", "/exit"}
+var slashCommands = []string{"/help", "/new", "/sessions", "/load", "/context", "/history", "/model", "/think", "/exit"}
+
+var effortCandidates = func() []string {
+	out := make([]string, 0, len(agent.EffortLevels)+1)
+	out = append(out, agent.EffortLevels...)
+	return append(out, "off")
+}()
 
 type completer struct {
 	listSessions func() ([]agent.SessionInfo, error)
@@ -34,6 +40,14 @@ func (c *completer) isModelContext(line string) bool {
 		return false
 	}
 	prefix := strings.TrimPrefix(line, "/model ")
+	return !strings.Contains(prefix, " ")
+}
+
+func (c *completer) isThinkContext(line string) bool {
+	if !strings.HasPrefix(line, "/think ") {
+		return false
+	}
+	prefix := strings.TrimPrefix(line, "/think ")
 	return !strings.Contains(prefix, " ")
 }
 
@@ -72,6 +86,13 @@ func (c *completer) suggest(line string) string {
 				return m[len(prefix):]
 			}
 		}
+	case c.isThinkContext(line):
+		prefix := strings.TrimPrefix(line, "/think ")
+		for _, e := range effortCandidates {
+			if strings.HasPrefix(e, prefix) && e != prefix {
+				return e[len(prefix):]
+			}
+		}
 	}
 	return ""
 }
@@ -104,6 +125,15 @@ func (c *completer) complete(line string) []readline.Completion {
 		for _, m := range c.models() {
 			if strings.HasPrefix(m, prefix) {
 				out = append(out, readline.Completion{Insert: "/model " + m, Display: m})
+			}
+		}
+		return out
+	case c.isThinkContext(line):
+		prefix := strings.TrimPrefix(line, "/think ")
+		var out []readline.Completion
+		for _, e := range effortCandidates {
+			if strings.HasPrefix(e, prefix) {
+				out = append(out, readline.Completion{Insert: "/think " + e, Display: e})
 			}
 		}
 		return out

@@ -216,10 +216,32 @@ func (r *REPL) handleCommand(line string) bool {
 			break
 		}
 		r.agent.SetModel(parts[1])
+	case "/think":
+		r.handleThink(parts[1:])
 	default:
 		fmt.Print(MsgUnknownCmd)
 	}
 	return false
+}
+
+func (r *REPL) handleThink(args []string) {
+	if len(args) == 0 {
+		if cur := r.agent.ReasoningEffort(); cur == "" {
+			fmt.Print(MsgThinkUnset)
+		} else {
+			fmt.Printf(MsgCurEffort, cur)
+		}
+		return
+	}
+	if err := r.agent.SetReasoningEffort(args[0]); err != nil {
+		fmt.Printf(MsgErrLineFmt+"\n", err)
+		return
+	}
+	if cur := r.agent.ReasoningEffort(); cur == "" {
+		fmt.Print(MsgEffortOff)
+	} else {
+		fmt.Printf(MsgEffortSet, cur)
+	}
 }
 
 func (r *REPL) showHistory(args []string) {

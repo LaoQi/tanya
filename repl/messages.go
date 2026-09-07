@@ -19,6 +19,11 @@ const (
 	MsgModelsHead  = "可用模型:\n"
 	MsgMarkCurrent = "* "
 	MsgMarkPlain   = "  "
+
+	MsgThinkUnset = "思考等级: 未设置\n"
+	MsgCurEffort  = "思考等级: %s\n"
+	MsgEffortSet  = "思考等级已设为 %s\n"
+	MsgEffortOff  = "思考等级已关闭\n"
 )
 
 const (
@@ -60,6 +65,7 @@ const helpText = `斜杠命令：
   /context         显示上下文占用
   /history [n|all] 无参截断列表；n 全量查看单条；all 全量显示
   /model [name]    无参显示当前模型；带名切换模型
+  /think [level]   无参显示思考等级；设置 minimal/low/medium/high/max，off 关闭
   /exit            退出
 直接输入文本与 AI 对话；shell 工具直接执行，无需确认。
 `

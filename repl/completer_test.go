@@ -50,6 +50,37 @@ func TestSuggestModelContext(t *testing.T) {
 	}
 }
 
+func TestSuggestThinkContext(t *testing.T) {
+	c := &completer{}
+	if got := c.suggest("/think hi"); got != "gh" {
+		t.Errorf("got %q", got)
+	}
+	if got := c.suggest("/think of"); got != "f" {
+		t.Errorf("off 候选: %q", got)
+	}
+	if got := c.suggest("/think off"); got != "" {
+		t.Errorf("已完整应为空: %q", got)
+	}
+}
+
+func TestCompleteThinkContext(t *testing.T) {
+	c := &completer{}
+	cands := c.complete("/think ")
+	if len(cands) != len(agent.EffortLevels)+1 {
+		t.Fatalf("应为全部等级加 off: %v", cands)
+	}
+	if cands[0].Insert != "/think minimal" || cands[0].Display != "minimal" {
+		t.Errorf("got %+v", cands[0])
+	}
+	if cands[len(cands)-1].Insert != "/think off" {
+		t.Errorf("末位应为 off: %+v", cands[len(cands)-1])
+	}
+	cands = c.complete("/think m")
+	if len(cands) != 3 {
+		t.Fatalf("m 应匹配 minimal/medium/max: %v", cands)
+	}
+}
+
 func TestCompleteModelContext(t *testing.T) {
 	calls := 0
 	c := testModelsCompleter([]string{"auto-flash", "auto-flash-pro"}, nil, &calls)

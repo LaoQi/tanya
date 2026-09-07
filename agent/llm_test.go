@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -45,6 +46,36 @@ func TestListModelsAPIError(t *testing.T) {
 	_, err := NewClient(cfg).ListModels()
 	if err == nil || !strings.Contains(err.Error(), "502") {
 		t.Errorf("应返回错误: %v", err)
+	}
+}
+
+func TestChatStreamReasoningEffort(t *testing.T) {
+	var raw []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	cfg := defaultConfig()
+	cfg.BaseURL = srv.URL
+	cfg.APIKey = "test-key"
+	cfg.ReasoningEffort = "max"
+	if _, err := NewClient(cfg).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"reasoning_effort":"max"`) {
+		t.Errorf("应发送 reasoning_effort: %s", raw)
+	}
+
+	raw = nil
+	cfg.ReasoningEffort = ""
+	if _, err := NewClient(cfg).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "reasoning_effort") {
+		t.Errorf("未设置时不应发送 reasoning_effort: %s", raw)
 	}
 }
 

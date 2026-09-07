@@ -35,9 +35,11 @@ api_key: "sk-..."
 model: deepseek-v4-flash
 ```
 
-环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES` / `TANYA_SHELL`。
+环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES` / `TANYA_SHELL`。
 
 `shell` 配置项（env `TANYA_SHELL`）指定 run_shell 使用的 shell，支持名字或绝对路径（如 `zsh`、`/usr/bin/fish`）；缺省自动探测：Windows 用 pwsh，Linux/macOS 依次尝试 bash → sh → ash。全部落空时正常启动，仅不注册 run_shell 工具。
+
+`reasoning_effort` 配置项（env `TANYA_REASONING_EFFORT`）设置思考等级，随请求发送 OpenAI 标准字段 `reasoning_effort`（o 系 / gpt-5 及兼容网关支持），可选 `minimal` / `low` / `medium` / `high` / `max`，留空不发送；REPL 内 `/think` 可运行时切换。
 
 ## 使用
 
@@ -66,6 +68,7 @@ REPL 斜杠命令：
 | `/load <id>` | 载入历史会话 |
 | `/context` | 查看上下文占用 |
 | `/model [name]` | 查看/切换模型 |
+| `/think [level]` | 查看/设置思考等级（`off` 关闭） |
 | `/exit` | 退出 |
 
 会话按启动目录划分工作区（global 模式），`/sessions` 只显示当前项目的会话。

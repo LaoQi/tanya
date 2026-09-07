@@ -55,6 +55,46 @@ temperature: 0.3
 	}
 }
 
+func TestLoadConfigReasoningEffort(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("reasoning_effort: high\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReasoningEffort != "high" {
+		t.Errorf("yaml reasoning_effort 未生效: %q", cfg.ReasoningEffort)
+	}
+	t.Setenv("TANYA_REASONING_EFFORT", "MAX")
+	cfg, err = LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReasoningEffort != "max" {
+		t.Errorf("env 应覆盖 yaml 并归一小写: %q", cfg.ReasoningEffort)
+	}
+	t.Setenv("TANYA_REASONING_EFFORT", "")
+	cfg, err = LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReasoningEffort != "high" {
+		t.Errorf("空 env 不应覆盖: %q", cfg.ReasoningEffort)
+	}
+	if err := os.WriteFile(path, []byte("reasoning_effort: bogus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReasoningEffort != "" {
+		t.Errorf("非法值应置空: %q", cfg.ReasoningEffort)
+	}
+}
+
 func TestLoadConfigEnvOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("model: yaml-model\n"), 0o644); err != nil {
