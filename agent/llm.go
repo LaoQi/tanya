@@ -80,12 +80,13 @@ func NewClient(cfg *Config) *Client {
 }
 
 type chatRequest struct {
-	Model         string         `json:"model"`
-	Messages      []Message      `json:"messages"`
-	Temperature   float64        `json:"temperature,omitempty"`
-	Tools         []ToolDef      `json:"tools,omitempty"`
-	Stream        bool           `json:"stream"`
-	StreamOptions *streamOptions `json:"stream_options,omitempty"`
+	Model           string         `json:"model"`
+	Messages        []Message      `json:"messages"`
+	Temperature     float64        `json:"temperature,omitempty"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
+	Tools           []ToolDef      `json:"tools,omitempty"`
+	Stream          bool           `json:"stream"`
+	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
 }
 
 type streamOptions struct {
@@ -155,12 +156,13 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta fun
 		return nil, fmt.Errorf(MsgAPIKey)
 	}
 	body, err := json.Marshal(chatRequest{
-		Model:         c.cfg.Model,
-		Messages:      messages,
-		Temperature:   c.cfg.Temperature,
-		Tools:         ToolDefs(),
-		Stream:        true,
-		StreamOptions: &streamOptions{IncludeUsage: true},
+		Model:           c.cfg.Model,
+		Messages:        messages,
+		Temperature:     c.cfg.Temperature,
+		ReasoningEffort: c.cfg.ReasoningEffort,
+		Tools:           ToolDefs(),
+		Stream:          true,
+		StreamOptions:   &streamOptions{IncludeUsage: true},
 	})
 	if err != nil {
 		return nil, err

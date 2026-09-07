@@ -280,6 +280,34 @@ func TestSetModel(t *testing.T) {
 	}
 }
 
+func TestSetReasoningEffort(t *testing.T) {
+	a := newTestAgent(t)
+	if err := a.SetReasoningEffort("HIGH"); err != nil {
+		t.Fatal(err)
+	}
+	if a.ReasoningEffort() != "high" {
+		t.Errorf("应归一为小写: %q", a.ReasoningEffort())
+	}
+	if err := a.SetReasoningEffort("max"); err != nil {
+		t.Fatal(err)
+	}
+	if a.ReasoningEffort() != "max" {
+		t.Errorf("max 等级未生效: %q", a.ReasoningEffort())
+	}
+	if err := a.SetReasoningEffort(" off "); err != nil {
+		t.Fatal(err)
+	}
+	if a.ReasoningEffort() != "" {
+		t.Errorf("off 应清空: %q", a.ReasoningEffort())
+	}
+	if err := a.SetReasoningEffort("bogus"); err == nil {
+		t.Fatal("非法值应报错")
+	}
+	if a.ReasoningEffort() != "" {
+		t.Errorf("失败后不应变更: %q", a.ReasoningEffort())
+	}
+}
+
 func writeAgents(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

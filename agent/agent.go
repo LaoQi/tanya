@@ -362,6 +362,22 @@ func (a *Agent) Model() string { return a.cfg.Model }
 
 func (a *Agent) SetModel(m string) { a.cfg.Model = m }
 
+func (a *Agent) ReasoningEffort() string { return a.cfg.ReasoningEffort }
+
+func (a *Agent) SetReasoningEffort(level string) error {
+	level = strings.ToLower(strings.TrimSpace(level))
+	if level == "off" {
+		a.cfg.ReasoningEffort = ""
+		return nil
+	}
+	v := normalizeEffort(level)
+	if v == "" {
+		return fmt.Errorf(MsgBadEffort, level)
+	}
+	a.cfg.ReasoningEffort = v
+	return nil
+}
+
 func (a *Agent) History() []Message { return a.history }
 
 func (a *Agent) ListModels() ([]string, error) { return a.client.ListModels() }

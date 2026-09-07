@@ -21,6 +21,7 @@ const (
 	MsgBadSessionID     = "非法会话 id"
 	MsgSessionGone      = "会话不存在: %s"
 	MsgShellUnavailable = "run_shell 不可用（未找到可执行 shell）"
+	MsgBadEffort        = "无效思考等级 %q（可选: minimal/low/medium/high/max/off）"
 )
 
 const (

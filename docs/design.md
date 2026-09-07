@@ -30,6 +30,8 @@ readline/          package readline：自研终端输入层（editor / keys / te
 
 仅 OpenAI 兼容 Chat Completions API（`/chat/completions`，SSE 流式），一套代码兼容 OpenAI/DeepSeek/GLM/Ollama/vLLM。
 
+请求体固定字段：`model` / `messages` / `temperature` / `tools` / `stream` / `stream_options`；`reasoning_effort`（OpenAI 标准思考等级，minimal/low/medium/high/max）仅配置或 `/think` 设置后携带，`omitempty` 缺省不发送。厂商私有思考参数（GLM `thinking`、Qwen `enable_thinking` 等）不支持。
+
 流式解析要点：`data:` 行逐条解析 JSON chunk；content 直接拼接并经回调输出；tool_calls 按 `index` 分组做增量合并（id/type/name 覆盖、arguments 拼接），`[DONE]` 结束。`stream_options.include_usage` 捕获 usage；首个 chunk 时刻记 TTFT、流结束记总耗时，存于 `Message.Stat`（`json:"-"` 不落盘）。
 
 `/models` 列表获取：GET `/models`，按 id 排序返回，供 `/model` 命令与补全。
@@ -118,6 +120,7 @@ readline/          package readline：自研终端输入层（editor / keys / te
 
 - `/history` 无参截断列表（单行 120 rune）、`/history n` 全量查看单条、`/history all` 全量显示
 - `/model` 无参实时调接口列出可用模型（`*` 标注当前，失败仍显示当前模型），带参直接切换不校验；带尾随空格支持补全（接口列表在 REPL 内首次加载后缓存，失败不重试）
+- `/think` 无参显示当前思考等级（未设置显示"未设置"）；带参 `minimal/low/medium/high/max` 设置，`off` 关闭，非法值报错不变更；带尾随空格补全等级候选（含 off，静态列表）
 - `/load` 无参打开方向键选择菜单（`repl/picker.go`，非 TTY 降级为序号输入），候选 Display 带时间/条数/简介
 
 ### 提示符模板
@@ -143,13 +146,14 @@ readline/          package readline：自研终端输入层（editor / keys / te
 | `api_key` | 空 | 密钥（建议用 env 注入） |
 | `model` | `deepseek-v4-flash` | 模型名 |
 | `temperature` | 0.7 | |
+| `reasoning_effort` | 空 | 思考等级 minimal/low/medium/high/max，非法值忽略；空则请求不带 `reasoning_effort` 字段 |
 | `prompt` | 内置默认模板 | REPL 提示符 |
 | `user_agent` | `pi/0.85.0 (...)` | 出站 UA 伪装 |
 | `global_session` | `~/.local/share/tanyan/sessions` | global 模式会话基础目录，支持 `~` 展开 |
 | `session_mode` | `auto` | 会话存储模式 auto/local/global |
 | `tool_output_lines` | 20 | 工具输出最多显示行数（1-1000） |
 
-env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES`。
+env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES`。
 
 ## 测试
 

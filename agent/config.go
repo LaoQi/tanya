@@ -15,11 +15,24 @@ type Config struct {
 	APIKey          string  `yaml:"api_key"`
 	Model           string  `yaml:"model"`
 	Temperature     float64 `yaml:"temperature"`
+	ReasoningEffort string  `yaml:"reasoning_effort"`
 	UserAgent       string  `yaml:"user_agent"`
 	GlobalSession   string  `yaml:"global_session"`
 	SessionMode     string  `yaml:"session_mode"`
 	ToolOutputLines int     `yaml:"tool_output_lines"`
 	Shell           string  `yaml:"shell"`
+}
+
+var EffortLevels = []string{"minimal", "low", "medium", "high", "max"}
+
+func normalizeEffort(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	for _, e := range EffortLevels {
+		if v == e {
+			return e
+		}
+	}
+	return ""
 }
 
 const DefaultPrompt = "\x1b[37m{cwd}\x1b[0m \x1b[34m{model}\x1b[0m \x1b[33m{stat}\x1b[0m \x1b[37m>\x1b[0m "
@@ -68,6 +81,9 @@ func LoadConfig(path string) (*Config, error) {
 			cfg.Temperature = f
 		}
 	}
+	if v := os.Getenv("TANYA_REASONING_EFFORT"); v != "" {
+		cfg.ReasoningEffort = v
+	}
 	if v := os.Getenv("TANYA_SESSION_MODE"); v != "" {
 		cfg.SessionMode = v
 	}
@@ -88,6 +104,7 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = DefaultUserAgent
 	}
+	cfg.ReasoningEffort = normalizeEffort(cfg.ReasoningEffort)
 	cfg.GlobalSession = expandHome(cfg.GlobalSession)
 	return cfg, nil
 }
