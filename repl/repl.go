@@ -15,27 +15,6 @@ import (
 	"github.com/LaoQi/tanyan/readline"
 )
 
-const helpText = `斜杠命令：
-  /help            显示帮助
-  /new             开启新会话（当前会话自动保存）
-  /sessions        列出历史会话
-  /load <id>       载入历史会话
-  /context         显示上下文占用
-  /history [n|all] 无参截断列表；n 全量查看单条；all 全量显示
-  /model [name]    无参显示当前模型；带名切换模型
-  /exit            退出
-直接输入文本与 AI 对话；shell 工具直接执行，无需确认。
-`
-
-const welcomText = `
-██████ ▄████▄ ███  ██ ██  ██ ▄████▄ 
-  ██   ██▄▄██ ██ ▀▄██  ▀██▀  ██▄▄██ 
-  ██   ██  ██ ██   ██   ██   ██  ██ 
-
-输入 /help 查看命令
-
-`
-
 type REPL struct {
 	agent     *agent.Agent
 	ed        *readline.Editor
@@ -83,7 +62,7 @@ func (r *REPL) Run() error {
 			continue
 		}
 		if err == io.EOF {
-			fmt.Println("Bye")
+			fmt.Print(MsgBye + "\n")
 			return nil
 		}
 		if err != nil {
@@ -104,7 +83,7 @@ func (r *REPL) Run() error {
 		done()
 		fmt.Println()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "错误:", err)
+			fmt.Fprintf(os.Stderr, MsgErrLineFmt+"\n", err)
 		}
 	}
 }
@@ -179,32 +158,32 @@ func (r *REPL) handleCommand(line string) bool {
 	parts := strings.Fields(line)
 	switch parts[0] {
 	case "/exit", "/quit":
-		fmt.Println("再见")
+		fmt.Printf("%s\n", MsgBye)
 		return true
 	case "/help":
 		fmt.Print(helpText)
 	case "/new":
 		r.agent.NewSession()
-		fmt.Println("已开启新会话")
+		fmt.Print(MsgNewSession)
 	case "/sessions":
 		list, err := r.agent.ListSessions()
 		if err != nil {
-			fmt.Println("错误:", err)
+			fmt.Printf(MsgErrLineFmt+"\n", err)
 			break
 		}
 		if len(list) == 0 {
-			fmt.Println("(无历史会话)")
+			fmt.Print(MsgNoSessions)
 			break
 		}
 		for _, s := range list {
-			fmt.Printf("%s  %s  %3d条  %s\n", s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary)
+			fmt.Printf(SessRow+"\n", "", s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary)
 		}
 	case "/load":
 		if len(parts) >= 2 {
 			if err := r.agent.LoadSession(parts[1]); err != nil {
-				fmt.Println("错误:", err)
+				fmt.Printf(MsgErrLineFmt+"\n", err)
 			} else {
-				fmt.Println("已载入会话", parts[1])
+				fmt.Printf(MsgLoadedSess, parts[1])
 				r.warnLegacyPrompt()
 			}
 			break
@@ -216,29 +195,29 @@ func (r *REPL) handleCommand(line string) bool {
 		r.showHistory(parts[1:])
 	case "/model":
 		if len(parts) < 2 {
-			fmt.Println("当前模型:", r.agent.Model())
+			fmt.Printf(MsgCurModel, r.agent.Model())
 			models, err := r.agent.ListModels()
 			if err != nil {
-				fmt.Println("获取可用模型失败:", err)
+				fmt.Printf(MsgModelsFail, err)
 				break
 			}
 			if len(models) == 0 {
-				fmt.Println("(接口未返回可用模型)")
+				fmt.Print(MsgModelsEmpty)
 				break
 			}
-			fmt.Println("可用模型:")
+			fmt.Print(MsgModelsHead)
 			for _, m := range models {
-				mark := "  "
+				mark := MsgMarkPlain
 				if m == r.agent.Model() {
-					mark = "* "
+					mark = MsgMarkCurrent
 				}
-				fmt.Println(mark + m)
+				fmt.Printf("%s%s\n", mark, m)
 			}
 			break
 		}
 		r.agent.SetModel(parts[1])
 	default:
-		fmt.Println("未知命令，输入 /help 查看")
+		fmt.Print(MsgUnknownCmd)
 	}
 	return false
 }
@@ -246,7 +225,7 @@ func (r *REPL) handleCommand(line string) bool {
 func (r *REPL) showHistory(args []string) {
 	msgs := r.agent.History()
 	if len(msgs) == 0 {
-		fmt.Println("(当前会话无消息)")
+		fmt.Print(MsgNoHistoryMsg)
 		return
 	}
 	if len(args) > 0 {
@@ -261,13 +240,13 @@ func (r *REPL) showHistory(args []string) {
 		}
 		n, err := strconv.Atoi(args[0])
 		if err != nil || n < 1 || n > len(msgs) {
-			fmt.Printf("序号无效（1-%d，或 all）\n", len(msgs))
+			fmt.Printf(MsgInvalidIndex, len(msgs))
 			return
 		}
 		printHistoryFull(n, msgs[n-1])
 		return
 	}
-	fmt.Printf("共 %d 条消息\n", len(msgs))
+	fmt.Printf(MsgTotalMsgs, len(msgs))
 	for i, m := range msgs {
 		fmt.Println(historyLine(i+1, m))
 	}
@@ -286,7 +265,7 @@ func historyText(m agent.Message) string {
 		for i, tc := range m.ToolCalls {
 			names[i] = tc.Function.Name
 		}
-		return "[调用 " + strings.Join(names, ", ") + "]"
+		return fmt.Sprintf(MsgCallLabel, strings.Join(names, ", "))
 	}
 	return m.Content
 }
@@ -317,11 +296,11 @@ func printHistoryFull(n int, m agent.Message) {
 func (r *REPL) loadSessionInteractive() {
 	list, err := r.agent.ListSessions()
 	if err != nil {
-		fmt.Println("错误:", err)
+		fmt.Printf(MsgErrLineFmt+"\n", err)
 		return
 	}
 	if len(list) == 0 {
-		fmt.Println("(无历史会话)")
+		fmt.Print(MsgNoSessions)
 		return
 	}
 	var idx int
@@ -332,20 +311,20 @@ func (r *REPL) loadSessionInteractive() {
 		idx, ok = pickByNumber(list)
 	}
 	if !ok || idx < 0 {
-		fmt.Println("已取消")
+		fmt.Print(MsgCancelled)
 		return
 	}
 	if err := r.agent.LoadSession(list[idx].ID); err != nil {
-		fmt.Println("错误:", err)
+		fmt.Printf(MsgErrLineFmt+"\n", err)
 		return
 	}
-	fmt.Println("已载入会话", list[idx].ID)
+	fmt.Printf(MsgLoadedSess, list[idx].ID)
 	r.warnLegacyPrompt()
 }
 
 func (r *REPL) warnLegacyPrompt() {
 	if r.agent.LegacyPrompt() {
-		fmt.Println("提示: 旧版本会话已冻结历史环境信息；建议 /new 开启新会话")
+		fmt.Print(MsgLegacyHint)
 	}
 }
 

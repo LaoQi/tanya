@@ -167,19 +167,19 @@ func (r *ShellResult) String() string {
 	writeStream(&b, "stdout", r.Stdout)
 	writeStream(&b, "stderr", r.Stderr)
 	if r.Interrupted {
-		b.WriteString("error: 已中断\n")
+		b.WriteString(MsgInterrupted + "\n")
 	}
 	if r.TimedOut {
-		fmt.Fprintf(&b, "error: 执行超时\n")
+		fmt.Fprintf(&b, MsgTimedOut+"\n")
 	}
 	if r.Err != "" {
-		b.WriteString("error: " + r.Err + "\n")
+		fmt.Fprintf(&b, MsgErrLine+"\n", r.Err)
 	}
 	if r.ExitCode != 0 {
 		fmt.Fprintf(&b, "exit code: %d\n", r.ExitCode)
 	}
 	if b.Len() == 0 {
-		return "(无输出，退出码 0)"
+		return MsgNoOutput
 	}
 	return b.String()
 }
@@ -190,9 +190,9 @@ func writeStream(sb *strings.Builder, label string, chunks []ShellChunk) {
 	}
 	fmt.Fprintf(sb, "%s:\n%s\n", label, chunks[0].Data)
 	if len(chunks) > 1 {
-		fmt.Fprintf(sb, "[%s 中间截断 %d 字节]\n%s\n", label, chunks[1].Truncated, chunks[1].Data)
+		fmt.Fprintf(sb, MsgTruncMiddle+"\n%s\n", label, chunks[1].Truncated, chunks[1].Data)
 	} else if chunks[0].Truncated > 0 {
-		fmt.Fprintf(sb, "[%s 截断 %d 字节]\n", label, chunks[0].Truncated)
+		fmt.Fprintf(sb, MsgTruncTail+"\n", label, chunks[0].Truncated)
 	}
 }
 
@@ -263,7 +263,7 @@ func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellR
 	res := &ShellResult{Command: command}
 	profile := ShellRuntime().profile
 	if profile == nil {
-		res.Err = "run_shell 不可用（未找到可执行 shell）"
+		res.Err = MsgShellUnavailable
 		return res
 	}
 	start := time.Now()

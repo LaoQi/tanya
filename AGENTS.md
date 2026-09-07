@@ -29,6 +29,8 @@ agent/agent.go     对话 loop、上下文估算、会话持久化（prompt 规�
 agent/envprobe.go  环境探针（envSection 纯函数：平台 + cwd + run_shell 执行契约 + 工作区标记，恒定注入无开关）
 agent/shell.go     run_shell 工具（shellProfile 按平台解析 bash/sh/ash/pwsh/cmd、streamCapture 头尾截断、ShellResult 结构化返回、常用程序探测拼入工具描述）
 agent/builtin.go   内置小工具：get_time / get_env / calc
+repl/messages.go   repl 侧用户可见文案常量（UI 文案单一来源）
+agent/messages.go  agent 侧用户可见文案常量（错误/结果文本单一来源）
 ```
 
 各模块行为细节见 `docs/design.md`。

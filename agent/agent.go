@@ -264,14 +264,14 @@ func (a *Agent) dispatch(ctx context.Context, tc ToolCall) ToolResult {
 			Timeout int    `json:"timeout"`
 		}
 		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-			return ToolResult{Text: "error: 参数解析失败: " + err.Error()}
+			return ToolResult{Text: fmt.Sprintf(MsgParseArgs, err)}
 		}
 		return ToolResult{Shell: RunShellResult(ctx, args.Command, args.Timeout)}
 	}
 	if text, ok := DispatchBuiltin(tc.Function.Name, tc.Function.Arguments); ok {
 		return ToolResult{Text: text}
 	}
-	return ToolResult{Text: "error: 未知工具 " + tc.Function.Name}
+	return ToolResult{Text: fmt.Sprintf(MsgUnknownTool, tc.Function.Name)}
 }
 
 func (a *Agent) buildMessages() []Message {
@@ -307,12 +307,12 @@ func (a *Agent) totalTokens() int {
 func (a *Agent) ContextInfo() string {
 	var tokenLine string
 	if a.lastUsage != nil {
-		tokenLine = fmt.Sprintf("token: %d（prompt %d / completion %d，API 实报）",
+		tokenLine = fmt.Sprintf(MsgTokenAPI,
 			a.lastUsage.TotalTokens, a.lastUsage.PromptTokens, a.lastUsage.CompletionTokens)
 	} else {
-		tokenLine = fmt.Sprintf("token: ~%d（本地估算）", a.totalTokens())
+		tokenLine = fmt.Sprintf(MsgTokenEstimate, a.totalTokens())
 	}
-	return fmt.Sprintf("%s\n消息: %d 条\n会话文件: %s", tokenLine, len(a.history), a.sessionPath)
+	return fmt.Sprintf(MsgContextInfo, tokenLine, len(a.history), a.sessionPath)
 }
 
 func (a *Agent) PromptUsage() string {
@@ -393,12 +393,12 @@ func (a *Agent) save() error {
 
 func (a *Agent) LoadSession(id string) error {
 	if strings.ContainsAny(id, "/\\") || strings.Contains(id, "..") {
-		return fmt.Errorf("非法会话 id")
+		return fmt.Errorf(MsgBadSessionID)
 	}
 	path := filepath.Join(a.sessionDir, id+".jsonl")
 	f, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("会话不存在: %s", id)
+		return fmt.Errorf(MsgSessionGone, id)
 	}
 	defer f.Close()
 	var msgs []Message

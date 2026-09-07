@@ -70,9 +70,9 @@ func toolEndBody(res agent.ToolResult, width, maxLines int, tty bool) string {
 		parts := []string{status, respDuration(res.Shell.Duration)}
 		switch {
 		case trunc:
-			parts = append(parts, fmt.Sprintf("共 %d 行", total))
+			parts = append(parts, fmt.Sprintf(MsgLinesTotal, total))
 		case total > 0:
-			parts = append(parts, fmt.Sprintf("%d 行", total))
+			parts = append(parts, fmt.Sprintf(MsgLines, total))
 		}
 		status = strings.Join(parts, " · ")
 	} else {
@@ -114,10 +114,10 @@ func RenderResponseInfo(info agent.ResponseInfo, width int) string {
 			parts = append(parts, "completion "+shortTokens(u.CompletionTokens))
 		}
 		if hit := u.CacheHit(); hit > 0 && u.PromptTokens > 0 {
-			parts = append(parts, fmt.Sprintf("缓存 %.2f%%", float64(hit)/float64(u.PromptTokens)*100))
+			parts = append(parts, fmt.Sprintf(MsgCachePct, float64(hit)/float64(u.PromptTokens)*100))
 		}
 	} else if info.ContextTokens > 0 {
-		parts = append(parts, "上下文 ~"+shortTokens(info.ContextTokens))
+		parts = append(parts, fmt.Sprintf(MsgCtxTokens, shortTokens(info.ContextTokens)))
 	}
 	if len(parts) == 0 {
 		return ""
@@ -188,7 +188,7 @@ func chunkLines(chunks []agent.ShellChunk) []string {
 	var out []string
 	for _, c := range chunks {
 		if c.Truncated > 0 {
-			out = append(out, fmt.Sprintf("…中间省略 %d 字节…", c.Truncated))
+			out = append(out, fmt.Sprintf(MsgTruncNote, c.Truncated))
 		}
 		if c.Data == "" {
 			continue
@@ -201,11 +201,11 @@ func chunkLines(chunks []agent.ShellChunk) []string {
 func shellStatus(r *agent.ShellResult) string {
 	switch {
 	case r.Interrupted:
-		return "已中断"
+		return MsgInterrupt
 	case r.TimedOut:
-		return "执行超时"
+		return MsgTimeout
 	case r.Err != "":
-		return "错误: " + r.Err
+		return fmt.Sprintf(MsgToolErr, r.Err)
 	}
 	return fmt.Sprintf("exit %d", r.ExitCode)
 }
@@ -226,7 +226,7 @@ func textView(text string, width, maxLines int) ([]string, string) {
 		out[i] = readline.Truncate(l, width)
 	}
 	if trunc {
-		return out, fmt.Sprintf("共 %d 行", len(lines))
+		return out, fmt.Sprintf(MsgLinesTotal, len(lines))
 	}
 	return out, ""
 }
@@ -238,7 +238,7 @@ func WireToolView(a *agent.Agent, width func() int, maxLines int, tty bool) func
 	lineDirty := false
 	a.OnRequestStart = func() {
 		sp.start(func(elapsed time.Duration, frame string) string {
-			return ansiOrange + frame + " 等待响应 " + spinElapsed(elapsed) + ansiReset
+			return ansiOrange + fmt.Sprintf(SpinWaiting, frame, spinElapsed(elapsed)) + ansiReset
 		})
 	}
 	a.OnResponse = func(info agent.ResponseInfo) {
@@ -258,7 +258,7 @@ func WireToolView(a *agent.Agent, width func() int, maxLines int, tty bool) func
 		mu.Unlock()
 		lineDirty = false
 		sp.start(func(elapsed time.Duration, frame string) string {
-			return ansiOrange + "  " + frame + " 执行中 " + spinElapsed(elapsed) + ansiReset
+			return ansiOrange + fmt.Sprintf(SpinRunning, frame, spinElapsed(elapsed)) + ansiReset
 		})
 	}
 	a.OnToolEnd = func(name, args string, res agent.ToolResult) {

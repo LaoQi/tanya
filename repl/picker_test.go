@@ -53,7 +53,7 @@ func TestPickerRender(t *testing.T) {
 	var buf bytes.Buffer
 	p.render(&buf, true)
 	s := buf.String()
-	if !bytes.Contains(buf.Bytes(), []byte("选择会话")) {
+	if !bytes.Contains(buf.Bytes(), []byte(PickTitle)) {
 		t.Errorf("缺标题: %q", s)
 	}
 	count := 0
