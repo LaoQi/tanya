@@ -65,7 +65,7 @@ func TestDispatchGetEnv(t *testing.T) {
 	if !strings.Contains(got, "TANYAN_NO_SUCH_XXX: <未设置>") {
 		t.Errorf("应标注未设置变量: %q", got)
 	}
-	if !strings.Contains(got, "拒绝") {
+	if !strings.Contains(got, "拒绝：疑似敏感变量") {
 		t.Errorf("敏感变量应被拒绝: %q", got)
 	}
 	if strings.Contains(got, "MY_SECRET_KEY=") {

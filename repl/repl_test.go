@@ -87,3 +87,15 @@ func captureStdout(fn func()) string {
 	b, _ := io.ReadAll(r)
 	return string(b)
 }
+
+func TestExitMessageConsistency(t *testing.T) {
+	if MsgBye != "再见" {
+		t.Errorf("退出文案应统一: %q", MsgBye)
+	}
+	if !strings.HasSuffix(MsgNewSession, "\n") || !strings.HasSuffix(MsgLoadedSess, "\n") {
+		t.Errorf("repl 消息常量应以换行结尾，配合 Printf 单点控制换行")
+	}
+	if strings.Contains(MsgBye, "%") {
+		t.Errorf("非格式化常量不应含动词: %q", MsgBye)
+	}
+}

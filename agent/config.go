@@ -48,7 +48,7 @@ func LoadConfig(path string) (*Config, error) {
 	switch {
 	case err == nil:
 		if err := yaml.Unmarshal(b, cfg); err != nil {
-			return nil, fmt.Errorf("配置文件解析失败 %s: %w", path, err)
+			return nil, fmt.Errorf(MsgConfigParse, path, err)
 		}
 	case !os.IsNotExist(err):
 		return nil, err

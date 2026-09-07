@@ -93,7 +93,7 @@ func (c *completer) complete(line string) []readline.Completion {
 			if strings.HasPrefix(s.ID, prefix) {
 				out = append(out, readline.Completion{
 					Insert:  "/load " + s.ID,
-					Display: "/load " + s.ID + "  " + s.ModTime.Format("01-02 15:04") + fmt.Sprintf("  %3d条  %s", s.Msgs, s.Summary),
+					Display: fmt.Sprintf(PickCompleteItem, s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary),
 				})
 			}
 		}

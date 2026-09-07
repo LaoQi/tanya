@@ -112,7 +112,7 @@ type streamChunk struct {
 
 func (c *Client) ListModels() ([]string, error) {
 	if c.cfg.APIKey == "" {
-		return nil, fmt.Errorf("未配置 api_key（请写入配置文件或设置环境变量 TANYA_API_KEY）")
+		return nil, fmt.Errorf(MsgAPIKey)
 	}
 	url := strings.TrimSuffix(c.cfg.BaseURL, "/") + "/models"
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -130,7 +130,7 @@ func (c *Client) ListModels() ([]string, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("API 错误 %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return nil, fmt.Errorf(MsgAPIStatus, resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 	var out struct {
 		Data []struct {
@@ -138,7 +138,7 @@ func (c *Client) ListModels() ([]string, error) {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("解析模型列表失败: %w", err)
+		return nil, fmt.Errorf(MsgModelList, err)
 	}
 	ids := make([]string, 0, len(out.Data))
 	for _, m := range out.Data {
@@ -152,7 +152,7 @@ func (c *Client) ListModels() ([]string, error) {
 
 func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta func(string)) (*Message, error) {
 	if c.cfg.APIKey == "" {
-		return nil, fmt.Errorf("未配置 api_key（请写入配置文件或设置环境变量 TANYA_API_KEY）")
+		return nil, fmt.Errorf(MsgAPIKey)
 	}
 	body, err := json.Marshal(chatRequest{
 		Model:         c.cfg.Model,
@@ -183,7 +183,7 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta fun
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("API 错误 %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return nil, fmt.Errorf(MsgAPIStatus, resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
 	msg := &Message{Role: "assistant"}
@@ -242,7 +242,7 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta fun
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("读取流失败: %w", err)
+		return nil, fmt.Errorf(MsgReadStream, err)
 	}
 	msg.Usage = usage
 	msg.Stat = &RequestStat{Duration: time.Since(start), TTFT: ttft}

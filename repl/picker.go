@@ -43,13 +43,13 @@ func (p *sessionPicker) render(out io.Writer, first bool) {
 	if !first && len(p.items) > 0 {
 		fmt.Fprintf(out, "\x1b[%dA", len(p.items)+1)
 	}
-	fmt.Fprint(out, "\r\x1b[K选择会话（↑/↓ 移动，Enter 确认，q 取消）:\r\n")
+	fmt.Fprint(out, PickTitle)
 	for i, s := range p.items {
-		mark := "  "
+		mark := MsgMarkPlain
 		if i == p.cursor {
 			mark = "\x1b[32m> \x1b[0m"
 		}
-		fmt.Fprintf(out, "\r\x1b[K%s%s  %s  %3d条  %s\x1b[K\r\n",
+		fmt.Fprintf(out, "\r\x1b[K"+SessRow+"\x1b[K\r\n",
 			mark, s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary)
 	}
 }
@@ -82,11 +82,11 @@ func pickSession(term readline.Terminal, list []agent.SessionInfo) (int, bool) {
 }
 
 func pickByNumber(list []agent.SessionInfo) (int, bool) {
-	fmt.Printf("输入序号选择会话（回车取消）:\n")
+	fmt.Printf(PickNumTitle)
 	for i, s := range list {
-		fmt.Printf("  %-3d %s  %s  %3d条  %s\n", i+1, s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary)
+		fmt.Printf("  %-3d "+SessRow+"\n", i+1, "", s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary)
 	}
-	fmt.Print("序号: ")
+	fmt.Print(PickNumPrompt)
 	var n int
 	if _, err := fmt.Fscan(os.Stdin, &n); err != nil || n < 1 || n > len(list) {
 		return -1, false

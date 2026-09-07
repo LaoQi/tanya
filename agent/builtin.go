@@ -19,20 +19,20 @@ func DispatchBuiltin(name, argsJSON string) (string, bool) {
 			Names []string `json:"names"`
 		}
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			return "error: 参数解析失败: " + err.Error(), true
+			return fmt.Sprintf(MsgParseArgs, err), true
 		}
 		var b strings.Builder
 		for _, n := range args.Names {
 			up := strings.ToUpper(n)
 			if strings.Contains(up, "KEY") || strings.Contains(up, "TOKEN") ||
 				strings.Contains(up, "SECRET") || strings.Contains(up, "PASS") {
-				fmt.Fprintf(&b, "%s: <拒绝：疑似敏感变量>\n", n)
+				fmt.Fprintf(&b, MsgEnvDenied+"\n", n)
 				continue
 			}
 			if v, ok := os.LookupEnv(n); ok {
 				fmt.Fprintf(&b, "%s=%s\n", n, v)
 			} else {
-				fmt.Fprintf(&b, "%s: <未设置>\n", n)
+				fmt.Fprintf(&b, MsgEnvUnset+"\n", n)
 			}
 		}
 		return strings.TrimRight(b.String(), "\n"), true
@@ -41,7 +41,7 @@ func DispatchBuiltin(name, argsJSON string) (string, bool) {
 			Expression string `json:"expression"`
 		}
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			return "error: 参数解析失败: " + err.Error(), true
+			return fmt.Sprintf(MsgParseArgs, err), true
 		}
 		v, err := calcEval(args.Expression)
 		if err != nil {
@@ -65,7 +65,7 @@ func calcEval(s string) (float64, error) {
 	}
 	p.skipSpace()
 	if p.i != len(p.s) {
-		return 0, fmt.Errorf("表达式存在无法解析的部分: %q", p.s[p.i:])
+		return 0, fmt.Errorf(MsgCalcUnparsed, p.s[p.i:])
 	}
 	return v, nil
 }
@@ -121,12 +121,12 @@ func (p *calcParser) parseTerm() (float64, error) {
 			v *= r
 		case '/':
 			if r == 0 {
-				return 0, fmt.Errorf("除数为零")
+				return 0, fmt.Errorf(MsgCalcDivZero)
 			}
 			v /= r
 		case '%':
 			if r == 0 {
-				return 0, fmt.Errorf("除数为零")
+				return 0, fmt.Errorf(MsgCalcDivZero)
 			}
 			v = float64(int64(v) % int64(r))
 		}
@@ -136,7 +136,7 @@ func (p *calcParser) parseTerm() (float64, error) {
 func (p *calcParser) parseFactor() (float64, error) {
 	p.skipSpace()
 	if p.i >= len(p.s) {
-		return 0, fmt.Errorf("表达式意外结束")
+		return 0, fmt.Errorf(MsgCalcUnexpectedEnd)
 	}
 	c := p.s[p.i]
 	switch {
@@ -148,7 +148,7 @@ func (p *calcParser) parseFactor() (float64, error) {
 		}
 		p.skipSpace()
 		if p.i >= len(p.s) || p.s[p.i] != ')' {
-			return 0, fmt.Errorf("缺少右括号")
+			return 0, fmt.Errorf(MsgCalcMissingRParen)
 		}
 		p.i++
 		return v, nil
@@ -165,7 +165,7 @@ func (p *calcParser) parseFactor() (float64, error) {
 		p.i++
 	}
 	if start == p.i {
-		return 0, fmt.Errorf("第 %d 个字符处应为数字", p.i+1)
+		return 0, fmt.Errorf(MsgCalcWantNumber, p.i+1)
 	}
 	return strconv.ParseFloat(p.s[start:p.i], 64)
 }

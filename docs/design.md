@@ -110,6 +110,8 @@ readline/          package readline：自研终端输入层（editor / keys / te
 
 ## REPL
 
+用户可见文案统一为常量：`repl/messages.go`（UI/命令输出/选择器/工具视图/spinner）与 `agent/messages.go`（错误/ToolResult 文本/ContextInfo），调用一律 `Printf`/`Fprintf` 引用常量，换行由调用处的格式串控制；`Bye`/`再见` 已统一为 `MsgBye`。工具描述与系统提示不在此列（模型侧文案，翻译需评估 prompt 影响）。
+
 ### 斜杠命令
 
 `/help` `/new` `/sessions` `/load` `/context` `/history` `/model` `/exit`：

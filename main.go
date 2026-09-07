@@ -11,13 +11,13 @@ import (
 )
 
 func main() {
-	configPath := flag.String("c", "", "配置文件路径（默认 ~/.config/tanyan/config.yaml）")
-	sessionMode := flag.String("m", "", "会话存储模式 local/global/auto（默认 auto）")
+	configPath := flag.String("c", "", repl.FlagConfig)
+	sessionMode := flag.String("m", "", repl.FlagMode)
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*configPath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "错误:", err)
+		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
 	if *sessionMode != "" {
@@ -25,7 +25,7 @@ func main() {
 	}
 	a, err := agent.New(cfg)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "错误:", err)
+		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
 	onDelta := repl.WireToolView(a, func() int { return repl.ToolWidth() }, a.ToolOutputLines(), repl.ToolTTY())
@@ -34,14 +34,14 @@ func main() {
 	if len(args) > 0 && args[0] == "ask" {
 		q := strings.Join(args[1:], " ")
 		if q == "" {
-			fmt.Fprintln(os.Stderr, "用法: tanyan ask \"问题\"")
+			fmt.Fprint(os.Stderr, repl.MsgAskUsage)
 			os.Exit(1)
 		}
 		ctx, done := repl.InterruptContext()
 		err := a.Ask(ctx, q, onDelta)
 		done()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "\n错误:", err)
+			fmt.Fprintf(os.Stderr, "\n"+repl.MsgErrLineFmt+"\n", err)
 			os.Exit(1)
 		}
 		fmt.Println()
@@ -50,12 +50,12 @@ func main() {
 
 	r, err := repl.NewREPL(a, agent.DefaultPrompt)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "错误:", err)
+		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
 	defer r.Close()
 	if err := r.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "错误:", err)
+		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
 }
