@@ -321,7 +321,7 @@ func (a *Agent) PromptCache() string {
 	if hit <= 0 {
 		return ""
 	}
-	return formatTokens(hit) + "/" + formatTokens(a.lastUsage.PromptTokens)
+	return formatTokens(hit)
 }
 
 func (a *Agent) PromptCacheRate() string {
@@ -333,6 +333,13 @@ func (a *Agent) PromptCacheRate() string {
 		return ""
 	}
 	return fmt.Sprintf("%.2f%%", float64(hit)/float64(a.lastUsage.PromptTokens)*100)
+}
+
+func (a *Agent) PromptSummary() string {
+	if a.lastUsage == nil || a.lastUsage.CacheHit() <= 0 {
+		return a.PromptUsage()
+	}
+	return formatTokens(a.lastUsage.CacheHit()) + "/" + formatTokens(a.lastUsage.PromptTokens) + " " + a.PromptCacheRate()
 }
 
 func formatTokens(n int) string {

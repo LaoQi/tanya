@@ -35,7 +35,7 @@ api_key: "sk-..."
 model: deepseek-v4-flash
 ```
 
-环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_SESSION_MODE` / `TANYA_PROMPT` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES`。
+环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES`。
 
 ## 使用
 
@@ -80,7 +80,7 @@ REPL 斜杠命令：
 - 文件不存在或内容为空白则跳过该层；组装在会话开始（`/new`、`/load`、启动）时刻快照，会话进行中不再读取文件
 - 每次请求的 system prompt 末尾实时拼接环境段（OS/CWD/bash 执行契约/工作区标记），不进快照、不持久化，模型可据此构造 `run_shell` 命令
 - history 全程追加，同一会话内请求前缀逐字节不变，prompt cache（DeepSeek/OpenAI）逐轮命中
-- 提示符模板支持两个缓存占位符：`{cache}` 缓存命中量（如 `980/1.2k`）、`{cache_rate}` 缓存命中率（保留两位小数，如 `81.67%`），无数据均渲染为空，默认模板不含缓存段
+- 提示符模板内置固定（不可配），占位符：`{cwd}` 短路径 / `{model}` 模型 / `{usage}` 上下文 token / `{cache}` 缓存命中量（如 `980`）/ `{cache_rate}` 缓存命中率（两位小数，如 `81.67%`）/ `{stat}` 组合用量——无缓存数据时仅总量（如 `12.3k`），有缓存时 `缓存/总量 命中率`（如 `980/12.3k 81.67%`），独立占位符无数据均渲染为空
 
 ## 工具
 

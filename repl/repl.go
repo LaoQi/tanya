@@ -61,13 +61,14 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 	return r, nil
 }
 
-func renderPrompt(tpl, cwd, model, usage, cache, cacheRate string) string {
+func renderPrompt(tpl, cwd, model, usage, cache, cacheRate, stat string) string {
 	return strings.NewReplacer(
 		"{cwd}", cwd,
 		"{model}", model,
 		"{usage}", usage,
 		"{cache}", cache,
 		"{cache_rate}", cacheRate,
+		"{stat}", stat,
 	).Replace(tpl)
 }
 
@@ -76,7 +77,7 @@ func (r *REPL) Close() {}
 func (r *REPL) Run() error {
 	fmt.Print(welcomText)
 	for {
-		prompt := renderPrompt(r.promptTpl, shortCwd(), r.agent.Model(), r.agent.PromptUsage(), r.agent.PromptCache(), r.agent.PromptCacheRate())
+		prompt := renderPrompt(r.promptTpl, shortCwd(), r.agent.Model(), r.agent.PromptUsage(), r.agent.PromptCache(), r.agent.PromptCacheRate(), r.agent.PromptSummary())
 		line, err := r.ed.Readline(prompt)
 		if err == readline.ErrInterrupt {
 			continue

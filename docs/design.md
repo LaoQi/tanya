@@ -115,9 +115,9 @@ readline/          package readline：自研终端输入层（editor / keys / te
 
 ### 提示符模板
 
-- yaml `prompt`、env `TANYA_PROMPT` 可配，空值回退默认；颜色由模板自带（yaml 双引号内用 `\x1b`），未知占位符原样保留
-- 占位符：`{cwd}` 短路径 / `{model}` 模型 / `{usage}` 上下文 token（API 实报或 `~` 估算）/ `{cache}` 缓存命中量 / `{cache_rate}` 缓存命中率（两位小数，无数据渲染为空）
-- 默认 `\x1b[37m{cwd}\x1b[0m \x1b[34m{model}\x1b[0m \x1b[32m{usage}>\x1b[0m `（路径白 / 模型蓝 / 上下文绿；缓存占位符存在但默认模板不含）
+- 提示符模板内置固定不可配（`prompt` 配置项与 `TANYA_PROMPT` 已移除，yaml 残留键被忽略），未知占位符原样保留
+- 占位符：`{cwd}` 短路径 / `{model}` 模型 / `{usage}` 上下文 token（API 实报或 `~` 估算）/ `{cache}` 缓存命中量 / `{cache_rate}` 缓存命中率（两位小数，无数据渲染为空）/ `{stat}` 组合用量——无缓存仅总量，有缓存为 `缓存/总量 命中率`
+- 默认 `\x1b[37m{cwd}\x1b[0m \x1b[34m{model}\x1b[0m \x1b[33m{stat}\x1b[0m \x1b[37m>\x1b[0m `（路径白 / 模型蓝 / 用量黄 / 提示符白）
 
 ### 终端输入（readline 包）
 
@@ -142,7 +142,7 @@ readline/          package readline：自研终端输入层（editor / keys / te
 | `session_mode` | `auto` | 会话存储模式 auto/local/global |
 | `tool_output_lines` | 20 | 工具输出最多显示行数（1-1000） |
 
-env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_SESSION_MODE` / `TANYA_PROMPT` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES`。
+env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES`。
 
 ## 测试
 
