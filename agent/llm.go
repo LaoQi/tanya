@@ -13,14 +13,20 @@ import (
 	"time"
 )
 
+type ReasoningItem struct {
+	ID      string `json:"id"`
+	Content string `json:"content,omitempty"`
+}
+
 type Message struct {
-	Role       string       `json:"role"`
-	Content    string       `json:"content,omitempty"`
-	ToolCalls  []ToolCall   `json:"tool_calls,omitempty"`
-	ToolCallID string       `json:"tool_call_id,omitempty"`
-	Name       string       `json:"name,omitempty"`
-	Usage      *Usage       `json:"-"`
-	Stat       *RequestStat `json:"-"`
+	Role           string          `json:"role"`
+	Content        string          `json:"content,omitempty"`
+	ToolCalls      []ToolCall      `json:"tool_calls,omitempty"`
+	ToolCallID     string          `json:"tool_call_id,omitempty"`
+	Name           string          `json:"name,omitempty"`
+	ReasoningItems []ReasoningItem `json:"reasoning_items,omitempty"`
+	Usage          *Usage          `json:"-"`
+	Stat           *RequestStat    `json:"-"`
 }
 
 type RequestStat struct {
@@ -34,6 +40,7 @@ type Usage struct {
 	TotalTokens      int `json:"total_tokens"`
 	CacheHitTokens   int `json:"prompt_cache_hit_tokens,omitempty"`
 	CacheMissTokens  int `json:"prompt_cache_miss_tokens,omitempty"`
+	ReasoningTokens  int `json:"reasoning_tokens,omitempty"`
 
 	PromptTokensDetails *promptTokensDetails `json:"prompt_tokens_details,omitempty"`
 }
@@ -82,7 +89,7 @@ func NewClient(cfg *Config) *Client {
 type chatRequest struct {
 	Model           string         `json:"model"`
 	Messages        []Message      `json:"messages"`
-	Temperature     float64        `json:"temperature,omitempty"`
+	Temperature     *float64       `json:"temperature,omitempty"`
 	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
 	Tools           []ToolDef      `json:"tools,omitempty"`
 	Stream          bool           `json:"stream"`
@@ -155,10 +162,29 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta fun
 	if c.cfg.APIKey == "" {
 		return nil, fmt.Errorf(MsgAPIKey)
 	}
+	if c.cfg.ApiProtocol == "chat" {
+		return c.chatStream(ctx, messages, onDelta)
+	}
+	return c.responsesStream(ctx, messages, onDelta)
+}
+
+func temperatureParam(cfg *Config) *float64 {
+	if cfg.ReasoningEffort != "" {
+		return nil
+	}
+	return &cfg.Temperature
+}
+
+func (c *Client) chatStream(ctx context.Context, messages []Message, onDelta func(string)) (*Message, error) {
+	wire := make([]Message, len(messages))
+	copy(wire, messages)
+	for i := range wire {
+		wire[i].ReasoningItems = nil
+	}
 	body, err := json.Marshal(chatRequest{
 		Model:           c.cfg.Model,
-		Messages:        messages,
-		Temperature:     c.cfg.Temperature,
+		Messages:        wire,
+		Temperature:     temperatureParam(c.cfg),
 		ReasoningEffort: c.cfg.ReasoningEffort,
 		Tools:           ToolDefs(),
 		Stream:          true,

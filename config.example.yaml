@@ -2,8 +2,12 @@ base_url: https://api.openai.com/v1
 api_key: ""
 model: deepseek-v4-flash
 temperature: 0.7
-# 思考等级，随请求发送 OpenAI 标准字段 reasoning_effort：minimal / low / medium / high / max
+# API 协议：responses（默认，OpenAI Responses API 兼容格式，思维链明文回传）/ chat（第三方兼容端点）
+# 仅提供 /chat/completions 的端点（Ollama/vLLM 等）遇 404 时改为 chat
+# api_protocol: responses
+# 思考等级，随请求发送 OpenAI 标准字段：minimal / low / medium / high / max
 # 留空或注释则不发送；REPL 内 /think 可运行时切换
+# 设置后请求不再发送 temperature（兼容 o 系/gpt-5 等仅支持 temperature=1 的推理模型）
 # reasoning_effort: medium
 # 出站请求 User-Agent（伪装，避免厂商风控）
 user_agent: "pi/0.85.0 (linux; node/v22.14.0; x64)"

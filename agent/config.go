@@ -16,6 +16,7 @@ type Config struct {
 	Model           string  `yaml:"model"`
 	Temperature     float64 `yaml:"temperature"`
 	ReasoningEffort string  `yaml:"reasoning_effort"`
+	ApiProtocol     string  `yaml:"api_protocol"`
 	UserAgent       string  `yaml:"user_agent"`
 	GlobalSession   string  `yaml:"global_session"`
 	SessionMode     string  `yaml:"session_mode"`
@@ -25,11 +26,23 @@ type Config struct {
 
 var EffortLevels = []string{"minimal", "low", "medium", "high", "max"}
 
+var ApiProtocols = []string{"chat", "responses"}
+
 func normalizeEffort(v string) string {
 	v = strings.ToLower(strings.TrimSpace(v))
 	for _, e := range EffortLevels {
 		if v == e {
 			return e
+		}
+	}
+	return ""
+}
+
+func normalizeApiProtocol(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	for _, p := range ApiProtocols {
+		if v == p {
+			return v
 		}
 	}
 	return ""
@@ -45,6 +58,7 @@ func defaultConfig() *Config {
 		BaseURL:         "https://api.openai.com/v1",
 		Model:           "deepseek-v4-flash",
 		Temperature:     0.7,
+		ApiProtocol:     "responses",
 		UserAgent:       DefaultUserAgent,
 		GlobalSession:   filepath.Join(home, ".local", "share", "tanyan", "sessions"),
 		ToolOutputLines: 20,
@@ -84,6 +98,9 @@ func LoadConfig(path string) (*Config, error) {
 	if v := os.Getenv("TANYA_REASONING_EFFORT"); v != "" {
 		cfg.ReasoningEffort = v
 	}
+	if v := os.Getenv("TANYA_API_PROTOCOL"); v != "" {
+		cfg.ApiProtocol = v
+	}
 	if v := os.Getenv("TANYA_SESSION_MODE"); v != "" {
 		cfg.SessionMode = v
 	}
@@ -105,6 +122,11 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.UserAgent = DefaultUserAgent
 	}
 	cfg.ReasoningEffort = normalizeEffort(cfg.ReasoningEffort)
+	rawProtocol := cfg.ApiProtocol
+	cfg.ApiProtocol = normalizeApiProtocol(cfg.ApiProtocol)
+	if cfg.ApiProtocol == "" {
+		return nil, fmt.Errorf(MsgBadApiProtocol, rawProtocol)
+	}
 	cfg.GlobalSession = expandHome(cfg.GlobalSession)
 	return cfg, nil
 }
