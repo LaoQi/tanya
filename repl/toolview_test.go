@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanyan/style"
 )
 
 func TestRenderToolStart(t *testing.T) {
@@ -31,7 +32,7 @@ func TestRenderToolEndShortOutput(t *testing.T) {
 		Duration: 250 * time.Millisecond,
 		ExitCode: 0,
 	}}
-	got := RenderToolEnd("run_shell", `{"command":"ls"}`, res, 80, 20, false)
+	got := RenderToolEnd("run_shell", `{"command":"ls"}`, res, 80, 20)
 	if !strings.Contains(got, "line1") || !strings.Contains(got, "line3") {
 		t.Errorf("got %q", got)
 	}
@@ -48,7 +49,7 @@ func TestRenderToolEndLongOutput(t *testing.T) {
 	res := agent.ToolResult{Shell: &agent.ShellResult{
 		Stdout: []agent.ShellChunk{{Data: sb.String()}},
 	}}
-	got := RenderToolEnd("run_shell", `{"command":"seq"}`, res, 80, 20, false)
+	got := RenderToolEnd("run_shell", `{"command":"seq"}`, res, 80, 20)
 	if strings.Contains(got, "L4x\n") || strings.Contains(got, "L28") {
 		t.Errorf("中段行应被省略: %q", got)
 	}
@@ -65,7 +66,7 @@ func TestRenderToolEndFailStatus(t *testing.T) {
 		Stderr:   []agent.ShellChunk{{Data: "oops"}},
 		ExitCode: 2,
 	}}
-	got := RenderToolEnd("run_shell", `{"command":"false"}`, res, 80, 20, false)
+	got := RenderToolEnd("run_shell", `{"command":"false"}`, res, 80, 20)
 	if !strings.Contains(got, "2| oops") {
 		t.Errorf("stderr 应带 2| 标记: %q", got)
 	}
@@ -76,12 +77,12 @@ func TestRenderToolEndFailStatus(t *testing.T) {
 
 func TestRenderToolEndTimeoutInterrupt(t *testing.T) {
 	res := agent.ToolResult{Shell: &agent.ShellResult{TimedOut: true, Duration: 3 * time.Second}}
-	got := RenderToolEnd("run_shell", `{"command":"sleep"}`, res, 80, 20, false)
+	got := RenderToolEnd("run_shell", `{"command":"sleep"}`, res, 80, 20)
 	if !strings.Contains(got, "执行超时") || !strings.Contains(got, "3.0s") {
 		t.Errorf("got %q", got)
 	}
 	res2 := agent.ToolResult{Shell: &agent.ShellResult{Interrupted: true}}
-	if got := RenderToolEnd("run_shell", `{}`, res2, 80, 20, false); !strings.Contains(got, "已中断") {
+	if got := RenderToolEnd("run_shell", `{}`, res2, 80, 20); !strings.Contains(got, "已中断") {
 		t.Errorf("got %q", got)
 	}
 }
@@ -90,7 +91,7 @@ func TestRenderToolEndTruncateLongLine(t *testing.T) {
 	res := agent.ToolResult{Shell: &agent.ShellResult{
 		Stdout: []agent.ShellChunk{{Data: strings.Repeat("a", 200) + "\n"}},
 	}}
-	got := RenderToolEnd("run_shell", `{"command":"cat"}`, res, 80, 20, false)
+	got := RenderToolEnd("run_shell", `{"command":"cat"}`, res, 80, 20)
 	if n := strings.Count(got, "\n"); n != 4 {
 		t.Errorf("应为前导空行+标题+正文+状态行 4 行，实际 %d: %q", n, got)
 	}
@@ -101,7 +102,7 @@ func TestRenderToolEndTruncateLongLine(t *testing.T) {
 
 func TestRenderToolEndBuiltin(t *testing.T) {
 	res := agent.ToolResult{Text: "1700000000 +0800 CST"}
-	got := RenderToolEnd("get_time", `{}`, res, 80, 20, false)
+	got := RenderToolEnd("get_time", `{}`, res, 80, 20)
 	if !strings.Contains(got, "▸ get_time") || !strings.Contains(got, "1700000000") {
 		t.Errorf("got %q", got)
 	}
@@ -112,7 +113,7 @@ func TestRenderToolEndBuiltin(t *testing.T) {
 
 func TestRenderToolEndBuiltinError(t *testing.T) {
 	res := agent.ToolResult{Text: "error: 除数为零"}
-	got := RenderToolEnd("calc", `{"expression":"1/0"}`, res, 80, 20, false)
+	got := RenderToolEnd("calc", `{"expression":"1/0"}`, res, 80, 20)
 	if !strings.Contains(got, "error: 除数为零") {
 		t.Errorf("got %q", got)
 	}
@@ -125,7 +126,7 @@ func TestRenderToolEndTruncationMarker(t *testing.T) {
 			{Data: "tail\n", Truncated: 9999},
 		},
 	}}
-	got := RenderToolEnd("run_shell", `{}`, res, 80, 20, false)
+	got := RenderToolEnd("run_shell", `{}`, res, 80, 20)
 	if !strings.Contains(got, "中间省略 9999 字节") {
 		t.Errorf("应显示中间截断标记: %q", got)
 	}
@@ -137,18 +138,15 @@ func TestToolWidthFallback(t *testing.T) {
 	}
 }
 
-func TestDim(t *testing.T) {
-	if got := dim("abc", false); got != "abc" {
-		t.Errorf("非 TTY 不应着色: %q", got)
+func TestSemanticColors(t *testing.T) {
+	if got := style.Dim.Sprint("abc"); got != "\x1b[90mabc\x1b[0m" {
+		t.Errorf("Dim 应包暗灰: %q", got)
 	}
-	if got := dim("abc", true); got != "\x1b[90mabc\x1b[0m" {
-		t.Errorf("TTY 应包暗灰: %q", got)
+	if got := style.Info.Sprint("abc"); got != "\x1b[94mabc\x1b[0m" {
+		t.Errorf("Info 应包亮蓝: %q", got)
 	}
-	if got := tint("abc", ansiInfo, true); got != "\x1b[94mabc\x1b[0m" {
-		t.Errorf("tint 亮蓝异常: %q", got)
-	}
-	if got := tint("abc", ansiInfo, false); got != "abc" {
-		t.Errorf("tint 非 TTY 不应着色: %q", got)
+	if got := style.Warn.Sprint("abc"); got != "\x1b[33mabc\x1b[0m" {
+		t.Errorf("Warn 应包橙黄: %q", got)
 	}
 }
 
@@ -157,7 +155,7 @@ func TestRenderToolEndInline(t *testing.T) {
 		Stdout:   []agent.ShellChunk{{Data: "ok\n"}},
 		Duration: 300 * time.Millisecond,
 	}}
-	got := RenderToolEndInline("run_shell", `{"command":"echo ok"}`, res, 80, 20, true)
+	got := RenderToolEndInline("run_shell", `{"command":"echo ok"}`, res, 80, 20)
 	if !strings.HasPrefix(got, "\x1b[1A\r\x1b[K▸ run_shell") {
 		t.Errorf("应以上移重绘开头: %q", got)
 	}

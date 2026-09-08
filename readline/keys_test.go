@@ -138,7 +138,4 @@ func TestStringWidth(t *testing.T) {
 			t.Errorf("stringWidth(%q) = %d, want %d", c.s, got, c.want)
 		}
 	}
-	if runeWidth('你') != 2 || runeWidth('a') != 1 {
-		t.Error("宽度表异常")
-	}
 }

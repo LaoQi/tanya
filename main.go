@@ -8,12 +8,14 @@ import (
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/repl"
+	"github.com/LaoQi/tanyan/style"
 )
 
 func main() {
 	configPath := flag.String("c", "", repl.FlagConfig)
 	sessionMode := flag.String("m", "", repl.FlagMode)
 	flag.Parse()
+	style.SetProfile(style.DetectProfile(repl.ToolTTY()))
 
 	cfg, err := agent.LoadConfig(*configPath)
 	if err != nil {
@@ -28,7 +30,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
-	onDelta := repl.WireToolView(a, func() int { return repl.ToolWidth() }, a.ToolOutputLines(), repl.ToolTTY())
+	onDelta := repl.WireToolView(a, repl.ToolWidth, a.ToolOutputLines())
 
 	args := flag.Args()
 	if len(args) > 0 && args[0] == "ask" {
