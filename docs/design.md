@@ -10,14 +10,16 @@
 main.go            package main：入口、flag 子命令、ask 单发
 repl/              package repl：REPL 循环、斜杠命令、补全、工具视图渲染、等待动画
 agent/             package agent：全部核心逻辑（config / llm / agent / shell / builtin）
-readline/          package readline：自研终端输入层（editor / keys / terminal / width）
+readline/          package readline：自研终端输入层（editor / keys / terminal）
+style/             package style：富文本管线（语义色/宽度截断/模板/IR，SGR 唯一产地），设计见 docs/render-pipeline.md
 ```
 
 设计取舍：
 
 - **不做细粒度拆包**：代码总量小，按包分职责即可
 - **不做工具注册表**：工具硬编码于 `ToolDefs()` 和 `Agent.dispatch` 的 switch，存量小且预计长期以 shell 为主
-- **依赖仅 2 个**：`gopkg.in/yaml.v3`（配置）、`golang.org/x/sys/unix`（raw mode）；终端输入层自研（实质替换 chzyer/readline）
+- **依赖仅 2 个**：`gopkg.in/yaml.v3`（配置）、`golang.org/x/sys/unix`（raw mode）；终端输入层与富文本管线自研
+- **颜色铁律**：SGR 序列仅 `style` 包产生（业务代码不得出现裸 `\x1b` 色码，readline 光标操作除外）；同一 IR 按终端能力档案（Profile）降级，无色终端自动纯文本
 
 ## 运行模式
 
@@ -84,8 +86,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 ### 工具视图渲染（repl/toolview.go）
 
 - `WireToolView` 接线全部回调，块状视图：`▸ 工具名 命令` 标题行 + 缩进输出行（stderr 加 `2|` 前缀）+ 亮蓝状态行
-- 状态行总是输出（TTY 亮蓝 `\x1b[94m`，非 TTY 纯文本）：`↳ exit 0 · 0.3s · 12 行`；异常时首段为 `exit 2`/`执行超时`/`已中断`/`错误: ...`；输出被截断时行数段显示 `共 N 行`；builtin 工具无状态行（截断时仅显示 `共 N 行`）
-- 颜色（TTY 生效，非 TTY 纯文本）：工具块暗灰 `\x1b[90m`、spinner 橙 `\x1b[33m`、状态行亮蓝 `\x1b[94m`；全部为 16 色基本 SGR 码
+- 状态行总是输出（语义色 `Info`，无色环境纯文本）：`↳ exit 0 · 0.3s · 12 行`；异常时首段为 `exit 2`/`执行超时`/`已中断`/`错误: ...`；输出被截断时行数段显示 `共 N 行`；builtin 工具无状态行（截断时仅显示 `共 N 行`）
+- 颜色走 `style` 语义色 + Profile 驱动（`colors` 配置 / `NO_COLOR` / 非 TTY → 纯文本）：工具块 `Dim`、spinner `Warn`、状态行 `Info`，可用 `palette` 配置覆盖
 - 显示行数上限 `tool_output_lines`（默认 20，范围 1-1000），超出保留头 3 行 + 尾 2 行并提示 `/history n` 查看完整输出
 - 执行开始即打印标题行（`⋯` 标记进行中）；结束在 TTY 下 `\x1b[1A\r\x1b[K` 上移重绘标题替换 `⋯`，非 TTY 直接打印完整块
 - 流式输出行尾无 `\n` 时（`lineDirty` 跟踪），状态行打印前自动补换行
@@ -145,15 +147,16 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 提示符模板
 
-- 提示符模板内置固定不可配（`prompt` 配置项与 `TANYA_PROMPT` 已移除，yaml 残留键被忽略），未知占位符原样保留
-- 占位符：`{cwd}` 短路径 / `{model}` 模型 / `{effort}` 思考等级（`ReasoningEffort()`，未设置渲染为空）/ `{usage}` 上下文 token（API 实报或 `~` 估算）/ `{cache}` 缓存命中量 / `{cache_rate}` 缓存命中率（两位小数，无数据渲染为空）/ `{stat}` 组合用量——无缓存仅总量，有缓存为 `缓存/总量 命中率`
-- 默认 `\x1b[37m{cwd}\x1b[0m \x1b[34m{model}\x1b[0m \x1b[33m{effort}\x1b[0m \x1b[32m{stat}\x1b[0m \x1b[37m>\x1b[0m `（路径白 / 模型蓝 / 思考黄 / 用量绿 / 提示符白）
+- 提示符模板内置固定不可配（`prompt` 配置项与 `TANYA_PROMPT` 已移除，yaml 残留键被忽略），模板走 `style` 管线：启动时 `ParseTemplate` 一次，每轮 `Bind` 占位符 + 渲染（解析仅一次，绑定微秒级）
+- 模板语法为 BBCode 风格标记：`[white]{cwd}[/] [blue]{model}[/]`，空格叠属性 `[red bold]`，支持语义名（dim/info/warn/ok/error/accent）；未知名/游离闭合/空标签降级原样，合法标签未闭合着色到行尾；旧裸 ANSI 模板自动 passthrough 兼容（无色环境 `Strip` 兜底）
+- 占位符：`{cwd}` 短路径 / `{model}` 模型 / `{effort}` 思考等级（未设置渲染为空）/ `{usage}` 上下文 token（API 实报或 `~` 估算）/ `{cache}` 缓存命中量 / `{cache_rate}` 缓存命中率（两位小数，无数据渲染为空）/ `{stat}` 组合用量——无缓存仅总量，有缓存为 `缓存/总量 命中率`；未知占位符原样保留，占位符值永不二次解析
+- 默认 `[white]{cwd}[/] [blue]{model}[/] [yellow]{effort}[/] [green]{stat}[/] [white]>[/] `（路径白 / 模型蓝 / 思考黄 / 用量绿 / 提示符白），渲染字节与旧 ANSI 版逐字节一致
 
 ### 终端输入（readline 包）
 
 - editor：行编辑/历史，快捷键 Ctrl+A/E/B/F/U/K/W/Y/T/L、Alt+B/F（按空白分词）、Home/End/方向键；render 多行感知（`cursorRow` 精确跟踪光标行，重渲染上移清屏），Size 不可用退化单行；ErrInterrupt 区分 Ctrl+C
 - Tab 补全菜单：多候选时在输入行下方渲染菜单，选中项反显（`\x1b[7m`）；`↑/↓` 循环选择（菜单打开时不触发历史导航）、`Tab` 循环下一项、`Enter` 仅插入选中项（再次 Enter 提交）、`Esc` 关闭、任意输入关闭菜单正常编辑；单候选直接补全、公共前缀先行扩展的行为不变；候选超 8 行滚动窗口显示
-- keys：ESC 序列/控制键/UTF-8 状态机；width：字符宽度表、ANSI 剥离、按显示宽度截断（`~` 后缀）
+- keys：ESC 序列/控制键/UTF-8 状态机；width：`style` 薄包装（宽度表/ANSI 剥离/感知截断均由 `style` 提供，截断自动复位悬空 SGR 防串色）
 - 非 TTY 降级：`Degraded` 按行读取，无动画/菜单
 
 ## 配置
@@ -167,7 +170,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `model` | `deepseek-v4-flash` | 模型名 |
 | `temperature` | 0.7 | |
 | `reasoning_effort` | 空 | 思考等级 minimal/low/medium/high/max，非法值忽略；空则请求不带 `reasoning_effort` 字段 |
-| `prompt` | 内置默认模板 | REPL 提示符 |
+| `colors` | `auto` | 终端配色 auto（跟随终端能力与 `NO_COLOR`）/ on（强制开色）/ off（强制纯文本） |
+| `palette` | 空 | 语义色覆盖（info/warn/ok/error/dim/accent → 色名），仅影响 UI 配色不影响提示符 |
 | `user_agent` | `pi/0.85.0 (...)` | 出站 UA 伪装 |
 | `global_session` | `~/.local/share/tanyan/sessions` | global 模式会话基础目录，支持 `~` 展开 |
 | `session_mode` | `auto` | 会话存储模式 auto/local/global |
