@@ -33,7 +33,8 @@ func toolWidth(term readline.Terminal) int {
 }
 
 func RenderToolStart(name, args string, width int) string {
-	return fmt.Sprintf("\n▸ %s %s ⋯\n", name, style.Truncate(toolArgsDisplay(name, args), width))
+	budget := width - 5 - style.Width(name)
+	return fmt.Sprintf("\n▸ %s %s ⋯\n", name, style.Truncate(toolArgsDisplay(name, args), budget))
 }
 
 func toolEndTitle(name, args string, res agent.ToolResult) string {
@@ -73,11 +74,11 @@ func toolEndBody(res agent.ToolResult, width, maxLines int) string {
 }
 
 func RenderToolEnd(name, args string, res agent.ToolResult, width, maxLines int) string {
-	return "\n▸ " + style.Truncate(toolEndTitle(name, args, res), width) + "\n" + toolEndBody(res, width, maxLines)
+	return "\n▸ " + style.Truncate(toolEndTitle(name, args, res), width-2) + "\n" + toolEndBody(res, width, maxLines)
 }
 
 func RenderToolEndInline(name, args string, res agent.ToolResult, width, maxLines int) string {
-	return style.CursorUp(1) + style.ClearLineHome() + "▸ " + style.Truncate(toolEndTitle(name, args, res), width) + "\n" + toolEndBody(res, width, maxLines)
+	return style.CursorUp(1) + style.ClearLineHome() + "▸ " + style.Truncate(toolEndTitle(name, args, res), width-2) + "\n" + toolEndBody(res, width, maxLines)
 }
 
 func RenderResponseInfo(info agent.ResponseInfo, width int) string {
@@ -160,7 +161,7 @@ func shellView(r *agent.ShellResult, width, maxLines int) ([]string, string, int
 		if t.stderr {
 			s = "2| " + s
 		}
-		lines = append(lines, style.Truncate(s, width))
+		lines = append(lines, style.Truncate(s, width-2))
 	}
 	return lines, shellStatus(r), total, trunc
 }
@@ -204,7 +205,7 @@ func textView(text string, width, maxLines int) ([]string, string) {
 	}
 	out := make([]string, len(view))
 	for i, l := range view {
-		out[i] = style.Truncate(l, width)
+		out[i] = style.Truncate(l, width-2)
 	}
 	if trunc {
 		return out, fmt.Sprintf(MsgLinesTotal, len(lines))
