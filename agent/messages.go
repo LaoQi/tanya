@@ -51,3 +51,7 @@ const (
 	MsgTokenEstimate = "token: ~%d（本地估算）"
 	MsgContextInfo   = "%s\n消息: %d 条\n会话文件: %s"
 )
+
+const (
+	MsgBadTheme = "无效主题 %q（可用: %s）"
+)

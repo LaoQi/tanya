@@ -35,8 +35,9 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 	c := &completer{listSessions: a.ListSessions, listModels: a.ListModels}
 	ed.SetComplete(c.complete)
 	ed.SetGhost(c.suggest)
+	sch := style.CurrentScheme()
 	if promptTpl == "" {
-		promptTpl = agent.DefaultPrompt
+		promptTpl = sch.Prompt
 	}
 	tpl, err := style.ParseTemplate(promptTpl)
 	if err != nil {
@@ -45,7 +46,7 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 	r := &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl, prompt: tpl, onDelta: func(s string) { fmt.Print(s) }}
 	r.md = style.NewMarkdownBuf()
 	r.mdLive = true
-	r.rend = style.NewRenderer(style.GetProfile())
+	r.rend = style.NewThemedRenderer(style.GetProfile(), sch.MD)
 	if a != nil {
 		r.onDelta = WireToolView(a, func() int { return toolWidth(term) }, a.ToolOutputLines())
 		innerStart := a.OnToolStart
@@ -283,10 +284,81 @@ func (r *REPL) handleCommand(line string) bool {
 		} else {
 			fmt.Print(MsgMdOff)
 		}
+	case "/theme":
+		r.handleTheme(parts[1:])
 	default:
 		fmt.Print(MsgUnknownCmd)
 	}
 	return false
+}
+
+func (r *REPL) handleTheme(args []string) {
+	if len(args) == 0 {
+		fmt.Printf(MsgCurTheme, style.CurrentSchemeName())
+		fmt.Print(MsgThemeHead)
+		for _, n := range style.SchemeNames() {
+			mark := MsgMarkPlain
+			if n == style.CurrentSchemeName() {
+				mark = MsgMarkCurrent
+			}
+			if s, ok := style.LookupScheme(n); ok {
+				fmt.Printf("%s%s  %s\n", mark, s.Name, s.Desc)
+			}
+		}
+		return
+	}
+	s, ok := style.ApplyScheme(args[0])
+	if !ok {
+		fmt.Printf(MsgErrLineFmt+"\n", fmt.Sprintf(MsgThemeBad, args[0], strings.Join(style.SchemeNames(), "/")))
+		return
+	}
+	r.applyTheme(s)
+	fmt.Printf(MsgThemeSet, s.Name, s.Desc)
+	r.printThemeSample()
+}
+
+func (r *REPL) printThemeSample() {
+	if style.GetProfile().Colors == style.LevelNone {
+		return
+	}
+	line := func(text string) []style.Inline {
+		return []style.Inline{style.Span{Text: text}}
+	}
+	blocks := []style.Block{
+		style.Heading{Level: 1, Inlines: line("一级标题")},
+		style.Heading{Level: 2, Inlines: line("二级标题")},
+		style.Heading{Level: 3, Inlines: line("三级标题")},
+		style.Paragraph{Inlines: []style.Inline{style.Span{Text: "正文段落，"}, style.CodeSpan{Text: "行内代码"}, style.Span{Text: "与结尾。"}}},
+		style.CodeBlock{Lines: []string{"代码块内容"}},
+	}
+	var b strings.Builder
+	for _, blk := range blocks {
+		b.WriteString(r.rend.Block(blk))
+	}
+	prompt := r.prompt.Render(func(name string) (string, bool) {
+		switch name {
+		case "cwd":
+			return "~/proj", true
+		case "model":
+			return "model", true
+		case "effort":
+			return "high", true
+		case "stat":
+			return "1.2k", true
+		}
+		return "", false
+	})
+	b.WriteString(prompt)
+	b.WriteString("\n")
+	b.WriteString(style.Dim.Sprint("工具行 ") + style.Info.Sprint("状态行 ") + style.Warn.Sprint("等待中 ") + style.Ok.Sprint("成功 ") + style.Error.Sprint("错误") + "\n")
+	fmt.Print(b.String())
+}
+
+// applyTheme 把渲染器与提示符切到给定主题（语义色已在 ApplyScheme 中更新）。
+func (r *REPL) applyTheme(s style.Scheme) {
+	r.promptTpl = s.Prompt
+	r.prompt, _ = style.ParseTemplate(s.Prompt)
+	r.rend = style.NewThemedRenderer(style.GetProfile(), s.MD)
 }
 
 func (r *REPL) handleThink(args []string) {

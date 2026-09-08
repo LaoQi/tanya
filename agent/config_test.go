@@ -290,3 +290,35 @@ func TestLoadConfigStyle(t *testing.T) {
 		t.Errorf("palette 解析失败: %v", cfg.Palette)
 	}
 }
+
+func TestConfigTheme(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("theme: solar\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Theme != "solar" {
+		t.Errorf("yaml theme 未生效: %q", cfg.Theme)
+	}
+	t.Setenv("TANYA_THEME", "minimal")
+	cfg, err = LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Theme != "minimal" {
+		t.Errorf("env 应覆盖 yaml: %q", cfg.Theme)
+	}
+	t.Setenv("TANYA_THEME", "")
+	if err := os.WriteFile(path, []byte("theme: bogus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "bogus") {
+		t.Errorf("非法 theme 应报错: %v", err)
+	}
+	if cfg := defaultConfig(); cfg.Theme != "nord" {
+		t.Errorf("默认主题应为 nord: %q", cfg.Theme)
+	}
+}

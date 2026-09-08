@@ -24,6 +24,11 @@ const (
 	MsgCurEffort  = "思考等级: %s\n"
 	MsgEffortSet  = "思考等级已设为 %s\n"
 	MsgEffortOff  = "思考等级已关闭\n"
+
+	MsgCurTheme  = "当前主题: %s\n"
+	MsgThemeHead = "可用主题:\n"
+	MsgThemeSet  = "主题已切换为 %s（%s）\n"
+	MsgThemeBad  = "无效主题 %q（可用: %s）"
 )
 
 const (
@@ -71,6 +76,7 @@ const helpText = `斜杠命令：
   /history [n|all] 无参截断列表；n 全量查看单条；all 全量显示
   /model [name]    无参显示当前模型；带名切换模型
   /think [level]   无参显示思考等级；设置 minimal/low/medium/high/max，off 关闭
+  /theme [name]    无参显示当前主题与可用列表；带名切换内置主题
   /md              切换 AI 输出 Markdown 渲染（默认开启，非 TTY 自动旁路）
   /exit            退出
 直接输入文本与 AI 对话；shell 工具直接执行，无需确认。

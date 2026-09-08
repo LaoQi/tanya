@@ -33,7 +33,11 @@ func DefaultTheme() Theme {
 }
 
 func NewRenderer(prof Profile) Renderer {
-	return Renderer{Prof: prof, Theme: DefaultTheme()}
+	return NewThemedRenderer(prof, DefaultTheme())
+}
+
+func NewThemedRenderer(prof Profile, theme Theme) Renderer {
+	return Renderer{Prof: prof, Theme: theme}
 }
 
 func (t Theme) heading(level int) Style {

@@ -1,5 +1,14 @@
 package style
 
+var userPalette map[string]string
+
+// ApplyPalette 设置用户语义色覆盖并立即应用；m 为 nil 时清空覆盖。
+// 覆盖叠加在当前主题之上，ApplyScheme 切换主题后自动重放。
+func ApplyPalette(m map[string]string) {
+	userPalette = m
+	applySemanticPalette(m)
+}
+
 func ParseColorName(name string) (Color, bool) {
 	v, ok := colorNames[name]
 	if !ok {
@@ -8,7 +17,7 @@ func ParseColorName(name string) (Color, bool) {
 	return Color16(v), true
 }
 
-func ApplyPalette(m map[string]string) {
+func applySemanticPalette(m map[string]string) {
 	for k, v := range m {
 		c, ok := ParseColorName(v)
 		if !ok {
