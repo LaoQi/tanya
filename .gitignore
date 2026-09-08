@@ -1,6 +1,8 @@
 /tanyan
+/bench
 *.test
 *.out
 .tanya/
 config.yaml
 todos.md
+/refs/
