@@ -110,6 +110,30 @@ func TestLoadSessionInvalid(t *testing.T) {
 	}
 }
 
+func TestNewSessionResetsUsage(t *testing.T) {
+	a := newTestAgent(t)
+	a.lastUsage = &Usage{PromptTokens: 1200}
+	a.NewSession()
+	if a.lastUsage != nil {
+		t.Error("/new 应清理上次用量")
+	}
+}
+
+func TestLoadSessionResetsUsage(t *testing.T) {
+	a := newTestAgent(t)
+	p := filepath.Join(a.sessionDir, "20260101-090000.jsonl")
+	if err := os.WriteFile(p, []byte(`{"role":"user","content":"历史会话"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.lastUsage = &Usage{PromptTokens: 1200}
+	if err := a.LoadSession("20260101-090000"); err != nil {
+		t.Fatal(err)
+	}
+	if a.lastUsage != nil {
+		t.Error("/load 应清理上次用量")
+	}
+}
+
 func TestListSessions(t *testing.T) {
 	a := newTestAgent(t)
 	write := func(name, content string) {

@@ -179,6 +179,7 @@ func (a *Agent) runtimePrompt() string {
 func (a *Agent) NewSession() {
 	a.history = nil
 	a.saved = 0
+	a.lastUsage = nil
 	a.legacySystem = false
 	a.systemSaved = false
 	a.promptSnapshot = buildSystemPrompt(a.cwd)
@@ -443,6 +444,7 @@ func (a *Agent) LoadSession(id string) error {
 	a.history = history
 	a.sessionPath = path
 	a.saved = len(history)
+	a.lastUsage = nil
 	return nil
 }
 
