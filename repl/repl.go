@@ -224,19 +224,6 @@ func (r *REPL) handleCommand(line string) bool {
 	case "/new":
 		r.agent.NewSession()
 		fmt.Print(MsgNewSession)
-	case "/sessions":
-		list, err := r.agent.ListSessions()
-		if err != nil {
-			fmt.Printf(MsgErrLineFmt+"\n", err)
-			break
-		}
-		if len(list) == 0 {
-			fmt.Print(MsgNoSessions)
-			break
-		}
-		for _, s := range list {
-			fmt.Printf(SessRow+"\n", "", s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary)
-		}
 	case "/load":
 		if len(parts) >= 2 {
 			if err := r.agent.LoadSession(parts[1]); err != nil {

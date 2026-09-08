@@ -9,7 +9,7 @@ import (
 	"github.com/LaoQi/tanyan/style"
 )
 
-var slashCommands = []string{"/help", "/new", "/sessions", "/load", "/context", "/history", "/model", "/think", "/theme", "/md", "/exit"}
+var slashCommands = []string{"/help", "/new", "/load", "/context", "/history", "/model", "/think", "/theme", "/md", "/exit"}
 
 var effortCandidates = func() []string {
 	out := make([]string, 0, len(agent.EffortLevels)+1)
