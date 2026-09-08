@@ -121,7 +121,7 @@ type Span struct {
     Text  string
 }
 
-type CodeSpan struct{ Text string }   // 行内代码独立类型：固定暗底色、禁折行、超宽截断保内容
+type CodeSpan struct{ Text string }   // 行内代码独立类型：亮色（Theme.CodeInline，亮绿 92，对齐 glamour dracula/tokyo-night 的 inline code）与代码块暗灰（Theme.CodeBlock，90）分离、禁折行、超宽截断保内容
 type SoftBreak struct{}               // 段内换行；终端渲染为 \n，硬/软不区分
 ```
 
@@ -290,8 +290,8 @@ func (b *MarkdownBuf) Close() []Block               // 收尾：未闭合块降�
 - 实施修订（偏离原设计的 `\n\n` 段落界）：**段落按行即时出块**——每个完整行立即作为单行 Paragraph 提交，否则单段长回答会整段缓冲到响应结束，流式体验不可接受；可见输出与按段分组完全一致，代价是跨行行内标记不解析（v1 行内本就按行解析）
 - 块级分组：代码围栏（闭合出块）、列表/引用（组断出块）、标题/分隔线（单行即时）；未闭合围栏在流结束 `Close()` 降级为 `RawText` 原样
 - 行内未闭合标记按行解析，行尾不闭合自然按原样文本输出（乐观降级，不重绘、不闪屏）
-- 工具调用时序：`OnToolStart`/`OnResponse` 回调链先冲洗缓冲行再交原回调，保证缓冲文本先于工具块/状态行上屏
-- `/md` 开关（默认开）+ 非 TTY/ask 单发路径走旁路：模型输出原样直出
+- 工具调用时序：`OnToolStart`/`OnResponse` 回调链先**结算缓冲**再交原回调——结算走 `Close()`（不只刷完整行），把流式响应滞留的**无 `\n` 尾行**输出为段落并闭合未完结块。若仅按行 flush，末行会滞留到下次写入/`Close()`，状态行与工具块抢先在正文尾行前上屏，把渲染内容从中间劈开；结算保证整条正文先于工具块/状态行输出
+- `/md` 开关（默认开）+ 非 TTY 路径走旁路：模型输出原样直出；`/history n|all` 回放的 assistant 正文走同一管线渲染（`mdEnabled` 判断 + 整段 `Write`/`Close` → `Renderer.Block`），消息头 `#N 角色` 因 `#` 与序号连写不构成 markdown 标题语法，单独构造 `Heading{Level:1}` IR 按标题渲染；user/tool 消息与工具参数永远原样（工具输出红线）
 
 ### 范围
 

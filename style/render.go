@@ -7,7 +7,8 @@ import (
 
 type Theme struct {
 	Headings    [6]Style
-	Code        Style
+	CodeBlock   Style
+	CodeInline  Style
 	QuotePrefix string
 	Bullet      string
 	Rule        string
@@ -23,7 +24,8 @@ func DefaultTheme() Theme {
 			{Fg: Color16(8)},
 			{Fg: Color16(8)},
 		},
-		Code:        Style{Fg: Color16(8)},
+		CodeBlock:   Style{Fg: Color16(8)},
+		CodeInline:  Style{Fg: Color16(10)},
 		QuotePrefix: "▌ ",
 		Bullet:      "• ",
 		Rule:        "────",
@@ -74,7 +76,7 @@ func (r Renderer) Inline(in ...Inline) string {
 				b.WriteString(resetSequence)
 				hasOpen = false
 			}
-			if seq := r.Prof.sgr(r.Theme.Code); seq != "" {
+			if seq := r.Prof.sgr(r.Theme.CodeInline); seq != "" {
 				b.WriteString(seq)
 				b.WriteString(n.Text)
 				b.WriteString(resetSequence)
@@ -108,7 +110,7 @@ func (r Renderer) Block(b Block) string {
 	case CodeBlock:
 		var b strings.Builder
 		for _, l := range n.Lines {
-			b.WriteString(r.Inline(r.Theme.Code.Text(l)))
+			b.WriteString(r.Inline(r.Theme.CodeBlock.Text(l)))
 			b.WriteString("\n")
 		}
 		return b.String()
