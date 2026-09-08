@@ -203,3 +203,27 @@ func TestRenderResponseInfoErrorPath(t *testing.T) {
 		t.Errorf("全空 info 应无输出: %q", got)
 	}
 }
+
+func TestRenderToolBlocksNoWrap(t *testing.T) {
+	long := `{"command":"go build ./... && go vet ./... && go test ./repl/ ./style/ ./readline/ ./agent/ -count=1 2>&1 | tail -40"}`
+	res := agent.ToolResult{Shell: &agent.ShellResult{
+		Stdout:   []agent.ShellChunk{{Data: strings.Repeat("输出内容宽字符测试", 30) + "\n"}},
+		Duration: 250 * time.Millisecond,
+		ExitCode: 0,
+	}}
+	for _, tc := range []struct {
+		name string
+		out  string
+	}{
+		{"start", RenderToolStart("run_shell", long, 80)},
+		{"end", RenderToolEnd("run_shell", long, res, 80, 20)},
+		{"inline", RenderToolEndInline("run_shell", long, res, 80, 20)},
+	} {
+		for _, l := range strings.Split(strings.TrimSuffix(tc.out, "\n"), "\n") {
+			l = strings.ReplaceAll(l, "\r", "")
+			if w := style.Width(l); w > 80 {
+				t.Errorf("%s 行宽 %d 超出终端 80 列，折行会导致 CursorUp 擦错行: %q", tc.name, w, l)
+			}
+		}
+	}
+}
