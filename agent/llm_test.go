@@ -61,6 +61,7 @@ func TestChatStreamReasoningEffort(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.BaseURL = srv.URL
 	cfg.APIKey = "test-key"
+	cfg.ApiProtocol = "chat"
 	cfg.ReasoningEffort = "max"
 	if _, err := NewClient(cfg).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 		t.Fatal(err)
@@ -76,6 +77,62 @@ func TestChatStreamReasoningEffort(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "reasoning_effort") {
 		t.Errorf("未设置时不应发送 reasoning_effort: %s", raw)
+	}
+}
+
+func rawChatServer(t *testing.T, raw *[]byte) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*raw, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestChatStripsReasoningItems(t *testing.T) {
+	var raw []byte
+	srv := rawChatServer(t, &raw)
+	cfg := defaultConfig()
+	cfg.BaseURL = srv.URL
+	cfg.APIKey = "test-key"
+	cfg.ApiProtocol = "chat"
+	history := []Message{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "ok", ReasoningItems: []ReasoningItem{{ID: "rs_1", Content: "想了一下"}}},
+		{Role: "user", Content: "next"},
+	}
+	if _, err := NewClient(cfg).ChatStream(context.Background(), history, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "reasoning_items") {
+		t.Errorf("chat 请求不应携带 reasoning_items: %s", raw)
+	}
+}
+
+func TestChatEffortOmitsTemperature(t *testing.T) {
+	var raw []byte
+	srv := rawChatServer(t, &raw)
+	cfg := defaultConfig()
+	cfg.BaseURL = srv.URL
+	cfg.APIKey = "test-key"
+	cfg.ApiProtocol = "chat"
+	cfg.ReasoningEffort = "high"
+	if _, err := NewClient(cfg).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"temperature"`) {
+		t.Errorf("设置 reasoning_effort 时不应发送 temperature: %s", raw)
+	}
+
+	raw = nil
+	cfg.ReasoningEffort = ""
+	if _, err := NewClient(cfg).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"temperature"`) {
+		t.Errorf("未设置时应发送 temperature: %s", raw)
 	}
 }
 

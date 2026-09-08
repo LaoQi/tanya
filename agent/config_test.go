@@ -16,6 +16,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.BaseURL == "" || cfg.Model == "" {
 		t.Error("默认值不应为空")
 	}
+	if cfg.ApiProtocol != "responses" {
+		t.Errorf("默认协议应为 responses: %q", cfg.ApiProtocol)
+	}
 	if cfg.Temperature != 0.7 {
 		t.Errorf("默认数值异常: %+v", cfg)
 	}
@@ -24,6 +27,35 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if cfg.UserAgent != DefaultUserAgent || !strings.HasPrefix(cfg.UserAgent, "pi/") {
 		t.Errorf("默认 UA 异常: %q", cfg.UserAgent)
+	}
+}
+
+func TestLoadConfigApiProtocol(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("api_protocol: chat\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ApiProtocol != "chat" {
+		t.Errorf("yaml api_protocol 未生效: %q", cfg.ApiProtocol)
+	}
+	t.Setenv("TANYA_API_PROTOCOL", "RESPONSES")
+	cfg, err = LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ApiProtocol != "responses" {
+		t.Errorf("env 应覆盖 yaml 并归一小写: %q", cfg.ApiProtocol)
+	}
+	t.Setenv("TANYA_API_PROTOCOL", "")
+	if err := os.WriteFile(path, []byte("api_protocol: bogus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "bogus") {
+		t.Errorf("非法 api_protocol 应报错: %v", err)
 	}
 }
 
@@ -180,6 +212,7 @@ func TestUserAgentHeader(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.BaseURL = srv.URL + "/v1"
 	cfg.APIKey = "test-key"
+	cfg.ApiProtocol = "chat"
 	c := NewClient(cfg)
 	if _, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 		t.Fatal(err)

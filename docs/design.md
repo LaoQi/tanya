@@ -28,13 +28,33 @@ readline/          package readline：自研终端输入层（editor / keys / te
 
 ## LLM 接入
 
-仅 OpenAI 兼容 Chat Completions API（`/chat/completions`，SSE 流式），一套代码兼容 OpenAI/DeepSeek/GLM/Ollama/vLLM。
+双协议并存，由 `api_protocol` 配置选择（默认 `responses`，env `TANYA_API_PROTOCOL` 可覆盖，非法值启动报错）：
 
-请求体固定字段：`model` / `messages` / `temperature` / `tools` / `stream` / `stream_options`；`reasoning_effort`（OpenAI 标准思考等级，minimal/low/medium/high/max）仅配置或 `/think` 设置后携带，`omitempty` 缺省不发送。厂商私有思考参数（GLM `thinking`、Qwen `enable_thinking` 等）不支持。
+### chat 协议（llm.go `chatStream`）
+
+OpenAI 兼容 Chat Completions API（`/chat/completions`，SSE 流式），一套代码兼容 OpenAI/DeepSeek/GLM/Ollama/vLLM。
+
+请求体固定字段：`model` / `messages` / `temperature` / `tools` / `stream` / `stream_options`；`reasoning_effort`（OpenAI 标准思考等级，minimal/low/medium/high/max）仅配置或 `/think` 设置后携带，`omitempty` 缺省不发送。设置 `reasoning_effort` 后 `temperature` 不发送（指针 + omitempty，兼容 o 系/gpt-5 仅支持 `temperature=1`），chat 与 responses 两协议一致。请求构造时剥离 `Message.ReasoningItems`（拷贝置空），思维链历史不上线 chat 端点。厂商私有思考参数（GLM `thinking`、Qwen `enable_thinking` 等）不支持。
 
 流式解析要点：`data:` 行逐条解析 JSON chunk；content 直接拼接并经回调输出；tool_calls 按 `index` 分组做增量合并（id/type/name 覆盖、arguments 拼接），`[DONE]` 结束。`stream_options.include_usage` 捕获 usage；首个 chunk 时刻记 TTFT、流结束记总耗时，存于 `Message.Stat`（`json:"-"` 不落盘）。
 
-`/models` 列表获取：GET `/models`，按 id 排序返回，供 `/model` 命令与补全。
+### responses 协议（llm_responses.go `responsesStream`）
+
+OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses API 标准为参照**（OpenAI 兼容但不完整遵守 OpenAI：不支持/不依赖 `include`、`encrypted_content`），切换核心动机是思维链保持：
+
+- **请求构造**：`messages[0]`(system) → 顶层 `instructions`；历史 `Message` 确定性映射为 input items——user/assistant 文本 → `message` item（content 分段 `input_text`/`output_text`）、assistant `tool_calls` → `function_call` item、tool 结果 → `function_call_output` item、assistant `ReasoningItems` → `reasoning` item（content 为明文 `reasoning_text`，输出在关联的 function_call/message 之前；`Content` 为空的 reasoning item 跳过不回传）。工具定义为内部 chat 嵌套形状，此处拍平为 `{type:"function",name,description,parameters}`。`reasoning_effort` → `reasoning.effort`；设置后 `temperature` 不发送（同 chat 协议）。
+- **固定参数**：`store: false`。不携带 `include` / `encrypted_content` / reasoning `summary`（DeepSeek 均不支持）。
+- **流式解析**：只解析 `data:` 行按 JSON `type` 分发。首个有效 data 事件记 TTFT（与 chat 协议对齐，纯 tool_call 响应也有 TTFT）；`response.output_text.delta` 驱动 onDelta 并置 `hasDelta`；最终 Message 以 `response.completed`（及 `response.incomplete`）事件的 `response.output[]` 终态构建——`message` 拼接 Content（收到过 text delta 则整体跳过，未收到才从 message items 拼接 output_text 补齐）、`function_call` → ToolCalls（call_id/args 整体取用）、`reasoning` → `ReasoningItems`（`id` + 明文 `content`，取终态 `reasoning_text` 原文拼接）。`response.failed`/`error` 事件返回错误。
+- **usage 映射**：`input_tokens`→PromptTokens、`output_tokens`→CompletionTokens、`input_tokens_details.cached_tokens`→`CacheHit()` 既有通道、`output_tokens_details.reasoning_tokens`→`Usage.ReasoningTokens`。
+- **404 提示**：第三方端点不支持时错误文案附带切换 `api_protocol: chat` 的指引。
+
+**思维链回传与缓存（实现红线）**：reasoning `content` 随会话 jsonl 明文持久化，后续请求**原样回传**（取 `response.completed` 终态、不做任何截断/改写/规范化），以维持 DeepSeek 前缀缓存命中——history 段逐字节稳定即可命中「用户输入结束/模型输出结束」位置的缓存前缀单元；会话经 `/load` 恢复后仅需同目录同环境（`envSection` 的 `CWD`/`SHELL`/`WORKSPACE` 实时探针不变）即可命中。jsonl 序列化 HTML 转义（`\u00xx`）只在磁盘表示，读回还原，不影响请求构造。
+
+### 协议无关约束
+
+- `Message` 为内部规范格式（含 `ReasoningItems`），会话 jsonl 直接持久化，旧会话（无 reasoning 字段）双协议均可回放
+- chat 协议忽略 `ReasoningItems`（无对应物，请求构造时剥离不上线），思维链能力为 responses 协议独有
+- `/models` 列表（GET `/models`）与协议无关，按 id 排序返回，供 `/model` 命令与补全
 
 ## Agent Loop
 

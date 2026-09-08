@@ -15,6 +15,8 @@ const (
 	MsgModelList   = "解析模型列表失败: %w"
 	MsgReadStream  = "读取流失败: %w"
 	MsgConfigParse = "配置文件解析失败 %s: %w"
+	MsgRespFailed  = "API 响应失败: %s"
+	MsgRespHint404 = "端点可能不支持 responses 协议，可在配置中设置 api_protocol: chat"
 )
 
 const (
@@ -22,6 +24,7 @@ const (
 	MsgSessionGone      = "会话不存在: %s"
 	MsgShellUnavailable = "run_shell 不可用（未找到可执行 shell）"
 	MsgBadEffort        = "无效思考等级 %q（可选: minimal/low/medium/high/max/off）"
+	MsgBadApiProtocol   = "无效 api_protocol %q（可选: chat/responses）"
 )
 
 const (
