@@ -48,7 +48,7 @@ var schemeList = []Scheme{
 	{
 		Name:   "minimal",
 		Desc:   "克制灰阶，层级靠粗细",
-		Prompt: "[white bold]{cwd}[/] [white]{model}[/] [bright_black]{effort}[/] [bright_green]{stat}[/] [bright_black]>[/] ",
+		Prompt: "[white bold]{cwd}[/] [white]{model}[/] [bright_black]{effort}[/] [bright_green]{stat}[/] [white]>[/] ",
 		Sem: Semantics{
 			Dim:    fg(8),
 			Info:   fg(7),
@@ -62,7 +62,7 @@ var schemeList = []Scheme{
 	{
 		Name:   "solar",
 		Desc:   "冷暖青金，低饱和护眼",
-		Prompt: "[cyan]{cwd}[/] [white]{model}[/] [yellow]{effort}[/] [bright_green]{stat}[/] [cyan]>[/] ",
+		Prompt: "[cyan]{cwd}[/] [white]{model}[/] [yellow]{effort}[/] [bright_green]{stat}[/] [white]>[/] ",
 		Sem: Semantics{
 			Dim:    fg(8),
 			Info:   fg(6),
@@ -76,7 +76,7 @@ var schemeList = []Scheme{
 	{
 		Name:   "vivid",
 		Desc:   "高对比霓虹",
-		Prompt: "[bright_blue]{cwd}[/] [bright_white]{model}[/] [bright_yellow]{effort}[/] [bright_green]{stat}[/] [bright_black]>[/] ",
+		Prompt: "[bright_blue]{cwd}[/] [bright_white]{model}[/] [bright_yellow]{effort}[/] [bright_green]{stat}[/] [white]>[/] ",
 		Sem: Semantics{
 			Dim:    fg(8),
 			Info:   fg(14),
@@ -90,7 +90,7 @@ var schemeList = []Scheme{
 	{
 		Name:   "nord",
 		Desc:   "冷蓝灰（北极）",
-		Prompt: "[bright_cyan]{cwd}[/] [white]{model}[/] [bright_blue]{effort}[/] [bright_green]{stat}[/] [bright_black]>[/] ",
+		Prompt: "[bright_cyan]{cwd}[/] [white]{model}[/] [bright_blue]{effort}[/] [bright_green]{stat}[/] [white]>[/] ",
 		Sem: Semantics{
 			Dim:    fg(8),
 			Info:   fg(12),
@@ -104,7 +104,7 @@ var schemeList = []Scheme{
 	{
 		Name:   "gruv",
 		Desc:   "暖金复古（Gruvbox 精神）",
-		Prompt: "[bright_yellow]{cwd}[/] [white]{model}[/] [yellow]{effort}[/] [bright_green]{stat}[/] [bright_black]>[/] ",
+		Prompt: "[bright_yellow]{cwd}[/] [white]{model}[/] [yellow]{effort}[/] [bright_green]{stat}[/] [white]>[/] ",
 		Sem: Semantics{
 			Dim:    fg(8),
 			Info:   fg(3),
@@ -118,7 +118,7 @@ var schemeList = []Scheme{
 	{
 		Name:   "dusk",
 		Desc:   "蓝紫夜（Tokyo Night 精神）",
-		Prompt: "[bright_magenta]{cwd}[/] [white]{model}[/] [bright_cyan]{effort}[/] [bright_green]{stat}[/] [bright_black]>[/] ",
+		Prompt: "[bright_magenta]{cwd}[/] [white]{model}[/] [bright_cyan]{effort}[/] [bright_green]{stat}[/] [white]>[/] ",
 		Sem: Semantics{
 			Dim:    fg(8),
 			Info:   fg(12),
