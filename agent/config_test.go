@@ -272,3 +272,21 @@ func TestToolOutputLines(t *testing.T) {
 		t.Errorf("env 覆盖失败: %d", cfg.ToolOutputLines)
 	}
 }
+
+func TestLoadConfigStyle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := "colors: off\npalette:\n  info: bright_red\n  error: green\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Colors != "off" {
+		t.Errorf("colors 解析失败: %q", cfg.Colors)
+	}
+	if cfg.Palette["info"] != "bright_red" || cfg.Palette["error"] != "green" {
+		t.Errorf("palette 解析失败: %v", cfg.Palette)
+	}
+}

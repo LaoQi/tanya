@@ -11,17 +11,19 @@ import (
 )
 
 type Config struct {
-	BaseURL         string  `yaml:"base_url"`
-	APIKey          string  `yaml:"api_key"`
-	Model           string  `yaml:"model"`
-	Temperature     float64 `yaml:"temperature"`
-	ReasoningEffort string  `yaml:"reasoning_effort"`
-	ApiProtocol     string  `yaml:"api_protocol"`
-	UserAgent       string  `yaml:"user_agent"`
-	GlobalSession   string  `yaml:"global_session"`
-	SessionMode     string  `yaml:"session_mode"`
-	ToolOutputLines int     `yaml:"tool_output_lines"`
-	Shell           string  `yaml:"shell"`
+	BaseURL         string            `yaml:"base_url"`
+	APIKey          string            `yaml:"api_key"`
+	Model           string            `yaml:"model"`
+	Temperature     float64           `yaml:"temperature"`
+	ReasoningEffort string            `yaml:"reasoning_effort"`
+	ApiProtocol     string            `yaml:"api_protocol"`
+	UserAgent       string            `yaml:"user_agent"`
+	GlobalSession   string            `yaml:"global_session"`
+	SessionMode     string            `yaml:"session_mode"`
+	ToolOutputLines int               `yaml:"tool_output_lines"`
+	Shell           string            `yaml:"shell"`
+	Colors          string            `yaml:"colors"`
+	Palette         map[string]string `yaml:"palette"`
 }
 
 var EffortLevels = []string{"minimal", "low", "medium", "high", "max"}
@@ -48,7 +50,7 @@ func normalizeApiProtocol(v string) string {
 	return ""
 }
 
-const DefaultPrompt = "\x1b[37m{cwd}\x1b[0m \x1b[34m{model}\x1b[0m \x1b[33m{effort}\x1b[0m \x1b[32m{stat}\x1b[0m \x1b[37m>\x1b[0m "
+const DefaultPrompt = "[white]{cwd}[/] [blue]{model}[/] [yellow]{effort}[/] [green]{stat}[/] [white]>[/] "
 
 const DefaultUserAgent = "pi/0.85.0 (linux; node/v22.14.0; x64)"
 

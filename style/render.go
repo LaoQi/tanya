@@ -8,13 +8,24 @@ type Renderer struct {
 
 func (r Renderer) Inline(in ...Inline) string {
 	var b strings.Builder
+	var open Style
+	hasOpen := false
 	for _, i := range in {
 		switch n := i.(type) {
 		case Span:
+			if hasOpen && n.Style == open {
+				b.WriteString(n.Text)
+				continue
+			}
+			if hasOpen {
+				b.WriteString(resetSequence)
+				hasOpen = false
+			}
 			if seq := r.Prof.sgr(n.Style); seq != "" {
 				b.WriteString(seq)
 				b.WriteString(n.Text)
-				b.WriteString(resetSequence)
+				open = n.Style
+				hasOpen = true
 			} else {
 				b.WriteString(n.Text)
 			}
@@ -23,6 +34,9 @@ func (r Renderer) Inline(in ...Inline) string {
 		case SoftBreak:
 			b.WriteString("\n")
 		}
+	}
+	if hasOpen {
+		b.WriteString(resetSequence)
 	}
 	return b.String()
 }

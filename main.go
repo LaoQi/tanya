@@ -15,13 +15,23 @@ func main() {
 	configPath := flag.String("c", "", repl.FlagConfig)
 	sessionMode := flag.String("m", "", repl.FlagMode)
 	flag.Parse()
-	style.SetProfile(style.DetectProfile(repl.ToolTTY()))
 
 	cfg, err := agent.LoadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
+	style.ApplyPalette(cfg.Palette)
+	prof := style.DetectProfile(repl.ToolTTY())
+	switch cfg.Colors {
+	case "on":
+		if prof.Colors == style.LevelNone {
+			prof.Colors = style.Level16
+		}
+	case "off":
+		prof.Colors = style.LevelNone
+	}
+	style.SetProfile(prof)
 	if *sessionMode != "" {
 		cfg.SessionMode = *sessionMode
 	}

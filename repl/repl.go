@@ -13,6 +13,7 @@ import (
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
+	"github.com/LaoQi/tanyan/style"
 )
 
 type REPL struct {
@@ -21,6 +22,7 @@ type REPL struct {
 	term      readline.Terminal
 	raw       bool
 	promptTpl string
+	prompt    style.Template
 	onDelta   func(string)
 }
 
@@ -33,23 +35,37 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 	if promptTpl == "" {
 		promptTpl = agent.DefaultPrompt
 	}
-	r := &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl, onDelta: func(s string) { fmt.Print(s) }}
+	tpl, err := style.ParseTemplate(promptTpl)
+	if err != nil {
+		return nil, err
+	}
+	r := &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl, prompt: tpl, onDelta: func(s string) { fmt.Print(s) }}
 	if a != nil {
 		r.onDelta = WireToolView(a, func() int { return toolWidth(term) }, a.ToolOutputLines())
 	}
 	return r, nil
 }
 
-func renderPrompt(tpl, cwd, model, effort, usage, cache, cacheRate, stat string) string {
-	return strings.NewReplacer(
-		"{cwd}", cwd,
-		"{model}", model,
-		"{effort}", effort,
-		"{usage}", usage,
-		"{cache}", cache,
-		"{cache_rate}", cacheRate,
-		"{stat}", stat,
-	).Replace(tpl)
+func (r *REPL) resolveVars() func(string) (string, bool) {
+	return func(name string) (string, bool) {
+		switch name {
+		case "cwd":
+			return shortCwd(), true
+		case "model":
+			return r.agent.Model(), true
+		case "effort":
+			return r.agent.ReasoningEffort(), true
+		case "usage":
+			return r.agent.PromptUsage(), true
+		case "cache":
+			return r.agent.PromptCache(), true
+		case "cache_rate":
+			return r.agent.PromptCacheRate(), true
+		case "stat":
+			return r.agent.PromptSummary(), true
+		}
+		return "", false
+	}
 }
 
 func (r *REPL) Close() {}
@@ -57,7 +73,7 @@ func (r *REPL) Close() {}
 func (r *REPL) Run() error {
 	fmt.Print(welcomText)
 	for {
-		prompt := renderPrompt(r.promptTpl, shortCwd(), r.agent.Model(), r.agent.ReasoningEffort(), r.agent.PromptUsage(), r.agent.PromptCache(), r.agent.PromptCacheRate(), r.agent.PromptSummary())
+		prompt := r.prompt.Render(r.resolveVars())
 		line, err := r.ed.Readline(prompt)
 		if err == readline.ErrInterrupt {
 			continue

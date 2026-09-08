@@ -1,6 +1,6 @@
 # 富文本渲染管线方案
 
-> 状态：**设计定稿，暂不实施**（等待排期）。目标：为 tanyan 建立统一的富文本中间表示（IR）与渲染管线，收敛现散落各处的颜色/终端控制代码，支撑后续 Markdown 输出染色与跨终端（Windows Terminal 等）渲染。
+> 状态：**分阶段实施中**——阶段 1（style 包骨架与存量收编）、阶段 2（markup 模板与 palette 配置）已实施；阶段 3（markdown 管线）、阶段 4（远期可选项）待排期。参考项目对比分析见 `docs/render-refs-compare.md`（持续补录）。目标：为 tanyan 建立统一的富文本中间表示（IR）与渲染管线，收敛现散落各处的颜色/终端控制代码，支撑后续 Markdown 输出染色与跨终端（Windows Terminal 等）渲染。
 > 决策背景（备选方案对比与取舍过程）见文末附录。参考项目对比分析见 `docs/render-refs-compare.md`（持续补录）。
 
 ## 1. 背景与问题

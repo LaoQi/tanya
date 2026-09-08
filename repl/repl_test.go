@@ -7,33 +7,58 @@ import (
 	"testing"
 
 	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanyan/style"
 )
 
+func promptRender(t *testing.T, tpl string, vars map[string]string) string {
+	t.Helper()
+	tpl2, err := style.ParseTemplate(tpl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tpl2.Render(func(name string) (string, bool) {
+		v, ok := vars[name]
+		return v, ok
+	})
+}
+
 func TestRenderPrompt(t *testing.T) {
-	got := renderPrompt("{cwd} {model} {effort} {usage} {cache} {cache_rate} {stat} →", "~/p/t", "m1", "high", "123", "980", "81.67%", "980/12.3k 81.67%")
+	got := promptRender(t, "{cwd} {model} {effort} {usage} {cache} {cache_rate} {stat} →", map[string]string{
+		"cwd": "~/p/t", "model": "m1", "effort": "high", "usage": "123",
+		"cache": "980", "cache_rate": "81.67%", "stat": "980/12.3k 81.67%",
+	})
 	if got != "~/p/t m1 high 123 980 81.67% 980/12.3k 81.67% →" {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestRenderPromptCacheEmpty(t *testing.T) {
-	got := renderPrompt("{usage}|{cache}|{cache_rate}|{stat}", "p", "m", "", "1", "", "", "")
+	got := promptRender(t, "{usage}|{cache}|{cache_rate}|{stat}", map[string]string{
+		"usage": "1", "cache": "", "cache_rate": "", "stat": "",
+	})
 	if got != "1|||" {
 		t.Errorf("无缓存数据 {cache} 应渲染为空: %q", got)
 	}
 }
 
 func TestRenderPromptUnknownKept(t *testing.T) {
-	got := renderPrompt("{cwd} {date}", "p", "m", "", "1", "", "", "")
+	got := promptRender(t, "{cwd} {date}", map[string]string{"cwd": "p"})
 	if !strings.Contains(got, "{date}") {
 		t.Errorf("未知占位符应保留原样: %q", got)
 	}
 }
 
 func TestRenderPromptEffortEmpty(t *testing.T) {
-	got := renderPrompt("{model}[{effort}]", "p", "m", "", "1", "", "", "")
+	got := promptRender(t, "{model}[{effort}]", map[string]string{"model": "m", "effort": ""})
 	if got != "m[]" {
 		t.Errorf("未设置思考等级时 {effort} 应渲染为空: %q", got)
+	}
+}
+
+func TestRenderPromptMarkupColored(t *testing.T) {
+	got := promptRender(t, "[white]{cwd}[/] [green]{stat}[/]", map[string]string{"cwd": "/p", "stat": "ok"})
+	if got != "\x1b[37m/p\x1b[0m \x1b[32mok\x1b[0m" {
+		t.Errorf("markup 模板上色: %q", got)
 	}
 }
 
