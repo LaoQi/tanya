@@ -181,8 +181,7 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 	case KeyCtrlT:
 		e.transpose()
 	case KeyCtrlL:
-		fmt.Fprint(e.out, "\x1b[2J\x1b[H")
-		e.cursorRow = 0
+		e.clearKeepHistory()
 	case KeyAltB:
 		e.pos = e.wordBack(e.pos)
 	case KeyAltF:
@@ -218,6 +217,23 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 	e.refreshGhost()
 	e.render("")
 	return false, "", nil
+}
+
+func (e *Editor) clearKeepHistory() {
+	size, ok := e.term.Size()
+	if !ok || size.Rows < 1 {
+		fmt.Fprint(e.out, "\x1b[2J\x1b[H")
+		e.cursorRow = 0
+		return
+	}
+	var b strings.Builder
+	b.WriteString(strings.Repeat("\n", size.Rows*2))
+	b.WriteString("\r")
+	if size.Rows > 1 {
+		b.WriteString("\x1b[" + strconv.Itoa(size.Rows-1) + "A")
+	}
+	fmt.Fprint(e.out, b.String())
+	e.cursorRow = 0
 }
 
 func (e *Editor) refreshGhost() {

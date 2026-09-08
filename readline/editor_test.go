@@ -216,8 +216,12 @@ func TestEditorCtrlBFAndCtrlL(t *testing.T) {
 	if _, err := ed.Readline("> "); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "\x1b[2J\x1b[H") {
-		t.Errorf("Ctrl+L 应清屏: %q", out.String())
+	o := out.String()
+	if !strings.Contains(o, strings.Repeat("\n", 48)) || !strings.Contains(o, "\x1b[23A") {
+		t.Errorf("Ctrl+L 应推屏保历史（48 换行+上移 23 行）: %q", o)
+	}
+	if strings.Contains(o, "\x1b[2J") {
+		t.Errorf("Ctrl+L 不应擦屏: %q", o)
 	}
 }
 
