@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/LaoQi/tanyan/style"
 )
 
 var ErrInterrupt = errors.New("interrupted")
@@ -274,9 +276,9 @@ func (e *Editor) menuLines(cols int) []string {
 	for i := start; i < end; i++ {
 		item := "  " + e.menu[i].display()
 		if i == e.menuIdx {
-			item = "  \x1b[7m" + e.menu[i].display() + "\x1b[0m"
+			item = "  " + style.Accent.Sprint(e.menu[i].display())
 		}
-		out = append(out, Truncate(item, cols))
+		out = append(out, truncate(item, cols))
 	}
 	return out
 }
@@ -367,7 +369,7 @@ func (e *Editor) histNext() {
 func (e *Editor) render(extra string) {
 	line := e.prompt + string(e.buf)
 	if e.ghost != "" && e.pos == len(e.buf) {
-		line += "\x1b[90m" + e.ghost + "\x1b[0m"
+		line += style.Dim.Sprint(e.ghost)
 	}
 	cur := stringWidth(stripANSI(e.prompt)) + stringWidth(string(e.buf[:e.pos]))
 	size, ok := e.term.Size()

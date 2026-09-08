@@ -10,28 +10,13 @@ import (
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
+	"github.com/LaoQi/tanyan/style"
 )
 
 const (
 	toolHeadLines = 3
 	toolTailLines = 2
-
-	ansiDim    = "\x1b[90m"
-	ansiOrange = "\x1b[33m"
-	ansiInfo   = "\x1b[94m"
-	ansiReset  = "\x1b[0m"
 )
-
-func tint(s, code string, tty bool) string {
-	if !tty {
-		return s
-	}
-	return code + s + ansiReset
-}
-
-func dim(s string, tty bool) string {
-	return tint(s, ansiDim, tty)
-}
 
 type tagLine struct {
 	text   string
@@ -48,7 +33,7 @@ func toolWidth(term readline.Terminal) int {
 }
 
 func RenderToolStart(name, args string, width int) string {
-	return fmt.Sprintf("\n▸ %s %s ⋯\n", name, readline.Truncate(toolArgsDisplay(name, args), width))
+	return fmt.Sprintf("\n▸ %s %s ⋯\n", name, style.Truncate(toolArgsDisplay(name, args), width))
 }
 
 func toolEndTitle(name, args string, res agent.ToolResult) string {
@@ -59,7 +44,7 @@ func toolEndTitle(name, args string, res agent.ToolResult) string {
 	return title
 }
 
-func toolEndBody(res agent.ToolResult, width, maxLines int, tty bool) string {
+func toolEndBody(res agent.ToolResult, width, maxLines int) string {
 	var b strings.Builder
 	var lines []string
 	status := ""
@@ -82,21 +67,17 @@ func toolEndBody(res agent.ToolResult, width, maxLines int, tty bool) string {
 		b.WriteString("  " + l + "\n")
 	}
 	if status != "" {
-		if tty {
-			b.WriteString("\x1b[94m  ↳ " + status + "\x1b[0m\n")
-		} else {
-			b.WriteString("  ↳ " + status + "\n")
-		}
+		b.WriteString(style.Info.Sprint("  ↳ "+status) + "\n")
 	}
 	return b.String()
 }
 
-func RenderToolEnd(name, args string, res agent.ToolResult, width, maxLines int, tty bool) string {
-	return "\n▸ " + readline.Truncate(toolEndTitle(name, args, res), width) + "\n" + toolEndBody(res, width, maxLines, tty)
+func RenderToolEnd(name, args string, res agent.ToolResult, width, maxLines int) string {
+	return "\n▸ " + style.Truncate(toolEndTitle(name, args, res), width) + "\n" + toolEndBody(res, width, maxLines)
 }
 
-func RenderToolEndInline(name, args string, res agent.ToolResult, width, maxLines int, tty bool) string {
-	return "\x1b[1A\r\x1b[K▸ " + readline.Truncate(toolEndTitle(name, args, res), width) + "\n" + toolEndBody(res, width, maxLines, tty)
+func RenderToolEndInline(name, args string, res agent.ToolResult, width, maxLines int) string {
+	return style.CursorUp(1) + style.ClearLineHome() + "▸ " + style.Truncate(toolEndTitle(name, args, res), width) + "\n" + toolEndBody(res, width, maxLines)
 }
 
 func RenderResponseInfo(info agent.ResponseInfo, width int) string {
@@ -122,7 +103,7 @@ func RenderResponseInfo(info agent.ResponseInfo, width int) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return "  ↳ " + readline.Truncate(strings.Join(parts, " · "), width-4) + "\n"
+	return "  ↳ " + style.Truncate(strings.Join(parts, " · "), width-4) + "\n"
 }
 
 func respDuration(d time.Duration) string {
@@ -179,7 +160,7 @@ func shellView(r *agent.ShellResult, width, maxLines int) ([]string, string, int
 		if t.stderr {
 			s = "2| " + s
 		}
-		lines = append(lines, readline.Truncate(s, width))
+		lines = append(lines, style.Truncate(s, width))
 	}
 	return lines, shellStatus(r), total, trunc
 }
@@ -223,7 +204,7 @@ func textView(text string, width, maxLines int) ([]string, string) {
 	}
 	out := make([]string, len(view))
 	for i, l := range view {
-		out[i] = readline.Truncate(l, width)
+		out[i] = style.Truncate(l, width)
 	}
 	if trunc {
 		return out, fmt.Sprintf(MsgLinesTotal, len(lines))
@@ -231,14 +212,14 @@ func textView(text string, width, maxLines int) ([]string, string) {
 	return out, ""
 }
 
-func WireToolView(a *agent.Agent, width func() int, maxLines int, tty bool) func(string) {
+func WireToolView(a *agent.Agent, width func() int, maxLines int) func(string) {
 	var mu sync.Mutex
-	sp := newSpinner(&mu, tty)
+	sp := newSpinner(&mu, style.GetProfile().TTY)
 	toolJustEnded := false
 	lineDirty := false
 	a.OnRequestStart = func() {
 		sp.start(func(elapsed time.Duration, frame string) string {
-			return ansiOrange + fmt.Sprintf(SpinWaiting, frame, spinElapsed(elapsed)) + ansiReset
+			return style.Warn.Sprint(fmt.Sprintf(SpinWaiting, frame, spinElapsed(elapsed)))
 		})
 	}
 	a.OnResponse = func(info agent.ResponseInfo) {
@@ -248,26 +229,26 @@ func WireToolView(a *agent.Agent, width func() int, maxLines int, tty bool) func
 			fmt.Println()
 			lineDirty = false
 		}
-		fmt.Print(tint(RenderResponseInfo(info, width()), ansiInfo, tty))
+		fmt.Print(style.Info.Sprint(RenderResponseInfo(info, width())))
 		mu.Unlock()
 	}
 	a.OnToolStart = func(name, args string) {
 		sp.stop()
 		mu.Lock()
-		fmt.Print(dim(RenderToolStart(name, args, width()), tty))
+		fmt.Print(style.Dim.Sprint(RenderToolStart(name, args, width())))
 		mu.Unlock()
 		lineDirty = false
 		sp.start(func(elapsed time.Duration, frame string) string {
-			return ansiOrange + fmt.Sprintf(SpinRunning, frame, spinElapsed(elapsed)) + ansiReset
+			return style.Warn.Sprint(fmt.Sprintf(SpinRunning, frame, spinElapsed(elapsed)))
 		})
 	}
 	a.OnToolEnd = func(name, args string, res agent.ToolResult) {
 		sp.stop()
 		mu.Lock()
-		if tty {
-			fmt.Print(dim(RenderToolEndInline(name, args, res, width(), maxLines, true), true))
+		if style.GetProfile().TTY {
+			fmt.Print(style.Dim.Sprint(RenderToolEndInline(name, args, res, width(), maxLines)))
 		} else {
-			fmt.Print(RenderToolEnd(name, args, res, width(), maxLines, false))
+			fmt.Print(RenderToolEnd(name, args, res, width(), maxLines))
 		}
 		mu.Unlock()
 		toolJustEnded = true

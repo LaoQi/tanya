@@ -6,6 +6,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/LaoQi/tanyan/style"
 )
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -47,7 +49,7 @@ func (s *spinner) loop(start time.Time, render spinRender) {
 	frame := 0
 	for {
 		s.mu.Lock()
-		fmt.Fprint(s.out, "\r\x1b[K"+render(time.Since(start), spinnerFrames[frame%len(spinnerFrames)]))
+		fmt.Fprint(s.out, style.ClearLineHome()+render(time.Since(start), spinnerFrames[frame%len(spinnerFrames)]))
 		s.mu.Unlock()
 		frame++
 		select {
@@ -72,7 +74,7 @@ func (s *spinner) stop() {
 	s.active = false
 	if clean {
 		s.mu.Lock()
-		fmt.Fprint(s.out, "\r\x1b[K")
+		fmt.Fprint(s.out, style.ClearLineHome())
 		s.mu.Unlock()
 	}
 }

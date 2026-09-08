@@ -7,6 +7,7 @@ import (
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
+	"github.com/LaoQi/tanyan/style"
 )
 
 type sessionPicker struct {
@@ -41,15 +42,15 @@ func (p *sessionPicker) handle(ev readline.KeyEvent) {
 
 func (p *sessionPicker) render(out io.Writer, first bool) {
 	if !first && len(p.items) > 0 {
-		fmt.Fprintf(out, "\x1b[%dA", len(p.items)+1)
+		fmt.Fprint(out, style.CursorUp(len(p.items)+1))
 	}
-	fmt.Fprint(out, PickTitle)
+	fmt.Fprint(out, style.ClearLineHome()+PickTitle)
 	for i, s := range p.items {
 		mark := MsgMarkPlain
 		if i == p.cursor {
-			mark = "\x1b[32m> \x1b[0m"
+			mark = style.Ok.Sprint("> ")
 		}
-		fmt.Fprintf(out, "\r\x1b[K"+SessRow+"\x1b[K\r\n",
+		fmt.Fprintf(out, style.ClearLineHome()+SessRow+style.ClearLine()+"\r\n",
 			mark, s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary)
 	}
 }
