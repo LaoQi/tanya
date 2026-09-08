@@ -70,8 +70,7 @@ const (
 const helpText = `斜杠命令：
   /help            显示帮助
   /new             开启新会话（当前会话自动保存）
-  /sessions        列出历史会话
-  /load <id>       载入历史会话
+  /load [id]       无参打开会话选择菜单；带 id 直接载入
   /context         显示上下文占用
   /history [n|all] 无参截断列表；n 全量查看单条；all 全量显示
   /model [name]    无参显示当前模型；带名切换模型

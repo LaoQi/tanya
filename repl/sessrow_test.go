@@ -62,25 +62,12 @@ func TestPickByNumberOutput(t *testing.T) {
 	}
 }
 
-func TestHandleCommandSessionsAndExit(t *testing.T) {
-	dir := t.TempDir()
-	seed := `{"role":"user","content":"第一条"}` + "\n"
-	a := newSessTestAgent(t, dir)
-	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", seed)
-	sessions, err := a.ListSessions()
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestHandleCommandExit(t *testing.T) {
+	a := newSessTestAgent(t, t.TempDir())
 	r := &REPL{agent: a}
 
-	out := captureStdout(func() { r.handleCommand("/sessions") })
-	want := "20260101-100000  " + sessions[0].ModTime.Format("01-02 15:04") + "    1条  第一条\n"
-	if out != want {
-		t.Errorf("sessions: got %q want %q", out, want)
-	}
-
 	exit := false
-	out = captureStdout(func() { exit = r.handleCommand("/exit") })
+	out := captureStdout(func() { exit = r.handleCommand("/exit") })
 	if !exit || out != "再见\n" {
 		t.Errorf("exit: ret=%v out=%q want %q", exit, out, "再见\n")
 	}
