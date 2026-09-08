@@ -171,13 +171,16 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `temperature` | 0.7 | |
 | `reasoning_effort` | 空 | 思考等级 minimal/low/medium/high/max，非法值忽略；空则请求不带 `reasoning_effort` 字段 |
 | `colors` | `auto` | 终端配色 auto（跟随终端能力与 `NO_COLOR`）/ on（强制开色）/ off（强制纯文本） |
-| `palette` | 空 | 语义色覆盖（info/warn/ok/error/dim/accent → 色名），仅影响 UI 配色不影响提示符 |
+| `theme` | `nord` | 内置配色主题（语义色/提示符/markdown 标题与代码整体切换）：default/minimal/solar/vivid/nord/gruv/dusk，非法值启动报错 |
+| `palette` | 空 | 语义色覆盖（info/warn/ok/error/dim/accent → 色名），叠加在当前主题之上（切换主题后自动重放） |
 | `user_agent` | `pi/0.85.0 (...)` | 出站 UA 伪装 |
 | `global_session` | `~/.local/share/tanyan/sessions` | global 模式会话基础目录，支持 `~` 展开 |
 | `session_mode` | `auto` | 会话存储模式 auto/local/global |
 | `tool_output_lines` | 20 | 工具输出最多显示行数（1-1000） |
 
-env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES`。
+env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_SESSION_MODE` / `TANYA_THEME` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES`。
+
+配色主题：`style/theme.go` 内置 `Scheme` 聚合（语义色 + 提示符模板 + markdown `Theme`），`ApplyScheme` 更新全局语义色并叠加用户 `palette` 覆盖；REPL `/theme [name]` 切换后提示符与渲染器即时重建，默认启动主题取 `theme` 配置。`DefaultPrompt` 常量归属 style 包（default 主题提示符），`agent.DefaultPrompt` 仅为兼容引用。
 
 ## 测试
 

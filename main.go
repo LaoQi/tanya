@@ -21,6 +21,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
+	style.ApplyScheme(cfg.Theme)
 	style.ApplyPalette(cfg.Palette)
 	prof := style.DetectProfile(repl.ToolTTY())
 	switch cfg.Colors {
@@ -60,7 +61,7 @@ func main() {
 		return
 	}
 
-	r, err := repl.NewREPL(a, agent.DefaultPrompt)
+	r, err := repl.NewREPL(a, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)

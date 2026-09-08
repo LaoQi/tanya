@@ -6,9 +6,10 @@ import (
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
+	"github.com/LaoQi/tanyan/style"
 )
 
-var slashCommands = []string{"/help", "/new", "/sessions", "/load", "/context", "/history", "/model", "/think", "/md", "/exit"}
+var slashCommands = []string{"/help", "/new", "/sessions", "/load", "/context", "/history", "/model", "/think", "/theme", "/md", "/exit"}
 
 var effortCandidates = func() []string {
 	out := make([]string, 0, len(agent.EffortLevels)+1)
@@ -40,6 +41,14 @@ func (c *completer) isModelContext(line string) bool {
 		return false
 	}
 	prefix := strings.TrimPrefix(line, "/model ")
+	return !strings.Contains(prefix, " ")
+}
+
+func (c *completer) isThemeContext(line string) bool {
+	if !strings.HasPrefix(line, "/theme ") {
+		return false
+	}
+	prefix := strings.TrimPrefix(line, "/theme ")
 	return !strings.Contains(prefix, " ")
 }
 
@@ -93,6 +102,13 @@ func (c *completer) suggest(line string) string {
 				return e[len(prefix):]
 			}
 		}
+	case c.isThemeContext(line):
+		prefix := strings.TrimPrefix(line, "/theme ")
+		for _, n := range style.SchemeNames() {
+			if strings.HasPrefix(n, prefix) && n != prefix {
+				return n[len(prefix):]
+			}
+		}
 	}
 	return ""
 }
@@ -134,6 +150,15 @@ func (c *completer) complete(line string) []readline.Completion {
 		for _, e := range effortCandidates {
 			if strings.HasPrefix(e, prefix) {
 				out = append(out, readline.Completion{Insert: "/think " + e, Display: e})
+			}
+		}
+		return out
+	case c.isThemeContext(line):
+		prefix := strings.TrimPrefix(line, "/theme ")
+		var out []readline.Completion
+		for _, n := range style.SchemeNames() {
+			if strings.HasPrefix(n, prefix) {
+				out = append(out, readline.Completion{Insert: "/theme " + n, Display: n})
 			}
 		}
 		return out

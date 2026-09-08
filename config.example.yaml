@@ -19,7 +19,11 @@ session_mode: auto
 
 # 终端配色：auto（默认，跟随终端能力与 NO_COLOR）/ on（强制开色）/ off（强制纯文本）
 # colors: auto
-# 语义色覆盖：仅影响状态行/等待动画/菜单选中等 UI 色，提示符内置配色不受影响
+# 内置配色主题（影响语义色/提示符/markdown 标题与代码色，REPL 内 /theme 可切换）：
+# default 默认（蓝绿黄高亮） / minimal 克制灰阶 / solar 冷暖青金（低饱和护眼） / vivid 高对比霓虹
+# / nord 冷蓝灰 / gruv 暖金复古 / dusk 蓝紫夜
+# theme: nord
+# 语义色覆盖：叠加在当前主题之上（仅影响状态行/等待动画/菜单选中等 UI 色，提示符随主题不受影响）
 # 可用色名：black red green yellow blue magenta cyan white 与 bright_ 前缀亮色
 # palette:
 #   info: bright_cyan

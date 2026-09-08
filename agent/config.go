@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/LaoQi/tanyan/style"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,6 +24,7 @@ type Config struct {
 	ToolOutputLines int               `yaml:"tool_output_lines"`
 	Shell           string            `yaml:"shell"`
 	Colors          string            `yaml:"colors"`
+	Theme           string            `yaml:"theme"`
 	Palette         map[string]string `yaml:"palette"`
 }
 
@@ -50,7 +52,7 @@ func normalizeApiProtocol(v string) string {
 	return ""
 }
 
-const DefaultPrompt = "[white]{cwd}[/] [blue]{model}[/] [yellow]{effort}[/] [green]{stat}[/] [white]>[/] "
+var DefaultPrompt = style.DefaultPrompt
 
 const DefaultUserAgent = "pi/0.85.0 (linux; node/v22.14.0; x64)"
 
@@ -61,6 +63,7 @@ func defaultConfig() *Config {
 		Model:           "deepseek-v4-flash",
 		Temperature:     0.7,
 		ApiProtocol:     "responses",
+		Theme:           "nord",
 		UserAgent:       DefaultUserAgent,
 		GlobalSession:   filepath.Join(home, ".local", "share", "tanyan", "sessions"),
 		ToolOutputLines: 20,
@@ -106,6 +109,9 @@ func LoadConfig(path string) (*Config, error) {
 	if v := os.Getenv("TANYA_SESSION_MODE"); v != "" {
 		cfg.SessionMode = v
 	}
+	if v := os.Getenv("TANYA_THEME"); v != "" {
+		cfg.Theme = v
+	}
 	if v := os.Getenv("TANYA_USER_AGENT"); v != "" {
 		cfg.UserAgent = v
 	}
@@ -128,6 +134,9 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.ApiProtocol = normalizeApiProtocol(cfg.ApiProtocol)
 	if cfg.ApiProtocol == "" {
 		return nil, fmt.Errorf(MsgBadApiProtocol, rawProtocol)
+	}
+	if !style.HasScheme(cfg.Theme) {
+		return nil, fmt.Errorf(MsgBadTheme, cfg.Theme, strings.Join(style.SchemeNames(), "/"))
 	}
 	cfg.GlobalSession = expandHome(cfg.GlobalSession)
 	return cfg, nil
