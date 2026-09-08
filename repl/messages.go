@@ -53,6 +53,11 @@ const (
 )
 
 const (
+	MsgMdOn  = "Markdown 渲染已开启\n"
+	MsgMdOff = "Markdown 渲染已关闭\n"
+)
+
+const (
 	SpinWaiting = "%s 等待响应 %s"
 	SpinRunning = "  %s 执行中 %s"
 )
@@ -66,6 +71,7 @@ const helpText = `斜杠命令：
   /history [n|all] 无参截断列表；n 全量查看单条；all 全量显示
   /model [name]    无参显示当前模型；带名切换模型
   /think [level]   无参显示思考等级；设置 minimal/low/medium/high/max，off 关闭
+  /md              切换 AI 输出 Markdown 渲染（默认开启，非 TTY 自动旁路）
   /exit            退出
 直接输入文本与 AI 对话；shell 工具直接执行，无需确认。
 `

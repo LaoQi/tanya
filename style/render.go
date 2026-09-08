@@ -1,9 +1,49 @@
 package style
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
+
+type Theme struct {
+	Headings    [6]Style
+	Code        Style
+	QuotePrefix string
+	Bullet      string
+	Rule        string
+}
+
+func DefaultTheme() Theme {
+	return Theme{
+		Headings: [6]Style{
+			{Attr: AttrBold, Fg: Color16(15)},
+			{Attr: AttrBold, Fg: Color16(14)},
+			{Attr: AttrBold, Fg: Color16(12)},
+			{Fg: Color16(7)},
+			{Fg: Color16(8)},
+			{Fg: Color16(8)},
+		},
+		Code:        Style{Fg: Color16(8)},
+		QuotePrefix: "▌ ",
+		Bullet:      "• ",
+		Rule:        "────",
+	}
+}
+
+func NewRenderer(prof Profile) Renderer {
+	return Renderer{Prof: prof, Theme: DefaultTheme()}
+}
+
+func (t Theme) heading(level int) Style {
+	if level < 1 || level > 6 {
+		return Style{}
+	}
+	return t.Headings[level-1]
+}
 
 type Renderer struct {
-	Prof Profile
+	Prof  Profile
+	Theme Theme
 }
 
 func (r Renderer) Inline(in ...Inline) string {
@@ -30,7 +70,17 @@ func (r Renderer) Inline(in ...Inline) string {
 				b.WriteString(n.Text)
 			}
 		case CodeSpan:
-			b.WriteString(r.Inline(Dim.Text(n.Text)))
+			if hasOpen {
+				b.WriteString(resetSequence)
+				hasOpen = false
+			}
+			if seq := r.Prof.sgr(r.Theme.Code); seq != "" {
+				b.WriteString(seq)
+				b.WriteString(n.Text)
+				b.WriteString(resetSequence)
+			} else {
+				b.WriteString(n.Text)
+			}
 		case SoftBreak:
 			b.WriteString("\n")
 		}
@@ -42,5 +92,72 @@ func (r Renderer) Inline(in ...Inline) string {
 }
 
 func Sprint(in ...Inline) string {
-	return Renderer{Prof: current}.Inline(in...)
+	return NewRenderer(current).Inline(in...)
+}
+
+func (r Renderer) Block(b Block) string {
+	switch n := b.(type) {
+	case Paragraph:
+		return r.Inline(n.Inlines...) + "\n"
+	case Heading:
+		body := r.Inline(n.Inlines...)
+		if seq := r.Prof.sgr(r.Theme.heading(n.Level)); seq != "" {
+			return seq + body + resetSequence + "\n"
+		}
+		return body + "\n"
+	case CodeBlock:
+		var b strings.Builder
+		for _, l := range n.Lines {
+			b.WriteString(r.Inline(r.Theme.Code.Text(l)))
+			b.WriteString("\n")
+		}
+		return b.String()
+	case List:
+		var b strings.Builder
+		for i, item := range n.Items {
+			prefix := r.Theme.Bullet
+			if n.Ordered {
+				prefix = strconv.Itoa(n.Start+i) + ". "
+			}
+			b.WriteString(prefix)
+			b.WriteString(r.itemInline(item))
+			b.WriteString("\n")
+		}
+		return b.String()
+	case Quote:
+		var b strings.Builder
+		for _, blk := range n.Blocks {
+			b.WriteString(r.Theme.QuotePrefix)
+			if p, ok := blk.(Paragraph); ok {
+				b.WriteString(r.Inline(p.Inlines...))
+			}
+			b.WriteString("\n")
+		}
+		return b.String()
+	case Rule:
+		return r.Theme.Rule + "\n"
+	case RawText:
+		if strings.HasSuffix(n.Text, "\n") {
+			return n.Text
+		}
+		return n.Text + "\n"
+	}
+	return ""
+}
+
+func (r Renderer) itemInline(item ListItem) string {
+	for _, blk := range item.Blocks {
+		if p, ok := blk.(Paragraph); ok {
+			return r.Inline(p.Inlines...)
+		}
+	}
+	return ""
+}
+
+func (r Renderer) Doc(d Document) string {
+	var b strings.Builder
+	for _, blk := range d.Blocks {
+		b.WriteString(r.Block(blk))
+	}
+	return b.String()
 }

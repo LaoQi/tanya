@@ -29,6 +29,7 @@ const (
 	AttrBold Attr = 1 << iota
 	AttrUnderline
 	AttrReverse
+	AttrItalic
 )
 
 type Style struct {
@@ -77,6 +78,9 @@ func (p Profile) sgr(s Style) string {
 	}
 	if s.Attr&AttrReverse != 0 {
 		params = append(params, "7")
+	}
+	if s.Attr&AttrItalic != 0 {
+		params = append(params, "3")
 	}
 	if len(params) == 0 {
 		return ""

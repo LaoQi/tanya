@@ -8,7 +8,7 @@ import (
 	"github.com/LaoQi/tanyan/readline"
 )
 
-var slashCommands = []string{"/help", "/new", "/sessions", "/load", "/context", "/history", "/model", "/think", "/exit"}
+var slashCommands = []string{"/help", "/new", "/sessions", "/load", "/context", "/history", "/model", "/think", "/md", "/exit"}
 
 var effortCandidates = func() []string {
 	out := make([]string, 0, len(agent.EffortLevels)+1)
