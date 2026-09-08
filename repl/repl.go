@@ -24,6 +24,9 @@ type REPL struct {
 	promptTpl string
 	prompt    style.Template
 	onDelta   func(string)
+	md        *style.MarkdownBuf
+	mdLive    bool
+	rend      style.Renderer
 }
 
 func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
@@ -40,10 +43,40 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 		return nil, err
 	}
 	r := &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl, prompt: tpl, onDelta: func(s string) { fmt.Print(s) }}
+	r.md = style.NewMarkdownBuf()
+	r.mdLive = true
+	r.rend = style.NewRenderer(style.GetProfile())
 	if a != nil {
 		r.onDelta = WireToolView(a, func() int { return toolWidth(term) }, a.ToolOutputLines())
+		innerStart := a.OnToolStart
+		a.OnToolStart = func(name, args string) {
+			r.flushMd()
+			innerStart(name, args)
+		}
+		innerResp := a.OnResponse
+		a.OnResponse = func(info agent.ResponseInfo) {
+			r.flushMd()
+			innerResp(info)
+		}
 	}
 	return r, nil
+}
+
+func (r *REPL) deltaFn() func(string) {
+	if !r.mdLive || !style.GetProfile().TTY {
+		return r.onDelta
+	}
+	return func(s string) {
+		for _, blk := range r.md.Write(s) {
+			r.onDelta(r.rend.Block(blk))
+		}
+	}
+}
+
+func (r *REPL) flushMd() {
+	for _, blk := range r.md.Flush() {
+		r.onDelta(r.rend.Block(blk))
+	}
 }
 
 func (r *REPL) resolveVars() func(string) (string, bool) {
@@ -96,7 +129,11 @@ func (r *REPL) Run() error {
 			continue
 		}
 		ctx, done := r.interruptContext()
-		err = r.agent.Ask(ctx, line, r.onDelta)
+		r.md.Reset()
+		err = r.agent.Ask(ctx, line, r.deltaFn())
+		for _, blk := range r.md.Close() {
+			r.onDelta(r.rend.Block(blk))
+		}
 		done()
 		fmt.Println()
 		if err != nil {
@@ -235,6 +272,13 @@ func (r *REPL) handleCommand(line string) bool {
 		r.agent.SetModel(parts[1])
 	case "/think":
 		r.handleThink(parts[1:])
+	case "/md":
+		r.mdLive = !r.mdLive
+		if r.mdLive {
+			fmt.Print(MsgMdOn)
+		} else {
+			fmt.Print(MsgMdOff)
+		}
 	default:
 		fmt.Print(MsgUnknownCmd)
 	}

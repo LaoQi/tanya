@@ -131,3 +131,37 @@ func TestExitMessageConsistency(t *testing.T) {
 		t.Errorf("非格式化常量不应含动词: %q", MsgBye)
 	}
 }
+
+func TestMdToggle(t *testing.T) {
+	r, err := NewREPL(nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.mdLive {
+		t.Error("md 默认应开启")
+	}
+	if r.handleCommand("/md") {
+		t.Error("/md 不应退出")
+	}
+	if r.mdLive {
+		t.Error("/md 后应关闭")
+	}
+	r.handleCommand("/md")
+	if !r.mdLive {
+		t.Error("再次 /md 应开启")
+	}
+}
+
+func TestDeltaFnBypassWhenOff(t *testing.T) {
+	r, err := NewREPL(nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.deltaFn() == nil {
+		t.Fatal("deltaFn 不应为 nil")
+	}
+	r.mdLive = false
+	if r.deltaFn() == nil {
+		t.Error("关闭时仍应返回直通函数")
+	}
+}
