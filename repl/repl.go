@@ -50,20 +50,24 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 		r.onDelta = WireToolView(a, func() int { return toolWidth(term) }, a.ToolOutputLines())
 		innerStart := a.OnToolStart
 		a.OnToolStart = func(name, args string) {
-			r.flushMd()
+			r.settleMd()
 			innerStart(name, args)
 		}
 		innerResp := a.OnResponse
 		a.OnResponse = func(info agent.ResponseInfo) {
-			r.flushMd()
+			r.settleMd()
 			innerResp(info)
 		}
 	}
 	return r, nil
 }
 
+func (r *REPL) mdEnabled() bool {
+	return r.mdLive && style.GetProfile().TTY
+}
+
 func (r *REPL) deltaFn() func(string) {
-	if !r.mdLive || !style.GetProfile().TTY {
+	if !r.mdEnabled() {
 		return r.onDelta
 	}
 	return func(s string) {
@@ -73,8 +77,8 @@ func (r *REPL) deltaFn() func(string) {
 	}
 }
 
-func (r *REPL) flushMd() {
-	for _, blk := range r.md.Flush() {
+func (r *REPL) settleMd() {
+	for _, blk := range r.md.Close() {
 		r.onDelta(r.rend.Block(blk))
 	}
 }
@@ -317,7 +321,7 @@ func (r *REPL) showHistory(args []string) {
 				if i > 0 {
 					fmt.Println()
 				}
-				printHistoryFull(i+1, m)
+				r.printHistoryFull(i+1, m)
 			}
 			return
 		}
@@ -326,7 +330,7 @@ func (r *REPL) showHistory(args []string) {
 			fmt.Printf(MsgInvalidIndex, len(msgs))
 			return
 		}
-		printHistoryFull(n, msgs[n-1])
+		r.printHistoryFull(n, msgs[n-1])
 		return
 	}
 	fmt.Printf(MsgTotalMsgs, len(msgs))
@@ -366,14 +370,46 @@ func historyLine(n int, m agent.Message) string {
 	return fmt.Sprintf("%3d %-9s %s", n, historyLabel(m), truncateRunes(text, 120))
 }
 
-func printHistoryFull(n int, m agent.Message) {
-	fmt.Printf("#%d %s\n", n, historyLabel(m))
-	if text := historyText(m); text != "" {
+func (r *REPL) printHistoryFull(n int, m agent.Message) {
+	r.printHistoryHead(n, historyLabel(m))
+	if m.Role == "assistant" && m.Content != "" {
+		r.printRendered(m.Content)
+	} else if text := historyText(m); text != "" {
 		fmt.Println(text)
 	}
 	for _, tc := range m.ToolCalls {
 		fmt.Printf("→ %s %s\n", tc.Function.Name, tc.Function.Arguments)
 	}
+}
+
+// printHistoryHead 把消息头（#N 角色）按一级标题渲染——`#` 与序号连写不构成 markdown 标题语法，
+// 因此不走 markdown 解析，直接构造 Heading IR。
+func (r *REPL) printHistoryHead(n int, label string) {
+	head := fmt.Sprintf("#%d %s", n, label)
+	if !r.mdEnabled() {
+		fmt.Println(head)
+		return
+	}
+	r.onDelta(r.rend.Block(style.Heading{Level: 1, Inlines: []style.Inline{style.Span{Text: head}}}))
+}
+
+// printRendered 把整段文本按与 AI 输出一致的管线渲染（/md 开关 + TTY 旁路），供历史回放等一次性展示使用。
+func (r *REPL) printRendered(text string) {
+	if !r.mdEnabled() {
+		fmt.Println(text)
+		return
+	}
+	for _, blk := range r.mdBlocks(text) {
+		r.onDelta(r.rend.Block(blk))
+	}
+}
+
+func (r *REPL) mdBlocks(text string) []style.Block {
+	buf := style.NewMarkdownBuf()
+	var blks []style.Block
+	blks = append(blks, buf.Write(text)...)
+	blks = append(blks, buf.Close()...)
+	return blks
 }
 
 func (r *REPL) loadSessionInteractive() {

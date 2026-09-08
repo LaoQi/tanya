@@ -35,8 +35,6 @@ func (b *MarkdownBuf) Write(delta string) []Block {
 	return out
 }
 
-func (b *MarkdownBuf) Flush() []Block { return b.Write("") }
-
 func (b *MarkdownBuf) Close() []Block {
 	b.drain()
 	switch b.kind {

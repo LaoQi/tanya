@@ -103,9 +103,16 @@ func TestPrintHistoryFullToolCalls(t *testing.T) {
 	tc.Function.Name = "calc"
 	tc.Function.Arguments = `{"expression":"1+1"}`
 	m := agent.Message{Role: "assistant", ToolCalls: []agent.ToolCall{tc}}
-	out := captureStdout(func() { printHistoryFull(2, m) })
-	if !strings.Contains(out, "#2 assistant") || !strings.Contains(out, "→ calc {\"expression\":\"1+1\"}") {
-		t.Errorf("全量输出异常: %q", out)
+	r, err := NewREPL(nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(func() { r.printHistoryFull(2, m) })
+	if !strings.Contains(out, "\x1b[97;1m#2 assistant\x1b[0m") {
+		t.Errorf("消息头应按一级标题渲染: %q", out)
+	}
+	if !strings.Contains(out, "\n[调用 calc]\n") || !strings.Contains(out, "\n→ calc {\"expression\":\"1+1\"}\n") {
+		t.Errorf("正文摘要与工具调用行应原样无颜色: %q", out)
 	}
 }
 
@@ -163,5 +170,61 @@ func TestDeltaFnBypassWhenOff(t *testing.T) {
 	r.mdLive = false
 	if r.deltaFn() == nil {
 		t.Error("关闭时仍应返回直通函数")
+	}
+}
+
+func TestPrintHistoryFullRenderedMarkdown(t *testing.T) {
+	r, err := NewREPL(nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.mdEnabled() {
+		t.Fatal("默认应开启渲染")
+	}
+	m := agent.Message{Role: "assistant", Content: "# 标题\n\n- a\n- b\n\n正文 **粗** 结尾\n"}
+	out := captureStdout(func() { r.printHistoryFull(1, m) })
+	for _, want := range []string{"\x1b[97;1m#1 assistant\x1b[0m", "\x1b[97;1m标题\x1b[0m", "• a", "• b", "\x1b[1m粗\x1b[0m"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("assistant 正文应走 Markdown 渲染，缺 %q: %q", want, out)
+		}
+	}
+	if strings.Contains(out, "# 标题\n") || strings.Contains(out, "- a\n") {
+		t.Errorf("渲染开启时不应输出原始 Markdown 文本: %q", out)
+	}
+}
+
+func TestPrintHistoryFullBypassWhenMdOff(t *testing.T) {
+	r, err := NewREPL(nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.mdLive = false
+	if r.mdEnabled() {
+		t.Fatal("/md off 后应旁路")
+	}
+	m := agent.Message{Role: "assistant", Content: "# 标题\n\n- a\n"}
+	out := captureStdout(func() { r.printHistoryFull(1, m) })
+	if !strings.HasPrefix(out, "#1 assistant\n") || !strings.Contains(out, "# 标题") || !strings.Contains(out, "- a") {
+		t.Errorf("旁路时应原样输出（含消息头）: %q", out)
+	}
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("旁路时不应出现颜色: %q", out)
+	}
+}
+
+func TestPrintHistoryFullUserToolRaw(t *testing.T) {
+	r, err := NewREPL(nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := agent.Message{Role: "user", Content: "请解释 **这个** 不算 md"}
+	out := captureStdout(func() { r.printHistoryFull(1, user) })
+	if !strings.Contains(out, "\n请解释 **这个** 不算 md\n") {
+		t.Errorf("user 正文应原样显示不渲染: %q", out)
+	}
+	tool := agent.Message{Role: "tool", Name: "run_shell", Content: "输出 `code` 原文"}
+	out = captureStdout(func() { r.printHistoryFull(2, tool) })
+	if !strings.Contains(out, "\n输出 `code` 原文\n") {
+		t.Errorf("tool 正文应原样显示不渲染: %q", out)
 	}
 }

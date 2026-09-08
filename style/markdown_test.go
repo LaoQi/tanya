@@ -150,11 +150,11 @@ func TestParseInline(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"粗斜代码混排", "**b** *i* `c`", "\x1b[1mb\x1b[0m \x1b[3mi\x1b[0m \x1b[90mc\x1b[0m"},
+		{"粗斜代码混排", "**b** *i* `c`", "\x1b[1mb\x1b[0m \x1b[3mi\x1b[0m \x1b[92mc\x1b[0m"},
 		{"未闭合粗体原样", "**abc", "**abc"},
 		{"星号列表符不误判", "* a *b*", "* a \x1b[3mb\x1b[0m"},
 		{"下划线不解析", "a_1 b_2", "a_1 b_2"},
-		{"代码内字面量", "`**x**`", "\x1b[90m**x**\x1b[0m"},
+		{"代码内字面量", "`**x**`", "\x1b[92m**x**\x1b[0m"},
 		{"未闭合代码原样", "`abc", "`abc"},
 		{"纯文本", "plain 中文", "plain 中文"},
 		{"粗体含中文", "**你好**世界", "\x1b[1m你好\x1b[0m世界"},
@@ -187,7 +187,7 @@ func TestInlineMergeAcrossCodeSpan(t *testing.T) {
 		CodeSpan{Text: "c"},
 		Span{Style: Style{Attr: AttrBold}, Text: "b"},
 	)
-	want := "\x1b[1ma\x1b[0m\x1b[90mc\x1b[0m\x1b[1mb\x1b[0m"
+	want := "\x1b[1ma\x1b[0m\x1b[92mc\x1b[0m\x1b[1mb\x1b[0m"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -199,5 +199,16 @@ func TestMarkdownClosePendingStripsANSI(t *testing.T) {
 	got := closeText(t, buf)
 	if got != "ab\n" {
 		t.Errorf("残行应剥离转义: %q", got)
+	}
+}
+
+func TestInlineCodeBrightAndDistinct(t *testing.T) {
+	inline := Sprint(CodeSpan{Text: "x"})
+	if strings.Contains(inline, "\x1b[90m") {
+		t.Errorf("行内 code 不应使用暗色: %q", inline)
+	}
+	block := NewRenderer(GetProfile()).Block(CodeBlock{Lines: []string{"x"}})
+	if inline == block {
+		t.Errorf("行内 code 与代码块应有不同配色: %q", inline)
 	}
 }
