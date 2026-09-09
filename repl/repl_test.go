@@ -224,7 +224,7 @@ func TestPrintHistoryFullUserToolRaw(t *testing.T) {
 	}
 	tool := agent.Message{Role: "tool", Name: "run_shell", Content: "输出 `code` 原文"}
 	out = captureStdout(func() { r.printHistoryFull(2, tool) })
-	if !strings.Contains(out, "\n输出 `code` 原文\n") {
-		t.Errorf("tool 正文应原样显示不渲染: %q", out)
+	if !strings.Contains(out, "\n\x1b[90m输出 `code` 原文\x1b[0m\n") {
+		t.Errorf("tool 正文应 Frame 灰色清洗显示: %q", out)
 	}
 }

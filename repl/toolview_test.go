@@ -160,8 +160,8 @@ func TestRenderToolEndInline(t *testing.T) {
 		Duration: 300 * time.Millisecond,
 	}}
 	got := RenderToolEndInline("run_shell", `{"command":"echo ok"}`, res, 80, 20)
-	if !strings.HasPrefix(got, "\x1b[1A\r\x1b[K▸ run_shell") {
-		t.Errorf("应以上移重绘开头: %q", got)
+	if !strings.HasPrefix(got, "\x1b[1A\r\x1b[K\x1b[90m▸ run_shell") {
+		t.Errorf("应以上移重绘开头且标题行框定: %q", got)
 	}
 	if !strings.Contains(got, "\x1b[94m  ↳ exit 0 · 300ms · 1 行") || !strings.Contains(got, "  ok\n") {
 		t.Errorf("状态行应亮蓝且含耗时行数: %q", got)
@@ -306,5 +306,79 @@ func TestWireToolViewNonInteractive(t *testing.T) {
 	}
 	if !strings.Contains(out, "\x1b[1A") {
 		t.Errorf("非交互模式应上移重绘标题: %q", out)
+	}
+}
+
+func TestRenderToolEndANSIDirectView(t *testing.T) {
+	oldProf := style.GetProfile()
+	style.SetProfile(style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
+	defer style.SetProfile(oldProf)
+	res := agent.ToolResult{Shell: &agent.ShellResult{
+		Stdout:   []agent.ShellChunk{{Data: "logo\n\x1b[90m版本行\x1b[0m\n"}},
+		Duration: 100 * time.Millisecond,
+	}}
+	got := RenderToolEnd("run_shell", `{"command":"printf"}`, res, 80, 20)
+	if !strings.Contains(got, "  \x1b[90m版本行\x1b[0m\n") {
+		t.Errorf("直显区应保留 SGR 原色: %q", got)
+	}
+	if !strings.Contains(got, "\x1b[90m▸ run_shell") {
+		t.Errorf("标题行仍应 Dim 框定: %q", got)
+	}
+	pi := strings.Index(got, "版本行")
+	si := strings.Index(got, "↳ exit 0")
+	if pi < 0 || si < 0 || si < pi {
+		t.Errorf("状态行应显式后置于直显区: %q", got)
+	}
+}
+
+func TestRenderToolEndPlainBlockIntegrity(t *testing.T) {
+	oldProf := style.GetProfile()
+	style.SetProfile(style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
+	defer style.SetProfile(oldProf)
+	res := agent.ToolResult{Shell: &agent.ShellResult{
+		Stdout:   []agent.ShellChunk{{Data: "a\x1b[2Kb\rc\n"}},
+		Duration: 100 * time.Millisecond,
+	}}
+	got := RenderToolEnd("run_shell", `{"command":"echo"}`, res, 80, 20)
+	if strings.Contains(got, "\x1b[2K") || strings.Contains(got, "\r") {
+		t.Errorf("布局序列与 C0 应被清洗: %q", got)
+	}
+	if strings.Count(got, "\x1b[90m") != 1 {
+		t.Errorf("单色块应单一 Dim 开启: %q", got)
+	}
+	if strings.Count(got, "\x1b[0m") != 2 {
+		t.Errorf("Dim 与 Info 各一次闭合: %q", got)
+	}
+	if !strings.Contains(got, "\x1b[90m\n▸ run_shell") && !strings.Contains(got, "\x1b[90m▸ run_shell") {
+		t.Errorf("块级包裹应覆盖标题与输出: %q", got)
+	}
+}
+
+func TestRenderToolEndNonTTYNoEscape(t *testing.T) {
+	oldProf := style.GetProfile()
+	style.SetProfile(style.Profile{TTY: false, Colors: style.LevelNone, Unicode: true})
+	defer style.SetProfile(oldProf)
+	res := agent.ToolResult{Shell: &agent.ShellResult{
+		Stdout:   []agent.ShellChunk{{Data: "\x1b[31mred\x1b[0m\n"}},
+		Duration: 100 * time.Millisecond,
+	}}
+	got := RenderToolEnd("run_shell", `{"command":"echo"}`, res, 80, 20)
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("非 TTY 输出不应含转义: %q", got)
+	}
+}
+
+func TestRenderToolEndSGRMixedStderr(t *testing.T) {
+	oldProf := style.GetProfile()
+	style.SetProfile(style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
+	defer style.SetProfile(oldProf)
+	res := agent.ToolResult{Shell: &agent.ShellResult{
+		Stdout:   []agent.ShellChunk{{Data: "plain\n"}},
+		Stderr:   []agent.ShellChunk{{Data: "\x1b[91merr\x1b[0m\n"}},
+		Duration: 100 * time.Millisecond,
+	}}
+	got := RenderToolEnd("run_shell", `{}`, res, 80, 20)
+	if !strings.Contains(got, "2| \x1b[91merr\x1b[0m\n") {
+		t.Errorf("stderr 标记行彩色应直显保留: %q", got)
 	}
 }

@@ -298,6 +298,35 @@ func (b *MarkdownBuf) Close() []Block               // 收尾：未闭合块降�
 - 第一批：块级四样（代码块/标题/列表/引用）+ 行内三样（粗体/斜体/行内码）
 - 远期：表格、truecolor palette、非终端 Renderer
 
+## 10.5 ANSI 过滤器（style/filter.go）
+
+**变更背景**：工具块此前整体 `Dim.Sprint` 包裹，捕获输出中的任意 `\x1b[0m` 会提前终止块级灰色（同块前灰后白），彩色序列穿透块样式，状态行 `Info` 靠 SGR 时序巧合存活；预览类彩色输出（如欢迎屏效果）无法在块内原样呈现。
+
+**机制**：工具块与历史回放的"序列卫生学"，与 IR 渲染并行的独立出口：
+
+- **扫描器**（`scanSequence`）：CSI（终字节 `m` → SGR，其余丢弃）/ OSC（BEL 或 `ESC\` 终止，丢弃）/ 字符集选择（`ESC ( B` 类，丢弃）/ 孤立 ESC（丢弃）；C0 控制符除 `\n` `\t` 外一律丢弃（防进度条 `\r` 破坏行渲染）
+- **`Style.Frame(text)`**：全清洗（SGR/CSI/OSC/C0 全去）+ 基样式包裹。默认单色块出口；块换色只改基样式，机制不变
+- **`Passthrough(text)`**：保色清洗——SGR 原样保留（含 `38;2;r;g;b` 扩展色，参数吞并解析防误判 reset），非 SGR 序列照丢；末尾 SGR 未闭合（`sgrLeavesState` 脏态跟踪，组合序列 `0;31m` 识别为非 reset 结尾）时补 reset 防跨区泄漏；无色 profile 退化为全清洗
+- **`HasSGR(text)`**：直显触发检测，仅认 CSI-`m`
+
+**消费方与块组装**（`repl/toolview.go` `renderToolBlock`）：输出区无 SGR → 标题+输出整块 `Dim.Frame` 单点包裹；检测到 SGR → 标题行独立 `Frame`，输出区走 `Passthrough` 直显（用户看到真实颜色），状态行 `Info` 显式后置（不再依赖 SGR 时序）；自产光标控制序列（上移重绘 `lead`）在 `Frame` 之外，不被过滤器吞掉。`/history` 的 tool 正文走 `Dim.Frame`（`repl/repl.go`）。
+
+**双通道语义**：显示侧机制对模型完全不可见——模型通道（`ToolResult.Content()` 及其历史落盘）**零变换**，转义序列是模型可用的地面真值（ANSI 调试类任务依赖），且 DeepSeek KV 缓存要求请求前缀逐字节稳定；显示差异不得进入模型上下文。
+
+**已决取舍**：
+
+| 项 | 决议 |
+|---|---|
+| 裸 `\x1b[0m` 也触发直显（块失去灰色） | 接受：判据统一为"含任一 SGR"，避免判据分叉 |
+| 交互模式块纳入 `Frame`（此前无样式） | 接受：块视觉一致，且交互回放不再被裸序列破坏 |
+| 非 TTY 剥离嵌入转义（此前会漏进管道） | 接受：非 TTY 输出不应含控制序列 |
+| 第三方 256/truecolor 序列透传 | 接受：颜色铁律约束自产序列，第三方输出原样呈现 |
+| 截断切在跨行着色区时尾段丢色 | 接受：极简权衡，记录在案 |
+
+**红线**：过滤器为纯函数；`Frame` 的 profile 依赖仅显示侧；模型通道不得接入任何过滤出口。
+
+**测试锚点**：`style/filter_test.go`（清洗/保色/脏态闭合/扩展色/无色退化/未闭合/`HasSGR`）；`repl/toolview_test.go`（直显区保色与状态行后置、单色块单开单闭、非 TTY 零转义、stderr 标记行直显）；`repl/repl_test.go`（/history tool 正文 Frame 化）。
+
 ## 11. 现有代码收编清单
 
 | 现状 | 收编后 |

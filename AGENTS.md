@@ -34,6 +34,7 @@ agent/shell.go     run_shell 工具（shellProfile 按平台解析 bash/sh/ash/p
 agent/builtin.go   内置小工具：get_time / get_env / calc
 repl/messages.go   repl 侧用户可见文案常量（UI 文案单一来源）
 agent/messages.go  agent 侧用户可见文案常量（错误/结果文本单一来源）
+style/*            富文本管线（语义色/主题/markdown/模板/宽度/ANSI 过滤：Frame 清洗包裹 · Passthrough 保色直显）
 ```
 
 各模块行为细节见 `docs/design.md`。

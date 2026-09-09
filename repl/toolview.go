@@ -45,7 +45,7 @@ func toolEndTitle(name, args string, res agent.ToolResult) string {
 	return title
 }
 
-func toolEndBody(res agent.ToolResult, width, maxLines int) string {
+func toolEndBody(res agent.ToolResult, width, maxLines int) (string, string) {
 	var b strings.Builder
 	var lines []string
 	status := ""
@@ -67,6 +67,20 @@ func toolEndBody(res agent.ToolResult, width, maxLines int) string {
 	for _, l := range lines {
 		b.WriteString("  " + l + "\n")
 	}
+	return b.String(), status
+}
+
+func renderToolBlock(lead, name, args string, res agent.ToolResult, width, maxLines int) string {
+	title := style.Truncate(toolEndTitle(name, args, res), width-2)
+	out, status := toolEndBody(res, width, maxLines)
+	var b strings.Builder
+	b.WriteString(lead)
+	if style.HasSGR(out) {
+		b.WriteString(style.Dim.Frame("▸ " + title + "\n"))
+		b.WriteString(style.Passthrough(out))
+	} else {
+		b.WriteString(style.Dim.Frame("▸ " + title + "\n" + out))
+	}
 	if status != "" {
 		b.WriteString(style.Info.Sprint("  ↳ "+status) + "\n")
 	}
@@ -74,11 +88,11 @@ func toolEndBody(res agent.ToolResult, width, maxLines int) string {
 }
 
 func RenderToolEnd(name, args string, res agent.ToolResult, width, maxLines int) string {
-	return "\n▸ " + style.Truncate(toolEndTitle(name, args, res), width-2) + "\n" + toolEndBody(res, width, maxLines)
+	return renderToolBlock("\n", name, args, res, width, maxLines)
 }
 
 func RenderToolEndInline(name, args string, res agent.ToolResult, width, maxLines int) string {
-	return style.CursorUp(1) + style.ClearLineHome() + "▸ " + style.Truncate(toolEndTitle(name, args, res), width-2) + "\n" + toolEndBody(res, width, maxLines)
+	return renderToolBlock(style.CursorUp(1)+style.ClearLineHome(), name, args, res, width, maxLines)
 }
 
 func RenderResponseInfo(info agent.ResponseInfo, width int) string {
@@ -256,7 +270,7 @@ func WireToolView(width func() int, maxLines int) agent.EventSink {
 		case agent.EventToolStart:
 			sp.stop()
 			mu.Lock()
-			fmt.Print(style.Dim.Sprint(RenderToolStart(e.ToolName, e.ToolArgs, width())))
+			fmt.Print(style.Dim.Frame(RenderToolStart(e.ToolName, e.ToolArgs, width())))
 			if e.Interactive {
 				fmt.Print(style.Info.Sprint(MsgInteractiveHint))
 			}
@@ -269,7 +283,7 @@ func WireToolView(width func() int, maxLines int) agent.EventSink {
 			sp.stop()
 			mu.Lock()
 			if style.GetProfile().TTY && !e.Interactive {
-				fmt.Print(style.Dim.Sprint(RenderToolEndInline(e.ToolName, e.ToolArgs, e.Result, width(), maxLines)))
+				fmt.Print(RenderToolEndInline(e.ToolName, e.ToolArgs, e.Result, width(), maxLines))
 			} else {
 				fmt.Print(RenderToolEnd(e.ToolName, e.ToolArgs, e.Result, width(), maxLines))
 			}
