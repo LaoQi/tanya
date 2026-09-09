@@ -22,7 +22,7 @@ go install github.com/LaoQi/tanyan@latest
 
 ```bash
 git clone https://github.com/LaoQi/tanyan.git && cd tanyan
-go build -o tanyan .
+make build
 ```
 
 ## 配置

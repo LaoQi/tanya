@@ -11,10 +11,18 @@ import (
 	"github.com/LaoQi/tanyan/style"
 )
 
+var version = "dev"
+
 func main() {
+	showVersion := flag.Bool("v", false, repl.FlagVersion)
 	configPath := flag.String("c", "", repl.FlagConfig)
 	sessionMode := flag.String("m", "", repl.FlagMode)
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("tanyan %s\n", version)
+		return
+	}
 
 	cfg, err := agent.LoadConfig(*configPath)
 	if err != nil {
