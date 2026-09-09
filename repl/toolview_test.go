@@ -85,6 +85,10 @@ func TestRenderToolEndTimeoutInterrupt(t *testing.T) {
 	if got := RenderToolEnd("run_shell", `{}`, res2, 80, 20); !strings.Contains(got, "已中断") {
 		t.Errorf("got %q", got)
 	}
+	res3 := agent.ToolResult{Shell: &agent.ShellResult{Interrupted: true, NotStarted: true}}
+	if got := RenderToolEnd("run_shell", `{}`, res3, 80, 20); !strings.Contains(got, "未执行") {
+		t.Errorf("got %q", got)
+	}
 }
 
 func TestRenderToolEndTruncateLongLine(t *testing.T) {

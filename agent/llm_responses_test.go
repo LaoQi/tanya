@@ -497,3 +497,48 @@ func TestResponsesToolCallDeltaEvents(t *testing.T) {
 		t.Errorf("终态仍应从 completed 提取 tool_calls: %+v", msg.ToolCalls)
 	}
 }
+
+func TestResponsesErrorKeepsPartialTurn(t *testing.T) {
+	m, cfg := responsesLLM(t,
+		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "calc", args: `{"expression":"2*3"}`}}},
+		mockStep{status: 500},
+		mockStep{content: "继续"},
+	)
+	a, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Ask(context.Background(), "算 2*3", nil); err == nil {
+		t.Fatal("第一轮应返回错误")
+	}
+	if len(a.history) != 4 {
+		t.Fatalf("应保留 user+assistant+tool+错误提示 共4条: %d", len(a.history))
+	}
+	if last := a.history[3]; last.Role != "user" || !strings.HasPrefix(last.Content, "[本轮因错误中止") {
+		t.Fatalf("末条应为错误提示: %+v", last)
+	}
+	if err := a.Ask(context.Background(), "继续", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.rawReqs) != 3 {
+		t.Fatalf("应有 3 次请求: %d", len(m.rawReqs))
+	}
+	input, _ := m.rawReqs[2]["input"].([]any)
+	found := false
+	for _, it := range input {
+		item, _ := it.(map[string]any)
+		if item["role"] != "user" {
+			continue
+		}
+		parts, _ := item["content"].([]any)
+		for _, p := range parts {
+			part, _ := p.(map[string]any)
+			if text, _ := part["text"].(string); strings.HasPrefix(text, "[本轮因错误中止") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("续接请求 input 应含错误提示: %+v", input)
+	}
+}

@@ -52,8 +52,20 @@ func TestRunShellInterrupt(t *testing.T) {
 		cancel()
 	}()
 	got := RunShell(ctx, "sleep 5", 60)
-	if !strings.Contains(got, "已中断") {
+	if !strings.Contains(got, "已中断") || !strings.Contains(got, "输出可能不完整") {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestRunShellInterruptNotStarted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got := RunShell(ctx, "echo hi", 60)
+	if !strings.Contains(got, "命令未执行") {
+		t.Errorf("got %q", got)
+	}
+	if strings.Contains(got, "hi") {
+		t.Errorf("命令不应执行: %q", got)
 	}
 }
 

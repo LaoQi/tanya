@@ -66,7 +66,14 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
   → 有 tool_calls：逐个 dispatch 执行 → tool 结果回填 history → 再次请求
 ```
 
-本地不设轮数上限，依赖模型终止；异常由 API 错误直接暴露。每轮请求触发回调：`OnRequestStart`（请求前）/ `OnResponse`（响应后，含出错路径，携带 `ResponseInfo`：Duration/TTFT/Usage/ContextTokens）。
+本地不设轮数上限，依赖模型终止。每轮请求触发回调：`OnRequestStart`（请求前）/ `OnResponse`（响应后，含出错路径，携带 `ResponseInfo`：Duration/TTFT/Usage/ContextTokens）。
+
+回合非正常结束（`Ask`，按"有无产出"分派，产出 = 本回合出现过完整 assistant/tool 消息）：
+
+- 用户中断（`ctx` 取消）：有产出 → 保留全部产出并追加 user 提示 `[用户已中断本轮请求]` 后落盘；无产出 → 回滚到回合起点
+- 其它错误：有产出 → 保留产出并追加 user 提示 `[本轮因错误中止：<错误摘要>]`（摘要 200 rune 截断）后落盘；无产出 → 回滚
+- 终止提示为 user 角色、仅陈述事实不含引导词；写入 history 后不可变（append-only 落盘），保证请求前缀稳定与 prompt cache 命中；`save()` 失败静默，`saved` 游标未推进时下次成功回合补齐
+- 中断返回 `*InterruptError{Kept}`（REPL 据此区分"已保留/未保留"文案），错误路径返回原错误；已完成的工具步骤（含被 SIGINT 终止的 run_shell，其结果照常回填）随产出一并保留，续接时模型可回溯此前实施
 
 ## 工具
 
@@ -74,7 +81,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 - 参数：`command`（必填）、`timeout`（默认 60s，上限 900s）、`interactive`（布尔，默认 false）
 - 交互模式（`interactive: true`）：仅由模型显式声明，**不做命令文本猜测**（早期版本有 sudo/ssh 关键词兜底，review 后移除）。声明后 repl 侧停用等待动画、标题行下打印引导行、结束用追加式渲染（避免 `CursorUp` 擦掉用户输入回显）；`timeout` 缺省时默认放宽至 300s（显式值优先，上限仍 900s）。命令提示须自行写入 `/dev/tty`，否则被工具捕获不可见
-- 实现：按 `shellProfile` 组装命令（posix `<path> -c`、powershell `<path> -NoProfile -NonInteractive -Command`、cmd `<path> /d /s /c`），捕获 stdout/stderr/退出码/耗时（`ShellResult` 结构化返回：Command/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Duration）
+- 实现：按 `shellProfile` 组装命令（posix `<path> -c`、powershell `<path> -NoProfile -NonInteractive -Command`、cmd `<path> /d /s /c`），捕获 stdout/stderr/退出码/耗时（`ShellResult` 结构化返回：Command/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Stopped/NotStarted/Duration）
+- 中断语义：运行中被 ctx 取消 → `Interrupted`，结果追加 `error: 已中断（进程已终止，输出可能不完整）`；ctx 已取消导致命令未能启动 → `Interrupted+NotStarted`，追加 `error: 已中断（命令未执行）`（不再把裸 `context canceled` 交给模型）；toolview 状态行分别为 `已中断`/`未执行`，已捕获的首尾输出照常保留
 - shell 解析（`InitShell`，Agent 构造时一次性执行并缓存）：
   - 优先级：配置覆盖（`config.yaml shell:` / env `TANYA_SHELL`，名字或绝对路径，任意 shell 名允许，未知 basename 按 posix `-c` 处理）> 平台自动探测
   - 自动探测：windows 仅 `pwsh`（强制 PowerShell 7，不回退 5.1/cmd）；linux/darwin `bash` → `sh` → `ash`
@@ -126,7 +134,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
   - `auto`：当前目录存在 `.tanya/` → local，否则 global
   - `local`：`<启动目录>/.tanya/sessions/`（.tanya 本身即项目隔离，不叠加 workspace-id）
   - `global`：`global_session/<workspace-id>/`，workspace-id 由启动目录派生（可读路径转义 + 短哈希）
-- 落盘：`<timestamp>.jsonl`，每轮结束追加写入新消息（一行一条 Message JSON），记录完整历史（回放/审计用）
+- 落盘：`<timestamp>.jsonl`，每轮结束追加写入新消息（一行一条 Message JSON），记录完整历史（回放/审计用）；回合因中断/错误保留产出时同样落盘（含终止提示行）
+- 落盘原子性：本批消息先编码进内存缓冲再单次追加写入，写入报错或短写时 `Truncate` 回滚到写入前大小，`saved` 游标与文件内容始终一致（重试不会产生重复行/半行）
 - 首行持久化 system prompt 快照（`systemSaved` 标志防重复），`/load` 还原后前缀与当初逐字节一致；旧格式文件（无 system 首行）回退为载入时快照当前 AGENTS.md，且保持不补写；system 行不计入 `/sessions` 条数与标题
 - 会话列表扫描：`agent.New` 启动时预扫描填充缓存；`ListSessions` 按 (mtime,size) 增量刷新，仅重扫变化的文件；每文件 `bufio` 逐行计数条数、仅解码至首条 user 消息取摘要
 - `/sessions` 列出（id、时间、消息数、首条用户消息摘要），`/load <id>` 恢复继续对话；id 校验拒绝路径穿越

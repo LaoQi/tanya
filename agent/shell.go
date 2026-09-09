@@ -156,6 +156,7 @@ type ShellResult struct {
 	TimedOut    bool
 	Interrupted bool
 	Stopped     bool
+	NotStarted  bool
 	Duration    time.Duration
 }
 
@@ -169,7 +170,11 @@ func (r *ShellResult) String() string {
 	writeStream(&b, "stdout", r.Stdout)
 	writeStream(&b, "stderr", r.Stderr)
 	if r.Interrupted {
-		b.WriteString(MsgInterrupted + "\n")
+		if r.NotStarted {
+			b.WriteString(MsgInterruptNotStarted + "\n")
+		} else {
+			b.WriteString(MsgInterruptRunning + "\n")
+		}
 	}
 	if r.TimedOut {
 		fmt.Fprintf(&b, MsgTimedOut+"\n")
@@ -331,7 +336,15 @@ func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellR
 		cmd.Stdin = tty
 	}
 	if err := cmd.Start(); err != nil {
-		res.Err = err.Error()
+		switch {
+		case ctx.Err() != nil:
+			res.Interrupted = true
+			res.NotStarted = true
+		case runCtx.Err() == context.DeadlineExceeded:
+			res.TimedOut = true
+		default:
+			res.Err = err.Error()
+		}
 		res.Duration = time.Since(start)
 		return res
 	}
@@ -342,9 +355,9 @@ func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellR
 	res.Duration = time.Since(start)
 
 	switch {
-	case ctx.Err() != nil:
+	case err != nil && ctx.Err() != nil:
 		res.Interrupted = true
-	case runCtx.Err() == context.DeadlineExceeded:
+	case err != nil && runCtx.Err() == context.DeadlineExceeded:
 		res.TimedOut = true
 	case res.Stopped:
 	case err != nil:

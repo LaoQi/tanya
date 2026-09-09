@@ -1,13 +1,20 @@
 package agent
 
 const (
-	MsgErrPrefix   = "error: "
-	MsgErrLine     = MsgErrPrefix + "%s"
-	MsgParseArgs   = MsgErrPrefix + "参数解析失败: %v"
-	MsgUnknownTool = MsgErrPrefix + "未知工具 %s"
-	MsgInterrupted = MsgErrPrefix + "已中断"
-	MsgTimedOut    = MsgErrPrefix + "执行超时"
-	MsgStopped     = MsgErrPrefix + "进程被终端挂起(Ctrl+Z)已终止"
+	MsgErrPrefix           = "error: "
+	MsgErrLine             = MsgErrPrefix + "%s"
+	MsgParseArgs           = MsgErrPrefix + "参数解析失败: %v"
+	MsgUnknownTool         = MsgErrPrefix + "未知工具 %s"
+	MsgInterruptNotStarted = MsgErrPrefix + "已中断（命令未执行）"
+	MsgInterruptRunning    = MsgErrPrefix + "已中断（进程已终止，输出可能不完整）"
+	MsgTimedOut            = MsgErrPrefix + "执行超时"
+	MsgStopped             = MsgErrPrefix + "进程被终端挂起(Ctrl+Z)已终止"
+)
+
+const (
+	MsgInterruptNotice = "[用户已中断本轮请求]"
+	MsgErrorNoticeFmt  = "[本轮因错误中止：%s]"
+	MsgInterruptedBare = "已中断"
 )
 
 const (

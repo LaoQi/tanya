@@ -2,11 +2,14 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -184,14 +187,49 @@ func (a *Agent) NewSession() {
 	a.sessionPath = filepath.Join(a.sessionDir, time.Now().Format("20060102-150405")+".jsonl")
 }
 
+const noticeLimit = 200
+
+type InterruptError struct {
+	Kept bool
+}
+
+func (e *InterruptError) Error() string { return MsgInterruptedBare }
+
+func (e *InterruptError) Unwrap() error { return context.Canceled }
+
+func briefErr(err error) string {
+	s := strings.Join(strings.Fields(err.Error()), " ")
+	r := []rune(s)
+	if len(r) > noticeLimit {
+		return string(r[:noticeLimit]) + "…"
+	}
+	return s
+}
+
 func (a *Agent) Ask(ctx context.Context, input string, sink EventSink) error {
 	mark := len(a.history)
 	a.history = append(a.history, Message{Role: "user", Content: input})
-	if err := a.runTurn(ctx, sink); err != nil {
-		a.history = a.history[:mark]
+	err := a.runTurn(ctx, sink)
+	if err == nil {
+		return a.save()
+	}
+	kept := len(a.history) > mark+1
+	if errors.Is(ctx.Err(), context.Canceled) {
+		if kept {
+			a.history = append(a.history, Message{Role: "user", Content: MsgInterruptNotice})
+			_ = a.save()
+		} else {
+			a.history = a.history[:mark]
+		}
+		return &InterruptError{Kept: kept}
+	}
+	if kept {
+		a.history = append(a.history, Message{Role: "user", Content: fmt.Sprintf(MsgErrorNoticeFmt, briefErr(err))})
+		_ = a.save()
 		return err
 	}
-	return a.save()
+	a.history = a.history[:mark]
+	return err
 }
 
 func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
@@ -392,23 +430,37 @@ func (a *Agent) save() error {
 	if a.saved >= len(a.history) {
 		return nil
 	}
-	f, err := os.OpenFile(a.sessionPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	enc := json.NewEncoder(f)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	if !a.systemSaved {
 		if err := enc.Encode(Message{Role: "system", Content: a.promptSnapshot}); err != nil {
 			return err
 		}
-		a.systemSaved = true
 	}
 	for _, m := range a.history[a.saved:] {
 		if err := enc.Encode(m); err != nil {
 			return err
 		}
 	}
+	f, err := os.OpenFile(a.sessionPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	prev := info.Size()
+	n, err := f.Write(buf.Bytes())
+	if err == nil && n != buf.Len() {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		_ = f.Truncate(prev)
+		return err
+	}
+	a.systemSaved = true
 	a.saved = len(a.history)
 	return nil
 }
@@ -441,7 +493,7 @@ func (a *Agent) LoadSession(id string) error {
 	} else {
 		a.promptSnapshot = buildSystemPrompt(a.cwd)
 		history = msgs
-		a.systemSaved = false
+		a.systemSaved = true
 		a.legacySystem = false
 	}
 	a.history = history

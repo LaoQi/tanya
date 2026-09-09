@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type mockToolCall struct {
@@ -22,6 +23,7 @@ type mockStep struct {
 	toolCalls []mockToolCall
 	usage     *Usage
 	reasoning string
+	hold      time.Duration
 }
 
 type mockLLM struct {
@@ -73,6 +75,9 @@ func (m *mockLLM) handleChat(w http.ResponseWriter, r *http.Request) {
 	if step.status != 0 && step.status != http.StatusOK {
 		http.Error(w, "mock error", step.status)
 		return
+	}
+	if step.hold > 0 {
+		time.Sleep(step.hold)
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -155,6 +160,9 @@ func (m *mockLLM) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if step.status != 0 && step.status != http.StatusOK {
 		http.Error(w, "mock error", step.status)
 		return
+	}
+	if step.hold > 0 {
+		time.Sleep(step.hold)
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
