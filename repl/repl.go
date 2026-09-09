@@ -299,7 +299,7 @@ func (r *REPL) printThemeSample() {
 	})
 	b.WriteString(prompt)
 	b.WriteString("\n")
-	b.WriteString(style.Dim.Sprint("工具行 ") + style.Info.Sprint("状态行 ") + style.Warn.Sprint("等待中 ") + style.Ok.Sprint("成功 ") + style.Error.Sprint("错误") + "\n")
+	b.WriteString(style.Dim.Sprint("工具行 ") + style.Info.Sprint("状态行 ") + style.Warn.Sprint("等待中 ") + style.Think.Sprint("思考中 ") + style.Run.Sprint("执行中 ") + style.Ok.Sprint("成功 ") + style.Error.Sprint("错误") + "\n")
 	fmt.Print(b.String())
 }
 

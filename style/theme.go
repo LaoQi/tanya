@@ -1,8 +1,8 @@
 package style
 
-// Semantics 是 UI 语义色集合，对应全局 Dim/Info/Warn/Ok/Error/Accent。
+// Semantics 是 UI 语义色集合，对应全局 Dim/Info/Warn/Ok/Error/Accent/Think/Run。
 type Semantics struct {
-	Dim, Info, Warn, Ok, Error, Accent Style
+	Dim, Info, Warn, Ok, Error, Accent, Think, Run Style
 }
 
 // Scheme 是完整配色主题：语义色 + 提示符模板 + markdown 渲染样式。
@@ -42,6 +42,8 @@ var schemeList = []Scheme{
 			Ok:     fg(2),
 			Error:  fg(9),
 			Accent: Style{Attr: AttrReverse},
+			Think:  fg(5),
+			Run:    fg(6),
 		},
 		MD: DefaultTheme(),
 	},
@@ -56,6 +58,8 @@ var schemeList = []Scheme{
 			Ok:     fg(10),
 			Error:  fg(9),
 			Accent: Style{Attr: AttrReverse},
+			Think:  fg(5),
+			Run:    fg(6),
 		},
 		MD: mdTheme(fgBold(15), fgBold(7), fgBold(8), fg(8), fg(8), fg(8), fg(8), Style{Attr: AttrUnderline}),
 	},
@@ -70,6 +74,8 @@ var schemeList = []Scheme{
 			Ok:     fg(10),
 			Error:  fg(9),
 			Accent: Style{Attr: AttrReverse},
+			Think:  fg(5),
+			Run:    fg(6),
 		},
 		MD: mdTheme(fgBold(15), fgBold(6), fgBold(3), fg(8), fg(8), fg(8), fg(8), fg(6)),
 	},
@@ -84,6 +90,8 @@ var schemeList = []Scheme{
 			Ok:     fg(10),
 			Error:  fg(9),
 			Accent: Style{Attr: AttrReverse},
+			Think:  fg(5),
+			Run:    fg(6),
 		},
 		MD: mdTheme(fgBold(15), fgBold(13), fgBold(12), fg(7), fg(8), fg(8), fg(8), fg(10)),
 	},
@@ -98,6 +106,8 @@ var schemeList = []Scheme{
 			Ok:     fg(10),
 			Error:  fg(9),
 			Accent: Style{Attr: AttrReverse},
+			Think:  fg(5),
+			Run:    fg(6),
 		},
 		MD: mdTheme(fgBold(15), fgBold(14), fgBold(6), fg(8), fg(8), fg(8), fg(8), fg(12)),
 	},
@@ -112,6 +122,8 @@ var schemeList = []Scheme{
 			Ok:     fg(10),
 			Error:  fg(9),
 			Accent: Style{Attr: AttrReverse},
+			Think:  fg(5),
+			Run:    fg(6),
 		},
 		MD: mdTheme(fgBold(15), fgBold(3), fgBold(11), fg(8), fg(8), fg(8), fg(8), fg(10)),
 	},
@@ -126,6 +138,8 @@ var schemeList = []Scheme{
 			Ok:     fg(10),
 			Error:  fg(9),
 			Accent: Style{Attr: AttrReverse},
+			Think:  fg(5),
+			Run:    fg(6),
 		},
 		MD: mdTheme(fgBold(15), fgBold(12), fgBold(13), fg(8), fg(8), fg(8), fg(8), fg(14)),
 	},
@@ -174,6 +188,8 @@ func ApplyScheme(name string) (Scheme, bool) {
 	Ok = s.Sem.Ok
 	Error = s.Sem.Error
 	Accent = s.Sem.Accent
+	Think = s.Sem.Think
+	Run = s.Sem.Run
 	curScheme = name
 	if userPalette != nil {
 		applySemanticPalette(userPalette)

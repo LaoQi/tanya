@@ -24,8 +24,16 @@ func TestSchemeRegistry(t *testing.T) {
 		if !HasScheme(n) {
 			t.Errorf("HasScheme(%q) 应为 true", n)
 		}
-		if _, ok := LookupScheme(n); !ok {
+		s, ok := LookupScheme(n)
+		if !ok {
 			t.Errorf("LookupScheme(%q) 应命中", n)
+			continue
+		}
+		if s.Sem.Think.Fg.Kind == KindNone || s.Sem.Run.Fg.Kind == KindNone {
+			t.Errorf("主题 %s 缺少 think/run 语义色: %+v", n, s.Sem)
+		}
+		if s.Sem.Run == s.Sem.Ok {
+			t.Errorf("主题 %s 执行色不应与成功色相同: %+v", n, s.Sem.Run)
 		}
 	}
 	if HasScheme("bogus") {
@@ -61,6 +69,9 @@ func TestApplySchemeUpdatesSemantics(t *testing.T) {
 	}
 	if Accent.Attr&AttrReverse == 0 {
 		t.Error("accent 应保持反显")
+	}
+	if Think.Fg.V16 != 5 || Run.Fg.V16 != 6 {
+		t.Errorf("vivid 思考/执行色未生效: think=%d run=%d", Think.Fg.V16, Run.Fg.V16)
 	}
 	if s.MD.Headings[1].Fg.V16 != 13 || s.MD.Headings[1].Attr&AttrBold == 0 {
 		t.Errorf("vivid h2 应为亮紫粗体: %+v", s.MD.Headings[1])

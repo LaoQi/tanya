@@ -27,9 +27,9 @@ const (
 func spinLine(kind spinKind, elapsed time.Duration, frame string) string {
 	switch kind {
 	case spinThinking:
-		return style.Warn.Sprint(fmt.Sprintf(SpinThinking, frame, spinElapsed(elapsed)))
+		return style.Think.Sprint(fmt.Sprintf(SpinThinking, frame, spinElapsed(elapsed)))
 	case spinRunning:
-		return style.Warn.Sprint(fmt.Sprintf(SpinRunning, frame, spinElapsed(elapsed)))
+		return style.Run.Sprint(fmt.Sprintf(SpinRunning, frame, spinElapsed(elapsed)))
 	default:
 		return style.Warn.Sprint(fmt.Sprintf(SpinWaiting, frame, spinElapsed(elapsed)))
 	}

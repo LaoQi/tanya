@@ -36,6 +36,10 @@ func applySemanticPalette(m map[string]string) {
 			Error = Style{Fg: c}
 		case "accent":
 			Accent = Style{Fg: c, Attr: AttrReverse}
+		case "think":
+			Think = Style{Fg: c}
+		case "run":
+			Run = Style{Fg: c}
 		}
 	}
 }

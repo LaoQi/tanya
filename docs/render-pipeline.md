@@ -165,10 +165,10 @@ type Style struct {
 UI 代码只引用语义名，具体色集中一处、可配置覆盖：
 
 ```go
-var (Dim, Info, Warn, Ok, Error, Accent Style)   // 启动时按 palette 填充
+var (Dim, Info, Warn, Ok, Error, Accent, Think, Run Style)   // 启动时按 palette 填充
 ```
 
-对应现状：`Dim`←90（工具块/ghost）、`Info`←94（状态行）、`Warn`←33（spinner）、`Ok`←32（选中标记）、`Error`（新补，当前错误文案未上色）。
+对应现状：`Dim`←90（工具块/ghost）、`Info`←94（状态行）、`Warn`←33（等待中）、`Think`←35（思考中）、`Run`←36（执行中）、`Ok`←32（选中标记）、`Error`（新补，当前错误文案未上色）。
 
 ```yaml
 colors: auto        # auto | on | off
