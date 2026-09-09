@@ -255,13 +255,18 @@ func WireToolView(width func() int, maxLines int) agent.EventSink {
 			sp.stop()
 			mu.Lock()
 			fmt.Print(style.Dim.Sprint(RenderToolStart(e.ToolName, e.ToolArgs, width())))
+			if e.Interactive {
+				fmt.Print(style.Info.Sprint(MsgInteractiveHint))
+			}
 			mu.Unlock()
 			lineDirty = false
-			sp.start(spinRunning)
+			if !e.Interactive {
+				sp.start(spinRunning)
+			}
 		case agent.EventToolEnd:
 			sp.stop()
 			mu.Lock()
-			if style.GetProfile().TTY {
+			if style.GetProfile().TTY && !e.Interactive {
 				fmt.Print(style.Dim.Sprint(RenderToolEndInline(e.ToolName, e.ToolArgs, e.Result, width(), maxLines)))
 			} else {
 				fmt.Print(RenderToolEnd(e.ToolName, e.ToolArgs, e.Result, width(), maxLines))

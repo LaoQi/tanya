@@ -226,9 +226,10 @@ func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
 			break
 		}
 		for _, tc := range resp.ToolCalls {
-			sink.Emit(Event{Kind: EventToolStart, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments})
-			res := a.dispatch(ctx, tc)
-			sink.Emit(Event{Kind: EventToolEnd, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, Result: res})
+			interactive := toolInteractive(tc.Function.Name, tc.Function.Arguments)
+			sink.Emit(Event{Kind: EventToolStart, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, Interactive: interactive})
+			res := a.dispatch(ctx, tc, interactive)
+			sink.Emit(Event{Kind: EventToolEnd, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, Result: res, Interactive: interactive})
 			a.history = append(a.history, Message{
 				Role:       "tool",
 				ToolCallID: tc.ID,
@@ -238,6 +239,16 @@ func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
 		}
 	}
 	return nil
+}
+
+func toolInteractive(name, args string) bool {
+	if name != "run_shell" {
+		return false
+	}
+	var a struct {
+		Interactive bool `json:"interactive"`
+	}
+	return json.Unmarshal([]byte(args), &a) == nil && a.Interactive
 }
 
 type ToolResult struct {
@@ -252,7 +263,7 @@ func (r ToolResult) Content() string {
 	return r.Text
 }
 
-func (a *Agent) dispatch(ctx context.Context, tc ToolCall) ToolResult {
+func (a *Agent) dispatch(ctx context.Context, tc ToolCall, interactive bool) ToolResult {
 	if tc.Function.Name == "run_shell" {
 		var args struct {
 			Command string `json:"command"`
@@ -261,7 +272,7 @@ func (a *Agent) dispatch(ctx context.Context, tc ToolCall) ToolResult {
 		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 			return ToolResult{Text: fmt.Sprintf(MsgParseArgs, err)}
 		}
-		return ToolResult{Shell: RunShellResult(ctx, args.Command, args.Timeout)}
+		return ToolResult{Shell: RunShellResult(ctx, args.Command, effectiveShellTimeout(args.Timeout, interactive))}
 	}
 	if text, ok := DispatchBuiltin(tc.Function.Name, tc.Function.Arguments); ok {
 		return ToolResult{Text: text}
@@ -569,8 +580,8 @@ func runShellDesc(rt *shellRuntime) string {
 }
 
 func runShellParams() string {
-	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"timeout":{"type":"integer","description":"超时秒数，默认 %d，最大 %d"}},"required":["command"]}`,
-		shellTimeoutSec, shellTimeoutLimit)
+	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"timeout":{"type":"integer","description":"超时秒数，默认 %d（interactive 时 %d），最大 %d"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/read 等交互提示）时置 true：停用等待动画，默认超时放宽"}},"required":["command"]}`,
+		shellTimeoutSec, shellInteractiveTimeoutSec, shellTimeoutLimit)
 }
 
 func (a *Agent) ToolOutputLines() int {

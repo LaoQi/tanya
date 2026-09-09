@@ -260,3 +260,47 @@ func TestWireToolViewReasoningLabel(t *testing.T) {
 		t.Errorf("收到思维链应切换为思考中: %q", out)
 	}
 }
+
+func TestWireToolViewInteractive(t *testing.T) {
+	old := style.GetProfile()
+	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
+	t.Cleanup(func() { style.SetProfile(old) })
+	var sink agent.EventSink
+	out := captureStdout(func() {
+		sink = WireToolView(func() int { return 80 }, 20)
+		sink(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true})
+		time.Sleep(250 * time.Millisecond)
+		sink(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "sudo -S true", ExitCode: 1}}})
+	})
+	if !strings.Contains(out, "等待终端输入") {
+		t.Errorf("交互模式应打印引导行: %q", out)
+	}
+	if strings.Contains(out, "执行中") {
+		t.Errorf("交互模式不应启动 spinner: %q", out)
+	}
+	if strings.Contains(out, "\x1b[1A") {
+		t.Errorf("交互模式不应上移重绘: %q", out)
+	}
+}
+
+func TestWireToolViewNonInteractive(t *testing.T) {
+	old := style.GetProfile()
+	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
+	t.Cleanup(func() { style.SetProfile(old) })
+	var sink agent.EventSink
+	out := captureStdout(func() {
+		sink = WireToolView(func() int { return 80 }, 20)
+		sink(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
+		time.Sleep(250 * time.Millisecond)
+		sink(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", ExitCode: 0}}})
+	})
+	if strings.Contains(out, "等待终端输入") {
+		t.Errorf("非交互模式不应打印引导行: %q", out)
+	}
+	if !strings.Contains(out, "执行中") {
+		t.Errorf("非交互模式应启动 spinner: %q", out)
+	}
+	if !strings.Contains(out, "\x1b[1A") {
+		t.Errorf("非交互模式应上移重绘标题: %q", out)
+	}
+}

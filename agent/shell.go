@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	shellMaxOutput    = 30000
-	shellWaitDelay    = 2 * time.Second
-	shellTimeoutSec   = 60
-	shellTimeoutLimit = 900
+	shellMaxOutput             = 30000
+	shellWaitDelay             = 2 * time.Second
+	shellTimeoutSec            = 60
+	shellInteractiveTimeoutSec = 300
+	shellTimeoutLimit          = 900
 )
 
 type ShellKind int
@@ -300,12 +301,7 @@ func statState(stat string) string {
 }
 
 func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellResult {
-	if timeoutSec <= 0 {
-		timeoutSec = shellTimeoutSec
-	}
-	if timeoutSec > shellTimeoutLimit {
-		timeoutSec = shellTimeoutLimit
-	}
+	timeoutSec = effectiveShellTimeout(timeoutSec, false)
 	res := &ShellResult{Command: command}
 	profile := ShellRuntime().profile
 	if profile == nil {
@@ -331,6 +327,9 @@ func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellR
 	stderr.chunks = &res.Stderr
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	if tty != nil {
+		cmd.Stdin = tty
+	}
 	if err := cmd.Start(); err != nil {
 		res.Err = err.Error()
 		res.Duration = time.Since(start)
@@ -356,4 +355,17 @@ func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellR
 		}
 	}
 	return res
+}
+
+func effectiveShellTimeout(explicit int, interactive bool) int {
+	if explicit <= 0 {
+		if interactive {
+			return shellInteractiveTimeoutSec
+		}
+		return shellTimeoutSec
+	}
+	if explicit > shellTimeoutLimit {
+		return shellTimeoutLimit
+	}
+	return explicit
 }

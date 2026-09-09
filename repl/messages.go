@@ -56,6 +56,8 @@ const (
 	MsgTimeout    = "执行超时"
 	MsgSuspended  = "挂起已终止"
 	MsgToolErr    = "错误: %s"
+
+	MsgInteractiveHint = "  ⏎ 等待终端输入，请在下方直接应答\n"
 )
 
 const (

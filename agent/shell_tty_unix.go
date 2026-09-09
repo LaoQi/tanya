@@ -16,6 +16,8 @@ func ownPgrp() int {
 	return pgrp
 }
 
+func ttyStdinSupported() bool { return true }
+
 func openForegroundTTY() *os.File {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
