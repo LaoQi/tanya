@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"sync"
 	"unicode/utf8"
 
 	"github.com/LaoQi/tanyan/agent"
@@ -142,7 +141,7 @@ func (r *REPL) Run() error {
 			}
 			continue
 		}
-		ctx, done := r.interruptContext()
+		ctx, done := InterruptContext()
 		r.md.Reset()
 		err = r.agent.Ask(ctx, line, r.stream)
 		for _, blk := range r.md.Close() {
@@ -152,52 +151,6 @@ func (r *REPL) Run() error {
 		fmt.Println()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, MsgErrLineFmt+"\n", err)
-		}
-	}
-}
-
-func (r *REPL) interruptContext() (context.Context, func()) {
-	ctx, cancel := context.WithCancel(context.Background())
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt)
-	stop := make(chan struct{})
-	var wg sync.WaitGroup
-	raw := false
-	kw, watchable := r.term.(readline.KeyWatcher)
-	if r.raw && watchable {
-		if err := kw.WatchRaw(); err == nil {
-			raw = true
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for {
-					ev, err := kw.ReadKeyUntil(stop)
-					if err != nil {
-						return
-					}
-					if ev.Code == readline.KeyCtrlC {
-						cancel()
-					}
-				}
-			}()
-		}
-	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		select {
-		case <-sigCh:
-			cancel()
-		case <-stop:
-		}
-	}()
-	return ctx, func() {
-		cancel()
-		close(stop)
-		wg.Wait()
-		signal.Stop(sigCh)
-		if raw {
-			r.term.Restore()
 		}
 	}
 }

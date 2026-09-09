@@ -26,7 +26,7 @@ style/             package style：富文本管线（语义色/宽度截断/模�
 - `tanyan`：交互 REPL，维护内存 messages 历史，SSE 逐 token 流式输出
 - `tanyan ask "问题"`：单发，输出后退出
 - 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式
-- Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）。REPL 路径不依赖 tty ISIG 产生 SIGINT：Ask 期间切到 WatchRaw（输入 raw、保留 OPOST），watcher goroutine 经 `KeyWatcher.ReadKeyUntil` 监听 Ctrl+C 直接 cancel ctx，信号处理仅作兜底；`ask` 单发路径仍用 signal.Notify。依赖环境 termios 的旧实现会在 ISIG 被关闭的终端（被上层程序污染的 tty）下完全失效
+- Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）：REPL 与 `ask` 单发统一走 `signal.Notify(SIGINT)`（`repl.InterruptContext`），不依赖 tty ISIG；命令执行期间子进程组持有终端前台，Ctrl+C 由内核直达子进程组（命令优雅退出），再次按下取消回合
 
 ## LLM 接入
 
@@ -80,13 +80,17 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
   - 全部落空（含配置的 shell 不存在）：降级不报错，profile 为 nil，仅不注册 run_shell（ToolDefs 条件注册、env 段无 SHELL/TIMEOUT/OUTPUT 行、system prompt 退化为 `NoShellSystemPrompt`），dispatch 调用返回错误文案
 - 程序探测：profile 就绪后对固定清单（ls/cat/head/tail/grep/rg/fd/sed/awk/find/sort/wc/cut/tr/xargs/git/curl/wget/go/node/python）逐个 LookPath，存在的拼入 run_shell 工具描述 `可用程序: ...`，仅在工具描述出现，不重复注入 env 段
 - 输出捕获：stdout/stderr 各保留头 30000 字节 + 尾 30000 字节（`streamCapture` 滚动窗口），中间字节计数丢弃，模型仍可见首尾内容
+- 终端前台移交（unix，shell_tty_unix.go；illumos/ios 无 x/sys ioctl 支持，降级 no-op）：执行前打开 `/dev/tty`，仅当自身进程组已是前台时 `TIOCSPGRP` 移交子进程组（`handoverForeground`），子进程结束后以 `handed` 门控归还（`restoreForeground`，避免从未交接时抢占 shell 的前台）；无控制终端 / 非前台（嵌套、后台运行）自动跳过，行为与旧版一致。子进程因此可直接在终端应答 ssh/git 等密码提示，不再静默挂死至超时
+- 信号防护（`ProtectTerminalSignals`，main 启动时 `sync.Once` 一次性）：`Notify(SIGTSTP)` 吞没（命令间隙 Ctrl+Z 不挂起自身）、`Ignore(SIGTTIN/SIGTTOU)`（自身后台 tty 读写不停止）；SIGQUIT 保持 Go 默认（全栈转储）。忽略处置随 exec 被子进程继承，子进程后台读写 tty 得 EIO 而非停止
+- 挂起探测（`waitShell`）：200ms 轮询 `/proc/<pid>/stat`，连续 2 次 `T` 判定被终端挂起（Ctrl+Z 等停止信号），SIGKILL 进程组并置 `Stopped`，状态行显示 `挂起已终止`，避免静默挂到超时；`processStopped` 由 shell_proc_linux.go 提供 /proc 实现，非 linux（shell_proc_other.go）恒 false（探测失效，其余功能不受影响）
+- 字段集：`ShellResult` 为 Command/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Stopped/Duration
 - 回调：`OnToolStart`（dispatch 内触发）/ `OnToolEnd`（结构化 `ToolResult`：Shell/Text 二选一，发回模型的 content 由 `Content()` 拼回文本），渲染在 repl 包 `toolview.go`
 - **免确认直接执行**（早期版本有 y/n/a 确认机制，已移除）
 
 ### 工具视图渲染（repl/toolview.go）
 
 - `WireToolView` 接线全部回调，块状视图：`▸ 工具名 命令` 标题行 + 缩进输出行（stderr 加 `2|` 前缀）+ 亮蓝状态行
-- 状态行总是输出（语义色 `Info`，无色环境纯文本）：`↳ exit 0 · 0.3s · 12 行`；异常时首段为 `exit 2`/`执行超时`/`已中断`/`错误: ...`；输出被截断时行数段显示 `共 N 行`；builtin 工具无状态行（截断时仅显示 `共 N 行`）
+- 状态行总是输出（语义色 `Info`，无色环境纯文本）：`↳ exit 0 · 0.3s · 12 行`；异常时首段为 `exit 2`/`执行超时`/`已中断`/`挂起已终止`/`错误: ...`；输出被截断时行数段显示 `共 N 行`；builtin 工具无状态行（截断时仅显示 `共 N 行`）
 - 颜色走 `style` 语义色 + Profile 驱动（`colors` 配置 / `NO_COLOR` / 非 TTY → 纯文本）：工具块 `Dim`、spinner `Warn`、状态行 `Info`，可用 `palette` 配置覆盖
 - 显示行数上限 `tool_output_lines`（默认 20，范围 1-1000），超出保留头 3 行 + 尾 2 行并提示 `/history n` 查看完整输出
 - 执行开始即打印标题行（`⋯` 标记进行中）；结束在 TTY 下 `\x1b[1A\r\x1b[K` 上移重绘标题替换 `⋯`，非 TTY 直接打印完整块
@@ -158,6 +162,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - Tab 补全菜单：多候选时在输入行下方渲染菜单，选中项反显（`\x1b[7m`）；`↑/↓` 循环选择（菜单打开时不触发历史导航）、`Tab` 循环下一项、`Enter` 仅插入选中项（再次 Enter 提交）、`Esc` 关闭、任意输入关闭菜单正常编辑；单候选直接补全、公共前缀先行扩展的行为不变；候选超 8 行滚动窗口显示
 - keys：ESC 序列/控制键/UTF-8 状态机；width：`style` 薄包装（宽度表/ANSI 剥离/感知截断均由 `style` 提供，截断自动复位悬空 SGR 防串色）
 - 非 TTY 降级：`Degraded` 按行读取，无动画/菜单
+- 平台划分：termios 请求常量按平台族分文件（`termios_sysv.go` linux/android/aix/solaris 用 TCGETS/TCSETS/TCSETSF，`termios_bsd.go` darwin/freebsd/netbsd/openbsd/dragonfly 用 TIOCGETA/TIOCSETA/TIOCSETAF）；illumos/ios 在该版 x/sys 无 ioctl 支持，`terminal_unix_stub.go` 直接返回 ErrUnsupported 走 Degraded 降级，保证全 unix GOOS 可编译
 
 ## 配置
 

@@ -154,6 +154,7 @@ type ShellResult struct {
 	ExitCode    int
 	TimedOut    bool
 	Interrupted bool
+	Stopped     bool
 	Duration    time.Duration
 }
 
@@ -171,6 +172,9 @@ func (r *ShellResult) String() string {
 	}
 	if r.TimedOut {
 		fmt.Fprintf(&b, MsgTimedOut+"\n")
+	}
+	if r.Stopped {
+		b.WriteString(MsgStopped + "\n")
 	}
 	if r.Err != "" {
 		fmt.Fprintf(&b, MsgErrLine+"\n", r.Err)
@@ -253,6 +257,48 @@ func RunShell(ctx context.Context, command string, timeoutSec int) string {
 	return RunShellResult(ctx, command, timeoutSec).String()
 }
 
+const (
+	stopPollInterval = 200 * time.Millisecond
+	stopPollHits     = 2
+)
+
+func waitShell(cmd *exec.Cmd, stopped *bool) error {
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	tick := time.NewTicker(stopPollInterval)
+	defer tick.Stop()
+	hits := 0
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-tick.C:
+			if processStopped(cmd.Process.Pid) {
+				hits++
+				if hits >= stopPollHits {
+					*stopped = true
+					killProcessGroup(cmd)
+					return <-done
+				}
+			} else {
+				hits = 0
+			}
+		}
+	}
+}
+
+func statState(stat string) string {
+	i := strings.IndexByte(stat, ')')
+	if i < 0 || i+2 > len(stat) {
+		return ""
+	}
+	fields := strings.Fields(stat[i+2:])
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
 func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellResult {
 	if timeoutSec <= 0 {
 		timeoutSec = shellTimeoutSec
@@ -266,6 +312,9 @@ func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellR
 		res.Err = MsgShellUnavailable
 		return res
 	}
+	tty := openForegroundTTY()
+	handed := false
+	defer func() { restoreForeground(tty, handed) }()
 	start := time.Now()
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
@@ -282,7 +331,13 @@ func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellR
 	stderr.chunks = &res.Stderr
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		res.Err = err.Error()
+		res.Duration = time.Since(start)
+		return res
+	}
+	handed = handoverForeground(tty, cmd.Process.Pid)
+	err := waitShell(cmd, &res.Stopped)
 	stdout.finish()
 	stderr.finish()
 	res.Duration = time.Since(start)
@@ -292,6 +347,7 @@ func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellR
 		res.Interrupted = true
 	case runCtx.Err() == context.DeadlineExceeded:
 		res.TimedOut = true
+	case res.Stopped:
 	case err != nil:
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			res.ExitCode = exitErr.ExitCode()

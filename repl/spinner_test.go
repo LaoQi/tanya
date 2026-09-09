@@ -33,7 +33,10 @@ type blockedWriter struct {
 }
 
 func (w *blockedWriter) Write(p []byte) (int, error) {
-	w.entered <- struct{}{}
+	select {
+	case w.entered <- struct{}{}:
+	default:
+	}
 	<-w.release
 	return len(p), nil
 }
@@ -59,6 +62,11 @@ func TestSpinnerStopTimeout(t *testing.T) {
 		t.Error("超时后 active 应置 false")
 	}
 	close(bw.release)
+	select {
+	case <-sp.stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("spinner goroutine 未退出（遗留 goroutine 会与后续测试的全局状态写构成竞态）")
+	}
 }
 
 func TestSpinLine(t *testing.T) {

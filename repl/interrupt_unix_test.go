@@ -25,3 +25,13 @@ func TestInterruptContextSignal(t *testing.T) {
 		t.Fatal("SIGINT 未取消 ctx")
 	}
 }
+
+func TestInterruptContextDone(t *testing.T) {
+	ctx, done := InterruptContext()
+	done()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("done() 应取消 ctx")
+	}
+}
