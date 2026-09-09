@@ -159,17 +159,17 @@ func TestMdToggle(t *testing.T) {
 	}
 }
 
-func TestDeltaFnBypassWhenOff(t *testing.T) {
+func TestStreamContentBypassWhenOff(t *testing.T) {
 	r, err := NewREPL(nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.deltaFn() == nil {
-		t.Fatal("deltaFn 不应为 nil")
-	}
 	r.mdLive = false
-	if r.deltaFn() == nil {
-		t.Error("关闭时仍应返回直通函数")
+	out := captureStdout(func() {
+		r.stream(agent.Event{Kind: agent.EventContent, Text: "直接输出"})
+	})
+	if out != "直接输出" {
+		t.Errorf("关闭渲染应直通输出: %q", out)
 	}
 }
 

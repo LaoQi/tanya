@@ -34,7 +34,11 @@ func TestResponsesContentAndUsage(t *testing.T) {
 	var sb strings.Builder
 	msg, err := NewClient(cfg).ChatStream(context.Background(),
 		[]Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "hi"}},
-		func(s string) { sb.WriteString(s) })
+		EventSink(func(e Event) {
+			if e.Kind == EventContent {
+				sb.WriteString(e.Text)
+			}
+		}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,8 +209,8 @@ func TestResponsesTTFTToolCallOnly(t *testing.T) {
 	if msg.Content != "" || len(msg.ToolCalls) != 1 {
 		t.Fatalf("应为纯 tool_call 响应: %+v", msg)
 	}
-	if msg.Stat == nil || msg.Stat.TTFT <= 0 {
-		t.Errorf("纯 tool_call 响应也应记录 TTFT: %+v", msg.Stat)
+	if msg.Stat == nil || msg.Stat.FirstEvent <= 0 {
+		t.Errorf("纯 tool_call 响应也应记录 FirstEvent: %+v", msg.Stat)
 	}
 }
 
@@ -241,7 +245,11 @@ func TestResponsesCompletedSkipsMessageWhenDelta(t *testing.T) {
 	cfg.APIKey = "test-key"
 	var sb strings.Builder
 	msg, err := NewClient(cfg).ChatStream(context.Background(),
-		[]Message{{Role: "user", Content: "hi"}}, func(s string) { sb.WriteString(s) })
+		[]Message{{Role: "user", Content: "hi"}}, EventSink(func(e Event) {
+			if e.Kind == EventContent {
+				sb.WriteString(e.Text)
+			}
+		}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,4 +439,61 @@ func readLines(t *testing.T, path string) []string {
 		t.Fatal(err)
 	}
 	return strings.Split(strings.TrimSpace(string(b)), "\n")
+}
+
+func TestResponsesReasoningDeltaEvents(t *testing.T) {
+	_, cfg := responsesLLM(t, mockStep{reasoning: "推理过程", content: "结论"})
+	var reasoning, content strings.Builder
+	sink := EventSink(func(e Event) {
+		switch e.Kind {
+		case EventReasoning:
+			reasoning.WriteString(e.Text)
+		case EventContent:
+			content.WriteString(e.Text)
+		}
+	})
+	msg, err := NewClient(cfg).ChatStream(context.Background(),
+		[]Message{{Role: "user", Content: "hi"}}, sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reasoning.String() != "推理过程" {
+		t.Errorf("思维链事件: %q", reasoning.String())
+	}
+	if content.String() != "结论" {
+		t.Errorf("正文事件: %q", content.String())
+	}
+	if msg.Content != "结论" {
+		t.Errorf("思维链不应污染正文: %q", msg.Content)
+	}
+	if len(msg.ReasoningItems) != 1 || msg.ReasoningItems[0].Content != "推理过程" {
+		t.Errorf("completed 仍应捕获思维链: %+v", msg.ReasoningItems)
+	}
+	if msg.Stat == nil || msg.Stat.FirstReasoning <= 0 || msg.Stat.FirstContent < msg.Stat.FirstReasoning {
+		t.Errorf("时序维度异常: %+v", msg.Stat)
+	}
+}
+
+func TestResponsesToolCallDeltaEvents(t *testing.T) {
+	_, cfg := responsesLLM(t,
+		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "run_shell", args: `{"command":"echo hi"}`}}},
+		mockStep{content: "done"},
+	)
+	var args strings.Builder
+	sink := EventSink(func(e Event) {
+		if e.Kind == EventToolCall {
+			args.WriteString(e.ToolArgs)
+		}
+	})
+	msg, err := NewClient(cfg).ChatStream(context.Background(),
+		[]Message{{Role: "user", Content: "hi"}}, sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args.String() != `{"command":"echo hi"}` {
+		t.Errorf("工具参数增量事件: %q", args.String())
+	}
+	if len(msg.ToolCalls) != 1 || msg.ToolCalls[0].Function.Arguments != `{"command":"echo hi"}` {
+		t.Errorf("终态仍应从 completed 提取 tool_calls: %+v", msg.ToolCalls)
+	}
 }

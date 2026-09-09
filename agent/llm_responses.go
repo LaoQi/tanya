@@ -162,7 +162,7 @@ type responsesError struct {
 	Message string `json:"message"`
 }
 
-func (c *Client) responsesStream(ctx context.Context, messages []Message, onDelta func(string)) (*Message, error) {
+func (c *Client) responsesStream(ctx context.Context, messages []Message, sink EventSink) (*Message, error) {
 	instructions, input := buildResponsesInput(messages)
 	body, err := json.Marshal(responsesRequest{
 		Model:        c.cfg.Model,
@@ -202,7 +202,7 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, onDelt
 	}
 
 	msg := &Message{Role: "assistant"}
-	var ttft time.Duration
+	var firstEvent, firstReasoning, firstContent time.Duration
 	var usage *Usage
 	var hasDelta bool
 
@@ -221,20 +221,39 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, onDelt
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
 			continue
 		}
-		if ttft == 0 {
-			ttft = time.Since(start)
+		if firstEvent == 0 {
+			firstEvent = time.Since(start)
 		}
 		switch ev.Type {
+		case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
+			var d responsesTextDelta
+			if json.Unmarshal([]byte(data), &d) != nil || d.Delta == "" {
+				continue
+			}
+			if firstReasoning == 0 {
+				firstReasoning = time.Since(start)
+			}
+			sink.Emit(Event{Kind: EventReasoning, Text: d.Delta})
+		case "response.function_call_arguments.delta":
+			var d struct {
+				ItemID string `json:"item_id"`
+				Delta  string `json:"delta"`
+			}
+			if json.Unmarshal([]byte(data), &d) != nil || d.Delta == "" {
+				continue
+			}
+			sink.Emit(Event{Kind: EventToolCall, ToolID: d.ItemID, ToolArgs: d.Delta})
 		case "response.output_text.delta":
 			var d responsesTextDelta
 			if json.Unmarshal([]byte(data), &d) != nil || d.Delta == "" {
 				continue
 			}
+			if firstContent == 0 {
+				firstContent = time.Since(start)
+			}
 			hasDelta = true
 			msg.Content += d.Delta
-			if onDelta != nil {
-				onDelta(d.Delta)
-			}
+			sink.Emit(Event{Kind: EventContent, Text: d.Delta})
 		case "response.completed", "response.incomplete":
 			var cc responsesCompleted
 			if json.Unmarshal([]byte(data), &cc) != nil {
@@ -243,6 +262,7 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, onDelt
 			applyCompletedOutput(msg, &cc.Response.Output, hasDelta)
 			if cc.Response.Usage != nil {
 				usage = usageFromResponses(cc.Response.Usage)
+				sink.Emit(Event{Kind: EventUsage, Usage: usage})
 			}
 			if ev.Type == "response.completed" && cc.Response.Error != nil {
 				return nil, fmt.Errorf(MsgRespFailed, cc.Response.Error.Message)
@@ -266,7 +286,7 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, onDelt
 		return nil, fmt.Errorf(MsgReadStream, err)
 	}
 	msg.Usage = usage
-	msg.Stat = &RequestStat{Duration: time.Since(start), TTFT: ttft}
+	msg.Stat = &RequestStat{Duration: time.Since(start), FirstEvent: firstEvent, FirstReasoning: firstReasoning, FirstContent: firstContent}
 	return msg, nil
 }
 

@@ -13,7 +13,12 @@ func TestAskSingleTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sb strings.Builder
-	if err := a.Ask(context.Background(), "问题", func(s string) { sb.WriteString(s) }); err != nil {
+	sink := EventSink(func(e Event) {
+		if e.Kind == EventContent {
+			sb.WriteString(e.Text)
+		}
+	})
+	if err := a.Ask(context.Background(), "问题", sink); err != nil {
 		t.Fatal(err)
 	}
 	if sb.String() != "这是回答" {
@@ -42,10 +47,16 @@ func TestAskShellToolLoop(t *testing.T) {
 	}
 	var toolEvents []string
 	var startEvents []string
-	a.OnToolStart = func(name, args string) { startEvents = append(startEvents, name+":"+args) }
-	a.OnToolEnd = func(name, args string, res ToolResult) { toolEvents = append(toolEvents, name) }
+	sink := EventSink(func(e Event) {
+		switch e.Kind {
+		case EventToolStart:
+			startEvents = append(startEvents, e.ToolName+":"+e.ToolArgs)
+		case EventToolEnd:
+			toolEvents = append(toolEvents, e.ToolName)
+		}
+	})
 
-	if err := a.Ask(context.Background(), "测试 shell", nil); err != nil {
+	if err := a.Ask(context.Background(), "测试 shell", sink); err != nil {
 		t.Fatal(err)
 	}
 	if len(a.history) != 4 {
@@ -138,9 +149,15 @@ func TestAskRequestCallbacks(t *testing.T) {
 	}
 	var starts int
 	var infos []ResponseInfo
-	a.OnRequestStart = func() { starts++ }
-	a.OnResponse = func(info ResponseInfo) { infos = append(infos, info) }
-	if err := a.Ask(context.Background(), "算一下", nil); err != nil {
+	sink := EventSink(func(e Event) {
+		switch e.Kind {
+		case EventRequestStart:
+			starts++
+		case EventResponse:
+			infos = append(infos, e.Response)
+		}
+	})
+	if err := a.Ask(context.Background(), "算一下", sink); err != nil {
 		t.Fatal(err)
 	}
 	if starts != 2 || len(infos) != 2 {
@@ -150,8 +167,8 @@ func TestAskRequestCallbacks(t *testing.T) {
 		if info.Duration <= 0 {
 			t.Errorf("infos[%d] Duration 应 >0: %v", i, info.Duration)
 		}
-		if info.TTFT <= 0 {
-			t.Errorf("infos[%d] TTFT 应 >0: %v", i, info.TTFT)
+		if info.FirstEvent <= 0 {
+			t.Errorf("infos[%d] FirstEvent 应 >0: %v", i, info.FirstEvent)
 		}
 	}
 	if infos[0].Usage != nil {
@@ -176,9 +193,15 @@ func TestAskRequestCallbackOnError(t *testing.T) {
 	}
 	var starts int
 	var infos []ResponseInfo
-	a.OnRequestStart = func() { starts++ }
-	a.OnResponse = func(info ResponseInfo) { infos = append(infos, info) }
-	if err := a.Ask(context.Background(), "问题", nil); err == nil {
+	sink := EventSink(func(e Event) {
+		switch e.Kind {
+		case EventRequestStart:
+			starts++
+		case EventResponse:
+			infos = append(infos, e.Response)
+		}
+	})
+	if err := a.Ask(context.Background(), "问题", sink); err == nil {
 		t.Fatal("应返回错误")
 	}
 	if starts != 1 || len(infos) != 1 {
@@ -203,5 +226,111 @@ func TestAskUnknownTool(t *testing.T) {
 	}
 	if !strings.Contains(a.history[2].Content, "未知工具") {
 		t.Errorf("got %q", a.history[2].Content)
+	}
+}
+
+func milestoneKinds(kinds []EventKind) []EventKind {
+	var out []EventKind
+	for _, k := range kinds {
+		switch k {
+		case EventRequestStart, EventResponse, EventToolStart, EventToolEnd:
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+func TestAskEventSequence(t *testing.T) {
+	m := newMockLLM(t,
+		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "calc", args: `{"expression":"1+1"}`}}},
+		mockStep{content: "2"},
+	)
+	a, err := New(m.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []EventKind
+	if err := a.Ask(context.Background(), "算一下", EventSink(func(e Event) { kinds = append(kinds, e.Kind) })); err != nil {
+		t.Fatal(err)
+	}
+	got := milestoneKinds(kinds)
+	want := []EventKind{EventRequestStart, EventResponse, EventToolStart, EventToolEnd, EventRequestStart, EventResponse}
+	if len(got) != len(want) {
+		t.Fatalf("里程碑事件序列: %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("里程碑事件序列: %v want %v", got, want)
+		}
+	}
+}
+
+func TestAskReasoningPhaseEvents(t *testing.T) {
+	m := newMockLLM(t, mockStep{reasoning: "先推理", content: "结论"})
+	a, err := New(m.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []EventKind
+	var info ResponseInfo
+	sink := EventSink(func(e Event) {
+		switch e.Kind {
+		case EventReasoning, EventContent:
+			order = append(order, e.Kind)
+		case EventResponse:
+			info = e.Response
+		}
+	})
+	if err := a.Ask(context.Background(), "问题", sink); err != nil {
+		t.Fatal(err)
+	}
+	if len(order) < 2 || order[0] != EventReasoning {
+		t.Fatalf("思考事件应先于正文: %v", order)
+	}
+	if order[len(order)-1] != EventContent {
+		t.Errorf("末尾应为正文事件: %v", order)
+	}
+	if info.FirstReasoning <= 0 {
+		t.Errorf("FirstReasoning 应 >0: %v", info.FirstReasoning)
+	}
+	if info.FirstContent < info.FirstReasoning {
+		t.Errorf("FirstContent 不应早于 FirstReasoning: %v < %v", info.FirstContent, info.FirstReasoning)
+	}
+}
+
+func TestAskToolEventsCarryResult(t *testing.T) {
+	m := newMockLLM(t,
+		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "run_shell", args: `{"command":"echo evt"}`}}},
+		mockStep{content: "done"},
+	)
+	a, err := New(m.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var startBeforeEnd bool
+	var sawResult bool
+	var started bool
+	sink := EventSink(func(e Event) {
+		switch e.Kind {
+		case EventToolStart:
+			started = true
+			if e.ToolName != "run_shell" || !strings.Contains(e.ToolArgs, "echo evt") {
+				t.Errorf("ToolStart 载荷异常: %+v", e)
+			}
+		case EventToolEnd:
+			if started {
+				startBeforeEnd = true
+			}
+			if e.Result.Shell == nil || !strings.Contains(e.Result.Content(), "evt") {
+				t.Errorf("ToolEnd 应携带结构化结果: %+v", e.Result)
+			}
+			sawResult = true
+		}
+	})
+	if err := a.Ask(context.Background(), "跑一下", sink); err != nil {
+		t.Fatal(err)
+	}
+	if !startBeforeEnd || !sawResult {
+		t.Errorf("ToolStart 应先于 ToolEnd 且携带结果: start=%v result=%v", startBeforeEnd, sawResult)
 	}
 }

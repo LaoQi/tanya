@@ -43,17 +43,15 @@ type Agent struct {
 	lastUsage      *Usage
 	sessionCache   map[string]SessionInfo
 	sessionStat    map[string]sessionFileStat
-	OnToolStart    func(name, args string)
-	OnToolEnd      func(name, args string, res ToolResult)
-	OnRequestStart func()
-	OnResponse     func(info ResponseInfo)
 }
 
 type ResponseInfo struct {
-	Duration      time.Duration
-	TTFT          time.Duration
-	Usage         *Usage
-	ContextTokens int
+	Duration       time.Duration
+	FirstEvent     time.Duration
+	FirstReasoning time.Duration
+	FirstContent   time.Duration
+	Usage          *Usage
+	ContextTokens  int
 }
 
 type sessionFileStat struct {
@@ -186,39 +184,37 @@ func (a *Agent) NewSession() {
 	a.sessionPath = filepath.Join(a.sessionDir, time.Now().Format("20060102-150405")+".jsonl")
 }
 
-func (a *Agent) Ask(ctx context.Context, input string, onDelta func(string)) error {
+func (a *Agent) Ask(ctx context.Context, input string, sink EventSink) error {
 	mark := len(a.history)
 	a.history = append(a.history, Message{Role: "user", Content: input})
-	if err := a.runTurn(ctx, onDelta); err != nil {
+	if err := a.runTurn(ctx, sink); err != nil {
 		a.history = a.history[:mark]
 		return err
 	}
 	return a.save()
 }
 
-func (a *Agent) runTurn(ctx context.Context, onDelta func(string)) error {
+func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
 	for {
-		if a.OnRequestStart != nil {
-			a.OnRequestStart()
-		}
+		sink.Emit(Event{Kind: EventRequestStart})
 		start := time.Now()
-		resp, err := a.client.ChatStream(ctx, a.buildMessages(), onDelta)
-		if a.OnResponse != nil {
-			info := ResponseInfo{Duration: time.Since(start)}
-			if err == nil {
-				if resp.Stat != nil {
-					info.Duration = resp.Stat.Duration
-					info.TTFT = resp.Stat.TTFT
-				}
-				info.Usage = resp.Usage
-				if resp.Usage != nil {
-					info.ContextTokens = resp.Usage.PromptTokens
-				} else {
-					info.ContextTokens = a.totalTokens()
-				}
+		resp, err := a.client.ChatStream(ctx, a.buildMessages(), sink)
+		info := ResponseInfo{Duration: time.Since(start)}
+		if err == nil {
+			if resp.Stat != nil {
+				info.Duration = resp.Stat.Duration
+				info.FirstEvent = resp.Stat.FirstEvent
+				info.FirstReasoning = resp.Stat.FirstReasoning
+				info.FirstContent = resp.Stat.FirstContent
 			}
-			a.OnResponse(info)
+			info.Usage = resp.Usage
+			if resp.Usage != nil {
+				info.ContextTokens = resp.Usage.PromptTokens
+			} else {
+				info.ContextTokens = a.totalTokens()
+			}
 		}
+		sink.Emit(Event{Kind: EventResponse, Response: info})
 		if err != nil {
 			return err
 		}
@@ -230,10 +226,9 @@ func (a *Agent) runTurn(ctx context.Context, onDelta func(string)) error {
 			break
 		}
 		for _, tc := range resp.ToolCalls {
+			sink.Emit(Event{Kind: EventToolStart, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments})
 			res := a.dispatch(ctx, tc)
-			if a.OnToolEnd != nil {
-				a.OnToolEnd(tc.Function.Name, tc.Function.Arguments, res)
-			}
+			sink.Emit(Event{Kind: EventToolEnd, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, Result: res})
 			a.history = append(a.history, Message{
 				Role:       "tool",
 				ToolCallID: tc.ID,
@@ -258,9 +253,6 @@ func (r ToolResult) Content() string {
 }
 
 func (a *Agent) dispatch(ctx context.Context, tc ToolCall) ToolResult {
-	if a.OnToolStart != nil {
-		a.OnToolStart(tc.Function.Name, tc.Function.Arguments)
-	}
 	if tc.Function.Name == "run_shell" {
 		var args struct {
 			Command string `json:"command"`

@@ -83,8 +83,11 @@ func RenderToolEndInline(name, args string, res agent.ToolResult, width, maxLine
 
 func RenderResponseInfo(info agent.ResponseInfo, width int) string {
 	var parts []string
-	if info.TTFT > 0 {
-		parts = append(parts, "TTFT "+respDuration(info.TTFT))
+	if info.FirstEvent > 0 {
+		parts = append(parts, "TTFT "+respDuration(info.FirstEvent))
+	}
+	if info.FirstContent > info.FirstEvent {
+		parts = append(parts, "TTFC "+respDuration(info.FirstContent))
 	}
 	if info.Duration > 0 {
 		parts = append(parts, respDuration(info.Duration))
@@ -213,61 +216,58 @@ func textView(text string, width, maxLines int) ([]string, string) {
 	return out, ""
 }
 
-func WireToolView(a *agent.Agent, width func() int, maxLines int) func(string) {
+func WireToolView(width func() int, maxLines int) agent.EventSink {
 	var mu sync.Mutex
 	sp := newSpinner(&mu, style.GetProfile().TTY)
 	toolJustEnded := false
 	lineDirty := false
-	a.OnRequestStart = func() {
-		sp.start(func(elapsed time.Duration, frame string) string {
-			return style.Warn.Sprint(fmt.Sprintf(SpinWaiting, frame, spinElapsed(elapsed)))
-		})
-	}
-	a.OnResponse = func(info agent.ResponseInfo) {
-		sp.stop()
-		mu.Lock()
-		if lineDirty {
-			fmt.Println()
+	return func(e agent.Event) {
+		switch e.Kind {
+		case agent.EventRequestStart:
+			sp.start(spinWaiting)
+		case agent.EventReasoning:
+			sp.setKind(spinThinking)
+		case agent.EventContent:
+			if e.Text == "" {
+				return
+			}
+			sp.stop()
+			mu.Lock()
+			if toolJustEnded {
+				fmt.Println()
+				toolJustEnded = false
+			}
+			fmt.Print(e.Text)
+			lineDirty = !strings.HasSuffix(e.Text, "\n")
+			mu.Unlock()
+		case agent.EventResponse:
+			sp.stop()
+			mu.Lock()
+			if lineDirty {
+				fmt.Println()
+				lineDirty = false
+			}
+			fmt.Print(style.Info.Sprint(RenderResponseInfo(e.Response, width())))
+			mu.Unlock()
+		case agent.EventToolStart:
+			sp.stop()
+			mu.Lock()
+			fmt.Print(style.Dim.Sprint(RenderToolStart(e.ToolName, e.ToolArgs, width())))
+			mu.Unlock()
+			lineDirty = false
+			sp.start(spinRunning)
+		case agent.EventToolEnd:
+			sp.stop()
+			mu.Lock()
+			if style.GetProfile().TTY {
+				fmt.Print(style.Dim.Sprint(RenderToolEndInline(e.ToolName, e.ToolArgs, e.Result, width(), maxLines)))
+			} else {
+				fmt.Print(RenderToolEnd(e.ToolName, e.ToolArgs, e.Result, width(), maxLines))
+			}
+			mu.Unlock()
+			toolJustEnded = true
 			lineDirty = false
 		}
-		fmt.Print(style.Info.Sprint(RenderResponseInfo(info, width())))
-		mu.Unlock()
-	}
-	a.OnToolStart = func(name, args string) {
-		sp.stop()
-		mu.Lock()
-		fmt.Print(style.Dim.Sprint(RenderToolStart(name, args, width())))
-		mu.Unlock()
-		lineDirty = false
-		sp.start(func(elapsed time.Duration, frame string) string {
-			return style.Warn.Sprint(fmt.Sprintf(SpinRunning, frame, spinElapsed(elapsed)))
-		})
-	}
-	a.OnToolEnd = func(name, args string, res agent.ToolResult) {
-		sp.stop()
-		mu.Lock()
-		if style.GetProfile().TTY {
-			fmt.Print(style.Dim.Sprint(RenderToolEndInline(name, args, res, width(), maxLines)))
-		} else {
-			fmt.Print(RenderToolEnd(name, args, res, width(), maxLines))
-		}
-		mu.Unlock()
-		toolJustEnded = true
-		lineDirty = false
-	}
-	return func(s string) {
-		if s == "" {
-			return
-		}
-		sp.stop()
-		mu.Lock()
-		if toolJustEnded {
-			fmt.Println()
-			toolJustEnded = false
-		}
-		fmt.Print(s)
-		lineDirty = !strings.HasSuffix(s, "\n")
-		mu.Unlock()
 	}
 }
 

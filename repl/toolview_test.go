@@ -166,8 +166,9 @@ func TestRenderToolEndInline(t *testing.T) {
 
 func TestRenderResponseInfoFull(t *testing.T) {
 	info := agent.ResponseInfo{
-		Duration: 3200 * time.Millisecond,
-		TTFT:     800 * time.Millisecond,
+		Duration:     3200 * time.Millisecond,
+		FirstEvent:   800 * time.Millisecond,
+		FirstContent: 3200 * time.Millisecond,
 		Usage: &agent.Usage{
 			PromptTokens:     12300,
 			CompletionTokens: 1200,
@@ -176,7 +177,7 @@ func TestRenderResponseInfoFull(t *testing.T) {
 		ContextTokens: 12300,
 	}
 	got := RenderResponseInfo(info, 80)
-	for _, want := range []string{"↳", "TTFT 800ms", "3.2s", "prompt 12.3k", "completion 1.2k", "缓存 81.67%"} {
+	for _, want := range []string{"↳", "TTFT 800ms", "TTFC 3.2s", "3.2s", "prompt 12.3k", "completion 1.2k", "缓存 81.67%"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("缺少 %q: %q", want, got)
 		}
@@ -225,5 +226,37 @@ func TestRenderToolBlocksNoWrap(t *testing.T) {
 				t.Errorf("%s 行宽 %d 超出终端 80 列，折行会导致 CursorUp 擦错行: %q", tc.name, w, l)
 			}
 		}
+	}
+}
+
+func TestRenderResponseInfoNoTTFCWhenImmediate(t *testing.T) {
+	info := agent.ResponseInfo{Duration: 800 * time.Millisecond, FirstEvent: 800 * time.Millisecond, FirstContent: 800 * time.Millisecond}
+	got := RenderResponseInfo(info, 80)
+	if !strings.Contains(got, "TTFT 800ms") {
+		t.Errorf("应显示 TTFT: %q", got)
+	}
+	if strings.Contains(got, "TTFC") {
+		t.Errorf("正文与首事件同时到达时不应显示 TTFC: %q", got)
+	}
+}
+
+func TestWireToolViewReasoningLabel(t *testing.T) {
+	old := style.GetProfile()
+	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
+	t.Cleanup(func() { style.SetProfile(old) })
+	var sink agent.EventSink
+	out := captureStdout(func() {
+		sink = WireToolView(func() int { return 80 }, 20)
+		sink(agent.Event{Kind: agent.EventRequestStart})
+		time.Sleep(150 * time.Millisecond)
+		sink(agent.Event{Kind: agent.EventReasoning, Text: "想"})
+		time.Sleep(150 * time.Millisecond)
+		sink(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{Duration: time.Second}})
+	})
+	if !strings.Contains(out, "等待响应") {
+		t.Errorf("请求开始应显示等待响应: %q", out)
+	}
+	if !strings.Contains(out, "思考中") {
+		t.Errorf("收到思维链应切换为思考中: %q", out)
 	}
 }

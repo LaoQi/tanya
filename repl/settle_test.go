@@ -46,9 +46,9 @@ func newSettleAgent(t *testing.T) *agent.Agent {
 
 func infoWithUsage() agent.ResponseInfo {
 	return agent.ResponseInfo{
-		Duration: 1200 * time.Millisecond,
-		TTFT:     300 * time.Millisecond,
-		Usage:    &agent.Usage{PromptTokens: 1500, CompletionTokens: 10, TotalTokens: 1510},
+		Duration:   1200 * time.Millisecond,
+		FirstEvent: 300 * time.Millisecond,
+		Usage:      &agent.Usage{PromptTokens: 1500, CompletionTokens: 10, TotalTokens: 1510},
 	}
 }
 
@@ -62,7 +62,7 @@ func TestResponseInfoFollowsSettledTail(t *testing.T) {
 	r.md.Write("计算结果是 42")
 
 	out := captureStdout(func() {
-		a.OnResponse(infoWithUsage())
+		r.stream(agent.Event{Kind: agent.EventResponse, Response: infoWithUsage()})
 	})
 	if !strings.Contains(out, "计算结果是 42") {
 		t.Fatalf("滞留尾行应在回合结束结算输出，修复前会丢失直到 Ask 结束: %q", out)
@@ -85,8 +85,8 @@ func TestToolStartFollowsSettledTail(t *testing.T) {
 	r.md.Write("准备运行计算")
 
 	out := captureStdout(func() {
-		a.OnResponse(infoWithUsage())
-		a.OnToolStart("calc", `{"expression":"6*7"}`)
+		r.stream(agent.Event{Kind: agent.EventResponse, Response: infoWithUsage()})
+		r.stream(agent.Event{Kind: agent.EventToolStart, ToolName: "calc", ToolArgs: `{"expression":"6*7"}`})
 	})
 	iTail := strings.Index(out, "准备运行计算")
 	iStat := strings.Index(out, "↳")
