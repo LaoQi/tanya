@@ -7,6 +7,7 @@ const (
 	MsgUnknownTool = MsgErrPrefix + "未知工具 %s"
 	MsgInterrupted = MsgErrPrefix + "已中断"
 	MsgTimedOut    = MsgErrPrefix + "执行超时"
+	MsgStopped     = MsgErrPrefix + "进程被终端挂起(Ctrl+Z)已终止"
 )
 
 const (

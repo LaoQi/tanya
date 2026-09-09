@@ -5,6 +5,8 @@ package agent
 import (
 	"os"
 	"os/exec"
+	"os/signal"
+	"sync"
 	"syscall"
 )
 
@@ -21,4 +23,14 @@ func killProcessGroup(cmd *exec.Cmd) error {
 		return os.ErrProcessDone
 	}
 	return err
+}
+
+var protectOnce sync.Once
+
+func ProtectTerminalSignals() {
+	protectOnce.Do(func() {
+		ch := make(chan os.Signal, 4)
+		signal.Notify(ch, syscall.SIGTSTP)
+		signal.Ignore(syscall.SIGTTIN, syscall.SIGTTOU)
+	})
 }

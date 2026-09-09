@@ -1,4 +1,4 @@
-//go:build unix
+//go:build unix && !illumos && !ios
 
 package readline
 
@@ -16,14 +16,14 @@ type unixTerminal struct {
 
 func newUnixTerminal() (Terminal, error) {
 	t := &unixTerminal{}
-	if _, err := unix.IoctlGetTermios(int(os.Stdin.Fd()), unix.TCGETS); err != nil {
+	if _, err := getTermios(int(os.Stdin.Fd())); err != nil {
 		return nil, err
 	}
 	return t, nil
 }
 
-func (t *unixTerminal) setRaw(keepOutput bool) error {
-	saved, err := unix.IoctlGetTermios(int(os.Stdin.Fd()), unix.TCGETS)
+func (t *unixTerminal) Raw() error {
+	saved, err := getTermios(int(os.Stdin.Fd()))
 	if err != nil {
 		return err
 	}
@@ -32,12 +32,10 @@ func (t *unixTerminal) setRaw(keepOutput bool) error {
 	raw.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP |
 		unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON
 	raw.Lflag &^= unix.ECHO | unix.ICANON | unix.ISIG | unix.IEXTEN
-	if !keepOutput {
-		raw.Oflag &^= unix.OPOST
-	}
+	raw.Oflag &^= unix.OPOST
 	raw.Cc[unix.VMIN] = 0
 	raw.Cc[unix.VTIME] = 1
-	if err := unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETSF, &raw); err != nil {
+	if err := setTermiosFlush(int(os.Stdin.Fd()), &raw); err != nil {
 		return err
 	}
 	t.queue = nil
@@ -45,16 +43,8 @@ func (t *unixTerminal) setRaw(keepOutput bool) error {
 	return nil
 }
 
-func (t *unixTerminal) Raw() error {
-	return t.setRaw(false)
-}
-
-func (t *unixTerminal) WatchRaw() error {
-	return t.setRaw(true)
-}
-
 func (t *unixTerminal) Restore() {
-	_ = unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETS, &t.saved)
+	_ = setTermios(int(os.Stdin.Fd()), &t.saved)
 }
 
 func (t *unixTerminal) Size() (Size, bool) {
@@ -101,34 +91,4 @@ func (t *unixTerminal) ReadKey() (KeyEvent, error) {
 	ev := t.queue[0]
 	t.queue = t.queue[1:]
 	return ev, nil
-}
-
-func (t *unixTerminal) ReadKeyUntil(stop <-chan struct{}) (KeyEvent, error) {
-	buf := make([]byte, 256)
-	for {
-		select {
-		case <-stop:
-			return KeyEvent{}, ErrWatchStopped
-		default:
-		}
-		if len(t.queue) > 0 {
-			ev := t.queue[0]
-			t.queue = t.queue[1:]
-			return ev, nil
-		}
-		n, err := t.readChunk(buf)
-		if err != nil {
-			if err == unix.EINTR {
-				continue
-			}
-			return KeyEvent{}, err
-		}
-		if n > 0 {
-			t.queue = append(t.queue, t.parser.feed(buf[:n])...)
-			continue
-		}
-		if t.parser.needsMore() {
-			t.queue = append(t.queue, t.parser.flush()...)
-		}
-	}
 }

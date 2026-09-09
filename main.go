@@ -36,6 +36,7 @@ func main() {
 	if *sessionMode != "" {
 		cfg.SessionMode = *sessionMode
 	}
+	agent.ProtectTerminalSignals()
 	a, err := agent.New(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)

@@ -54,6 +54,7 @@ const (
 	MsgTruncNote  = "…中间省略 %d 字节…"
 	MsgInterrupt  = "已中断"
 	MsgTimeout    = "执行超时"
+	MsgSuspended  = "挂起已终止"
 	MsgToolErr    = "错误: %s"
 )
 
