@@ -406,7 +406,11 @@ func (r *REPL) printHistoryFull(n int, m agent.Message) {
 	if m.Role == "assistant" && m.Content != "" {
 		r.printRendered(m.Content)
 	} else if text := historyText(m); text != "" {
-		fmt.Println(text)
+		if m.Role == "tool" {
+			fmt.Println(style.Dim.Frame(text))
+		} else {
+			fmt.Println(text)
+		}
 	}
 	for _, tc := range m.ToolCalls {
 		fmt.Printf("→ %s %s\n", tc.Function.Name, tc.Function.Arguments)
