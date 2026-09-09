@@ -85,6 +85,16 @@ func (m *mockLLM) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if step.reasoning != "" {
+		runes := []rune(step.reasoning)
+		for i := 0; i < len(runes); i += 2 {
+			end := i + 2
+			if end > len(runes) {
+				end = len(runes)
+			}
+			writeChunk(map[string]any{"reasoning_content": string(runes[i:end])})
+		}
+	}
 	runes := []rune(step.content)
 	for i := 0; i < len(runes); i += 2 {
 		end := i + 2
@@ -158,6 +168,16 @@ func (m *mockLLM) handleResponses(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if step.reasoning != "" {
+		runes := []rune(step.reasoning)
+		for i := 0; i < len(runes); i += 2 {
+			end := i + 2
+			if end > len(runes) {
+				end = len(runes)
+			}
+			send("response.reasoning_text.delta", map[string]any{"delta": string(runes[i:end])})
+		}
+	}
 	runes := []rune(step.content)
 	for i := 0; i < len(runes); i += 2 {
 		end := i + 2

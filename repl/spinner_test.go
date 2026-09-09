@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -9,9 +10,7 @@ import (
 func TestSpinnerNonTTYNoop(t *testing.T) {
 	var mu sync.Mutex
 	sp := newSpinner(&mu, false)
-	sp.start(func(elapsed time.Duration, frame string) string {
-		return frame + " 等待响应"
-	})
+	sp.start(spinWaiting)
 	time.Sleep(250 * time.Millisecond)
 	sp.stop()
 	if sp.active {
@@ -44,9 +43,7 @@ func TestSpinnerStopTimeout(t *testing.T) {
 	sp := newSpinner(&mu, true)
 	bw := &blockedWriter{entered: make(chan struct{}), release: make(chan struct{})}
 	sp.out = bw
-	sp.start(func(elapsed time.Duration, frame string) string {
-		return frame + " 等待响应"
-	})
+	sp.start(spinWaiting)
 	<-bw.entered
 	done := make(chan struct{})
 	go func() {
@@ -62,4 +59,16 @@ func TestSpinnerStopTimeout(t *testing.T) {
 		t.Error("超时后 active 应置 false")
 	}
 	close(bw.release)
+}
+
+func TestSpinLine(t *testing.T) {
+	if got := spinLine(spinWaiting, 2*time.Second, "⠋"); !strings.Contains(got, "等待响应") || !strings.Contains(got, "2s") {
+		t.Errorf("等待文案: %q", got)
+	}
+	if got := spinLine(spinThinking, 3*time.Second, "⠙"); !strings.Contains(got, "思考中") || !strings.Contains(got, "3s") {
+		t.Errorf("思考文案: %q", got)
+	}
+	if got := spinLine(spinRunning, time.Second, "⠹"); !strings.Contains(got, "执行中") {
+		t.Errorf("执行文案: %q", got)
+	}
 }

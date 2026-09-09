@@ -23,7 +23,8 @@ type REPL struct {
 	raw       bool
 	promptTpl string
 	prompt    style.Template
-	onDelta   func(string)
+	view      agent.EventSink
+	stream    agent.EventSink
 	md        *style.MarkdownBuf
 	mdLive    bool
 	rend      style.Renderer
@@ -43,44 +44,52 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl, prompt: tpl, onDelta: func(s string) { fmt.Print(s) }}
+	r := &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl, prompt: tpl}
 	r.md = style.NewMarkdownBuf()
 	r.mdLive = true
 	r.rend = style.NewThemedRenderer(style.GetProfile(), sch.MD)
+	maxLines := 20
 	if a != nil {
-		r.onDelta = WireToolView(a, func() int { return toolWidth(term) }, a.ToolOutputLines())
-		innerStart := a.OnToolStart
-		a.OnToolStart = func(name, args string) {
-			r.settleMd()
-			innerStart(name, args)
-		}
-		innerResp := a.OnResponse
-		a.OnResponse = func(info agent.ResponseInfo) {
-			r.settleMd()
-			innerResp(info)
-		}
+		maxLines = a.ToolOutputLines()
 	}
+	r.view = WireToolView(func() int { return toolWidth(term) }, maxLines)
+	r.stream = r.streamEvent
 	return r, nil
+}
+
+func (r *REPL) streamEvent(e agent.Event) {
+	switch e.Kind {
+	case agent.EventContent:
+		r.writeContent(e.Text)
+	case agent.EventToolStart, agent.EventResponse:
+		r.settleMd()
+		r.view(e)
+	default:
+		r.view(e)
+	}
+}
+
+func (r *REPL) writeContent(s string) {
+	if !r.mdEnabled() {
+		r.print(s)
+		return
+	}
+	for _, blk := range r.md.Write(s) {
+		r.print(r.rend.Block(blk))
+	}
+}
+
+func (r *REPL) print(text string) {
+	r.view(agent.Event{Kind: agent.EventContent, Text: text})
 }
 
 func (r *REPL) mdEnabled() bool {
 	return r.mdLive && style.GetProfile().TTY
 }
 
-func (r *REPL) deltaFn() func(string) {
-	if !r.mdEnabled() {
-		return r.onDelta
-	}
-	return func(s string) {
-		for _, blk := range r.md.Write(s) {
-			r.onDelta(r.rend.Block(blk))
-		}
-	}
-}
-
 func (r *REPL) settleMd() {
 	for _, blk := range r.md.Close() {
-		r.onDelta(r.rend.Block(blk))
+		r.print(r.rend.Block(blk))
 	}
 }
 
@@ -135,9 +144,9 @@ func (r *REPL) Run() error {
 		}
 		ctx, done := r.interruptContext()
 		r.md.Reset()
-		err = r.agent.Ask(ctx, line, r.deltaFn())
+		err = r.agent.Ask(ctx, line, r.stream)
 		for _, blk := range r.md.Close() {
-			r.onDelta(r.rend.Block(blk))
+			r.print(r.rend.Block(blk))
 		}
 		done()
 		fmt.Println()
@@ -449,7 +458,7 @@ func (r *REPL) printHistoryHead(n int, label string) {
 		fmt.Println(head)
 		return
 	}
-	r.onDelta(r.rend.Block(style.Heading{Level: 1, Inlines: []style.Inline{style.Span{Text: head}}}))
+	r.print(r.rend.Block(style.Heading{Level: 1, Inlines: []style.Inline{style.Span{Text: head}}}))
 }
 
 // printRendered 把整段文本按与 AI 输出一致的管线渲染（/md 开关 + TTY 旁路），供历史回放等一次性展示使用。
@@ -459,7 +468,7 @@ func (r *REPL) printRendered(text string) {
 		return
 	}
 	for _, blk := range r.mdBlocks(text) {
-		r.onDelta(r.rend.Block(blk))
+		r.print(r.rend.Block(blk))
 	}
 }
 

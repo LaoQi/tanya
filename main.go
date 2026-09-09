@@ -41,7 +41,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
-	onDelta := repl.WireToolView(a, repl.ToolWidth, a.ToolOutputLines())
+	sink := repl.WireToolView(repl.ToolWidth, a.ToolOutputLines())
 
 	args := flag.Args()
 	if len(args) > 0 && args[0] == "ask" {
@@ -51,7 +51,7 @@ func main() {
 			os.Exit(1)
 		}
 		ctx, done := repl.InterruptContext()
-		err := a.Ask(ctx, q, onDelta)
+		err := a.Ask(ctx, q, sink)
 		done()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "\n"+repl.MsgErrLineFmt+"\n", err)

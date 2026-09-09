@@ -142,7 +142,11 @@ func TestChatStreamContent(t *testing.T) {
 	var sb strings.Builder
 	msg, err := c.ChatStream(context.Background(),
 		[]Message{{Role: "user", Content: "hi"}},
-		func(s string) { sb.WriteString(s) })
+		EventSink(func(e Event) {
+			if e.Kind == EventContent {
+				sb.WriteString(e.Text)
+			}
+		}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,5 +257,62 @@ func TestChatStreamRequestFormat(t *testing.T) {
 	}
 	if req.Messages[0].Role != "system" || req.Messages[1].Role != "user" {
 		t.Error("messages 顺序异常")
+	}
+}
+
+func TestChatStreamReasoningEvents(t *testing.T) {
+	m := newMockLLM(t, mockStep{reasoning: "先想一想", content: "答案是 42"})
+	c := NewClient(m.config())
+	var kinds []EventKind
+	var reasoning, content strings.Builder
+	sink := EventSink(func(e Event) {
+		kinds = append(kinds, e.Kind)
+		switch e.Kind {
+		case EventReasoning:
+			reasoning.WriteString(e.Text)
+		case EventContent:
+			content.WriteString(e.Text)
+		}
+	})
+	msg, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reasoning.String() != "先想一想" {
+		t.Errorf("思维链事件: %q", reasoning.String())
+	}
+	if content.String() != "答案是 42" {
+		t.Errorf("正文事件: %q", content.String())
+	}
+	if msg.Content != "答案是 42" {
+		t.Errorf("思维链不应污染正文: %q", msg.Content)
+	}
+	if len(msg.ReasoningItems) != 0 {
+		t.Errorf("chat 协议不应累积思维链到 Message: %+v", msg.ReasoningItems)
+	}
+	if len(kinds) == 0 || kinds[0] != EventReasoning {
+		t.Errorf("思维链事件应先于正文: %v", kinds)
+	}
+}
+
+func TestChatStreamTimingDimensions(t *testing.T) {
+	m := newMockLLM(t, mockStep{reasoning: "想", content: "答"})
+	c := NewClient(m.config())
+	msg, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := msg.Stat
+	if st == nil {
+		t.Fatal("应记录 Stat")
+	}
+	if st.FirstEvent <= 0 {
+		t.Errorf("FirstEvent 应 >0: %v", st.FirstEvent)
+	}
+	if st.FirstReasoning <= 0 {
+		t.Errorf("FirstReasoning 应 >0: %v", st.FirstReasoning)
+	}
+	if st.FirstContent < st.FirstReasoning {
+		t.Errorf("FirstContent 不应早于 FirstReasoning: %v < %v", st.FirstContent, st.FirstReasoning)
 	}
 }

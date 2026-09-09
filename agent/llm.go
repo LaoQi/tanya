@@ -30,8 +30,10 @@ type Message struct {
 }
 
 type RequestStat struct {
-	Duration time.Duration
-	TTFT     time.Duration
+	Duration       time.Duration
+	FirstEvent     time.Duration
+	FirstReasoning time.Duration
+	FirstContent   time.Duration
 }
 
 type Usage struct {
@@ -103,8 +105,9 @@ type streamOptions struct {
 type streamChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content   string `json:"content"`
-			ToolCalls []struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
 				Index    int    `json:"index"`
 				ID       string `json:"id"`
 				Type     string `json:"type"`
@@ -158,14 +161,14 @@ func (c *Client) ListModels() ([]string, error) {
 	return ids, nil
 }
 
-func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta func(string)) (*Message, error) {
+func (c *Client) ChatStream(ctx context.Context, messages []Message, sink EventSink) (*Message, error) {
 	if c.cfg.APIKey == "" {
 		return nil, fmt.Errorf(MsgAPIKey)
 	}
 	if c.cfg.ApiProtocol == "chat" {
-		return c.chatStream(ctx, messages, onDelta)
+		return c.chatStream(ctx, messages, sink)
 	}
-	return c.responsesStream(ctx, messages, onDelta)
+	return c.responsesStream(ctx, messages, sink)
 }
 
 func temperatureParam(cfg *Config) *float64 {
@@ -175,7 +178,7 @@ func temperatureParam(cfg *Config) *float64 {
 	return &cfg.Temperature
 }
 
-func (c *Client) chatStream(ctx context.Context, messages []Message, onDelta func(string)) (*Message, error) {
+func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventSink) (*Message, error) {
 	wire := make([]Message, len(messages))
 	copy(wire, messages)
 	for i := range wire {
@@ -215,7 +218,7 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, onDelta fun
 	}
 
 	msg := &Message{Role: "assistant"}
-	var ttft time.Duration
+	var firstEvent, firstReasoning, firstContent time.Duration
 	var usage *Usage
 	type toolAcc struct {
 		id, typ, name, args string
@@ -237,18 +240,26 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, onDelta fun
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
 		}
-		if ttft == 0 && (len(chunk.Choices) > 0 || chunk.Usage != nil) {
-			ttft = time.Since(start)
+		if firstEvent == 0 && (len(chunk.Choices) > 0 || chunk.Usage != nil) {
+			firstEvent = time.Since(start)
 		}
 		if chunk.Usage != nil {
 			usage = chunk.Usage
+			sink.Emit(Event{Kind: EventUsage, Usage: chunk.Usage})
 		}
 		for _, ch := range chunk.Choices {
-			if ch.Delta.Content != "" {
-				msg.Content += ch.Delta.Content
-				if onDelta != nil {
-					onDelta(ch.Delta.Content)
+			if ch.Delta.ReasoningContent != "" {
+				if firstReasoning == 0 {
+					firstReasoning = time.Since(start)
 				}
+				sink.Emit(Event{Kind: EventReasoning, Text: ch.Delta.ReasoningContent})
+			}
+			if ch.Delta.Content != "" {
+				if firstContent == 0 {
+					firstContent = time.Since(start)
+				}
+				msg.Content += ch.Delta.Content
+				sink.Emit(Event{Kind: EventContent, Text: ch.Delta.Content})
 			}
 			for _, tc := range ch.Delta.ToolCalls {
 				a := accs[tc.Index]
@@ -266,6 +277,7 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, onDelta fun
 					a.name = tc.Function.Name
 				}
 				a.args += tc.Function.Arguments
+				sink.Emit(Event{Kind: EventToolCall, ToolIndex: tc.Index, ToolID: tc.ID, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments})
 			}
 		}
 	}
@@ -273,7 +285,7 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, onDelta fun
 		return nil, fmt.Errorf(MsgReadStream, err)
 	}
 	msg.Usage = usage
-	msg.Stat = &RequestStat{Duration: time.Since(start), TTFT: ttft}
+	msg.Stat = &RequestStat{Duration: time.Since(start), FirstEvent: firstEvent, FirstReasoning: firstReasoning, FirstContent: firstContent}
 
 	if len(accs) > 0 {
 		idxs := make([]int, 0, len(accs))
