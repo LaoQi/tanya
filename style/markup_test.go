@@ -36,6 +36,13 @@ func TestParseMarkup(t *testing.T) {
 			{Text: " "},
 			{Style: Style{Fg: Color16(12)}, Text: "b"},
 		}},
+		{"spinner 语义名", "[warn]a[/] [think]b[/] [run]c[/]", []Span{
+			{Style: Style{Fg: Color16(3)}, Text: "a"},
+			{Text: " "},
+			{Style: Style{Fg: Color16(5)}, Text: "b"},
+			{Text: " "},
+			{Style: Style{Fg: Color16(6)}, Text: "c"},
+		}},
 		{"未知名原样", "a[xyz]b", []Span{{Text: "a[xyz]b"}}},
 		{"部分未知整标签原样", "[red xyz]a[/]", []Span{{Text: "[red xyz]a[/]"}}},
 		{"未闭合着色到行尾", "[red]abc", []Span{{Style: Style{Fg: Color16(1)}, Text: "abc"}}},

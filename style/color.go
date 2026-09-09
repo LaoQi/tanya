@@ -45,6 +45,8 @@ var (
 	Ok     = Style{Fg: Color16(2)}
 	Error  = Style{Fg: Color16(9)}
 	Accent = Style{Attr: AttrReverse}
+	Think  = Style{Fg: Color16(5)}
+	Run    = Style{Fg: Color16(6)}
 )
 
 func (s Style) Text(t string) Span {

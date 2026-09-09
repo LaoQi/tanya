@@ -26,3 +26,15 @@ func TestApplyPalette(t *testing.T) {
 		t.Errorf("非法色名应忽略: %+v", Warn)
 	}
 }
+
+func TestApplyPaletteSpinColors(t *testing.T) {
+	defer ApplyPalette(nil)
+	ApplyPalette(map[string]string{"think": "bright_magenta", "run": "bright_cyan"})
+	if Think.Fg.V16 != 13 || Run.Fg.V16 != 14 {
+		t.Errorf("think/run palette 覆盖未生效: think=%d run=%d", Think.Fg.V16, Run.Fg.V16)
+	}
+	ApplyPalette(map[string]string{"think": "notacolor"})
+	if Think.Fg.V16 != 13 {
+		t.Errorf("非法色名应忽略: %+v", Think)
+	}
+}

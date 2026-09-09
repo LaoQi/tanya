@@ -30,6 +30,10 @@ func semanticByName(name string) (Style, bool) {
 		return Error, true
 	case "accent":
 		return Accent, true
+	case "think":
+		return Think, true
+	case "run":
+		return Run, true
 	}
 	return Style{}, false
 }

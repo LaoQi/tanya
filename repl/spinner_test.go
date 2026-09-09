@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/LaoQi/tanyan/style"
 )
 
 func TestSpinnerNonTTYNoop(t *testing.T) {
@@ -78,5 +80,46 @@ func TestSpinLine(t *testing.T) {
 	}
 	if got := spinLine(spinRunning, time.Second, "⠹"); !strings.Contains(got, "执行中") {
 		t.Errorf("执行文案: %q", got)
+	}
+}
+
+func TestSpinLineStateColors(t *testing.T) {
+	old := style.GetProfile()
+	style.SetProfile(style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
+	defer style.SetProfile(old)
+	prev := style.CurrentSchemeName()
+	style.ApplyScheme("default")
+	style.ApplyPalette(nil)
+	defer func() {
+		style.ApplyScheme(prev)
+		style.ApplyPalette(nil)
+	}()
+
+	sgr := func(st style.Style) string {
+		out := st.Sprint("x")
+		return out[:strings.Index(out, "m")+1]
+	}
+	colors := map[spinKind]string{}
+	for _, k := range []spinKind{spinWaiting, spinThinking, spinRunning} {
+		line := spinLine(k, time.Second, "⠋")
+		i := strings.Index(line, "\x1b[")
+		if i < 0 {
+			t.Fatalf("%d 缺少颜色码: %q", k, line)
+		}
+		j := strings.Index(line[i:], "m")
+		colors[k] = line[i : i+j+1]
+	}
+	if colors[spinWaiting] == colors[spinThinking] || colors[spinThinking] == colors[spinRunning] || colors[spinWaiting] == colors[spinRunning] {
+		t.Errorf("三态颜色应互不相同: %v", colors)
+	}
+	want := map[spinKind]string{
+		spinWaiting:  sgr(style.Warn),
+		spinThinking: sgr(style.Think),
+		spinRunning:  sgr(style.Run),
+	}
+	for k, code := range want {
+		if colors[k] != code {
+			t.Errorf("%d 应为对应语义色 %q: %q", k, code, colors[k])
+		}
 	}
 }
