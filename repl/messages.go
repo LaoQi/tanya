@@ -101,6 +101,7 @@ const welcomText = `
 `
 
 const (
-	FlagConfig = "配置文件路径（默认 ~/.config/tanyan/config.yaml）"
-	FlagMode   = "会话存储模式 local/global/auto（默认 auto）"
+	FlagConfig  = "配置文件路径（默认 ~/.config/tanyan/config.yaml）"
+	FlagMode    = "会话存储模式 local/global/auto（默认 auto）"
+	FlagVersion = "显示版本号并退出"
 )
