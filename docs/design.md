@@ -81,6 +81,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
   - 全部落空（含配置的 shell 不存在）：降级不报错，profile 为 nil，仅不注册 run_shell（ToolDefs 条件注册、env 段无 SHELL/TIMEOUT/OUTPUT 行、system prompt 退化为 `NoShellSystemPrompt`），dispatch 调用返回错误文案
 - 程序探测：profile 就绪后对固定清单（ls/cat/head/tail/grep/rg/fd/sed/awk/find/sort/wc/cut/tr/xargs/git/curl/wget/go/node/python）逐个 LookPath，存在的拼入 run_shell 工具描述 `可用程序: ...`，仅在工具描述出现，不重复注入 env 段
 - 输出捕获：stdout/stderr 各保留头 30000 字节 + 尾 30000 字节（`streamCapture` 滚动窗口），中间字节计数丢弃，模型仍可见首尾内容
+- 实测契约（sudo 两模式对照）：`sudo` 默认模式自开 `/dev/tty` 完成提示与密码输入——前台移交后提示实时可见、密码不回显，仅最终错误走 stderr 回流；`sudo -S` 强制从 stdin 读密码时提示改写 stderr（被捕获，等待期间不可见），交互命令应避免 `-S` 类强制 stdin 选项
 - 终端前台移交（unix，shell_tty_unix.go；illumos/ios 与 windows 等 !unix 平台无实现，降级 no-op，`ttyStdinSupported()` 为假）：执行前打开 `/dev/tty`，仅当自身进程组已是前台时 `TIOCSPGRP` 移交子进程组（`handoverForeground`），子进程结束后以 `handed` 门控归还（`restoreForeground`，避免从未交接时抢占 shell 的前台）；无控制终端 / 非前台（嵌套、后台运行）自动跳过，行为与旧版一致。移交前台的同时将 `cmd.Stdin` 接到 `/dev/tty`（tty 打开成功时），子进程 stdin 直通用户终端，可直接在终端应答 ssh/git/sudo 等密码与确认提示，不再静默挂死至超时；无 tty 时 stdin 保持原状（/dev/null）
 - 信号防护（`ProtectTerminalSignals`，main 启动时 `sync.Once` 一次性）：`Notify(SIGTSTP)` 吞没（命令间隙 Ctrl+Z 不挂起自身）、`Ignore(SIGTTIN/SIGTTOU)`（自身后台 tty 读写不停止）；SIGQUIT 保持 Go 默认（全栈转储）。忽略处置随 exec 被子进程继承，子进程后台读写 tty 得 EIO 而非停止
 - 挂起探测（`waitShell`）：200ms 轮询 `/proc/<pid>/stat`，连续 2 次 `T` 判定被终端挂起（Ctrl+Z 等停止信号），SIGKILL 进程组并置 `Stopped`，状态行显示 `挂起已终止`，避免静默挂到超时；`processStopped` 由 shell_proc_linux.go 提供 /proc 实现，非 linux（shell_proc_other.go）恒 false（探测失效，其余功能不受影响）
