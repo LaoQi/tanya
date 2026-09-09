@@ -142,8 +142,12 @@ func TestToolDefsRunShellDesc(t *testing.T) {
 	if !strings.Contains(desc, "在 "+runtime.GOOS+" bash 中执行") || !strings.Contains(desc, "可用程序: ls, grep") {
 		t.Errorf("desc = %q", desc)
 	}
-	if !strings.Contains(runShellParams(), "默认 60，最大 900") {
-		t.Error("timeout 参数描述应为默认 60 最大 900")
+	params := runShellParams()
+	if !strings.Contains(params, "默认 60（interactive 时 300），最大 900") {
+		t.Error("timeout 参数描述应为默认 60 interactive 时 300 最大 900")
+	}
+	if !strings.Contains(params, `"interactive":{"type":"boolean"`) {
+		t.Error("params 缺少 interactive 参数声明")
 	}
 }
 

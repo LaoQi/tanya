@@ -72,7 +72,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### run_shell（shell.go）
 
-- 参数：`command`（必填）、`timeout`（默认 60s，上限 900s）
+- 参数：`command`（必填）、`timeout`（默认 60s，上限 900s）、`interactive`（布尔，默认 false）
+- 交互模式（`interactive: true`）：仅由模型显式声明，**不做命令文本猜测**（早期版本有 sudo/ssh 关键词兜底，review 后移除）。声明后 repl 侧停用等待动画、标题行下打印引导行、结束用追加式渲染（避免 `CursorUp` 擦掉用户输入回显）；`timeout` 缺省时默认放宽至 300s（显式值优先，上限仍 900s）。命令提示须自行写入 `/dev/tty`，否则被工具捕获不可见
 - 实现：按 `shellProfile` 组装命令（posix `<path> -c`、powershell `<path> -NoProfile -NonInteractive -Command`、cmd `<path> /d /s /c`），捕获 stdout/stderr/退出码/耗时（`ShellResult` 结构化返回：Command/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Duration）
 - shell 解析（`InitShell`，Agent 构造时一次性执行并缓存）：
   - 优先级：配置覆盖（`config.yaml shell:` / env `TANYA_SHELL`，名字或绝对路径，任意 shell 名允许，未知 basename 按 posix `-c` 处理）> 平台自动探测
@@ -80,7 +81,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
   - 全部落空（含配置的 shell 不存在）：降级不报错，profile 为 nil，仅不注册 run_shell（ToolDefs 条件注册、env 段无 SHELL/TIMEOUT/OUTPUT 行、system prompt 退化为 `NoShellSystemPrompt`），dispatch 调用返回错误文案
 - 程序探测：profile 就绪后对固定清单（ls/cat/head/tail/grep/rg/fd/sed/awk/find/sort/wc/cut/tr/xargs/git/curl/wget/go/node/python）逐个 LookPath，存在的拼入 run_shell 工具描述 `可用程序: ...`，仅在工具描述出现，不重复注入 env 段
 - 输出捕获：stdout/stderr 各保留头 30000 字节 + 尾 30000 字节（`streamCapture` 滚动窗口），中间字节计数丢弃，模型仍可见首尾内容
-- 终端前台移交（unix，shell_tty_unix.go；illumos/ios 无 x/sys ioctl 支持，降级 no-op）：执行前打开 `/dev/tty`，仅当自身进程组已是前台时 `TIOCSPGRP` 移交子进程组（`handoverForeground`），子进程结束后以 `handed` 门控归还（`restoreForeground`，避免从未交接时抢占 shell 的前台）；无控制终端 / 非前台（嵌套、后台运行）自动跳过，行为与旧版一致。子进程因此可直接在终端应答 ssh/git 等密码提示，不再静默挂死至超时
+- 终端前台移交（unix，shell_tty_unix.go；illumos/ios 与 windows 等 !unix 平台无实现，降级 no-op，`ttyStdinSupported()` 为假）：执行前打开 `/dev/tty`，仅当自身进程组已是前台时 `TIOCSPGRP` 移交子进程组（`handoverForeground`），子进程结束后以 `handed` 门控归还（`restoreForeground`，避免从未交接时抢占 shell 的前台）；无控制终端 / 非前台（嵌套、后台运行）自动跳过，行为与旧版一致。移交前台的同时将 `cmd.Stdin` 接到 `/dev/tty`（tty 打开成功时），子进程 stdin 直通用户终端，可直接在终端应答 ssh/git/sudo 等密码与确认提示，不再静默挂死至超时；无 tty 时 stdin 保持原状（/dev/null）
 - 信号防护（`ProtectTerminalSignals`，main 启动时 `sync.Once` 一次性）：`Notify(SIGTSTP)` 吞没（命令间隙 Ctrl+Z 不挂起自身）、`Ignore(SIGTTIN/SIGTTOU)`（自身后台 tty 读写不停止）；SIGQUIT 保持 Go 默认（全栈转储）。忽略处置随 exec 被子进程继承，子进程后台读写 tty 得 EIO 而非停止
 - 挂起探测（`waitShell`）：200ms 轮询 `/proc/<pid>/stat`，连续 2 次 `T` 判定被终端挂起（Ctrl+Z 等停止信号），SIGKILL 进程组并置 `Stopped`，状态行显示 `挂起已终止`，避免静默挂到超时；`processStopped` 由 shell_proc_linux.go 提供 /proc 实现，非 linux（shell_proc_other.go）恒 false（探测失效，其余功能不受影响）
 - 字段集：`ShellResult` 为 Command/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Stopped/Duration
@@ -94,12 +95,13 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 颜色走 `style` 语义色 + Profile 驱动（`colors` 配置 / `NO_COLOR` / 非 TTY → 纯文本）：工具块 `Dim`、spinner `Warn`、状态行 `Info`，可用 `palette` 配置覆盖
 - 显示行数上限 `tool_output_lines`（默认 20，范围 1-1000），超出保留头 3 行 + 尾 2 行并提示 `/history n` 查看完整输出
 - 执行开始即打印标题行（`⋯` 标记进行中）；结束在 TTY 下 `\x1b[1A\r\x1b[K` 上移重绘标题替换 `⋯`，非 TTY 直接打印完整块
+- 交互模式（`Event.Interactive`）例外：不启动 spinner（周期重绘会擦掉子进程写往 tty 的提示），标题行下打印引导行 `⏎ 等待终端输入，请在下方直接应答`，结束一律追加式渲染（上移重绘会擦掉用户刚输入的回显行）
 - 流式输出行尾无 `\n` 时（`lineDirty` 跟踪），状态行打印前自动补换行
 
 ### 等待动画与请求状态（repl/spinner.go）
 
 - `OnRequestStart`：TTY 下显示 braille spinner（`⠋ 等待响应 3s`，100ms 帧，`\r\x1b[K` 行内重绘，与全部终端输出共享 mutex）；首个 delta 到达即停（纯 tool_calls 响应持续到本轮结束）
-- 工具执行期间标题行下方独立 spinner 行 `  ⠋ 执行中 3s`
+- 工具执行期间标题行下方独立 spinner 行 `  ⠋ 执行中 3s`；`interactive` 工具不启动该 spinner（子进程直接写 tty 的提示会被 100ms 重绘擦除）
 - 每轮请求完成打印状态行 `  ↳ TTFT 0.8s · 3.2s · prompt 12.3k · completion 1.2k · 缓存 81.67%`（字段缺失自动省略；无 usage 时显示本地估算上下文）；非 TTY 动画关闭、状态行保留
 
 ### builtin（builtin.go）
@@ -195,18 +197,20 @@ env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERA
 
 - 定位：只注入模型无法廉价自探的最小事实集——平台事实与 run_shell 执行契约；工具清单不注入 prompt（function calling 已完整提供），工具版本/分支/目录列表等易变信息模型可按需自探，一律不预注入
 - 组装：`runtimePrompt()` = persistPrompt（规则，冻结）+ 空行 + `envSection(cwd, probe)`（实时拼在末尾）；环境注入恒定生效，无配置开关（曾有 `probe` 配置项，review 后移除）
-- 输出格式（约 6 行紧凑键值，全部源自 `runtime` 与 `shell.go` 常量，同 cwd 下字节级确定）：
+- 输出格式（约 7 行紧凑键值，全部源自 `runtime` 与 `shell.go` 常量，同 cwd 下字节级确定）：
 
   ```
   # 环境
   OS: linux/amd64
   CWD: ~/Project/tanya
-  SHELL: /usr/bin/bash -c（非交互，无 TTY）
-  TIMEOUT: 默认 60s，上限 900s
+  SHELL: /usr/bin/bash -c（非交互；有控制终端时 run_shell 子进程 stdin 直通 tty，可应答密码/确认）
+  TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）
+  TIMEOUT: 默认 60s（interactive 时 300s），上限 900s
   OUTPUT: stdout/stderr 头尾各 30KB，中间截断
   WORKSPACE: go.mod, Makefile
   ```
 
-- 事实源单一：SHELL/TIMEOUT/OUTPUT 三行由解析后的 `shellProfile` 与 `shell.go` 常量程序化生成（`invocation()`/`shellTimeoutSec`/`shellTimeoutLimit`/`shellMaxOutput`），无第二份硬编码描述；shell 不可用时三行整体省略
+- 事实源单一：SHELL/TIMEOUT/OUTPUT 三行由解析后的 `shellProfile` 与 `shell.go` 常量程序化生成（`invocation()`/`shellTimeoutSec`/`shellInteractiveTimeoutSec`/`shellTimeoutLimit`/`shellMaxOutput`），TTY 行为固定契约文案，无第二份硬编码描述；shell 不可用时四行整体省略
+- 平台条件：`TTY:` 行与 SHELL 行的 tty 直通说明仅在 `ttyStdinSupported()` 为真（unix 且非 illumos/ios）时输出，其余平台 SHELL 行退化为 `（非交互）`，不宣称不存在的 /dev/tty 能力
 - 探测机制：`envSection` 为纯函数，WORKSPACE 标记文件（`os.Stat`，8 种标志文件固定顺序）经注入的 `envProbeFunc` 取得；shell 契约读包级 `ShellRuntime()`（`InitShell` 在 Agent 构造时解析缓存，envprobe 不再自行 LookPath）；主路径零 exec、零易变信息
 - 可测性：分层测试——persistPrompt 只含规则 / envSection 注入 fake probe 断言渲染 / runtimePrompt 拼接（probe 为 nil 时退化） / 同参数两次渲染字节相等

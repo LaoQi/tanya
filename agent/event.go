@@ -14,15 +14,16 @@ const (
 )
 
 type Event struct {
-	Kind      EventKind
-	Text      string
-	ToolIndex int
-	ToolID    string
-	ToolName  string
-	ToolArgs  string
-	Usage     *Usage
-	Result    ToolResult
-	Response  ResponseInfo
+	Kind        EventKind
+	Text        string
+	ToolIndex   int
+	ToolID      string
+	ToolName    string
+	ToolArgs    string
+	Usage       *Usage
+	Result      ToolResult
+	Interactive bool
+	Response    ResponseInfo
 }
 
 type EventSink func(Event)

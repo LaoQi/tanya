@@ -20,10 +20,15 @@ func TestEnvSectionFull(t *testing.T) {
 	wantSub := []string{
 		"# 环境",
 		"OS: " + runtime.GOOS + "/" + runtime.GOARCH,
-		"SHELL: /usr/bin/bash -c（非交互，无 TTY）",
-		"TIMEOUT: 默认 60s，上限 900s",
+		"SHELL: /usr/bin/bash -c（非交互",
+		"TIMEOUT: 默认 60s（interactive 时 300s），上限 900s",
 		"OUTPUT: stdout/stderr 头尾各 30KB，中间截断",
 		"WORKSPACE: go.mod, Makefile",
+	}
+	if ttyStdinSupported() {
+		wantSub = append(wantSub,
+			"stdin 直通 tty，可应答密码/确认）",
+			"TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）")
 	}
 	for _, w := range wantSub {
 		if !strings.Contains(out, w) {
@@ -35,7 +40,7 @@ func TestEnvSectionFull(t *testing.T) {
 func TestEnvSectionNoShell(t *testing.T) {
 	withShellRuntime(t, &shellRuntime{})
 	out := envSection("/tmp/x", fakeProbe(""))
-	for _, line := range []string{"SHELL:", "TIMEOUT:", "OUTPUT:"} {
+	for _, line := range []string{"SHELL:", "TTY:", "TIMEOUT:", "OUTPUT:"} {
 		if strings.Contains(out, line) {
 			t.Errorf("无 shell 不应输出 %s 行: %q", line, out)
 		}
