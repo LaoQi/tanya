@@ -2,6 +2,7 @@ package repl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -150,7 +151,16 @@ func (r *REPL) Run() error {
 		done()
 		fmt.Println()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, MsgErrLineFmt+"\n", err)
+			var ie *agent.InterruptError
+			if errors.As(err, &ie) {
+				if ie.Kept {
+					fmt.Print(MsgInterruptKept)
+				} else {
+					fmt.Print(MsgInterruptBare)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, MsgErrLineFmt+"\n", err)
+			}
 		}
 	}
 }

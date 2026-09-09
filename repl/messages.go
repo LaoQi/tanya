@@ -11,6 +11,11 @@ const (
 )
 
 const (
+	MsgInterruptKept = "已中断，本回合已完成步骤已保留，继续输入可续接\n"
+	MsgInterruptBare = "已中断\n"
+)
+
+const (
 	MsgNewSession  = "已开启新会话\n"
 	MsgLoadedSess  = "已载入会话 %s\n"
 	MsgCurModel    = "当前模型: %s\n"
@@ -53,6 +58,7 @@ const (
 	MsgCtxTokens  = "上下文 ~%s"
 	MsgTruncNote  = "…中间省略 %d 字节…"
 	MsgInterrupt  = "已中断"
+	MsgNotStarted = "未执行"
 	MsgTimeout    = "执行超时"
 	MsgSuspended  = "挂起已终止"
 	MsgToolErr    = "错误: %s"

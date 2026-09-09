@@ -185,6 +185,8 @@ func chunkLines(chunks []agent.ShellChunk) []string {
 
 func shellStatus(r *agent.ShellResult) string {
 	switch {
+	case r.Interrupted && r.NotStarted:
+		return MsgNotStarted
 	case r.Interrupted:
 		return MsgInterrupt
 	case r.TimedOut:

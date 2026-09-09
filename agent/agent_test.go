@@ -482,6 +482,32 @@ func TestLoadSessionLegacyFormat(t *testing.T) {
 	}
 }
 
+func TestLegacySessionNotAppendSystem(t *testing.T) {
+	a := newTestAgent(t)
+	legacy := filepath.Join(a.sessionDir, "20260101-090001.jsonl")
+	content := `{"role":"user","content":"历史问题"}` + "\n"
+	if err := os.WriteFile(legacy, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.LoadSession("20260101-090001"); err != nil {
+		t.Fatal(err)
+	}
+	a.history = append(a.history, Message{Role: "assistant", Content: "新回答"})
+	if err := a.save(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"role":"system"`) {
+		t.Fatalf("旧格式会话不应补写 system 行: %s", data)
+	}
+	if !strings.Contains(string(data), "新回答") {
+		t.Fatalf("新消息应落盘: %s", data)
+	}
+}
+
 func TestListSessionsSkipsSystemLine(t *testing.T) {
 	a := newTestAgent(t)
 	content := `{"role":"system","content":"sys"}` + "\n" +

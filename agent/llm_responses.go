@@ -209,6 +209,9 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
 			continue
