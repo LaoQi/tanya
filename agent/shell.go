@@ -260,7 +260,14 @@ func (c *streamCapture) finish() {
 }
 
 func RunShell(ctx context.Context, command string, timeoutSec int) string {
-	return RunShellResult(ctx, command, timeoutSec).String()
+	return RunShellResult(ctx, command, timeoutSec, false).String()
+}
+
+func shellArgs(profile *shellProfile, command string) []string {
+	args := make([]string, 0, len(profile.ExtraArgs)+2)
+	args = append(args, profile.ExtraArgs...)
+	args = append(args, profile.arg(), command)
+	return args
 }
 
 const (
@@ -305,14 +312,22 @@ func statState(stat string) string {
 	return fields[0]
 }
 
-func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellResult {
-	timeoutSec = effectiveShellTimeout(timeoutSec, false)
-	res := &ShellResult{Command: command}
+func RunShellResult(ctx context.Context, command string, timeoutSec int, interactive bool) *ShellResult {
+	timeoutSec = effectiveShellTimeout(timeoutSec, interactive)
 	profile := ShellRuntime().profile
 	if profile == nil {
-		res.Err = MsgShellUnavailable
-		return res
+		return &ShellResult{Command: command, Err: MsgShellUnavailable}
 	}
+	if interactive {
+		if res, ok := runShellBridged(ctx, command, timeoutSec, profile); ok {
+			return res
+		}
+	}
+	return runShellForeground(ctx, command, timeoutSec, profile)
+}
+
+func runShellForeground(ctx context.Context, command string, timeoutSec int, profile *shellProfile) *ShellResult {
+	res := &ShellResult{Command: command}
 	tty := openForegroundTTY()
 	handed := false
 	defer func() { restoreForeground(tty, handed) }()
@@ -320,10 +335,7 @@ func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellR
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	args := make([]string, 0, len(profile.ExtraArgs)+2)
-	args = append(args, profile.ExtraArgs...)
-	args = append(args, profile.arg(), command)
-	cmd := exec.CommandContext(runCtx, profile.Path, args...)
+	cmd := exec.CommandContext(runCtx, profile.Path, shellArgs(profile, command)...)
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.WaitDelay = shellWaitDelay
@@ -361,13 +373,75 @@ func RunShellResult(ctx context.Context, command string, timeoutSec int) *ShellR
 		res.TimedOut = true
 	case res.Stopped:
 	case err != nil:
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			res.ExitCode = exitErr.ExitCode()
+		if code, ok := shellExitCode(err); ok {
+			res.ExitCode = code
 		} else {
 			res.Err = err.Error()
 		}
 	}
 	return res
+}
+
+func runShellBridged(ctx context.Context, command string, timeoutSec int, profile *shellProfile) (*ShellResult, bool) {
+	bridge := currentTTYBridge()
+	if bridge == nil {
+		return nil, false
+	}
+	res := &ShellResult{Command: command}
+	start := time.Now()
+	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(runCtx, profile.Path, shellArgs(profile, command)...)
+	cmd.Cancel = func() error { return killProcessGroup(cmd) }
+	cmd.WaitDelay = shellWaitDelay
+	var capture streamCapture
+	capture.chunks = &res.Stdout
+	slave, err := bridge.Prepare(cmd)
+	if err != nil || slave == nil {
+		return nil, false
+	}
+	defer slave.Close()
+	stop, err := bridge.Attach(&capture)
+	if err != nil {
+		return nil, false
+	}
+	defer stop()
+	if err := cmd.Start(); err != nil {
+		stop()
+		slave.Close()
+		res.Duration = time.Since(start)
+		switch {
+		case ctx.Err() != nil:
+			res.Interrupted = true
+			res.NotStarted = true
+		case runCtx.Err() == context.DeadlineExceeded:
+			res.TimedOut = true
+		default:
+			res.Err = err.Error()
+		}
+		return res, true
+	}
+	slave.Close()
+	err = waitShell(cmd, &res.Stopped)
+	stop()
+	capture.finish()
+	res.Duration = time.Since(start)
+
+	switch {
+	case err != nil && ctx.Err() != nil:
+		res.Interrupted = true
+	case err != nil && runCtx.Err() == context.DeadlineExceeded:
+		res.TimedOut = true
+	case res.Stopped:
+	case err != nil:
+		if code, ok := shellExitCode(err); ok {
+			res.ExitCode = code
+		} else {
+			res.Err = err.Error()
+		}
+	}
+	return res, true
 }
 
 func effectiveShellTimeout(explicit int, interactive bool) int {

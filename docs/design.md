@@ -26,7 +26,7 @@ style/             package style：富文本管线（语义色/宽度截断/模�
 - `tanyan`：交互 REPL，维护内存 messages 历史，SSE 逐 token 流式输出
 - `tanyan ask "问题"`：单发，输出后退出
 - 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式
-- Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）：REPL 与 `ask` 单发统一走 `signal.Notify(SIGINT)`（`repl.InterruptContext`），不依赖 tty ISIG；命令执行期间子进程组持有终端前台，Ctrl+C 由内核直达子进程组（命令优雅退出），再次按下取消回合
+- Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）：REPL 与 `ask` 单发统一走 `signal.Notify(SIGINT)`（`repl.InterruptContext`），要求终端 `ISIG` 开启——readline 侧每回合开始前做终端状态自愈保证该项成立（`docs/interactive-tty.md` §5.9）；命令执行期间子进程组持有终端前台，Ctrl+C 由内核直达子进程组（命令优雅退出），再次按下取消回合
 
 ## LLM 接入
 
@@ -80,7 +80,17 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 ### run_shell（shell.go）
 
 - 参数：`command`（必填）、`timeout`（默认 60s，上限 900s）、`interactive`（布尔，默认 false）
-- 交互模式（`interactive: true`）：仅由模型显式声明，**不做命令文本猜测**（早期版本有 sudo/ssh 关键词兜底，review 后移除）。声明后 repl 侧停用等待动画、标题行下打印引导行、结束用追加式渲染（避免 `CursorUp` 擦掉用户输入回显）；`timeout` 缺省时默认放宽至 300s（显式值优先，上限仍 900s）。命令提示须自行写入 `/dev/tty`，否则被工具捕获不可见
+- 交互模式（`interactive: true`）：仅由模型显式声明，**不做命令文本猜测**（早期版本有 sudo/ssh 关键词兜底，review 后移除）。声明后 repl 侧停用等待动画、标题行下打印引导行、结束用追加式渲染（避免 `CursorUp` 擦掉用户输入回显）；`timeout` 缺省时默认放宽至 300s（显式值优先，上限仍 900s）。命令在**独立 pty** 中运行（见下条），提示与输出实时可见；非桥接回退路径下命令提示须自行写入 `/dev/tty`，否则被工具捕获不可见
+- 交互式 pty 桥接（`readline/bridge_linux.go` + `agent/tty_bridge.go`，linux 专用；决策与背景见 `docs/interactive-tty.md`）：解决"交互程序拿不到输入"（`/dev/tty` 直通导致 `ttyname(0)` 退化为 `/dev/tty`、pinentry 等无 ctty 程序无法按路径打开）。流程 `Prepare`（分配 pty、`Setsid+Setctty+Ctty=0`、三条标准流全接 slave、`GPG_TTY`/`SSH_TTY` 覆盖为 slave 路径）→ `Attach`（真实 tty 切 raw、初始尺寸复制到 master、启动双向泵）→ `cmd.Start()` → 立即关闭父进程 slave（否则子进程退出后 master 收不到 EIO）→ `waitShell` → `stop()`（恢复 termios、关闭 tty/master、泵收尾 drain 后 `capture.finish()`）
+  - 契约：master 输出**同时**写真实 tty（用户实时可见）与 `capture`（Writer，调用方决定去向）。本处 capture 即 `streamCapture` → `ShellResult.Stdout`，交互模式为**单流**（`Stderr` 空，`2|` 区分失效）；`streamCapture` 头尾截断与 `ShellResult` 字段语义不变
+  - 子进程成为独立会话首进程、ctty 为 pty slave，真实 tty 前台组始终是 tanyan，**不再需要 `TIOCSPGRP` 移交**；`^C` 经泵作为字节进入 pty，由 slave 行规程投递 `SIGINT` 给子进程前台组，tanyan 不拦截
+  - 已知语义差异：`Setsid` 后子进程组为孤儿进程组，内核按 POSIX 丢弃停止信号，**`^Z` 在桥接下不挂起子进程**（无效按键，`^C` 正常）；按 `docs/interactive-tty.md` §7 沿用现状、不新增分支（`waitShell` 的 `processStopped` 轮询保留，显式 `SIGSTOP` 等仍检出）
+  - 泵用 `poll` + 自管道唤醒（`stop()` 关写端令两向阻塞读退出），保证 stop 不悬挂、不漏读残留输出；写侧 `O_NONBLOCK` + `POLLOUT` 防子进程不消费时卡死
+  - 接口契约：**单次使用、非并发**——`Prepare → Attach → stop` 各一次；实例带 busy/attached 守卫（互斥量），并发或重复调用一律返回 `ErrUnsupported` 走回退，避免 pty/泵泄漏（为 §6"用户前台命令"复用的地基预留）
+  - 失败回退：无控制终端 / 非前台（`TIOCGPGRP != getpgrp`）/ pty 分配失败 / `SetNonblock` 失败 / `Attach` 失败 / 非 Linux（`bridge_stub.go` 返回 `ErrUnsupported`）→ 走原 `open("/dev/tty")` + `TIOCSPGRP` 路径，非交互路径行为零变化
+  - 终端状态自愈（`readline/secure.go`）：桥接 `Prepare` 的前台检查**之前**与 REPL 每回合开始前调用 `SecureTerminal()`——① 恢复被外部清掉的 `ISIG`（否则 `^C` 不产生 `SIGINT`，中断路径完全失效）② 限"启动瞬间自己就是终端前台作业"时夺回被 shell 抢占的前台组；后台启动（`&`）/无控制终端场景门控为否，语义不变（`docs/interactive-tty.md` §5.9）
+  - 结果语义：被信号终止的子进程按 shell 惯例记 `128 + signum`（`^C` → `exit 130`、`SIGKILL` → `137`），不再是 `-1`（`shellExitCode`，unix 取 `WaitStatus.Signaled()`）
+  - 刻意简化（`docs/interactive-tty.md` §7 登记，评审直接引用关闭）：`^C` 计数双杀、中断结果标记、输出清洗、`SIGWINCH` 转发（尽力而为，失败不报错）、桥接期显示对齐
 - 实现：按 `shellProfile` 组装命令（posix `<path> -c`、powershell `<path> -NoProfile -NonInteractive -Command`、cmd `<path> /d /s /c`），捕获 stdout/stderr/退出码/耗时（`ShellResult` 结构化返回：Command/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Stopped/NotStarted/Duration）
 - 中断语义：运行中被 ctx 取消 → `Interrupted`，结果追加 `error: 已中断（进程已终止，输出可能不完整）`；ctx 已取消导致命令未能启动 → `Interrupted+NotStarted`，追加 `error: 已中断（命令未执行）`（不再把裸 `context canceled` 交给模型）；toolview 状态行分别为 `已中断`/`未执行`，已捕获的首尾输出照常保留
 - shell 解析（`InitShell`，Agent 构造时一次性执行并缓存）：
@@ -106,7 +116,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - `/history` 查看 tool 消息时正文走 `Dim.Frame`（纯显示侧，历史存储不动），顺带解决历史串裸序列漏进视图的问题
 - 显示行数上限 `tool_output_lines`（默认 20，范围 1-1000），超出保留头 3 行 + 尾 2 行并提示 `/history n` 查看完整输出
 - 执行开始即打印标题行（`⋯` 标记进行中，调用点 `Dim.Frame` 包裹，模型可控的 args 一并清洗）；结束在 TTY 下 `\x1b[1A\r\x1b[K` 上移重绘标题替换 `⋯`（光标控制序列在 Frame 之外），非 TTY 直接打印完整块
-- 交互模式（`Event.Interactive`）例外：不启动 spinner（周期重绘会擦掉子进程写往 tty 的提示），标题行下打印引导行 `⏎ 等待终端输入，请在下方直接应答`，结束一律追加式渲染（上移重绘会擦掉用户刚输入的回显行）
+- 交互模式（`Event.Interactive`）例外：不启动 spinner（周期重绘会擦掉子进程写往 tty 的提示），标题行下打印引导行 `⏎ 等待终端输入，请在下方直接应答`，结束一律追加式渲染（上移重绘会擦掉用户刚输入的回显行）；桥接期间真实 tty 归 bridge 独占（repl 侧不写入：标题行在切 raw 前打印，结果块在 `stop()` 恢复 termios 后渲染）
 - 流式输出行尾无 `\n` 时（`lineDirty` 跟踪），状态行打印前自动补换行
 
 ### 等待动画与请求状态（repl/spinner.go）
@@ -176,6 +186,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - Tab 补全菜单：多候选时在输入行下方渲染菜单，选中项反显（`\x1b[7m`）；`↑/↓` 循环选择（菜单打开时不触发历史导航）、`Tab` 循环下一项、`Enter` 仅插入选中项（再次 Enter 提交）、`Esc` 关闭、任意输入关闭菜单正常编辑；单候选直接补全、公共前缀先行扩展的行为不变；候选超 8 行滚动窗口显示
 - keys：ESC 序列/控制键/UTF-8 状态机；width：`style` 薄包装（宽度表/ANSI 剥离/感知截断均由 `style` 提供，截断自动复位悬空 SGR 防串色）
 - 非 TTY 降级：`Degraded` 按行读取，无动画/菜单
+- tty 桥接（`bridge.go` 接口 + `bridge_linux.go` 实现 + `bridge_stub.go` 非 Linux 返回 `ErrUnsupported`）：为 `interactive: true` 的 run_shell 提供"命令在自己的 pty 中运行"的执行器（`TTYBridge.Prepare/Attach`），复用本包 termios 读写与 raw 语义；生产入口 `readline.NewTTYBridge()` 由 `main.go` 注入 `agent.InitTTYBridge`，测试可用 `newBridgeTTY(tty)` 以外层 pty 充当真实 tty
+- 终端状态自愈（`secure.go` + `secure_stub.go`）：`InitTerminalGuard`（启动时记录"自己是否为终端前台作业"，并 `signal.Ignore(SIGTTIN/SIGTTOU)`——`tcsetpgrp` 在前台被抢时需忽略 `SIGTTOU` 才不被停住）+ `SecureTerminal`（恢复 `ISIG`、必要时夺回前台组）
 - 平台划分：termios 请求常量按平台族分文件（`termios_sysv.go` linux/android/aix/solaris 用 TCGETS/TCSETS/TCSETSF，`termios_bsd.go` darwin/freebsd/netbsd/openbsd/dragonfly 用 TIOCGETA/TIOCSETA/TIOCSETAF）；illumos/ios 在该版 x/sys 无 ioctl 支持，`terminal_unix_stub.go` 直接返回 ErrUnsupported 走 Degraded 降级，保证全 unix GOOS 可编译
 
 ## 配置
@@ -204,6 +216,8 @@ env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERA
 ## 测试
 
 标准库 `testing` + `httptest` mock LLM（`agent/mock_test.go`，脚本化 `mockStep`，content/arguments 多 chunk 发送以覆盖流式合并）。覆盖 calc/shell/config/SSE 解析/trim/会话往返/Ask 全链路/回调。readline 用 fakeTerm 注入按键，真实终端行为 pty 人工验证。repl 覆盖渲染纯函数与非 TTY 降级。
+
+pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（测试自身分配 pty 充当真实 tty，经 `newBridgeTTY` 注入）断言子进程 `/dev/tty` 可读、`tty` 输出为 pty slave、`GPG_TTY` 覆盖、初始尺寸复制、raw 设置与恢复、子进程退出后 master 收到 EIO（防忘关 slave）、Attach 前预置输入不丢、子进程存活时 `stop()` 及时返回；② `agent/shell_bridge_test.go` 用 fake bridge（os.Pipe 造流）断言桥接全流程、Prepare/Attach 失败回退现状路径、非交互不触桥接；③ 真实 tty E2E（gated，用 `script -qec` 驱动真实 /dev/tty，不参与默认 `go test`）：`TTY_BRIDGE_E2E=1`（readline 单命令）、`TTY_E2E=1`（agent 全链路）、`TTY_E2E_REUSE=1`（同进程连续两次交互命令，覆盖 `ownTTY` 打开/恢复/重开复用路径）。
 
 ## 环境探针（envprobe）
 

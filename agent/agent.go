@@ -310,7 +310,7 @@ func (a *Agent) dispatch(ctx context.Context, tc ToolCall, interactive bool) Too
 		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 			return ToolResult{Text: fmt.Sprintf(MsgParseArgs, err)}
 		}
-		return ToolResult{Shell: RunShellResult(ctx, args.Command, effectiveShellTimeout(args.Timeout, interactive))}
+		return ToolResult{Shell: RunShellResult(ctx, args.Command, args.Timeout, interactive)}
 	}
 	if text, ok := DispatchBuiltin(tc.Function.Name, tc.Function.Arguments); ok {
 		return ToolResult{Text: text}
@@ -632,7 +632,7 @@ func runShellDesc(rt *shellRuntime) string {
 }
 
 func runShellParams() string {
-	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"timeout":{"type":"integer","description":"超时秒数，默认 %d（interactive 时 %d），最大 %d"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/read 等交互提示）时置 true：停用等待动画，默认超时放宽"}},"required":["command"]}`,
+	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"timeout":{"type":"integer","description":"超时秒数，默认 %d（interactive 时 %d），最大 %d"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令在独立 pty 中运行、终端直通应答，停用等待动画，默认超时放宽"}},"required":["command"]}`,
 		shellTimeoutSec, shellInteractiveTimeoutSec, shellTimeoutLimit)
 }
 
