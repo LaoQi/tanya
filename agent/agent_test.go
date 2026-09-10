@@ -641,3 +641,34 @@ func TestLegacyPromptFlagNewFormat(t *testing.T) {
 		t.Error("新格式不应标记 legacy")
 	}
 }
+
+func TestTotalTokensCountsReasoningItems(t *testing.T) {
+	isolatePromptEnv(t)
+	a := newTestAgent(t)
+	a.history = []Message{{Role: "assistant", Content: "ok"}}
+	without := a.totalTokens()
+	reasoning := strings.Repeat("推理内容", 400)
+	a.history = []Message{{Role: "assistant", Content: "ok", ReasoningItems: []ReasoningItem{{ID: "r1", Content: reasoning}}}}
+	with := a.totalTokens()
+	if with-without != estimateTokens(reasoning) {
+		t.Fatalf("推理未按 estimateTokens 计入: 差 %d, 期望 %d", with-without, estimateTokens(reasoning))
+	}
+	if with-without < 1000 {
+		t.Fatalf("推理增量过小: %d", with-without)
+	}
+}
+
+func TestTotalTokensCountsMultipleReasoningItems(t *testing.T) {
+	isolatePromptEnv(t)
+	a := newTestAgent(t)
+	a.history = []Message{{Role: "assistant", ReasoningItems: []ReasoningItem{
+		{ID: "r1", Content: strings.Repeat("a", 100)},
+		{ID: "r2", Content: strings.Repeat("b", 100)},
+	}}}
+	multi := a.totalTokens()
+	a.history = []Message{{Role: "assistant", ReasoningItems: []ReasoningItem{{ID: "r1", Content: strings.Repeat("a", 100)}}}}
+	single := a.totalTokens()
+	if multi-single != estimateTokens(strings.Repeat("b", 100)) {
+		t.Fatalf("多条 reasoning 未全部计入: 差 %d", multi-single)
+	}
+}

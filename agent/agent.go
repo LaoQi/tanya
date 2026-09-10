@@ -344,6 +344,9 @@ func (a *Agent) totalTokens() int {
 		for _, tc := range m.ToolCalls {
 			t += estimateTokens(tc.Function.Arguments)
 		}
+		for _, r := range m.ReasoningItems {
+			t += estimateTokens(r.Content)
+		}
 	}
 	return t
 }
