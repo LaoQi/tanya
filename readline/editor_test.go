@@ -267,3 +267,15 @@ func TestEditorRenderExactCols(t *testing.T) {
 		t.Errorf("整列数倍行数应正确跟踪: %q", out)
 	}
 }
+
+func TestEditorRenderWideWrapCursor(t *testing.T) {
+	ft := &fakeTerm{cols: 10, out: &bytes.Buffer{}}
+	ed := NewEditor(ft, true)
+	ed.SetOutput(ft.out)
+	ed.buf = []rune("abcdefghi中")
+	ed.pos = len(ed.buf)
+	ed.render("")
+	if !strings.HasSuffix(ft.out.String(), "\r\x1b[2C") {
+		t.Errorf("宽字符跨界后光标列应为 2: %q", ft.out.String())
+	}
+}
