@@ -30,7 +30,8 @@ const (
 const (
 	MsgBadSessionID     = "非法会话 id"
 	MsgSessionGone      = "会话不存在: %s"
-	MsgShellUnavailable = "run_shell 不可用（未找到可执行 shell）"
+	MsgNoShellFmt       = "未找到可用 shell（已尝试 %s），请安装或在配置中指定 shell:"
+	MsgShellOverrideFmt = "配置的 shell %q 不可执行，请检查 shell: 或 TANYA_SHELL"
 	MsgBadEffort        = "无效思考等级 %q（可选: minimal/low/medium/high/max/off）"
 	MsgBadApiProtocol   = "无效 api_protocol %q（可选: chat/responses）"
 )

@@ -10,6 +10,7 @@
 - 中断依赖两项终端不变量：`ISIG` 开启、终端前台组是 tanyan；启动时记录"自己是否为前台作业"，每回合开始前与桥接前台检查前自愈（恢复 `ISIG`、必要时夺回前台组），后台启动/无控制终端不抢；信号终止的子进程记 `128 + signum`（`^C` → `130`）
 - `interactive: true` 的 run_shell 走全 pty 桥接（命令在独立 pty 中运行，真实 tty 由 bridge 切 raw 双向泵转）；仅 Linux 实现，失败场景回退 `/dev/tty` + `TIOCSPGRP` 路径；细节见 `docs/interactive-tty.md`
 - 不做工具注册表：工具硬编码在 `ToolDefs()` 与 `Agent.dispatch` 的 switch 中
+- 启动即要求可用 shell：`agent.New` 解析 shell（配置覆盖 > 平台探测），全落空直接报错退出，无 noshell 降级路径（`run_shell` 恒定注册、env 段恒定输出 shell 契约、system prompt 恒为 `DefaultSystemPrompt`）
 - 工具策略：以 `run_shell` 为核心，新能力优先用 shell 命令组合实现；小型纯计算/查询工具放 `builtin.go`
 - LLM 协议双通道，`api_protocol` 配置（yaml/env `TANYA_API_PROTOCOL`，默认 `responses`，非法值启动报错）：`responses` 走 `/responses`，以 DeepSeek 标准为参照（OpenAI 兼容但非完整遵守），reasoning 明文捕获/原样回传、不依赖 `include`/`encrypted_content`、固定 `store: false`；`chat` 走 `/chat/completions`。思维链为 responses 独有，chat 构造时剥离 `ReasoningItems`；思考等级仅用标准字段 `reasoning_effort`（minimal/low/medium/high/max，yaml/env `/think` 三处可配），不支持厂商私有参数，设置后两协议均不发 `temperature`
 - 出站请求 UA 伪装（避免厂商风控），默认 `pi/0.85.0 (linux; node/v22.14.0; x64)`，yaml `user_agent` / env `TANYA_USER_AGENT` 可配

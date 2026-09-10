@@ -40,7 +40,7 @@ model: deepseek-v4-flash
 
 `api_protocol` 配置项（env `TANYA_API_PROTOCOL`）选择 API 协议：`responses`（默认，OpenAI Responses API 兼容格式，思维链明文回传）或 `chat`（Chat Completions 兼容协议）。端点路径为 `/responses` 时用 `responses`；仅提供 `/chat/completions` 的端点遇 404 时请切换为 `chat`。
 
-`shell` 配置项（env `TANYA_SHELL`）指定 run_shell 使用的 shell，支持名字或绝对路径（如 `zsh`、`/usr/bin/fish`）；缺省自动探测：Windows 用 pwsh，Linux/macOS 依次尝试 bash → sh → ash。全部落空时正常启动，仅不注册 run_shell 工具。
+`shell` 配置项（env `TANYA_SHELL`）指定 run_shell 使用的 shell，支持名字或绝对路径（如 `zsh`、`/usr/bin/fish`）；缺省自动探测：Windows 用 pwsh，Linux/macOS 依次尝试 bash → sh → ash。全部落空（含配置的 shell 不存在）时启动阶段直接报错退出，不进入 REPL。
 
 `reasoning_effort` 配置项（env `TANYA_REASONING_EFFORT`）设置思考等级，随请求发送 OpenAI 标准字段（o 系 / gpt-5 及兼容网关支持），可选 `minimal` / `low` / `medium` / `high` / `max`，留空不发送；REPL 内 `/think` 可运行时切换。`responses` 协议下映射为 `reasoning.effort`，`chat` 协议下为 `reasoning_effort`。设置思考等级后请求不再发送 `temperature`（两协议一致），以兼容 o 系 / gpt-5 等仅支持 `temperature=1` 的推理模型。
 
