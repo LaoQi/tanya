@@ -52,6 +52,11 @@ const (
 )
 
 const (
+	TurnSepTimeFmt = "──── %s"
+	TurnSepDurFmt  = " · 回合 %s"
+)
+
+const (
 	MsgLinesTotal = "共 %d 行"
 	MsgLines      = "%d 行"
 	MsgCachePct   = "缓存 %.2f%%"

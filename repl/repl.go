@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/LaoQi/tanyan/agent"
@@ -93,6 +94,40 @@ func (r *REPL) settleMd() {
 	}
 }
 
+func turnSep(d time.Duration) string {
+	if !style.GetProfile().TTY {
+		return ""
+	}
+	text := fmt.Sprintf(TurnSepTimeFmt, time.Now().Format("15:04:05"))
+	if d > 0 {
+		text += fmt.Sprintf(TurnSepDurFmt, turnDuration(d))
+	}
+	return "\n" + style.Dim.Sprint(text) + "\n"
+}
+
+func (r *REPL) turnSink() agent.EventSink {
+	gap := style.GetProfile().TTY
+	return func(e agent.Event) {
+		if gap {
+			gap = false
+			fmt.Println()
+		}
+		r.stream(e)
+	}
+}
+
+func turnDuration(d time.Duration) string {
+	switch {
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh%02dm", int(d/time.Hour), int(d/time.Minute)%60)
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm%02ds", int(d/time.Minute), int(d/time.Second)%60)
+	case d >= time.Second:
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	return fmt.Sprintf("%dms", d.Milliseconds())
+}
+
 func (r *REPL) resolveVars() func(string) (string, bool) {
 	return func(name string) (string, bool) {
 		switch name {
@@ -140,17 +175,19 @@ func (r *REPL) Run() error {
 			if r.handleCommand(line) {
 				return nil
 			}
+			fmt.Print(turnSep(0))
 			continue
 		}
 		readline.SecureTerminal()
 		ctx, done := InterruptContext()
 		r.md.Reset()
-		err = r.agent.Ask(ctx, line, r.stream)
+		start := time.Now()
+		err = r.agent.Ask(ctx, line, r.turnSink())
+		turnDur := time.Since(start)
 		for _, blk := range r.md.Close() {
 			r.print(r.rend.Block(blk))
 		}
 		done()
-		fmt.Println()
 		if err != nil {
 			var ie *agent.InterruptError
 			if errors.As(err, &ie) {
@@ -163,6 +200,7 @@ func (r *REPL) Run() error {
 				fmt.Fprintf(os.Stderr, MsgErrLineFmt+"\n", err)
 			}
 		}
+		fmt.Print(turnSep(turnDur))
 	}
 }
 

@@ -21,7 +21,7 @@
 
 ```
 main.go            入口、flag 子命令、ask 单发
-repl/              REPL 循环与斜杠命令、提示符模板、ghost 补全、/load picker、工具块渲染、spinner、UI 文案
+repl/              REPL 循环与斜杠命令、提示符模板、ghost 补全、/load picker、工具块渲染、回合分隔线、spinner、UI 文案
 readline/          自研终端输入层：行编辑/历史/Tab 补全菜单、按键解析、raw mode 与 KeyWatcher、显示宽度、pty 桥接、终端状态自愈
 agent/             核心逻辑
   config.go        配置加载（默认值 < ~/.config/tanyan/config.yaml < env TANYA_*）
