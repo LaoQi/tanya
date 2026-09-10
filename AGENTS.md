@@ -61,4 +61,4 @@ go run . ask "你好"   # 单发冒烟（需配置 api_key）
 
 ## Git
 
-- 提交用户为 LaoQi 时，提交后提醒需要签名
+- 提交一律 GPG 签名（`commit.gpgsign=true`，签名者 `LaoQi (Github) <me@madao.dev>`）：不得用 `--no-gpg-sign` 绕过；签名失败（如 gpg-agent 未解锁）时停下来问用户，不要提交未签名版本
