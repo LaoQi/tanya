@@ -397,6 +397,7 @@ func (e *Editor) render(extra string) {
 		return
 	}
 	cols := size.Cols
+	rows, curRow, curCol := layoutCursor([]rune(stripANSI(line)), cur, cols)
 	var b strings.Builder
 	b.WriteString("\r")
 	if e.cursorRow > 0 {
@@ -404,23 +405,21 @@ func (e *Editor) render(extra string) {
 	}
 	b.WriteString("\x1b[J")
 	b.WriteString(line)
-	total := stringWidth(stripANSI(line))
-	rows := (total + cols - 1) / cols
-	if rows < 1 {
-		rows = 1
-	}
 	menu := e.menuLines(cols)
 	for _, ml := range menu {
 		b.WriteString("\r\n" + ml)
 	}
-	up := rows - 1 - cur/cols + len(menu)
+	up := rows - 1 + len(menu) - curRow
 	if up > 0 {
 		b.WriteString("\x1b[" + strconv.Itoa(up) + "A")
 	}
 	b.WriteString("\r")
-	if col := cur % cols; col > 0 {
-		b.WriteString("\x1b[" + strconv.Itoa(col) + "C")
+	if curCol > 0 {
+		if curCol >= cols {
+			curCol = cols - 1
+		}
+		b.WriteString("\x1b[" + strconv.Itoa(curCol) + "C")
 	}
-	e.cursorRow = cur / cols
+	e.cursorRow = curRow
 	fmt.Fprint(e.out, b.String())
 }
