@@ -9,6 +9,7 @@
 - 内置轻量工具：`get_time` / `get_env` / `calc`
 - 会话持久化与恢复（JSONL，记录完整历史，system 快照随会话冻结）
 - token 用量实时显示在提示符（API 实报优先，本地估算兜底），支持显示缓存命中
+- AI 输出 Markdown 渲染（`/md` 切换）与内置配色主题（`/theme` 切换）
 - AGENTS.md 项目说明自动注入系统提示（全局 + 工作区双层，会话级快照保证 prompt cache 友好）
 - 依赖仅 2 个，核心逻辑测试覆盖率 90%+
 
@@ -35,13 +36,15 @@ api_key: "sk-..."
 model: deepseek-v4-flash
 ```
 
-环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_API_PROTOCOL` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES` / `TANYA_SHELL`。
+环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_API_PROTOCOL` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES` / `TANYA_SHELL` / `TANYA_THEME`。
 
 `api_protocol` 配置项（env `TANYA_API_PROTOCOL`）选择 API 协议：`responses`（默认，OpenAI Responses API 兼容格式，思维链明文回传）或 `chat`（Chat Completions 兼容协议）。端点路径为 `/responses` 时用 `responses`；仅提供 `/chat/completions` 的端点遇 404 时请切换为 `chat`。
 
 `shell` 配置项（env `TANYA_SHELL`）指定 run_shell 使用的 shell，支持名字或绝对路径（如 `zsh`、`/usr/bin/fish`）；缺省自动探测：Windows 用 pwsh，Linux/macOS 依次尝试 bash → sh → ash。全部落空时正常启动，仅不注册 run_shell 工具。
 
 `reasoning_effort` 配置项（env `TANYA_REASONING_EFFORT`）设置思考等级，随请求发送 OpenAI 标准字段（o 系 / gpt-5 及兼容网关支持），可选 `minimal` / `low` / `medium` / `high` / `max`，留空不发送；REPL 内 `/think` 可运行时切换。`responses` 协议下映射为 `reasoning.effort`，`chat` 协议下为 `reasoning_effort`。设置思考等级后请求不再发送 `temperature`（两协议一致），以兼容 o 系 / gpt-5 等仅支持 `temperature=1` 的推理模型。
+
+`theme` 配置项（env `TANYA_THEME`）选择内置配色主题，REPL 内 `/theme` 可运行时切换；`colors`（auto/on/off）控制是否着色；`palette` 可覆盖单个语义色。可用主题与色名见 `config.example.yaml`。
 
 `responses` 协议以思维链回传为核心特性（参照 DeepSeek Responses API 标准，OpenAI 兼容但不完整遵守 OpenAI）：响应中的 reasoning item 的明文思维链 `content` 随会话保存并在后续请求中原样回传，保持多轮工具调用间推理链完整；请求固定 `store: false`，不携带 `include`/`encrypted_content` 等 OpenAI 特有字段。回传内容须逐字节一致（不截断、不改写），以保证 DeepSeek 前缀缓存命中。`chat` 协议无此能力。
 
@@ -52,6 +55,7 @@ tanyan                 # 交互 REPL
 tanyan ask "问题"      # 单发模式
 tanyan -c x.yaml       # 指定配置文件
 tanyan -m local        # 会话存到当前目录 .tanya/
+tanyan -v              # 显示版本号
 ```
 
 会话存储模式（`-m` 参数 / 配置项 `session_mode` / env `TANYA_SESSION_MODE`，优先级从高到低）：
@@ -68,14 +72,16 @@ REPL 斜杠命令：
 |---|---|
 | `/help` | 帮助 |
 | `/new` | 开启新会话（当前会话自动保存） |
-| `/sessions` | 列出历史会话 |
-| `/load <id>` | 载入历史会话 |
+| `/load [id]` | 无参打开会话选择菜单；带 id 直接载入 |
 | `/context` | 查看上下文占用 |
+| `/history [n\|all]` | 无参截断列表；n 全量查看单条；all 全量显示 |
 | `/model [name]` | 查看/切换模型 |
 | `/think [level]` | 查看/设置思考等级（`off` 关闭） |
-| `/exit` | 退出 |
+| `/theme [name]` | 查看/切换配色主题 |
+| `/md` | 切换 Markdown 渲染（默认开，非 TTY 自动旁路） |
+| `/exit`（`/quit`） | 退出 |
 
-会话按启动目录划分工作区（global 模式），`/sessions` 只显示当前项目的会话。
+会话按启动目录划分工作区（global 模式），`/load` 的会话选择菜单只显示当前项目的会话。
 
 ## AGENTS.md 注入
 
@@ -97,19 +103,25 @@ REPL 斜杠命令：
 
 TTY 下带等待动画：LLM 请求等待期间显示 `⠋ 等待响应 3s`（首个 token 到达即消失），工具执行期间标题行下方显示独立 spinner 行（结束时原位重绘为最终标题）；每轮请求完成打印状态行 `  ↳ TTFT 0.8s · 3.2s · prompt 12.3k · completion 1.2k · 缓存 81.67%`（无 usage 时显示本地估算上下文，字段缺失自动省略）。非 TTY 环境动画自动关闭，状态行仍输出。
 
-| 工具 | 确认 | 说明 |
-|---|---|---|
-| `run_shell` | 免确认 | shell 执行命令（按平台自动选择，超时 60s 默认/900s 上限），输出截断 30000 字节 |
-| `get_time` | 免 | 当前时间 |
-| `get_env` | 免 | 环境变量查询（敏感变量名拒绝） |
-| `calc` | 免 | 四则运算求值 |
+所有工具免确认执行：
+
+| 工具 | 说明 |
+|---|---|
+| `run_shell` | shell 执行命令（按平台自动选择）；`timeout` 默认 60s、`interactive: true` 时 300s，上限 900s；输出截断 30000 字节 |
+| `get_time` | 当前时间 |
+| `get_env` | 环境变量查询（敏感变量名拒绝） |
+| `calc` | 四则运算求值 |
 
 ### 终端与信号行为
 
-命令执行期间 shell 进程被移交终端前台进程组（无控制终端时自动跳过），因此 ssh/git 等需要密码的程序可直接在终端应答，不再挂死至超时。相应信号语义：
+普通命令执行期间 shell 进程被移交终端前台进程组（`TIOCSPGRP`，无控制终端时自动跳过），因此 ssh/git 等需要密码的程序可直接在终端应答，不再挂死至超时。
+
+`interactive: true` 的命令改走独立 pty 桥接（仅 Linux 实现）：命令在自己的 pty 中运行，真实 tty 切 raw 由 bridge 双向泵转，提示与输出实时可见；此时无需前台移交，`^C` 经 pty 行规程投递（`^Z` 在桥接下不挂起子进程）。桥接不可用时回退上述前台移交路径。细节见 `docs/interactive-tty.md`。
+
+信号语义：
 
 - 执行期间 Ctrl+C 直接送达命令进程组（命令可优雅退出）；再次按下 Ctrl+C 取消当前回合
-- 执行期间 Ctrl+Z 会挂起命令进程，tanyan 检测到后立即终止并标注 `挂起已终止`，无需等超时
+- 普通路径下 Ctrl+Z 会挂起命令进程，tanyan 检测到后立即终止并标注 `挂起已终止`，无需等超时
 - 命令间隙/流式阶段 Ctrl+Z 被 tanyan 忽略（不会挂起自身），Ctrl+\ 保持 Go 默认行为（全栈转储）
 - 用户脚本内故意 `kill -STOP` 长挂起的进程会被同一机制终止
 

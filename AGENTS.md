@@ -5,39 +5,35 @@
 ## 设计约束
 
 - 极简优先：依赖仅 `gopkg.in/yaml.v3` 与 `golang.org/x/sys/unix`，新增依赖需先讨论
-- package 划分：`main`（仅入口）、`repl`（REPL/补全/picker）、`agent`（核心逻辑）、`readline`（自研终端输入层，实质替换 chzyer/readline）；根目录仅保留 main.go 与顶级包
-- 终端输入层自研（raw mode + ANSI 渲染），fish 风格 ghost 置灰建议；Windows 仅支持 Windows Terminal（VT 模式，`terminal_windows.go` 占位未实现），不支持 cmd/老 conhost；不引入 TUI 框架
-- `interactive: true` 的 run_shell 走全 pty 桥接（命令在独立 pty 中运行，真实 tty 由 bridge 切 raw 双向泵转，输出实时可见并照常捕获）；仅 Linux 实现，其余平台/失败场景回退原 `/dev/tty` + `TIOCSPGRP` 路径；细节见 `docs/interactive-tty.md`
-- 中断依赖两项终端不变量：`ISIG` 开启、终端前台组是 tanyan。启动时记录"自己是否为前台作业"，每回合开始前与桥接前台检查前自愈（恢复 `ISIG`、必要时夺回前台组）；后台启动/无控制终端不抢；信号终止的子进程记 `128 + signum`（`^C` → `130`）
+- package 划分：`main`（仅入口）、`repl`（REPL/补全/picker/渲染）、`agent`（核心逻辑）、`readline`（自研终端输入层）、`style`（富文本管线）；根目录仅 main.go 与顶级包
+- 终端输入层自研（raw mode + ANSI 渲染），fish 风格 ghost 置灰建议，不引入 TUI 框架；Windows 仅支持 Windows Terminal（VT 模式，`terminal_windows.go` 占位未实现），不支持 cmd/老 conhost
+- 中断依赖两项终端不变量：`ISIG` 开启、终端前台组是 tanyan；启动时记录"自己是否为前台作业"，每回合开始前与桥接前台检查前自愈（恢复 `ISIG`、必要时夺回前台组），后台启动/无控制终端不抢；信号终止的子进程记 `128 + signum`（`^C` → `130`）
+- `interactive: true` 的 run_shell 走全 pty 桥接（命令在独立 pty 中运行，真实 tty 由 bridge 切 raw 双向泵转）；仅 Linux 实现，失败场景回退 `/dev/tty` + `TIOCSPGRP` 路径；细节见 `docs/interactive-tty.md`
 - 不做工具注册表：工具硬编码在 `ToolDefs()` 与 `Agent.dispatch` 的 switch 中
 - 工具策略：以 `run_shell` 为核心，新能力优先用 shell 命令组合实现；小型纯计算/查询工具放 `builtin.go`
-- 出站请求 UA 伪装（避免厂商风控）：默认 `pi/0.85.0 (linux; node/v22.14.0; x64)`（Pi coding agent 的 UA），yaml `user_agent`、env `TANYA_USER_AGENT` 可配
-- 思考等级走 OpenAI 标准字段 `reasoning_effort`（minimal/low/medium/high/max），yaml `reasoning_effort`、env `TANYA_REASONING_EFFORT`、REPL `/think` 三处可配；厂商私有思考参数（GLM `thinking`、Qwen `enable_thinking` 等）不支持
-- LLM 协议双通道，`api_protocol` 配置（yaml/env `TANYA_API_PROTOCOL`，默认 `responses`，非法值启动报错）：`responses` 走 OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek 标准为参照**（OpenAI 兼容但不完整遵守 OpenAI）——reasoning 思维链以**明文 content** 捕获并原样回传，不依赖 OpenAI 特有的 `include`/`encrypted_content`，请求固定 `store: false`；`chat` 走 `/chat/completions`。思维链保持为 responses 协议独有，chat 请求构造时剥离 `ReasoningItems`。设置 `reasoning_effort` 后两协议均不发送 `temperature`（指针 + omitempty，兼容仅支持 `temperature=1` 的推理模型）
+- LLM 协议双通道，`api_protocol` 配置（yaml/env `TANYA_API_PROTOCOL`，默认 `responses`，非法值启动报错）：`responses` 走 `/responses`，以 DeepSeek 标准为参照（OpenAI 兼容但非完整遵守），reasoning 明文捕获/原样回传、不依赖 `include`/`encrypted_content`、固定 `store: false`；`chat` 走 `/chat/completions`。思维链为 responses 独有，chat 构造时剥离 `ReasoningItems`；思考等级仅用标准字段 `reasoning_effort`（minimal/low/medium/high/max，yaml/env `/think` 三处可配），不支持厂商私有参数，设置后两协议均不发 `temperature`
+- 出站请求 UA 伪装（避免厂商风控），默认 `pi/0.85.0 (linux; node/v22.14.0; x64)`，yaml `user_agent` / env `TANYA_USER_AGENT` 可配
 - 代码不添加注释，除非用户明确要求
-- 颜色一律使用终端 16 色基本 SGR 码（30-37/90-97），不用 256 色/truecolor 硬编码色值
+- 颜色一律使用终端 16 色基本 SGR 码（30-37/90-97），不用 256 色/truecolor
 
 ## 结构
 
 ```
 main.go            入口、flag 子命令、ask 单发
-repl/repl.go       REPL 循环、斜杠命令、提示符模板渲染、InterruptContext（ask 单发用 signal；REPL 用按键 watcher 中断）
-repl/completer.go  ghost 建议与 Tab 补全数据源
-repl/picker.go     /load 会话方向键选择菜单（非 TTY 序号降级）
-repl/toolview.go   工具块状渲染与回调接线
-repl/spinner.go    braille 等待动画
-readline/*         自研终端输入层（editor 行编辑/历史/Tab 补全菜单 / keys 按键解析 / terminal raw mode 与 KeyWatcher 按键监听 / width 显示宽度与截断 / bridge_* 交互命令 pty 桥接 / secure.go 终端状态自愈）
-agent/config.go    配置加载（默认值 < ~/.config/tanyan/config.yaml < env TANYA_*）
-agent/llm.go       OpenAI 兼容 client（chat 协议 SSE 流式 + tool_calls 增量合并 + usage 捕获；Message/ReasoningItem 内部格式，reasoning_effort 按配置携带）
-agent/llm_responses.go  responses 协议（/responses）：input items 映射、reasoning 明文思维链捕获/回传、usage 映射
-agent/agent.go     对话 loop、上下文估算、会话持久化（prompt 规则/事实分离：快照存规则，请求时实时拼接环境段）
-agent/envprobe.go  环境探针（envSection 纯函数：平台 + cwd + run_shell 执行契约 + 工作区标记，恒定注入无开关）
-agent/shell.go     run_shell 工具（shellProfile 按平台解析 bash/sh/ash/pwsh/cmd、streamCapture 头尾截断、ShellResult 结构化返回、常用程序探测拼入工具描述、interactive 走 pty 桥接）
-agent/tty_bridge.go  TTYBridge 接口与 InitTTYBridge 注入点（实现由 readline 提供，未注入/Prepare 失败回退现状路径）
-agent/builtin.go   内置小工具：get_time / get_env / calc
-repl/messages.go   repl 侧用户可见文案常量（UI 文案单一来源）
-agent/messages.go  agent 侧用户可见文案常量（错误/结果文本单一来源）
-style/*            富文本管线（语义色/主题/markdown/模板/宽度/ANSI 过滤：Frame 清洗包裹 · Passthrough 保色直显）
+repl/              REPL 循环与斜杠命令、提示符模板、ghost 补全、/load picker、工具块渲染、spinner、UI 文案
+readline/          自研终端输入层：行编辑/历史/Tab 补全菜单、按键解析、raw mode 与 KeyWatcher、显示宽度、pty 桥接、终端状态自愈
+agent/             核心逻辑
+  config.go        配置加载（默认值 < ~/.config/tanyan/config.yaml < env TANYA_*）
+  llm.go           chat 协议 client（SSE 流式 + tool_calls 增量合并 + usage 捕获）
+  llm_responses.go responses 协议 client（input items 映射、reasoning 明文捕获/回传、usage 映射）
+  agent.go         对话 loop、上下文估算、会话持久化（规则/事实分离）
+  envprobe.go      环境探针（平台 + cwd + run_shell 契约 + 工作区标记，恒定注入）
+  shell.go         run_shell 工具（平台 shell 解析、头尾截断、结构化返回、interactive 走 pty 桥接）
+  tty_bridge.go    TTYBridge 接口与注入点（实现由 readline 提供）
+  event.go         Event 词汇表（统一协议增量与生命周期）
+  builtin.go       内置小工具：get_time / get_env / calc
+  messages.go      agent 侧文案常量
+style/             富文本管线（语义色/主题/markdown/模板/宽度/ANSI 过滤）
 ```
 
 各模块行为细节见 `docs/design.md`。
@@ -46,6 +42,12 @@ style/*            富文本管线（语义色/主题/markdown/模板/宽度/ANS
 
 - `README.md` 使用说明
 - `docs/design.md` 核心设计与各模块行为细节
+- `docs/interactive-tty.md` 交互式 run_shell pty 桥接设计与落地差异
+- `docs/render-pipeline.md` 富文本渲染管线方案
+- `docs/render-refs-compare.md` 渲染参考项目对比（持续补录；`refs/` 不入库）
+- `docs/cache-probe.md` prompt cache 机制探测结论（脚本 `scripts/cache_probe.py`）
+- `docs/probe-redesign.md` 环境探针重构方案（已实施，归档）
+- `docs/todos.md` 待办清单
 
 ## 构建与测试
 
@@ -57,8 +59,4 @@ go test -race ./...   # 竞态检测
 go run . ask "你好"   # 单发冒烟（需配置 api_key）
 ```
 
-测试约定：LLM mock 在 `agent/mock_test.go`（`newMockLLM` + 脚本化 `mockStep`，content/arguments 均按多 chunk 发送以覆盖流式合并）；会话目录一律用 `t.TempDir()`，多 agent 共享会话时需显式同步 `cfg.GlobalSession`；涉及系统提示组装的测试用 `isolatePromptEnv` 隔离 HOME 与 cwd；readline 包用 fakeTerm 注入按键事件，真实终端行为用 pty（script 命令）人工验证。pty 桥接：集成测试自驱 pty（`readline/bridge_linux_test.go`），真实 tty 端到端测试由 `TTY_BRIDGE_E2E=1`/`TTY_E2E=1`/`TTY_E2E_REUSE=1` 门控（`printf 'hello\n' | script -qec "TTY_E2E=1 go test -run TestRunShellBridgedRealTTYE2E -v ./agent" /dev/null`；复用路径 `(printf 'hello\n'; sleep 3; printf 'world\n') | script -qec "TTY_E2E_REUSE=1 go test -run TestRunShellBridgedRealTTYReuse -v ./agent" /dev/null`），默认不跑。交互/中断类手工验证请用 `make build` 产出的 `./tanyan`：**不要用 `go run .`**（`^Z` 会停住 `go run` wrapper，shell 抢走终端前台后 `^C` 失效）。
-
-## Git
-
-- 提交一律 GPG 签名（`commit.gpgsign=true`，签名者 `LaoQi (Github) <me@madao.dev>`）：不得用 `--no-gpg-sign` 绕过；签名失败（如 gpg-agent 未解锁）时停下来问用户，不要提交未签名版本
+测试约定：LLM mock 见 `agent/mock_test.go`（`newMockLLM` + 脚本化 `mockStep`，多 chunk 发送覆盖流式合并）；会话目录一律用 `t.TempDir()`，多 agent 共享会话时显式同步 `cfg.GlobalSession`；系统提示组装测试用 `isolatePromptEnv` 隔离 HOME 与 cwd；readline 包用 fakeTerm 注入按键，真实终端行为用 pty（`script`）人工验证；pty 桥接三层测试与 E2E 门控变量（`TTY_BRIDGE_E2E` / `TTY_E2E` / `TTY_E2E_REUSE`）见 `docs/design.md`《测试》。交互/中断类手工验证用 `make build` 产出的 `./tanyan`：**不要用 `go run .`**（`^Z` 会停住 wrapper，shell 抢走终端前台后 `^C` 失效）。
