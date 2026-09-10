@@ -142,6 +142,7 @@ func (r *REPL) Run() error {
 			}
 			continue
 		}
+		readline.SecureTerminal()
 		ctx, done := InterruptContext()
 		r.md.Reset()
 		err = r.agent.Ask(ctx, line, r.stream)

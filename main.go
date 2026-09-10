@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanyan/readline"
 	"github.com/LaoQi/tanyan/repl"
 	"github.com/LaoQi/tanyan/style"
 )
@@ -45,6 +46,9 @@ func main() {
 		cfg.SessionMode = *sessionMode
 	}
 	agent.ProtectTerminalSignals()
+	readline.InitTerminalGuard()
+	readline.SecureTerminal()
+	agent.InitTTYBridge(readline.NewTTYBridge())
 	a, err := agent.New(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)

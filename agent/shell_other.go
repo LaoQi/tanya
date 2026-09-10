@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 )
@@ -25,3 +26,11 @@ func killProcessGroup(cmd *exec.Cmd) error {
 }
 
 func ProtectTerminalSignals() {}
+
+func shellExitCode(err error) (int, bool) {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return 0, false
+	}
+	return exitErr.ExitCode(), true
+}

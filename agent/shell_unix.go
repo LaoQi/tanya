@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -33,4 +34,15 @@ func ProtectTerminalSignals() {
 		signal.Notify(ch, syscall.SIGTSTP)
 		signal.Ignore(syscall.SIGTTIN, syscall.SIGTTOU)
 	})
+}
+
+func shellExitCode(err error) (int, bool) {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return 0, false
+	}
+	if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+		return 128 + int(ws.Signal()), true
+	}
+	return exitErr.ExitCode(), true
 }
