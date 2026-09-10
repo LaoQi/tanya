@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"errors"
 	"runtime"
 	"strings"
@@ -11,13 +10,26 @@ import (
 func withShellRuntime(t *testing.T, rt *shellRuntime) {
 	t.Helper()
 	shellRuntimeMu.Lock()
-	oldCur, oldSet := shellRuntimeCur, shellRuntimeSet
-	shellRuntimeCur = rt
-	shellRuntimeSet = true
+	oldCur, oldSet, oldErr := shellRuntimeCur, shellRuntimeSet, shellRuntimeErr
+	shellRuntimeCur, shellRuntimeSet, shellRuntimeErr = rt, true, nil
 	shellRuntimeMu.Unlock()
 	t.Cleanup(func() {
 		shellRuntimeMu.Lock()
-		shellRuntimeCur, shellRuntimeSet = oldCur, oldSet
+		shellRuntimeCur, shellRuntimeSet, shellRuntimeErr = oldCur, oldSet, oldErr
+		shellRuntimeMu.Unlock()
+	})
+}
+
+func stubShellLookPath(t *testing.T, existing ...string) {
+	t.Helper()
+	shellRuntimeMu.Lock()
+	oldCur, oldSet, oldErr, oldPath := shellRuntimeCur, shellRuntimeSet, shellRuntimeErr, shellLookPath
+	shellRuntimeCur, shellRuntimeSet, shellRuntimeErr = nil, false, nil
+	shellLookPath = lookPathStub(existing...)
+	shellRuntimeMu.Unlock()
+	t.Cleanup(func() {
+		shellRuntimeMu.Lock()
+		shellRuntimeCur, shellRuntimeSet, shellRuntimeErr, shellLookPath = oldCur, oldSet, oldErr, oldPath
 		shellRuntimeMu.Unlock()
 	})
 }
@@ -43,32 +55,32 @@ func lookPathStub(existing ...string) func(string) (string, error) {
 }
 
 func TestResolveProfilePosixChain(t *testing.T) {
-	p := resolveProfile("", "linux", lookPathStub("bash", "sh"))
-	if p == nil || p.Name != "bash" || p.Kind != KindPosix || p.arg() != "-c" {
-		t.Errorf("bash 应优先: %+v", p)
+	p, err := resolveProfile("", "linux", lookPathStub("bash", "sh"))
+	if err != nil || p == nil || p.Name != "bash" || p.Kind != KindPosix || p.arg() != "-c" {
+		t.Errorf("bash 应优先: %+v err=%v", p, err)
 	}
-	p = resolveProfile("", "linux", lookPathStub("sh"))
-	if p == nil || p.Name != "sh" {
-		t.Errorf("无 bash 应落 sh: %+v", p)
+	p, err = resolveProfile("", "linux", lookPathStub("sh"))
+	if err != nil || p == nil || p.Name != "sh" {
+		t.Errorf("无 bash 应落 sh: %+v err=%v", p, err)
 	}
-	p = resolveProfile("", "linux", lookPathStub("ash"))
-	if p == nil || p.Name != "ash" {
-		t.Errorf("仅 ash 应落 ash: %+v", p)
+	p, err = resolveProfile("", "linux", lookPathStub("ash"))
+	if err != nil || p == nil || p.Name != "ash" {
+		t.Errorf("仅 ash 应落 ash: %+v err=%v", p, err)
 	}
-	if p := resolveProfile("", "linux", lookPathStub()); p != nil {
-		t.Errorf("全落空应为 nil: %+v", p)
+	if p, err := resolveProfile("", "linux", lookPathStub()); err == nil || p != nil {
+		t.Errorf("全落空应报错: %+v err=%v", p, err)
 	}
 }
 
 func TestResolveProfileWindows(t *testing.T) {
-	p := resolveProfile("", "windows", lookPathStub("pwsh"))
-	if p == nil || p.Kind != KindPowerShell || p.arg() != "-Command" {
-		t.Fatalf("pwsh: %+v", p)
+	p, err := resolveProfile("", "windows", lookPathStub("pwsh"))
+	if err != nil || p == nil || p.Kind != KindPowerShell || p.arg() != "-Command" {
+		t.Fatalf("pwsh: %+v err=%v", p, err)
 	}
 	if strings.Join(p.ExtraArgs, " ") != "-NoProfile -NonInteractive" {
 		t.Errorf("ExtraArgs: %v", p.ExtraArgs)
 	}
-	if p := resolveProfile("", "windows", lookPathStub("cmd")); p != nil {
+	if p, err := resolveProfile("", "windows", lookPathStub("cmd")); err == nil {
 		t.Errorf("windows 不应回退 cmd: %+v", p)
 	}
 }
@@ -92,12 +104,12 @@ func TestNewProfileKinds(t *testing.T) {
 }
 
 func TestResolveProfileOverride(t *testing.T) {
-	p := resolveProfile("/usr/bin/fish", "linux", lookPathStub("fish", "bash"))
-	if p == nil || p.Name != "fish" || p.Path != "/usr/bin/fish" {
-		t.Errorf("override 优先: %+v", p)
+	p, err := resolveProfile("/usr/bin/fish", "linux", lookPathStub("fish", "bash"))
+	if err != nil || p == nil || p.Name != "fish" || p.Path != "/usr/bin/fish" {
+		t.Errorf("override 优先: %+v err=%v", p, err)
 	}
-	if p := resolveProfile("/no/such/shell", "linux", lookPathStub("bash")); p != nil {
-		t.Errorf("override 落空应降级 nil: %+v", p)
+	if p, err := resolveProfile("/no/such/shell", "linux", lookPathStub("bash")); err == nil || p != nil {
+		t.Errorf("override 落空应报错: %+v err=%v", p, err)
 	}
 }
 
@@ -108,23 +120,21 @@ func TestProbePrograms(t *testing.T) {
 	}
 }
 
-func TestShellRuntimeProgramsOnlyWithShell(t *testing.T) {
-	rt := resolveShellRuntime("", "linux", lookPathStub())
-	if rt.profile != nil || len(rt.programs) != 0 {
-		t.Errorf("无 shell 时不应探测程序: %+v", rt)
+func TestResolveShellRuntime(t *testing.T) {
+	if rt, err := resolveShellRuntime("", "linux", lookPathStub()); err == nil || rt != nil {
+		t.Errorf("无 shell 应报错: %+v err=%v", rt, err)
 	}
-	rt = resolveShellRuntime("", "linux", lookPathStub("bash", "ls"))
-	if rt.profile == nil || strings.Join(rt.programs, ",") != "ls" {
-		t.Errorf("有 shell 才探测: %+v", rt)
+	rt, err := resolveShellRuntime("", "linux", lookPathStub("bash", "ls"))
+	if err != nil || rt.profile == nil || strings.Join(rt.programs, ",") != "ls" {
+		t.Errorf("有 shell 才探测: %+v err=%v", rt, err)
 	}
 }
 
-func TestToolDefsWithoutShell(t *testing.T) {
-	withShellRuntime(t, &shellRuntime{})
-	for _, d := range ToolDefs() {
-		if d.Function.Name == "run_shell" {
-			t.Error("无 shell 不应注册 run_shell")
-		}
+func TestToolDefsHasRunShell(t *testing.T) {
+	withShellRuntime(t, &shellRuntime{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}})
+	defs := ToolDefs()
+	if len(defs) == 0 || defs[0].Function.Name != "run_shell" {
+		t.Errorf("run_shell 应恒定注册在首位: %+v", defs)
 	}
 }
 
@@ -151,10 +161,31 @@ func TestToolDefsRunShellDesc(t *testing.T) {
 	}
 }
 
-func TestRunShellUnavailable(t *testing.T) {
-	withShellRuntime(t, &shellRuntime{})
-	got := RunShell(context.Background(), "echo hi", 10)
-	if !strings.Contains(got, "run_shell 不可用") {
-		t.Errorf("got %q", got)
+func TestInitShellUnavailable(t *testing.T) {
+	stubShellLookPath(t)
+	err := InitShell("")
+	if err == nil || !strings.Contains(err.Error(), "未找到可用 shell") {
+		t.Fatalf("无 shell 应报错: %v", err)
+	}
+	if err2 := InitShell("bash"); err2 == nil {
+		t.Error("重复调用应返回缓存的错误")
+	}
+}
+
+func TestInitShellOverrideUnavailable(t *testing.T) {
+	stubShellLookPath(t, "bash")
+	err := InitShell("zsh")
+	if err == nil || !strings.Contains(err.Error(), "配置的 shell") {
+		t.Fatalf("override 无效应报错: %v", err)
+	}
+}
+
+func TestNewWithoutShell(t *testing.T) {
+	isolatePromptEnv(t)
+	stubShellLookPath(t)
+	cfg := defaultConfig()
+	cfg.GlobalSession = t.TempDir()
+	if _, err := New(cfg); err == nil || !strings.Contains(err.Error(), "未找到可用 shell") {
+		t.Fatalf("无 shell 时 New 应报错: %v", err)
 	}
 }

@@ -68,56 +68,56 @@ var (
 	shellRuntimeMu  sync.Mutex
 	shellRuntimeCur *shellRuntime
 	shellRuntimeSet bool
+	shellRuntimeErr error
+	shellLookPath   = exec.LookPath
 )
 
-func InitShell(override string) {
+func InitShell(override string) error {
 	shellRuntimeMu.Lock()
 	defer shellRuntimeMu.Unlock()
-	if shellRuntimeSet {
-		return
+	if !shellRuntimeSet {
+		shellRuntimeCur, shellRuntimeErr = resolveShellRuntime(override, runtime.GOOS, shellLookPath)
+		shellRuntimeSet = true
 	}
-	shellRuntimeCur = resolveShellRuntime(override, runtime.GOOS, exec.LookPath)
-	shellRuntimeSet = true
+	return shellRuntimeErr
 }
 
 func ShellRuntime() *shellRuntime {
 	shellRuntimeMu.Lock()
 	defer shellRuntimeMu.Unlock()
 	if !shellRuntimeSet {
-		shellRuntimeCur = resolveShellRuntime("", runtime.GOOS, exec.LookPath)
+		shellRuntimeCur, shellRuntimeErr = resolveShellRuntime("", runtime.GOOS, shellLookPath)
 		shellRuntimeSet = true
 	}
 	return shellRuntimeCur
 }
 
-func resolveShellRuntime(override, goos string, lookPath func(string) (string, error)) *shellRuntime {
-	rt := &shellRuntime{}
-	rt.profile = resolveProfile(override, goos, lookPath)
-	if rt.profile != nil {
-		rt.programs = probePrograms(lookPath)
+func resolveShellRuntime(override, goos string, lookPath func(string) (string, error)) (*shellRuntime, error) {
+	profile, err := resolveProfile(override, goos, lookPath)
+	if err != nil {
+		return nil, err
 	}
-	return rt
+	return &shellRuntime{profile: profile, programs: probePrograms(lookPath)}, nil
 }
 
-func resolveProfile(override, goos string, lookPath func(string) (string, error)) *shellProfile {
+func resolveProfile(override, goos string, lookPath func(string) (string, error)) (*shellProfile, error) {
 	if override != "" {
-		if p, err := lookPath(override); err == nil {
-			return newProfile(p)
+		p, err := lookPath(override)
+		if err != nil {
+			return nil, fmt.Errorf(MsgShellOverrideFmt, override)
 		}
-		return nil
+		return newProfile(p), nil
 	}
-	var candidates []string
+	candidates := []string{"bash", "sh", "ash"}
 	if goos == "windows" {
 		candidates = []string{"pwsh"}
-	} else {
-		candidates = []string{"bash", "sh", "ash"}
 	}
 	for _, name := range candidates {
 		if p, err := lookPath(name); err == nil {
-			return newProfile(p)
+			return newProfile(p), nil
 		}
 	}
-	return nil
+	return nil, fmt.Errorf(MsgNoShellFmt, strings.Join(candidates, "/"))
 }
 
 func newProfile(path string) *shellProfile {
@@ -315,9 +315,6 @@ func statState(stat string) string {
 func RunShellResult(ctx context.Context, command string, timeoutSec int, interactive bool) *ShellResult {
 	timeoutSec = effectiveShellTimeout(timeoutSec, interactive)
 	profile := ShellRuntime().profile
-	if profile == nil {
-		return &ShellResult{Command: command, Err: MsgShellUnavailable}
-	}
 	if interactive {
 		if res, ok := runShellBridged(ctx, command, timeoutSec, profile); ok {
 			return res

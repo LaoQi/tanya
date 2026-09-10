@@ -37,19 +37,6 @@ func TestEnvSectionFull(t *testing.T) {
 	}
 }
 
-func TestEnvSectionNoShell(t *testing.T) {
-	withShellRuntime(t, &shellRuntime{})
-	out := envSection("/tmp/x", fakeProbe(""))
-	for _, line := range []string{"SHELL:", "TTY:", "TIMEOUT:", "OUTPUT:"} {
-		if strings.Contains(out, line) {
-			t.Errorf("无 shell 不应输出 %s 行: %q", line, out)
-		}
-	}
-	if strings.Contains(out, "WORKSPACE:") {
-		t.Errorf("无标记应省略 WORKSPACE 行: %q", out)
-	}
-}
-
 func TestEnvSectionDeterministic(t *testing.T) {
 	withShellRuntime(t, &shellRuntime{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}})
 	cwd := "/home/u/proj"

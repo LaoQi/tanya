@@ -96,7 +96,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - shell 解析（`InitShell`，Agent 构造时一次性执行并缓存）：
   - 优先级：配置覆盖（`config.yaml shell:` / env `TANYA_SHELL`，名字或绝对路径，任意 shell 名允许，未知 basename 按 posix `-c` 处理）> 平台自动探测
   - 自动探测：windows 仅 `pwsh`（强制 PowerShell 7，不回退 5.1/cmd）；linux/darwin `bash` → `sh` → `ash`
-  - 全部落空（含配置的 shell 不存在）：降级不报错，profile 为 nil，仅不注册 run_shell（ToolDefs 条件注册、env 段无 SHELL/TIMEOUT/OUTPUT 行、system prompt 退化为 `NoShellSystemPrompt`），dispatch 调用返回错误文案
+  - 全部落空（含配置的 shell 不存在）：解析返回错误（`MsgNoShellFmt`/`MsgShellOverrideFmt`，含候选清单与配置提示），`agent.New` 立即透传，`main.go` 打印后以 1 退出——无降级路径，`ShellRuntime()` 在其后恒非 nil，profile 的非空成为不变量（`run_shell` 恒定注册、env 段恒定输出 SHELL/TIMEOUT/OUTPUT 行、system prompt 恒为 `DefaultSystemPrompt`）
 - 程序探测：profile 就绪后对固定清单（ls/cat/head/tail/grep/rg/fd/sed/awk/find/sort/wc/cut/tr/xargs/git/curl/wget/go/node/python）逐个 LookPath，存在的拼入 run_shell 工具描述 `可用程序: ...`，仅在工具描述出现，不重复注入 env 段
 - 输出捕获：stdout/stderr 各保留头 30000 字节 + 尾 30000 字节（`streamCapture` 滚动窗口），中间字节计数丢弃，模型仍可见首尾内容
 - 实测契约（sudo 两模式对照）：`sudo` 默认模式自开 `/dev/tty` 完成提示与密码输入——前台移交后提示实时可见、密码不回显，仅最终错误走 stderr 回流；`sudo -S` 强制从 stdin 读密码时提示改写 stderr（被捕获，等待期间不可见），交互命令应避免 `-S` 类强制 stdin 选项
@@ -237,7 +237,7 @@ pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（�
   WORKSPACE: go.mod, Makefile
   ```
 
-- 事实源单一：SHELL/TIMEOUT/OUTPUT 三行由解析后的 `shellProfile` 与 `shell.go` 常量程序化生成（`invocation()`/`shellTimeoutSec`/`shellInteractiveTimeoutSec`/`shellTimeoutLimit`/`shellMaxOutput`），TTY 行为固定契约文案，无第二份硬编码描述；shell 不可用时四行整体省略
+- 事实源单一：SHELL/TIMEOUT/OUTPUT 三行由解析后的 `shellProfile` 与 `shell.go` 常量程序化生成（`invocation()`/`shellTimeoutSec`/`shellInteractiveTimeoutSec`/`shellTimeoutLimit`/`shellMaxOutput`），TTY 行为固定契约文案，无第二份硬编码描述；四行恒定输出（shell 缺失时进程已在启动阶段退出）
 - 平台条件：`TTY:` 行与 SHELL 行的 tty 直通说明仅在 `ttyStdinSupported()` 为真（unix 且非 illumos/ios）时输出，其余平台 SHELL 行退化为 `（非交互）`，不宣称不存在的 /dev/tty 能力
 - 探测机制：`envSection` 为纯函数，WORKSPACE 标记文件（`os.Stat`，8 种标志文件固定顺序）经注入的 `envProbeFunc` 取得；shell 契约读包级 `ShellRuntime()`（`InitShell` 在 Agent 构造时解析缓存，envprobe 不再自行 LookPath）；主路径零 exec、零易变信息
 - 可测性：分层测试——persistPrompt 只含规则 / envSection 注入 fake probe 断言渲染 / runtimePrompt 拼接（probe 为 nil 时退化） / 同参数两次渲染字节相等

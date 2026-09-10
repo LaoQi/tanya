@@ -26,11 +26,6 @@ const DefaultSystemPrompt = `你是 tanyan（兼容 Pi/opencode），运行在�
 文件操作（ls、rg、find、cat 等）优先通过 run_shell 执行。
 坚持迭代直到任务完成：修改后主动验证（编译、测试、运行），确认无误再收尾。`
 
-const NoShellSystemPrompt = `你是 tanyan（兼容 Pi/opencode），运行在终端中的极简编码代理。
-习惯先制定方案：动手前列出实施计划并敲定每个实施细节，仅在用户明确同意后才开始实施。
-回答简洁直接；操作文件时明确显示路径。
-坚持迭代直到任务完成：修改后主动验证（编译、测试、运行），确认无误再收尾。`
-
 type Agent struct {
 	cfg            *Config
 	client         *Client
@@ -63,7 +58,9 @@ type sessionFileStat struct {
 }
 
 func New(cfg *Config) (*Agent, error) {
-	InitShell(cfg.Shell)
+	if err := InitShell(cfg.Shell); err != nil {
+		return nil, err
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -145,9 +142,6 @@ func readAgentsFile(path string) string {
 
 func buildSystemPrompt(cwd string) string {
 	prompt := DefaultSystemPrompt
-	if ShellRuntime().profile == nil {
-		prompt = NoShellSystemPrompt
-	}
 	if global := readAgentsFile(globalAgentsPath()); global != "" {
 		prompt += "\n\n# 全局说明（~/.config/tanyan/AGENTS.md）\n\n" + global
 	}
@@ -600,10 +594,7 @@ func ToolDefs() []ToolDef {
 		t.Function.Parameters = json.RawMessage(params)
 		return t
 	}
-	var defs []ToolDef
-	if rt := ShellRuntime(); rt.profile != nil {
-		defs = append(defs, def("run_shell", runShellDesc(rt), runShellParams()))
-	}
+	defs := []ToolDef{def("run_shell", runShellDesc(ShellRuntime()), runShellParams())}
 	return append(defs,
 		def("get_time",
 			"获取当前日期时间（含时区）",
