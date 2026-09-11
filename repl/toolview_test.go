@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -380,5 +381,50 @@ func TestRenderToolEndSGRMixedStderr(t *testing.T) {
 	got := RenderToolEnd("run_shell", `{}`, res, 80, 20)
 	if !strings.Contains(got, "2| \x1b[91merr\x1b[0m\n") {
 		t.Errorf("stderr 标记行彩色应直显保留: %q", got)
+	}
+}
+
+func TestToolArgsDisplayCollapsesMultiline(t *testing.T) {
+	got := toolArgsDisplay("run_shell", `{"command":"cat > a <<'EOF'\n  line one \n\nline two\nEOF"}`)
+	if want := "cat > a <<'EOF'; line one; line two; EOF"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRenderToolStartAlwaysSingleLine(t *testing.T) {
+	cmds := []string{
+		"ls -la",
+		strings.Repeat("x", 500),
+		"echo a\necho b",
+		strings.Repeat("中", 100),
+		"cd /tmp && ls\n" + strings.Repeat("y", 300),
+	}
+	for _, cmd := range cmds {
+		args, _ := json.Marshal(map[string]string{"command": cmd})
+		got := strings.Trim(RenderToolStart("run_shell", string(args), 80), "\n")
+		if strings.Contains(got, "\n") {
+			t.Errorf("占位行应为单行: %q", got)
+		}
+		if w := style.Width(got); w > 79 {
+			t.Errorf("占位行宽度 %d 超过 width-1: %q", w, got)
+		}
+	}
+}
+
+func TestToolBlockTitleSingleSpaceAndWidth(t *testing.T) {
+	cases := []string{"ls -la", strings.Repeat("z", 300), "cat <<'EOF'\nbody\nEOF"}
+	for _, cmd := range cases {
+		args, _ := json.Marshal(map[string]string{"command": cmd})
+		got := strings.Trim(RenderToolEnd("run_shell", string(args), agent.ToolResult{Text: "ok"}, 80, 20), "\n")
+		line, _, _ := strings.Cut(got, "\n")
+		if strings.Contains(line, "run_shell  ") {
+			t.Errorf("结束块标题应为单空格: %q", line)
+		}
+		if !strings.HasPrefix(style.Strip(line), "▸ run_shell ") {
+			t.Errorf("标题前缀异常: %q", line)
+		}
+		if w := style.Width(line); w > 79 {
+			t.Errorf("标题行宽度 %d 超过 width-1: %q", w, line)
+		}
 	}
 }
