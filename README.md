@@ -55,6 +55,8 @@ model: deepseek-v4-flash
 ```bash
 tanyan                 # 交互 REPL
 tanyan ask "问题"      # 单发模式
+tanyan -n              # 只读会话：可载入历史，不写入
+tanyan -n ask "问题"   # 单发且不写入会话历史
 tanyan -c x.yaml       # 指定配置文件
 tanyan -m local        # 会话存到当前目录 .tanya/
 tanyan -v              # 显示版本号
@@ -67,6 +69,8 @@ tanyan -v              # 显示版本号
 | `auto`（默认） | 当前目录存在 `.tanya/` 则用 `<cwd>/.tanya/sessions/`，否则用全局 |
 | `local` | `<启动目录>/.tanya/sessions/` |
 | `global` | `~/.local/share/tanyan/sessions/<workspace-id>/` |
+
+只读会话（`-n` / `--no-save`，只由命令行开启，配置文件与 env 均无法设置）：`ask` 单发与 REPL 通用。历史会话照常列出与载入，之后的对话只存在于内存、不写入会话文件，也不创建会话目录（REPL 启动时在欢迎屏下方显示黄色警告，`ask` 保持静默）。
 
 REPL 输入按前缀分发：
 

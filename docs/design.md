@@ -25,7 +25,7 @@ style/             package style：富文本管线（语义色/宽度截断/模�
 
 - `tanyan`：交互 REPL，维护内存 messages 历史，SSE 逐 token 流式输出
 - `tanyan ask "问题"`：单发，输出后退出
-- 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式
+- 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式、`-n` / `--no-save` 只读会话（见《会话与上下文》存储小节）
 - Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）：REPL 与 `ask` 单发统一走 `signal.Notify(SIGINT)`（`repl.InterruptContext`），要求终端 `ISIG` 开启——readline 侧每回合开始前做终端状态自愈保证该项成立（`docs/interactive-tty.md` §5.9）；命令执行期间子进程组持有终端前台，Ctrl+C 由内核直达子进程组（命令优雅退出），再次按下取消回合
 
 ## LLM 接入
@@ -146,10 +146,11 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
   - `auto`：当前目录存在 `.tanya/` → local，否则 global
   - `local`：`<启动目录>/.tanya/sessions/`（.tanya 本身即项目隔离，不叠加 workspace-id）
   - `global`：`global_session/<workspace-id>/`，workspace-id 由启动目录派生（可读路径转义 + 短哈希）
+- 只读会话（`-n` / `--no-save`）：由 CLI 经 `agent.New(cfg, agent.NoSave(true))` 传入，`Config` 无对应字段，配置文件与 env 均无法开启；`ask` 单发与 REPL 通用。读路径全部保留（启动预扫描、`ListSessions`、`LoadSession` 照常，既有会话不会被截断或改写），写路径在 `save()` 首行返回 nil 被整体关闭（覆盖成功/中断/错误三条路径）；`MkdirAll(sessionDir)` 在只读模式下跳过，目录缺失时 `refreshSessions` 按空列表处理不报错。内存 history 照常维护（中断保留语义不变），进程退出即丢。REPL 启动时在欢迎屏下方以语义色 `Warn` 打一行 `MsgNoSaveWarn`（`REPL.noSaveWarn`，agent 为 nil 或可写时不输出），`ask` 静默
 - 落盘：`<timestamp>.jsonl`，每轮结束追加写入新消息（一行一条 Message JSON），记录完整历史（回放/审计用）；回合因中断/错误保留产出时同样落盘（含终止提示行）
 - 落盘原子性：本批消息先编码进内存缓冲再单次追加写入，写入报错或短写时 `Truncate` 回滚到写入前大小，`saved` 游标与文件内容始终一致（重试不会产生重复行/半行）
 - 首行持久化 system prompt 快照（`systemSaved` 标志防重复），`/load` 还原后前缀与当初逐字节一致；旧格式文件（无 system 首行）回退为载入时快照当前 AGENTS.md，且保持不补写；system 行不计入 `/sessions` 条数与标题
-- 会话列表扫描：`agent.New` 启动时预扫描填充缓存；`ListSessions` 按 (mtime,size) 增量刷新，仅重扫变化的文件；每文件 `bufio` 逐行计数条数、仅解码至首条 user 消息取摘要
+- 会话列表扫描：`agent.New` 启动时预扫描填充缓存（只读模式不建目录，目录缺失按空处理）；`ListSessions` 按 (mtime,size) 增量刷新，仅重扫变化的文件；每文件 `bufio` 逐行计数条数、仅解码至首条 user 消息取摘要
 - `/sessions` 列出（id、时间、消息数、首条用户消息摘要），`/load <id>` 恢复继续对话；id 校验拒绝路径穿越
 
 ## 系统提示与缓存友好

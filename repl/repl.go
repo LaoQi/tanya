@@ -151,8 +151,15 @@ func (r *REPL) resolveVars() func(string) (string, bool) {
 
 func (r *REPL) Close() {}
 
+func (r *REPL) noSaveWarn() string {
+	if r.agent == nil || !r.agent.NoSave() {
+		return ""
+	}
+	return style.Warn.Sprint(MsgNoSaveWarn) + "\n"
+}
+
 func (r *REPL) Run() error {
-	fmt.Print(welcomeText())
+	fmt.Print(welcomeText() + r.noSaveWarn())
 	for {
 		prompt := r.prompt.Render(r.resolveVars())
 		line, err := r.ed.Readline(prompt)

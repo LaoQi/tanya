@@ -41,6 +41,7 @@ type Agent struct {
 	lastUsage      *Usage
 	sessionCache   map[string]SessionInfo
 	sessionStat    map[string]sessionFileStat
+	noSave         bool
 }
 
 type ResponseInfo struct {
@@ -57,7 +58,13 @@ type sessionFileStat struct {
 	size  int64
 }
 
-func New(cfg *Config) (*Agent, error) {
+type Option func(*Agent)
+
+func NoSave(v bool) Option {
+	return func(a *Agent) { a.noSave = v }
+}
+
+func New(cfg *Config, opts ...Option) (*Agent, error) {
 	if err := InitShell(cfg.Shell); err != nil {
 		return nil, err
 	}
@@ -66,9 +73,6 @@ func New(cfg *Config) (*Agent, error) {
 		return nil, err
 	}
 	sessionDir := resolveSessionDir(cfg, cwd)
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		return nil, err
-	}
 	a := &Agent{
 		cfg:          cfg,
 		client:       NewClient(cfg),
@@ -77,6 +81,14 @@ func New(cfg *Config) (*Agent, error) {
 		sessionDir:   sessionDir,
 		sessionCache: map[string]SessionInfo{},
 		sessionStat:  map[string]sessionFileStat{},
+	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	if !a.noSave {
+		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+			return nil, err
+		}
 	}
 	a.NewSession()
 	a.refreshSessions()
@@ -421,9 +433,14 @@ func (a *Agent) SetReasoningEffort(level string) error {
 
 func (a *Agent) History() []Message { return a.history }
 
+func (a *Agent) NoSave() bool { return a.noSave }
+
 func (a *Agent) ListModels() ([]string, error) { return a.client.ListModels() }
 
 func (a *Agent) save() error {
+	if a.noSave {
+		return nil
+	}
 	if a.saved >= len(a.history) {
 		return nil
 	}
@@ -522,6 +539,9 @@ func (a *Agent) ListSessions() ([]SessionInfo, error) {
 func (a *Agent) refreshSessions() error {
 	entries, err := os.ReadDir(a.sessionDir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
 	seen := map[string]bool{}
