@@ -33,14 +33,14 @@ func toolWidth(term readline.Terminal) int {
 }
 
 func RenderToolStart(name, args string, width int) string {
-	budget := width - 5 - style.Width(name)
+	budget := width - 6 - style.Width(name)
 	return fmt.Sprintf("\n▸ %s %s ⋯\n", name, style.Truncate(toolArgsDisplay(name, args), budget))
 }
 
 func toolEndTitle(name, args string, res agent.ToolResult) string {
 	title := name
 	if disp := toolArgsDisplay(name, args); disp != "" {
-		title += "  " + disp
+		title += " " + disp
 	}
 	return title
 }
@@ -71,7 +71,7 @@ func toolEndBody(res agent.ToolResult, width, maxLines int) (string, string) {
 }
 
 func renderToolBlock(lead, name, args string, res agent.ToolResult, width, maxLines int) string {
-	title := style.Truncate(toolEndTitle(name, args, res), width-2)
+	title := style.Truncate(toolEndTitle(name, args, res), width-3)
 	out, status := toolEndBody(res, width, maxLines)
 	var b strings.Builder
 	b.WriteString(lead)
@@ -146,9 +146,19 @@ func toolArgsDisplay(name, args string) string {
 		Command string `json:"command"`
 	}
 	if err := json.Unmarshal([]byte(args), &a); err == nil && strings.TrimSpace(a.Command) != "" {
-		return a.Command
+		return collapseCommand(a.Command)
 	}
-	return args
+	return collapseCommand(args)
+}
+
+func collapseCommand(s string) string {
+	var parts []string
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			parts = append(parts, line)
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 func shellView(r *agent.ShellResult, width, maxLines int) ([]string, string, int, bool) {
