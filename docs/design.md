@@ -118,7 +118,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 执行开始即打印标题行（`⋯` 标记进行中，调用点 `Dim.Frame` 包裹，模型可控的 args 一并清洗）；结束在 TTY 下 `\x1b[1A\r\x1b[K` 上移重绘标题替换 `⋯`（光标控制序列在 Frame 之外），非 TTY 直接打印完整块
 - 交互模式（`Event.Interactive`）例外：不启动 spinner（周期重绘会擦掉子进程写往 tty 的提示），标题行下打印引导行 `⏎ 等待终端输入，请在下方直接应答`，结束一律追加式渲染（上移重绘会擦掉用户刚输入的回显行）；桥接期间真实 tty 归 bridge 独占（repl 侧不写入：标题行在切 raw 前打印，结果块在 `stop()` 恢复 termios 后渲染）
 - 流式输出行尾无 `\n` 时（`lineDirty` 跟踪），状态行打印前自动补换行
-- 输出收敛（`output`）、内部数据流上下文（`flow`+`Phase`/`Kind`）与回合封装（`turn`）的改造规划见 `docs/repl-output-refactor.md`
+- 输出收敛（`output`/`streams` 双流）、`Kind` 门禁与输出模式（rich/plain）、回合封装（`turn`）的改造规划见 `docs/repl-output-refactor.md`
 
 ### 等待动画与请求状态（repl/spinner.go）
 
