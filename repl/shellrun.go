@@ -52,9 +52,6 @@ func (r *REPL) runShellLine(line string) {
 	}
 	start := time.Now()
 	cmd := agent.NewShellCmd(line)
-	if r.cwd != "" {
-		cmd.Dir = r.cwd
-	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if r.raw {
@@ -126,16 +123,9 @@ func reportShellExit(err error, stopped bool) {
 	fmt.Fprintf(os.Stderr, MsgErrLineFmt+"\n", err)
 }
 
-func (r *REPL) baseCwd() string {
-	if r.cwd != "" {
-		return r.cwd
-	}
-	cwd, _ := os.Getwd()
-	return cwd
-}
-
 func (r *REPL) cwdLabel() string {
-	return shortPath(r.baseCwd())
+	cwd, _ := os.Getwd()
+	return shortPath(cwd)
 }
 
 func shortPath(cwd string) string {

@@ -12,10 +12,8 @@ const (
 	MsgDialogueEmpty  = "用法: :内容（冒号开头与 AI 对话）\n"
 	MsgShellExitCode  = "退出码 %d"
 	MsgShellSuspended = "挂起已终止\n"
-	MsgCdBadDir       = "错误: 不是目录: %s\n"
-	MsgCdSubshell     = "cd 类命令未执行：目录只由内建 cd 切换（cd、cd -、cd 路径），子 shell 内的 cd 不会改变 tanyan 的目录，路径含空格暂不支持"
 	MsgKillFailFmt    = "无法终止已挂起的命令（pid %d）: %v"
-	MsgCdNoPrev       = "错误: 没有上一个目录\n"
+	MsgCdBlocked      = "cd 类命令未执行：工作目录固定为启动目录，cd/pushd/popd 均不生效"
 )
 
 const (
