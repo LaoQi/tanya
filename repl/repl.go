@@ -21,6 +21,7 @@ type REPL struct {
 	ed        *readline.Editor
 	term      readline.Terminal
 	raw       bool
+	st        *streams
 	promptTpl string
 	prompt    style.Template
 	view      agent.EventSink
@@ -30,9 +31,36 @@ type REPL struct {
 	rend      style.Renderer
 }
 
-func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
-	term, raw := readline.NewTerminal()
+type options struct {
+	st   *streams
+	term readline.Terminal
+	raw  bool
+}
+
+type Option func(*options)
+
+func WithStreams(st *streams) Option {
+	return func(o *options) { o.st = st }
+}
+
+func WithTerminal(term readline.Terminal, raw bool) Option {
+	return func(o *options) { o.term, o.raw = term, raw }
+}
+
+func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	if o.st == nil {
+		o.st = NewStreams(os.Stdout, os.Stderr)
+	}
+	term, raw := o.term, o.raw
+	if term == nil {
+		term, raw = readline.NewTerminal()
+	}
 	ed := readline.NewEditor(term, raw)
+	ed.SetOutput(o.st.out)
 	c := &completer{listSessions: a.ListSessions, listModels: a.ListModels}
 	ed.SetComplete(c.complete)
 	ed.SetGhost(c.suggest)
@@ -44,7 +72,7 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl, prompt: tpl}
+	r := &REPL{agent: a, ed: ed, term: term, raw: raw, st: o.st, promptTpl: promptTpl, prompt: tpl}
 	r.md = style.NewMarkdownBuf()
 	r.mdLive = true
 	r.rend = style.NewThemedRenderer(style.GetProfile(), sch.MD)
@@ -159,7 +187,7 @@ func (r *REPL) noSaveWarn() string {
 }
 
 func (r *REPL) Run() error {
-	fmt.Print(welcomeText() + r.noSaveWarn())
+	r.st.out.emit(welcomeText() + r.noSaveWarn())
 	for {
 		prompt := r.prompt.Render(r.resolveVars())
 		line, err := r.ed.Readline(prompt)
@@ -167,7 +195,7 @@ func (r *REPL) Run() error {
 			continue
 		}
 		if err == io.EOF {
-			fmt.Print(MsgBye + "\n")
+			r.st.out.emit(MsgBye + "\n")
 			return nil
 		}
 		if err != nil {
@@ -178,19 +206,19 @@ func (r *REPL) Run() error {
 			continue
 		}
 		if isExitLine(line) {
-			fmt.Print(MsgBye + "\n")
+			r.st.out.emit(MsgBye + "\n")
 			return nil
 		}
 		if isSlashCommand(line) {
 			if r.handleCommand(line) {
 				return nil
 			}
-			fmt.Print(turnSep(0))
+			r.st.out.emit(turnSep(0))
 			continue
 		}
 		if text, ok := dialogueText(line); ok {
 			if text == "" {
-				fmt.Print(MsgDialogueEmpty)
+				r.st.out.emit(MsgDialogueEmpty)
 				continue
 			}
 			r.ask(text)
