@@ -7,44 +7,40 @@ import (
 
 func TestHandleCommandThink(t *testing.T) {
 	a := newSessTestAgent(t, t.TempDir())
-	r := &REPL{agent: a}
-
-	out := captureStdout(func() { r.handleCommand("/think") })
-	if out != MsgThinkUnset {
-		t.Errorf("无参未设置: got %q want %q", out, MsgThinkUnset)
+	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	run := func(cmd string) string {
+		out.Reset()
+		errb.Reset()
+		r.handleCommand(cmd)
+		return out.String()
 	}
 
-	out = captureStdout(func() { r.handleCommand("/think high") })
-	if want := "思考等级已设为 high\n"; out != want {
-		t.Errorf("设置: got %q want %q", out, want)
+	if got := run("/think"); got != MsgThinkUnset {
+		t.Errorf("无参未设置: got %q want %q", got, MsgThinkUnset)
+	}
+	if got := run("/think high"); got != "思考等级已设为 high\n" {
+		t.Errorf("设置: got %q want %q", got, "思考等级已设为 high\n")
 	}
 	if a.ReasoningEffort() != "high" {
 		t.Errorf("agent 未生效: %q", a.ReasoningEffort())
 	}
-
-	out = captureStdout(func() { r.handleCommand("/think") })
-	if want := "思考等级: high\n"; out != want {
-		t.Errorf("查看: got %q want %q", out, want)
+	if got := run("/think"); got != "思考等级: high\n" {
+		t.Errorf("查看: got %q want %q", got, "思考等级: high\n")
 	}
-
-	out = captureStdout(func() { r.handleCommand("/think bogus") })
-	if !strings.Contains(out, "无效思考等级") {
-		t.Errorf("非法值应报错: %q", out)
+	run("/think bogus")
+	if !strings.Contains(errb.String(), "无效思考等级") {
+		t.Errorf("非法值应报错到 stderr: %q", errb.String())
 	}
 	if a.ReasoningEffort() != "high" {
 		t.Errorf("失败后不应变更: %q", a.ReasoningEffort())
 	}
-
-	out = captureStdout(func() { r.handleCommand("/think off") })
-	if out != MsgEffortOff {
-		t.Errorf("off: got %q want %q", out, MsgEffortOff)
+	if got := run("/think off"); got != MsgEffortOff {
+		t.Errorf("off: got %q want %q", got, MsgEffortOff)
 	}
 	if a.ReasoningEffort() != "" {
 		t.Errorf("off 未清空: %q", a.ReasoningEffort())
 	}
-
-	out = captureStdout(func() { r.handleCommand("/think max") })
-	if want := "思考等级已设为 max\n"; out != want {
-		t.Errorf("max: got %q want %q", out, want)
+	if got := run("/think max"); got != "思考等级已设为 max\n" {
+		t.Errorf("max: got %q want %q", got, "思考等级已设为 max\n")
 	}
 }

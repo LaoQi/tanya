@@ -55,21 +55,21 @@ func TestPickByNumberOutput(t *testing.T) {
 	if len(list) != 1 {
 		t.Fatalf("应扫描到 1 个会话: %d", len(list))
 	}
-	out := captureStdout(func() { pickByNumber(list) })
+	out := &syncBuf{}
+	pickByNumber(list, NewStreams(out, &syncBuf{}).out)
 	want := "输入序号选择会话（回车取消）:\n  1   20260101-100000  " + list[0].ModTime.Format("01-02 15:04") + "    2条  第一条\n序号: "
-	if out != want {
+	if out.String() != want {
 		t.Errorf("got %q want %q", out, want)
 	}
 }
 
 func TestHandleCommandExit(t *testing.T) {
 	a := newSessTestAgent(t, t.TempDir())
-	r := &REPL{agent: a}
+	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
 
-	exit := false
-	out := captureStdout(func() { exit = r.handleCommand("/exit") })
-	if !exit || out != "再见\n" {
-		t.Errorf("exit: ret=%v out=%q want %q", exit, out, "再见\n")
+	exit := r.handleCommand("/exit")
+	if !exit || out.String() != "再见\n" {
+		t.Errorf("exit: ret=%v out=%q want %q", exit, out.String(), "再见\n")
 	}
 }
 

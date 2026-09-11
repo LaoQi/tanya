@@ -2,8 +2,6 @@ package repl
 
 import (
 	"fmt"
-	"io"
-	"os"
 	"sync"
 	"time"
 
@@ -36,17 +34,17 @@ func spinLine(kind spinKind, elapsed time.Duration, frame string) string {
 }
 
 type spinner struct {
-	mu      *sync.Mutex
+	mu      sync.Mutex
 	tty     bool
-	out     io.Writer
+	out     *output
 	stopCh  chan struct{}
 	stopped chan struct{}
 	active  bool
 	kind    spinKind
 }
 
-func newSpinner(mu *sync.Mutex, tty bool) *spinner {
-	return &spinner{mu: mu, tty: tty, out: os.Stdout}
+func newSpinner(out *output, tty bool) *spinner {
+	return &spinner{out: out, tty: tty}
 }
 
 func (s *spinner) start(kind spinKind) {
@@ -77,8 +75,9 @@ func (s *spinner) loop(start time.Time) {
 	frame := 0
 	for {
 		s.mu.Lock()
-		fmt.Fprint(s.out, style.ClearLineHome()+spinLine(s.kind, time.Since(start), spinnerFrames[frame%len(spinnerFrames)]))
+		line := style.ClearLineHome() + spinLine(s.kind, time.Since(start), spinnerFrames[frame%len(spinnerFrames)])
 		s.mu.Unlock()
+		s.out.emit(KindSpinner, line)
 		frame++
 		select {
 		case <-s.stopCh:
@@ -101,9 +100,7 @@ func (s *spinner) stop() {
 	}
 	s.active = false
 	if clean {
-		s.mu.Lock()
-		fmt.Fprint(s.out, style.ClearLineHome())
-		s.mu.Unlock()
+		s.out.emit(KindSpinner, style.ClearLineHome())
 	}
 }
 

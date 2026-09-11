@@ -55,15 +55,11 @@ func infoWithUsage() agent.ResponseInfo {
 func TestResponseInfoFollowsSettledTail(t *testing.T) {
 	withPlainProfile(t)
 	a := newSettleAgent(t)
-	r, err := NewREPL(a, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r, buf, _ := newTestREPLAgent(t, a, newFakeTerm())
 	r.md.Write("计算结果是 42")
 
-	out := captureStdout(func() {
-		r.stream(agent.Event{Kind: agent.EventResponse, Response: infoWithUsage()})
-	})
+	r.stream(agent.Event{Kind: agent.EventResponse, Response: infoWithUsage()})
+	out := buf.String()
 	if !strings.Contains(out, "计算结果是 42") {
 		t.Fatalf("滞留尾行应在回合结束结算输出，修复前会丢失直到 Ask 结束: %q", out)
 	}
@@ -78,16 +74,12 @@ func TestResponseInfoFollowsSettledTail(t *testing.T) {
 func TestToolStartFollowsSettledTail(t *testing.T) {
 	withPlainProfile(t)
 	a := newSettleAgent(t)
-	r, err := NewREPL(a, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r, buf, _ := newTestREPLAgent(t, a, newFakeTerm())
 	r.md.Write("准备运行计算")
 
-	out := captureStdout(func() {
-		r.stream(agent.Event{Kind: agent.EventResponse, Response: infoWithUsage()})
-		r.stream(agent.Event{Kind: agent.EventToolStart, ToolName: "calc", ToolArgs: `{"expression":"6*7"}`})
-	})
+	r.stream(agent.Event{Kind: agent.EventResponse, Response: infoWithUsage()})
+	r.stream(agent.Event{Kind: agent.EventToolStart, ToolName: "calc", ToolArgs: `{"expression":"6*7"}`})
+	out := buf.String()
 	iTail := strings.Index(out, "准备运行计算")
 	iStat := strings.Index(out, "↳")
 	iTool := strings.Index(out, "▸ calc")

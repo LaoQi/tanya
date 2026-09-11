@@ -18,6 +18,7 @@ var (
 )
 
 func main() {
+	st := repl.NewStreams(os.Stdout, os.Stderr)
 	showVersion := flag.Bool("v", false, repl.FlagVersion)
 	configPath := flag.String("c", "", repl.FlagConfig)
 	sessionMode := flag.String("m", "", repl.FlagMode)
@@ -26,7 +27,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("tanyan %s\n", version)
+		st.Print(fmt.Sprintf("tanyan %s\n", version))
 		return
 	}
 
@@ -35,7 +36,7 @@ func main() {
 
 	cfg, err := agent.LoadConfig(*configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
+		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
 	style.ApplyScheme(cfg.Theme)
@@ -61,36 +62,36 @@ func main() {
 	agent.InitTTYBridge(readline.NewTTYBridge())
 	a, err := agent.New(cfg, agent.NoSave(*noSave))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
+		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
-	sink := repl.WireToolView(repl.ToolWidth, a.ToolOutputLines())
+	sink := repl.WireToolView(st, repl.ToolWidth, a.ToolOutputLines())
 
 	if isAsk {
 		q := strings.Join(args[1:], " ")
 		if q == "" {
-			fmt.Fprint(os.Stderr, repl.MsgAskUsage)
+			st.Fail(repl.MsgAskUsage)
 			os.Exit(1)
 		}
 		ctx, done := repl.InterruptContext()
 		err := a.Ask(ctx, q, sink)
 		done()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "\n"+repl.MsgErrLineFmt+"\n", err)
+			st.Fail("\n"+repl.MsgErrLineFmt+"\n", err)
 			os.Exit(1)
 		}
-		fmt.Println()
+		st.Content("\n")
 		return
 	}
 
-	r, err := repl.NewREPL(a, "")
+	r, err := repl.NewREPL(a, "", repl.WithStreams(st))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
+		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
 	defer r.Close()
 	if err := r.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
+		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
 }

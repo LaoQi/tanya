@@ -2,6 +2,7 @@ package repl
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/LaoQi/tanyan/agent"
@@ -68,5 +69,19 @@ func TestPickerRender(t *testing.T) {
 	p.render(&buf2, false)
 	if !bytes.Contains(buf2.Bytes(), []byte("\x1b[3A")) {
 		t.Errorf("重绘应上移光标: %q", buf2.String())
+	}
+}
+
+func TestPickerUsesWriter(t *testing.T) {
+	list := testSessions(2)
+	term := newFakeTerm(readline.KeyEvent{Code: readline.KeyDown}, readline.KeyEvent{Code: readline.KeyEnter})
+	var buf syncBuf
+	idx, ok := pickSession(term, list, &buf)
+	if !ok || idx != 1 {
+		t.Fatalf("应确认第 2 项: idx=%d ok=%v", idx, ok)
+	}
+	got := buf.String()
+	if !strings.Contains(got, PickTitle) || !strings.Contains(got, list[1].ID) {
+		t.Errorf("picker 应写入注入 writer: %q", got)
 	}
 }

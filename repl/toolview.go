@@ -3,9 +3,9 @@ package repl
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/LaoQi/tanyan/agent"
@@ -244,9 +244,8 @@ func textView(text string, width, maxLines int) ([]string, string) {
 	return out, ""
 }
 
-func WireToolView(width func() int, maxLines int) agent.EventSink {
-	var mu sync.Mutex
-	sp := newSpinner(&mu, style.GetProfile().TTY)
+func WireToolView(st *streams, width func() int, maxLines int) agent.EventSink {
+	sp := newSpinner(st.out, style.GetProfile().TTY && st.out.allows(KindSpinner))
 	toolJustEnded := false
 	lineDirty := false
 	return func(e agent.Event) {
@@ -260,44 +259,46 @@ func WireToolView(width func() int, maxLines int) agent.EventSink {
 				return
 			}
 			sp.stop()
-			mu.Lock()
-			if toolJustEnded {
-				fmt.Println()
-				toolJustEnded = false
-			}
-			fmt.Print(e.Text)
+			justEnded := toolJustEnded
+			st.out.atomic(KindContent, func(w io.Writer) {
+				if justEnded {
+					io.WriteString(w, "\n")
+				}
+				io.WriteString(w, e.Text)
+			})
+			toolJustEnded = false
 			lineDirty = !strings.HasSuffix(e.Text, "\n")
-			mu.Unlock()
 		case agent.EventResponse:
 			sp.stop()
-			mu.Lock()
-			if lineDirty {
-				fmt.Println()
-				lineDirty = false
-			}
-			fmt.Print(style.Info.Sprint(RenderResponseInfo(e.Response, width())))
-			mu.Unlock()
+			dirty := lineDirty
+			st.out.atomic(KindToolStatus, func(w io.Writer) {
+				if dirty {
+					io.WriteString(w, "\n")
+				}
+				io.WriteString(w, style.Info.Sprint(RenderResponseInfo(e.Response, width())))
+			})
+			lineDirty = false
 		case agent.EventToolStart:
 			sp.stop()
-			mu.Lock()
-			fmt.Print(style.Dim.Frame(RenderToolStart(e.ToolName, e.ToolArgs, width())))
-			if e.Interactive {
-				fmt.Print(style.Info.Sprint(MsgInteractiveHint))
-			}
-			mu.Unlock()
+			st.out.atomic(KindToolBlock, func(w io.Writer) {
+				io.WriteString(w, style.Dim.Frame(RenderToolStart(e.ToolName, e.ToolArgs, width())))
+				if e.Interactive {
+					io.WriteString(w, style.Info.Sprint(MsgInteractiveHint))
+				}
+			})
 			lineDirty = false
 			if !e.Interactive {
 				sp.start(spinRunning)
 			}
 		case agent.EventToolEnd:
 			sp.stop()
-			mu.Lock()
+			block := RenderToolEnd(e.ToolName, e.ToolArgs, e.Result, width(), maxLines)
 			if style.GetProfile().TTY && !e.Interactive {
-				fmt.Print(RenderToolEndInline(e.ToolName, e.ToolArgs, e.Result, width(), maxLines))
-			} else {
-				fmt.Print(RenderToolEnd(e.ToolName, e.ToolArgs, e.Result, width(), maxLines))
+				block = RenderToolEndInline(e.ToolName, e.ToolArgs, e.Result, width(), maxLines)
 			}
-			mu.Unlock()
+			st.out.atomic(KindToolBlock, func(w io.Writer) {
+				io.WriteString(w, block)
+			})
 			toolJustEnded = true
 			lineDirty = false
 		}
