@@ -263,13 +263,6 @@ func RunShell(ctx context.Context, command string, timeoutSec int) string {
 	return RunShellResult(ctx, command, timeoutSec, false).String()
 }
 
-func NewShellCmd(command string) *exec.Cmd {
-	profile := ShellRuntime().profile
-	return exec.Command(profile.Path, shellArgs(profile, command)...)
-}
-
-func ProcessStopped(pid int) bool { return processStopped(pid) }
-
 func shellArgs(profile *shellProfile, command string) []string {
 	args := make([]string, 0, len(profile.ExtraArgs)+2)
 	args = append(args, profile.ExtraArgs...)

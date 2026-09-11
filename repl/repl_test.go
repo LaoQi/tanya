@@ -139,6 +139,33 @@ func TestExitMessageConsistency(t *testing.T) {
 	}
 }
 
+func TestWelcomeText(t *testing.T) {
+	oldV, oldB := Version, BuildTime
+	t.Cleanup(func() { Version, BuildTime = oldV, oldB })
+	Version = "1.2.3"
+	BuildTime = ""
+	out := welcomeText()
+	line := ""
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "输入 /help 查看命令") {
+			line = l
+		}
+	}
+	if !strings.Contains(line, "tanyan 1.2.3") {
+		t.Errorf("版本应与帮助提示同行: %q", out)
+	}
+	if strings.Contains(out, "构建于") {
+		t.Errorf("构建时间为空时不应显示构建时间: %q", out)
+	}
+	if strings.Contains(out, "直接输入内容") {
+		t.Errorf("welcome 不应含已删除的输入提示: %q", out)
+	}
+	BuildTime = "2026-09-11 12:00"
+	if out = welcomeText(); !strings.Contains(out, "tanyan 1.2.3（构建于 2026-09-11 12:00）") {
+		t.Errorf("welcome 应含版本与构建时间: %q", out)
+	}
+}
+
 func TestMdToggle(t *testing.T) {
 	r, err := NewREPL(nil, "")
 	if err != nil {

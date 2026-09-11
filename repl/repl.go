@@ -152,7 +152,7 @@ func (r *REPL) resolveVars() func(string) (string, bool) {
 func (r *REPL) Close() {}
 
 func (r *REPL) Run() error {
-	fmt.Print(welcomText)
+	fmt.Print(welcomeText())
 	for {
 		prompt := r.prompt.Render(r.resolveVars())
 		line, err := r.ed.Readline(prompt)
@@ -189,7 +189,7 @@ func (r *REPL) Run() error {
 			r.ask(text)
 			continue
 		}
-		r.runShellLine(line)
+		r.ask(line)
 	}
 }
 

@@ -12,7 +12,10 @@ import (
 	"github.com/LaoQi/tanyan/style"
 )
 
-var version = "dev"
+var (
+	version   = "dev"
+	buildTime = ""
+)
 
 func main() {
 	showVersion := flag.Bool("v", false, repl.FlagVersion)
@@ -24,6 +27,9 @@ func main() {
 		fmt.Printf("tanyan %s\n", version)
 		return
 	}
+
+	repl.Version = version
+	repl.BuildTime = buildTime
 
 	cfg, err := agent.LoadConfig(*configPath)
 	if err != nil {
