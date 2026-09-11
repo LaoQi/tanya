@@ -1,8 +1,6 @@
 package repl
 
 import (
-	"io"
-	"os"
 	"testing"
 )
 
@@ -62,24 +60,4 @@ func TestIsExitLine(t *testing.T) {
 			t.Errorf("%q 不应内建退出", line)
 		}
 	}
-}
-
-func captureStderr(fn func()) string {
-	old := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
-	fn()
-	w.Close()
-	os.Stderr = old
-	b, _ := io.ReadAll(r)
-	return string(b)
-}
-
-func newTestREPL(t *testing.T) *REPL {
-	t.Helper()
-	r, err := NewREPL(nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return r
 }
