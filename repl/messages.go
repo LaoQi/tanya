@@ -107,6 +107,8 @@ const welcomLogo = `
   ██   ██  ██ ██   ██   ██   ██  ██ 
 `
 
+const MsgNoSaveWarn = "不落盘模式：本次会话不写入会话文件"
+
 var (
 	Version   = "dev"
 	BuildTime = ""
@@ -123,5 +125,6 @@ func welcomeText() string {
 const (
 	FlagConfig  = "配置文件路径（默认 ~/.config/tanyan/config.yaml）"
 	FlagMode    = "会话存储模式 local/global/auto（默认 auto）"
+	FlagNoSave  = "会话只读：不写入会话文件（历史会话仍可列出与载入）"
 	FlagVersion = "显示版本号并退出"
 )

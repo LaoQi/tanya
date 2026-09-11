@@ -11,7 +11,7 @@ import (
 	"github.com/LaoQi/tanyan/agent"
 )
 
-func newSessTestAgent(t *testing.T, dir string) *agent.Agent {
+func newSessTestAgent(t *testing.T, dir string, opts ...agent.Option) *agent.Agent {
 	t.Helper()
 	cfg := &agent.Config{
 		BaseURL:         "http://127.0.0.1:1",
@@ -21,7 +21,7 @@ func newSessTestAgent(t *testing.T, dir string) *agent.Agent {
 		SessionMode:     "global",
 		ToolOutputLines: 20,
 	}
-	a, err := agent.New(cfg)
+	a, err := agent.New(cfg, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}

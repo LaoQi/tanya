@@ -255,3 +255,22 @@ func TestPrintHistoryFullUserToolRaw(t *testing.T) {
 		t.Errorf("tool 正文应 Frame 灰色清洗显示: %q", out)
 	}
 }
+
+func TestNoSaveWarnOnlyWhenEnabled(t *testing.T) {
+	r, err := NewREPL(nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.noSaveWarn(); got != "" {
+		t.Errorf("agent 为 nil 时不应输出警告: %q", got)
+	}
+	r.agent = newSessTestAgent(t, t.TempDir())
+	if got := r.noSaveWarn(); got != "" {
+		t.Errorf("默认可写模式不应输出警告: %q", got)
+	}
+	r.agent = newSessTestAgent(t, t.TempDir(), agent.NoSave(true))
+	got := r.noSaveWarn()
+	if !strings.Contains(got, MsgNoSaveWarn) || !strings.HasSuffix(got, "\n") {
+		t.Errorf("只读模式应输出一行警告: %q", got)
+	}
+}

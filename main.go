@@ -21,6 +21,8 @@ func main() {
 	showVersion := flag.Bool("v", false, repl.FlagVersion)
 	configPath := flag.String("c", "", repl.FlagConfig)
 	sessionMode := flag.String("m", "", repl.FlagMode)
+	noSave := flag.Bool("n", false, repl.FlagNoSave)
+	flag.BoolVar(noSave, "no-save", false, repl.FlagNoSave)
 	flag.Parse()
 
 	if *showVersion {
@@ -51,19 +53,20 @@ func main() {
 	if *sessionMode != "" {
 		cfg.SessionMode = *sessionMode
 	}
+	args := flag.Args()
+	isAsk := len(args) > 0 && args[0] == "ask"
 	agent.ProtectTerminalSignals()
 	readline.InitTerminalGuard()
 	readline.SecureTerminal()
 	agent.InitTTYBridge(readline.NewTTYBridge())
-	a, err := agent.New(cfg)
+	a, err := agent.New(cfg, agent.NoSave(*noSave))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
 	sink := repl.WireToolView(repl.ToolWidth, a.ToolOutputLines())
 
-	args := flag.Args()
-	if len(args) > 0 && args[0] == "ask" {
+	if isAsk {
 		q := strings.Join(args[1:], " ")
 		if q == "" {
 			fmt.Fprint(os.Stderr, repl.MsgAskUsage)
