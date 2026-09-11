@@ -176,8 +176,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 中断：等待期间**只能**用 `signal.Notify` 捕获并丢弃 `SIGINT`——`signal.Ignore` 的忽略处置会被 `exec` 继承，命令自身也收不到 `^C`（实测 `^C` 完全失效）；捕获处置在 exec 后自动复位为默认，子进程与 tanyan 同前台组，终端信号直接送达命令
 - 挂起：进程被 `^Z`/`SIGSTOP` 停止时按 200ms 轮询 `/proc/PID/stat` 判定（`agent.ProcessStopped`，非 Linux 恒为 false），连续两次命中即 `SIGKILL` 子进程并提示 `MsgShellSuspended`（同组故用单进程 kill，不杀进程组）；kill 本身失败（权限/竞态）时不继续干等 `Wait`，直接报错并带上 pid 供手工处理
 - 退出码非零时向 stderr 打印红色 `退出码 N`（信号终止不打印，成功无额外输出；与其他错误提示同流，管道下顺序可预期）
-- 内建 `cd`：无参回 `$HOME`、`cd -` 折返上一目录、`~`/`~/x` 展开、相对路径基于 REPL cwd，失败仅提示不改状态。cwd 只存在于 REPL 局部状态（不 `os.Chdir`），agent 侧 cwd 与 `run_shell` 不受影响，`export` 等环境变更同样不持久（阶段 2 再评估）
-- `cd` 类命令拦截：`cd`/`pushd`/`popd` 出现在首段（`;`/`|`/`&` 之前）却不满足内建形式时（`cd "a b"`、`cd a b`、`cd /tmp && ls`、`pushd /tmp`）**不执行**，只打印黄色 `MsgCdSubshell`——子 shell 内的 cd 不改 tanyan 目录，静默无效比其他错误更难察觉；判定用 `firstSegment` 粗切 + 首 token 匹配，`echo cd` 之类不误伤。内建 cd 按空白分词，路径含空格暂不支持（拦截而非静默）
+- 目录命令走独立切面 `repl/localcmd.go`（`tryLocalCommand`，`runShellLine` 里唯一调用点）：内建 `cd` 无参回 `$HOME`、`cd -` 折返上一目录、`~`/`~/x` 展开、相对路径基于 REPL cwd，失败仅提示不改状态；`cd`/`pushd`/`popd` 出现在首段（`;`/`|`/`&` 之前）却不满足内建形式时（`cd "a b"`、`cd a b`、`cd /tmp && ls`、`pushd /tmp`）**不执行**，只打印黄色 `MsgCdSubshell`——子 shell 内的 cd 不改 tanyan 目录，静默无效比其他错误更难察觉；判定用 `firstSegment` 粗切 + 首 token 匹配，`echo cd` 之类不误伤
+- 该切面是**临时妥协**（内建 `cd` 按空白分词、路径不支持空格，拦截取「宁可拒绝也不静默无效」），因此按可整体剥离设计，剥离步骤：删 `repl/localcmd.go` 与 `repl/localcmd_test.go` → 删 `runShellLine` 里的 `tryLocalCommand` 调用 → `{cwd}` 占位符回退为直接 `os.Getwd`（删 `cwdLabel`/`baseCwd` 与 `REPL.cwd`/`prevCwd`）→ 删 `repl/messages.go` 三个 cd 文案常量。cwd 只存在于 REPL 局部状态（不 `os.Chdir`），agent 侧 cwd 与 `run_shell` 不受影响，`export` 等环境变更同样不持久（阶段 2 再评估）
 - 已知限制：命令若自行忽略 `SIGINT`（如 `trap '' INT`），`^C` 无法终止该回合（进程未停止故挂起检测也不触发）；`^Z` 对同组前台命令的停止依赖"前台组非孤儿组"，仅在与 tanyan 同会话的父 shell 下成立；`cd` 路径不支持空格与转义（`cd "a b"` 被拦截并提示）；`:` 单独一行的用法提示不打印回合分隔线（空内容不算回合）
 
 ### 斜杠命令

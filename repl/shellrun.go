@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -47,39 +46,8 @@ func dialogueText(line string) (string, bool) {
 	return strings.TrimSpace(line[size:]), true
 }
 
-func cdTarget(line string) (string, bool) {
-	fields := strings.Fields(line)
-	if len(fields) == 0 || fields[0] != "cd" || len(fields) > 2 {
-		return "", false
-	}
-	if len(fields) == 1 {
-		return "", true
-	}
-	return fields[1], true
-}
-
-func shellCdLike(line string) bool {
-	switch firstToken(firstSegment(line)) {
-	case "cd", "pushd", "popd":
-		return true
-	}
-	return false
-}
-
-func firstSegment(line string) string {
-	if i := strings.IndexAny(line, ";|&"); i >= 0 {
-		return line[:i]
-	}
-	return line
-}
-
 func (r *REPL) runShellLine(line string) {
-	if target, ok := cdTarget(line); ok {
-		r.changeDir(target)
-		return
-	}
-	if shellCdLike(line) {
-		fmt.Printf("%s\n", style.Warn.Sprint(MsgCdSubshell))
+	if r.tryLocalCommand(line) {
 		return
 	}
 	start := time.Now()
@@ -158,41 +126,6 @@ func reportShellExit(err error, stopped bool) {
 	fmt.Fprintf(os.Stderr, MsgErrLineFmt+"\n", err)
 }
 
-func (r *REPL) changeDir(arg string) {
-	target := arg
-	switch arg {
-	case "":
-		home, err := os.UserHomeDir()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, MsgErrLineFmt+"\n", err)
-			return
-		}
-		target = home
-	case "-":
-		if r.prevCwd == "" {
-			fmt.Print(MsgCdNoPrev)
-			return
-		}
-		target = r.prevCwd
-	default:
-		target = expandHome(arg)
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(r.baseCwd(), target)
-		}
-	}
-	info, err := os.Stat(target)
-	if err != nil || !info.IsDir() {
-		fmt.Printf(MsgCdBadDir, arg)
-		return
-	}
-	abs, err := filepath.Abs(target)
-	if err != nil {
-		abs = target
-	}
-	r.prevCwd = r.baseCwd()
-	r.cwd = abs
-}
-
 func (r *REPL) baseCwd() string {
 	if r.cwd != "" {
 		return r.cwd
@@ -203,20 +136,6 @@ func (r *REPL) baseCwd() string {
 
 func (r *REPL) cwdLabel() string {
 	return shortPath(r.baseCwd())
-}
-
-func expandHome(p string) string {
-	if p != "~" && !strings.HasPrefix(p, "~/") {
-		return p
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return p
-	}
-	if p == "~" {
-		return home
-	}
-	return filepath.Join(home, p[2:])
 }
 
 func shortPath(cwd string) string {
