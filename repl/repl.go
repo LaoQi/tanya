@@ -102,7 +102,7 @@ func turnSep(d time.Duration) string {
 	if d > 0 {
 		text += fmt.Sprintf(TurnSepDurFmt, turnDuration(d))
 	}
-	return "\n" + style.Dim.Sprint(text) + "\n"
+	return "\n" + style.Ok.Sprint(text) + "\n"
 }
 
 func (r *REPL) turnSink() agent.EventSink {

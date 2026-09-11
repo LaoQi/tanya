@@ -24,8 +24,8 @@ func TestTurnSepTimeOnly(t *testing.T) {
 	if !regexp.MustCompile(`^\n──── \d{2}:\d{2}:\d{2}\n$`).MatchString(plain) {
 		t.Errorf("回合分隔线格式不符: %q", plain)
 	}
-	if !strings.HasPrefix(out, "\n\x1b[90m") || !strings.HasSuffix(out, "\x1b[0m\n") {
-		t.Errorf("回合分隔线应整体 Dim 包裹且有前导尾随换行: %q", out)
+	if !strings.HasPrefix(out, "\n\x1b[32m") || !strings.HasSuffix(out, "\x1b[0m\n") {
+		t.Errorf("回合分隔线应整体 Ok 包裹且有前导尾随换行: %q", out)
 	}
 	if strings.Contains(plain, "回合") {
 		t.Errorf("无耗时时不应出现耗时字段: %q", plain)
