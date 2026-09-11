@@ -91,16 +91,17 @@ func newTestREPL(t *testing.T) *REPL {
 
 func TestRunShellLineExecutes(t *testing.T) {
 	r := newTestREPL(t)
-	dir := t.TempDir()
-	r.changeDir(dir)
 	out := captureStdout(func() { r.runShellLine("echo hi") })
 	if !strings.Contains(out, "hi\n") {
 		t.Errorf("命令输出应直通 stdout: %q", out)
 	}
 	out = captureStdout(func() { r.runShellLine("pwd") })
-	want, _ := filepath.EvalSymlinks(dir)
+	want, _ := os.Getwd()
+	if resolved, err := filepath.EvalSymlinks(want); err == nil {
+		want = resolved
+	}
 	if !strings.Contains(out, want) {
-		t.Errorf("命令应在 REPL cwd 执行: %q，期望含 %q", out, want)
+		t.Errorf("命令应在启动目录执行: %q，期望含 %q", out, want)
 	}
 	out = captureStderr(func() { r.runShellLine("exists-nowhere-xyz") })
 	if !strings.Contains(out, "退出码 127") {

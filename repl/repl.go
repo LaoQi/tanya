@@ -26,8 +26,6 @@ type REPL struct {
 	view      agent.EventSink
 	stream    agent.EventSink
 	md        *style.MarkdownBuf
-	cwd       string
-	prevCwd   string
 	mdLive    bool
 	rend      style.Renderer
 }
@@ -47,7 +45,6 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 		return nil, err
 	}
 	r := &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl, prompt: tpl}
-	r.cwd, _ = os.Getwd()
 	r.md = style.NewMarkdownBuf()
 	r.mdLive = true
 	r.rend = style.NewThemedRenderer(style.GetProfile(), sch.MD)
