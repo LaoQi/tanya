@@ -138,3 +138,31 @@ func sgrLeavesState(seq string) bool {
 	}
 	return !lastReset
 }
+
+func OneLine(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	space := false
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		if c == 0x1b {
+			_, _, next := scanSequence(s, i)
+			i = next
+			continue
+		}
+		switch {
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
+			space = b.Len() > 0
+		case c < 0x20 || c == 0x7f:
+		default:
+			if space {
+				b.WriteByte(' ')
+				space = false
+			}
+			b.WriteByte(c)
+		}
+		i++
+	}
+	return b.String()
+}
