@@ -9,11 +9,7 @@ const (
 	MsgNoHistoryMsg = "(当前会话无消息)\n"
 	MsgCancelled    = "已取消\n"
 
-	MsgDialogueEmpty  = "用法: :内容（冒号开头与 AI 对话）\n"
-	MsgShellExitCode  = "退出码 %d"
-	MsgShellSuspended = "挂起已终止\n"
-	MsgKillFailFmt    = "无法终止已挂起的命令（pid %d）: %v"
-	MsgCdBlocked      = "cd 类命令未执行：工作目录固定为启动目录，cd/pushd/popd 均不生效"
+	MsgDialogueEmpty = "用法: 直接输入内容与 AI 对话（: 前缀亦可）\n"
 )
 
 const (
@@ -100,19 +96,29 @@ const helpText = `斜杠命令：
   /md              切换 AI 输出 Markdown 渲染（默认开启，非 TTY 自动旁路）
   /exit            退出
 输入分发：
-  :内容            与 AI 对话（全角 ： 亦可）
+  内容 / :内容     与 AI 对话（两种写法等价，全角 ： 亦可）
   /命令            斜杠命令
-  其他             在当前目录用 shell 直接执行（cd / exit / quit 内建）
+  exit / quit      退出
 `
 
-const welcomText = `
+const welcomLogo = `
 ██████ ▄████▄ ███  ██ ██  ██ ▄████▄ 
   ██   ██▄▄██ ██ ▀▄██  ▀██▀  ██▄▄██ 
   ██   ██  ██ ██   ██   ██   ██  ██ 
-
-输入 /help 查看命令；:内容 与 AI 对话，其他直接执行 shell 命令
-
 `
+
+var (
+	Version   = "dev"
+	BuildTime = ""
+)
+
+func welcomeText() string {
+	ver := "tanyan " + Version
+	if BuildTime != "" {
+		ver += "（构建于 " + BuildTime + "）"
+	}
+	return welcomLogo + "\n输入 /help 查看命令   " + ver + "\n\n"
+}
 
 const (
 	FlagConfig  = "配置文件路径（默认 ~/.config/tanyan/config.yaml）"

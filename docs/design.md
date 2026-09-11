@@ -165,20 +165,15 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 用户可见文案统一为常量：`repl/messages.go`（UI/命令输出/选择器/工具视图/spinner）与 `agent/messages.go`（错误/ToolResult 文本/ContextInfo），调用一律 `Printf`/`Fprintf` 引用常量，换行由调用处的格式串控制；`Bye`/`再见` 已统一为 `MsgBye`。工具描述与系统提示不在此列（模型侧文案，翻译需评估 prompt 影响）。
 
-### 输入分发（shell-first）
+欢迎屏由 `welcomLogo` + `welcomeText()` 组装：logo ASCII 图 + 一行 `输入 /help 查看命令   tanyan <版本>（构建于 <时间>）`；`repl.Version`/`repl.BuildTime` 由 `main` 注入（`make build` 经 ldflags 写 `main.version`（git describe）与 `main.buildTime`（date），直接 `go build` 为 `dev`/空，空时不渲染构建时间）。`-v` 与欢迎屏共用同一 version 源。
 
-输入按前缀三路分发，判定顺序固定：`exit`/`quit`（首 token 命中即内建退出，等价 `/exit`）→ 已知斜杠命令（`slashCommands` 白名单匹配首 token，故 `/load x` 命中、`/usr/bin/ls` 不命中）→ `:` 或全角 `：` 开头（与 AI 对话）→ 其余交给 shell 直接执行。`:` 后剥离前缀与空白作为提问内容，空内容提示 `MsgDialogueEmpty` 不算回合。白名单匹配保证 `/` 开头的绝对路径照常可执行；未命中的斜杠输入按 shell 执行，报错与退出码来自 shell 本身。
+### 输入分发
 
-直接执行（`repl/shellrun.go`）：
+输入按前缀分发（`repl/dispatch.go`），判定顺序固定：`exit`/`quit`（首 token 命中即内建退出，等价 `/exit`）→ 已知斜杠命令（`slashCommands` 白名单匹配首 token，故 `/load x` 命中、`/usr/bin/ls` 不命中）→ `:` 或全角 `：` 开头（剥离前缀与空白作为提问，空内容提示 `MsgDialogueEmpty` 不算回合、不打印回合分隔线）→ 其余整行直接作为提问与 AI 对话，与 `:` 前缀写法等价。白名单未命中的 `/` 开头输入（如 `/usr/bin/ls`）不作命令处理，直接作为对话内容。
 
-- 命令由 `agent.NewShellCmd` 构造，与 `run_shell` 共用 shell 解析（`TANYA_SHELL` 覆盖与平台探测一致）；不设 `cmd.Dir`（子进程落在启动目录）；stdout/stderr 直通终端（保留子进程颜色判定、分页器与全屏程序行为）；TTY 下 stdin 直通（可应答 ssh/sudo 提示），Degraded 下不接 stdin（避免输入层的 `bufio` 预读吞字节）
-- 无超时、无输出截断、不进 LLM 上下文与 history 文件（prompt cache 前缀不受影响）；回合末尾照常打印分隔线与耗时
-- 中断：等待期间**只能**用 `signal.Notify` 捕获并丢弃 `SIGINT`——`signal.Ignore` 的忽略处置会被 `exec` 继承，命令自身也收不到 `^C`（实测 `^C` 完全失效）；捕获处置在 exec 后自动复位为默认，子进程与 tanyan 同前台组，终端信号直接送达命令
-- 挂起：进程被 `^Z`/`SIGSTOP` 停止时按 200ms 轮询 `/proc/PID/stat` 判定（`agent.ProcessStopped`，非 Linux 恒为 false），连续两次命中即 `SIGKILL` 子进程并提示 `MsgShellSuspended`（同组故用单进程 kill，不杀进程组）；kill 本身失败（权限/竞态）时不继续干等 `Wait`，直接报错并带上 pid 供手工处理
-- 退出码非零时向 stderr 打印红色 `退出码 N`（信号终止不打印，成功无额外输出；与其他错误提示同流，管道下顺序可预期）
-- 目录命令走独立切面 `repl/localcmd.go`（`tryLocalCommand`，`runShellLine` 里唯一调用点）：**工作目录固定为启动目录，禁止一切目录变更**——`cd`/`pushd`/`popd` 出现在首段（`;`/`|`/`&` 之前）即**不执行**（含 `cd`、`cd -`、`cd 路径` 等全部形式），只打印黄色 `MsgCdBlocked`——子 shell 内的 cd 不改 tanyan 目录，静默无效比报错更难察觉，宁可拦截；判定用 `firstSegment` 粗切 + 首 token 匹配（`dirChangeCommands` 表驱动，后续扩展更多本地拦截命令只改此表），`echo cd` 之类不误伤
-- 切面按**可整体剥离**设计（小拦截面：单入口 + 首 token 判定，REPL 不持有任何目录状态），剥离步骤：删 `repl/localcmd.go` 与 `repl/localcmd_test.go` → 删 `runShellLine` 里的 `tryLocalCommand` 调用 → 删 `repl/messages.go` 的 `MsgCdBlocked`。REPL 全程不 `os.Chdir`、不设 `cmd.Dir`，直通命令与 agent `run_shell` 一致落在启动目录，`export` 等环境变更同样不持久
-- 已知限制：命令若自行忽略 `SIGINT`（如 `trap '' INT`），`^C` 无法终止该回合（进程未停止故挂起检测也不触发）；`^Z` 对同组前台命令的停止依赖"前台组非孤儿组"，仅在与 tanyan 同会话的父 shell 下成立；`:` 单独一行的用法提示不打印回合分隔线（空内容不算回合）
+### 直通 shell 执行面（归档）
+
+原「其余输入在本目录直通执行 shell 命令」执行面已归档（2026-09）：体感作用有限——agent 侧已有 `run_shell` 工具，直通面与之重复且绕过上下文/契约。末态完整实现见 commit 60bc02e：执行四件套 `runShellLine`/`suppressInterrupt`/`waitShellCmd`/`reportShellExit`、cd 拦截切面 `repl/localcmd.go`（`tryLocalCommand` 单入口 + `dirChangeCommands` 表）、常量 `MsgShellExitCode`/`MsgShellSuspended`/`MsgKillFailFmt`/`MsgCdBlocked`、`agent.NewShellCmd`/`ProcessStopped` 导出包装。恢复步骤：自 60bc02e 取回上述文件与常量 → `Run()` 末分支 `r.ask(line)` 改回 `r.runShellLine(line)`。归档期间进程 cwd 恒为启动目录（全程不 `os.Chdir`、不设 `cmd.Dir`），`run_shell` 契约不受影响。
 
 ### 斜杠命令
 

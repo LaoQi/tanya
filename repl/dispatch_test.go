@@ -1,14 +1,9 @@
 package repl
 
 import (
-	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
-
-	"github.com/LaoQi/tanyan/agent"
 )
 
 func TestDialogueText(t *testing.T) {
@@ -87,41 +82,4 @@ func newTestREPL(t *testing.T) *REPL {
 		t.Fatal(err)
 	}
 	return r
-}
-
-func TestRunShellLineExecutes(t *testing.T) {
-	r := newTestREPL(t)
-	out := captureStdout(func() { r.runShellLine("echo hi") })
-	if !strings.Contains(out, "hi\n") {
-		t.Errorf("命令输出应直通 stdout: %q", out)
-	}
-	out = captureStdout(func() { r.runShellLine("pwd") })
-	want, _ := os.Getwd()
-	if resolved, err := filepath.EvalSymlinks(want); err == nil {
-		want = resolved
-	}
-	if !strings.Contains(out, want) {
-		t.Errorf("命令应在启动目录执行: %q，期望含 %q", out, want)
-	}
-	out = captureStderr(func() { r.runShellLine("exists-nowhere-xyz") })
-	if !strings.Contains(out, "退出码 127") {
-		t.Errorf("非零退出码应提示到 stderr: %q", out)
-	}
-}
-
-func TestReportShellExit(t *testing.T) {
-	cmd := agent.NewShellCmd("exit 2")
-	err := cmd.Run()
-	out := captureStderr(func() { reportShellExit(err, false) })
-	if !strings.Contains(out, fmt.Sprintf(MsgShellExitCode, 2)) {
-		t.Errorf("应提示退出码 2: %q", out)
-	}
-	out = captureStdout(func() { reportShellExit(nil, false) })
-	if out != "" {
-		t.Errorf("成功不应输出: %q", out)
-	}
-	out = captureStdout(func() { reportShellExit(err, true) })
-	if !strings.Contains(out, MsgShellSuspended) {
-		t.Errorf("挂起应提示: %q", out)
-	}
 }

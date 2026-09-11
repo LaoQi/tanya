@@ -26,6 +26,8 @@ git clone https://github.com/LaoQi/tanyan.git && cd tanyan
 make build
 ```
 
+`make build` 经 ldflags 注入版本号（`git describe`）与构建时间：欢迎屏显示 `tanyan <版本>（构建于 <时间>）`，`-v` 显示版本号。直接 `go build` 时版本为 `dev`、不显示构建时间。
+
 ## 配置
 
 `~/.config/tanyan/config.yaml`（完整示例见 `config.example.yaml`）：
@@ -70,14 +72,11 @@ REPL 输入按前缀分发：
 
 | 输入 | 行为 |
 |---|---|
-| `:内容`（全角 `：` 亦可） | 与 AI 对话 |
-| `/命令` | 斜杠命令（见下表）；`/` 开头的绝对路径（如 `/usr/bin/ls`）照常走 shell |
+| `内容` / `:内容`（全角 `：` 亦可） | 与 AI 对话（两种写法等价） |
+| `/命令` | 斜杠命令（见下表）；未命中的 `/` 开头输入按对话内容处理 |
 | `exit` / `quit` | 退出（等价 `/exit`） |
-| 其他 | 在当前目录直接执行 shell 命令 |
 
-shell 命令直通终端：输出不截断、保留颜色，`vim` / `ssh` / `sudo` 等交互命令可直接应答；命令不进 AI 上下文，非零退出码以 `退出码 N` 打到 stderr。`^C` 中断当前命令，`^Z` 挂起会提示并终止该命令。
-
-工作目录固定为启动目录，全程不变：`cd`、`pushd`、`popd` 无论何种形式（含 `cd`、`cd -`、`cd 路径`、复合命令）一律拦截，只打黄色警告、不执行；agent 的 `run_shell` 同样固定在启动目录。`export` 等环境变更不跨回合保留。
+直通 shell 执行面已归档（恢复步骤见 `docs/design.md`）：agent 需要执行命令时经 `run_shell` 工具完成（输出截断与超时策略见其工具说明）。工作目录恒为 tanyan 启动目录，全程不变。
 
 REPL 斜杠命令：
 
