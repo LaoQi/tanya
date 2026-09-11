@@ -8,6 +8,14 @@ const (
 	MsgNoSessions   = "(无历史会话)\n"
 	MsgNoHistoryMsg = "(当前会话无消息)\n"
 	MsgCancelled    = "已取消\n"
+
+	MsgDialogueEmpty  = "用法: :内容（冒号开头与 AI 对话）\n"
+	MsgShellExitCode  = "退出码 %d"
+	MsgShellSuspended = "挂起已终止\n"
+	MsgCdBadDir       = "错误: 不是目录: %s\n"
+	MsgCdSubshell     = "cd 类命令未执行：目录只由内建 cd 切换（cd、cd -、cd 路径），子 shell 内的 cd 不会改变 tanyan 的目录，路径含空格暂不支持"
+	MsgKillFailFmt    = "无法终止已挂起的命令（pid %d）: %v"
+	MsgCdNoPrev       = "错误: 没有上一个目录\n"
 )
 
 const (
@@ -93,7 +101,10 @@ const helpText = `斜杠命令：
   /theme [name]    无参显示当前主题与可用列表；带名切换内置主题
   /md              切换 AI 输出 Markdown 渲染（默认开启，非 TTY 自动旁路）
   /exit            退出
-直接输入文本与 AI 对话；shell 工具直接执行，无需确认。
+输入分发：
+  :内容            与 AI 对话（全角 ： 亦可）
+  /命令            斜杠命令
+  其他             在当前目录用 shell 直接执行（cd / exit / quit 内建）
 `
 
 const welcomText = `
@@ -101,7 +112,7 @@ const welcomText = `
   ██   ██▄▄██ ██ ▀▄██  ▀██▀  ██▄▄██ 
   ██   ██  ██ ██   ██   ██   ██  ██ 
 
-输入 /help 查看命令
+输入 /help 查看命令；:内容 与 AI 对话，其他直接执行 shell 命令
 
 `
 

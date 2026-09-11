@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
@@ -27,6 +26,8 @@ type REPL struct {
 	view      agent.EventSink
 	stream    agent.EventSink
 	md        *style.MarkdownBuf
+	cwd       string
+	prevCwd   string
 	mdLive    bool
 	rend      style.Renderer
 }
@@ -46,6 +47,7 @@ func NewREPL(a *agent.Agent, promptTpl string) (*REPL, error) {
 		return nil, err
 	}
 	r := &REPL{agent: a, ed: ed, term: term, raw: raw, promptTpl: promptTpl, prompt: tpl}
+	r.cwd, _ = os.Getwd()
 	r.md = style.NewMarkdownBuf()
 	r.mdLive = true
 	r.rend = style.NewThemedRenderer(style.GetProfile(), sch.MD)
@@ -132,7 +134,7 @@ func (r *REPL) resolveVars() func(string) (string, bool) {
 	return func(name string) (string, bool) {
 		switch name {
 		case "cwd":
-			return shortCwd(), true
+			return r.cwdLabel(), true
 		case "model":
 			return r.agent.Model(), true
 		case "effort":
@@ -171,37 +173,53 @@ func (r *REPL) Run() error {
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "/") {
+		if isExitLine(line) {
+			fmt.Print(MsgBye + "\n")
+			return nil
+		}
+		if isSlashCommand(line) {
 			if r.handleCommand(line) {
 				return nil
 			}
 			fmt.Print(turnSep(0))
 			continue
 		}
-		readline.SecureTerminal()
-		ctx, done := InterruptContext()
-		r.md.Reset()
-		start := time.Now()
-		err = r.agent.Ask(ctx, line, r.turnSink())
-		turnDur := time.Since(start)
-		for _, blk := range r.md.Close() {
-			r.print(r.rend.Block(blk))
-		}
-		done()
-		if err != nil {
-			var ie *agent.InterruptError
-			if errors.As(err, &ie) {
-				if ie.Kept {
-					fmt.Print(MsgInterruptKept)
-				} else {
-					fmt.Print(MsgInterruptBare)
-				}
-			} else {
-				fmt.Fprintf(os.Stderr, MsgErrLineFmt+"\n", err)
+		if text, ok := dialogueText(line); ok {
+			if text == "" {
+				fmt.Print(MsgDialogueEmpty)
+				continue
 			}
+			r.ask(text)
+			continue
 		}
-		fmt.Print(turnSep(turnDur))
+		r.runShellLine(line)
 	}
+}
+
+func (r *REPL) ask(q string) {
+	readline.SecureTerminal()
+	ctx, done := InterruptContext()
+	r.md.Reset()
+	start := time.Now()
+	err := r.agent.Ask(ctx, q, r.turnSink())
+	turnDur := time.Since(start)
+	for _, blk := range r.md.Close() {
+		r.print(r.rend.Block(blk))
+	}
+	done()
+	if err != nil {
+		var ie *agent.InterruptError
+		if errors.As(err, &ie) {
+			if ie.Kept {
+				fmt.Print(MsgInterruptKept)
+			} else {
+				fmt.Print(MsgInterruptBare)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, MsgErrLineFmt+"\n", err)
+		}
+	}
+	fmt.Print(turnSep(turnDur))
 }
 
 func InterruptContext() (context.Context, func()) {
@@ -519,28 +537,4 @@ func (r *REPL) warnLegacyPrompt() {
 	if r.agent.LegacyPrompt() {
 		fmt.Print(MsgLegacyHint)
 	}
-}
-
-func shortCwd() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	if home, _ := os.UserHomeDir(); home != "" && (cwd == home || strings.HasPrefix(cwd, home+"/")) {
-		cwd = "~" + cwd[len(home):]
-	}
-	parts := strings.Split(cwd, "/")
-	for i := 1; i < len(parts)-1; i++ {
-		if parts[i] == "" {
-			continue
-		}
-		if strings.HasPrefix(parts[i], ".") && len(parts[i]) > 1 {
-			r, _ := utf8.DecodeRuneInString(parts[i][1:])
-			parts[i] = "." + string(r)
-		} else {
-			r, _ := utf8.DecodeRuneInString(parts[i])
-			parts[i] = string(r)
-		}
-	}
-	return strings.Join(parts, "/")
 }

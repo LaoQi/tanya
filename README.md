@@ -66,6 +66,19 @@ tanyan -v              # 显示版本号
 | `local` | `<启动目录>/.tanya/sessions/` |
 | `global` | `~/.local/share/tanyan/sessions/<workspace-id>/` |
 
+REPL 输入按前缀分发：
+
+| 输入 | 行为 |
+|---|---|
+| `:内容`（全角 `：` 亦可） | 与 AI 对话 |
+| `/命令` | 斜杠命令（见下表）；`/` 开头的绝对路径（如 `/usr/bin/ls`）照常走 shell |
+| `exit` / `quit` | 退出（等价 `/exit`） |
+| 其他 | 在当前目录直接执行 shell 命令 |
+
+shell 命令直通终端：输出不截断、保留颜色，`vim` / `ssh` / `sudo` 等交互命令可直接应答；命令不进 AI 上下文，非零退出码以 `退出码 N` 打到 stderr。`^C` 中断当前命令，`^Z` 挂起会提示并终止该命令。
+
+目录切换只由内建 `cd` 完成（`cd`、`cd -`、`cd 路径`），只改 tanyan 的提示符与后续命令目录（不改变启动目录），`export` 等环境变更不跨回合保留。内建 `cd` 按空白分词、路径暂不支持空格；`cd "a b"`、`cd a b`、`cd /tmp && ls`、`pushd /tmp` 这类会落在子 shell 里的目录命令不执行，只给黄色警告——子 shell 的 cd 不会改变 tanyan 的目录。
+
 REPL 斜杠命令：
 
 | 命令 | 说明 |
@@ -79,7 +92,7 @@ REPL 斜杠命令：
 | `/think [level]` | 查看/设置思考等级（`off` 关闭） |
 | `/theme [name]` | 查看/切换配色主题 |
 | `/md` | 切换 Markdown 渲染（默认开，非 TTY 自动旁路） |
-| `/exit`（`/quit`） | 退出 |
+| `/exit`（`/quit`、`exit`、`quit`） | 退出 |
 
 会话按启动目录划分工作区（global 模式），`/load` 的会话选择菜单只显示当前项目的会话。
 
