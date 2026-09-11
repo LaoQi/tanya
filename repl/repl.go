@@ -80,7 +80,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if a != nil {
 		maxLines = a.ToolOutputLines()
 	}
-	r.view = WireToolView(func() int { return toolWidth(term) }, maxLines)
+	r.view = WireToolView(o.st, func() int { return toolWidth(term) }, maxLines)
 	r.stream = r.streamEvent
 	return r, nil
 }
@@ -137,7 +137,7 @@ func (r *REPL) turnSink() agent.EventSink {
 	return func(e agent.Event) {
 		if gap {
 			gap = false
-			fmt.Println()
+			r.st.out.emit(KindDecor, "\n")
 		}
 		r.stream(e)
 	}
@@ -187,7 +187,7 @@ func (r *REPL) noSaveWarn() string {
 }
 
 func (r *REPL) Run() error {
-	r.st.out.emit(welcomeText() + r.noSaveWarn())
+	r.st.out.emit(KindDecor, welcomeText()+r.noSaveWarn())
 	for {
 		prompt := r.prompt.Render(r.resolveVars())
 		line, err := r.ed.Readline(prompt)
@@ -195,7 +195,7 @@ func (r *REPL) Run() error {
 			continue
 		}
 		if err == io.EOF {
-			r.st.out.emit(MsgBye + "\n")
+			r.st.out.emit(KindNotice, MsgBye+"\n")
 			return nil
 		}
 		if err != nil {
@@ -206,19 +206,19 @@ func (r *REPL) Run() error {
 			continue
 		}
 		if isExitLine(line) {
-			r.st.out.emit(MsgBye + "\n")
+			r.st.out.emit(KindNotice, MsgBye+"\n")
 			return nil
 		}
 		if isSlashCommand(line) {
 			if r.handleCommand(line) {
 				return nil
 			}
-			r.st.out.emit(turnSep(0))
+			r.st.out.emit(KindDecor, turnSep(0))
 			continue
 		}
 		if text, ok := dialogueText(line); ok {
 			if text == "" {
-				r.st.out.emit(MsgDialogueEmpty)
+				r.st.out.emit(KindNotice, MsgDialogueEmpty)
 				continue
 			}
 			r.ask(text)
@@ -243,15 +243,15 @@ func (r *REPL) ask(q string) {
 		var ie *agent.InterruptError
 		if errors.As(err, &ie) {
 			if ie.Kept {
-				fmt.Print(MsgInterruptKept)
+				r.st.err.emit(KindError, MsgInterruptKept)
 			} else {
-				fmt.Print(MsgInterruptBare)
+				r.st.err.emit(KindError, MsgInterruptBare)
 			}
 		} else {
-			fmt.Fprintf(os.Stderr, MsgErrLineFmt+"\n", err)
+			r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
 		}
 	}
-	fmt.Print(turnSep(turnDur))
+	r.st.out.emit(KindDecor, turnSep(turnDur))
 }
 
 func InterruptContext() (context.Context, func()) {
@@ -278,48 +278,50 @@ func (r *REPL) handleCommand(line string) bool {
 	parts := strings.Fields(line)
 	switch parts[0] {
 	case "/exit", "/quit":
-		fmt.Printf("%s\n", MsgBye)
+		r.st.out.emit(KindNotice, MsgBye+"\n")
 		return true
 	case "/help":
-		fmt.Print(helpText)
+		r.st.out.emit(KindNotice, helpText)
 	case "/new":
 		r.agent.NewSession()
-		fmt.Print(MsgNewSession)
+		r.st.out.emit(KindNotice, MsgNewSession)
 	case "/load":
 		if len(parts) >= 2 {
 			if err := r.agent.LoadSession(parts[1]); err != nil {
-				fmt.Printf(MsgErrLineFmt+"\n", err)
+				r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
 			} else {
-				fmt.Printf(MsgLoadedSess, parts[1])
+				r.st.out.emit(KindNotice, fmt.Sprintf(MsgLoadedSess, parts[1]))
 				r.warnLegacyPrompt()
 			}
 			break
 		}
 		r.loadSessionInteractive()
 	case "/context":
-		fmt.Println(r.agent.ContextInfo())
+		r.st.out.emit(KindNotice, r.agent.ContextInfo()+"\n")
 	case "/history":
 		r.showHistory(parts[1:])
 	case "/model":
 		if len(parts) < 2 {
-			fmt.Printf(MsgCurModel, r.agent.Model())
+			r.st.out.emit(KindNotice, fmt.Sprintf(MsgCurModel, r.agent.Model()))
 			models, err := r.agent.ListModels()
 			if err != nil {
-				fmt.Printf(MsgModelsFail, err)
+				r.st.err.emit(KindError, fmt.Sprintf(MsgModelsFail, err))
 				break
 			}
 			if len(models) == 0 {
-				fmt.Print(MsgModelsEmpty)
+				r.st.out.emit(KindNotice, MsgModelsEmpty)
 				break
 			}
-			fmt.Print(MsgModelsHead)
+			var b strings.Builder
+			b.WriteString(MsgModelsHead)
 			for _, m := range models {
 				mark := MsgMarkPlain
 				if m == r.agent.Model() {
 					mark = MsgMarkCurrent
 				}
-				fmt.Printf("%s%s\n", mark, m)
+				fmt.Fprintf(&b, "%s%s\n", mark, m)
 			}
+			r.st.out.emit(KindNotice, b.String())
 			break
 		}
 		r.agent.SetModel(parts[1])
@@ -328,40 +330,43 @@ func (r *REPL) handleCommand(line string) bool {
 	case "/md":
 		r.mdLive = !r.mdLive
 		if r.mdLive {
-			fmt.Print(MsgMdOn)
+			r.st.out.emit(KindNotice, MsgMdOn)
 		} else {
-			fmt.Print(MsgMdOff)
+			r.st.out.emit(KindNotice, MsgMdOff)
 		}
 	case "/theme":
 		r.handleTheme(parts[1:])
 	default:
-		fmt.Print(MsgUnknownCmd)
+		r.st.err.emit(KindError, MsgUnknownCmd)
 	}
 	return false
 }
 
 func (r *REPL) handleTheme(args []string) {
 	if len(args) == 0 {
-		fmt.Printf(MsgCurTheme, style.CurrentSchemeName())
-		fmt.Print(MsgThemeHead)
+		var b strings.Builder
+		fmt.Fprintf(&b, MsgCurTheme, style.CurrentSchemeName())
+		b.WriteString(MsgThemeHead)
 		for _, n := range style.SchemeNames() {
 			mark := MsgMarkPlain
 			if n == style.CurrentSchemeName() {
 				mark = MsgMarkCurrent
 			}
 			if s, ok := style.LookupScheme(n); ok {
-				fmt.Printf("%s%s  %s\n", mark, s.Name, s.Desc)
+				fmt.Fprintf(&b, "%s%s  %s\n", mark, s.Name, s.Desc)
 			}
 		}
+		r.st.out.emit(KindNotice, b.String())
 		return
 	}
 	s, ok := style.ApplyScheme(args[0])
 	if !ok {
-		fmt.Printf(MsgErrLineFmt+"\n", fmt.Sprintf(MsgThemeBad, args[0], strings.Join(style.SchemeNames(), "/")))
+		bad := fmt.Sprintf(MsgThemeBad, args[0], strings.Join(style.SchemeNames(), "/"))
+		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", bad))
 		return
 	}
 	r.applyTheme(s)
-	fmt.Printf(MsgThemeSet, s.Name, s.Desc)
+	r.st.out.emit(KindNotice, fmt.Sprintf(MsgThemeSet, s.Name, s.Desc))
 	r.printThemeSample()
 }
 
@@ -399,7 +404,7 @@ func (r *REPL) printThemeSample() {
 	b.WriteString(prompt)
 	b.WriteString("\n")
 	b.WriteString(style.Dim.Sprint("工具行 ") + style.Info.Sprint("状态行 ") + style.Warn.Sprint("等待中 ") + style.Think.Sprint("思考中 ") + style.Run.Sprint("执行中 ") + style.Ok.Sprint("成功 ") + style.Error.Sprint("错误") + "\n")
-	fmt.Print(b.String())
+	r.st.out.emit(KindNotice, b.String())
 }
 
 // applyTheme 把渲染器与提示符切到给定主题（语义色已在 ApplyScheme 中更新）。
@@ -412,34 +417,34 @@ func (r *REPL) applyTheme(s style.Scheme) {
 func (r *REPL) handleThink(args []string) {
 	if len(args) == 0 {
 		if cur := r.agent.ReasoningEffort(); cur == "" {
-			fmt.Print(MsgThinkUnset)
+			r.st.out.emit(KindNotice, MsgThinkUnset)
 		} else {
-			fmt.Printf(MsgCurEffort, cur)
+			r.st.out.emit(KindNotice, fmt.Sprintf(MsgCurEffort, cur))
 		}
 		return
 	}
 	if err := r.agent.SetReasoningEffort(args[0]); err != nil {
-		fmt.Printf(MsgErrLineFmt+"\n", err)
+		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
 		return
 	}
 	if cur := r.agent.ReasoningEffort(); cur == "" {
-		fmt.Print(MsgEffortOff)
+		r.st.out.emit(KindNotice, MsgEffortOff)
 	} else {
-		fmt.Printf(MsgEffortSet, cur)
+		r.st.out.emit(KindNotice, fmt.Sprintf(MsgEffortSet, cur))
 	}
 }
 
 func (r *REPL) showHistory(args []string) {
 	msgs := r.agent.History()
 	if len(msgs) == 0 {
-		fmt.Print(MsgNoHistoryMsg)
+		r.st.out.emit(KindNotice, MsgNoHistoryMsg)
 		return
 	}
 	if len(args) > 0 {
 		if args[0] == "all" {
 			for i, m := range msgs {
 				if i > 0 {
-					fmt.Println()
+					r.st.out.emit(KindNotice, "\n")
 				}
 				r.printHistoryFull(i+1, m)
 			}
@@ -447,16 +452,19 @@ func (r *REPL) showHistory(args []string) {
 		}
 		n, err := strconv.Atoi(args[0])
 		if err != nil || n < 1 || n > len(msgs) {
-			fmt.Printf(MsgInvalidIndex, len(msgs))
+			r.st.err.emit(KindError, fmt.Sprintf(MsgInvalidIndex, len(msgs)))
 			return
 		}
 		r.printHistoryFull(n, msgs[n-1])
 		return
 	}
-	fmt.Printf(MsgTotalMsgs, len(msgs))
+	var b strings.Builder
+	fmt.Fprintf(&b, MsgTotalMsgs, len(msgs))
 	for i, m := range msgs {
-		fmt.Println(historyLine(i+1, m))
+		b.WriteString(historyLine(i+1, m))
+		b.WriteString("\n")
 	}
+	r.st.out.emit(KindNotice, b.String())
 }
 
 func historyLabel(m agent.Message) string {
@@ -496,13 +504,13 @@ func (r *REPL) printHistoryFull(n int, m agent.Message) {
 		r.printRendered(m.Content)
 	} else if text := historyText(m); text != "" {
 		if m.Role == "tool" {
-			fmt.Println(style.Dim.Frame(text))
+			r.st.out.emit(KindToolBlock, style.Dim.Frame(text)+"\n")
 		} else {
-			fmt.Println(text)
+			r.st.out.emit(KindNotice, text+"\n")
 		}
 	}
 	for _, tc := range m.ToolCalls {
-		fmt.Printf("→ %s %s\n", tc.Function.Name, tc.Function.Arguments)
+		r.st.out.emit(KindToolBlock, fmt.Sprintf("→ %s %s\n", tc.Function.Name, tc.Function.Arguments))
 	}
 }
 
@@ -511,7 +519,7 @@ func (r *REPL) printHistoryFull(n int, m agent.Message) {
 func (r *REPL) printHistoryHead(n int, label string) {
 	head := fmt.Sprintf("#%d %s", n, label)
 	if !r.mdEnabled() {
-		fmt.Println(head)
+		r.st.out.emit(KindContent, head+"\n")
 		return
 	}
 	r.print(r.rend.Block(style.Heading{Level: 1, Inlines: []style.Inline{style.Span{Text: head}}}))
@@ -520,7 +528,7 @@ func (r *REPL) printHistoryHead(n int, label string) {
 // printRendered 把整段文本按与 AI 输出一致的管线渲染（/md 开关 + TTY 旁路），供历史回放等一次性展示使用。
 func (r *REPL) printRendered(text string) {
 	if !r.mdEnabled() {
-		fmt.Println(text)
+		r.st.out.emit(KindContent, text+"\n")
 		return
 	}
 	for _, blk := range r.mdBlocks(text) {
@@ -539,34 +547,34 @@ func (r *REPL) mdBlocks(text string) []style.Block {
 func (r *REPL) loadSessionInteractive() {
 	list, err := r.agent.ListSessions()
 	if err != nil {
-		fmt.Printf(MsgErrLineFmt+"\n", err)
+		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
 		return
 	}
 	if len(list) == 0 {
-		fmt.Print(MsgNoSessions)
+		r.st.out.emit(KindNotice, MsgNoSessions)
 		return
 	}
 	var idx int
 	var ok bool
 	if r.raw {
-		idx, ok = pickSession(r.term, list)
+		idx, ok = pickSession(r.term, list, r.st.out)
 	} else {
-		idx, ok = pickByNumber(list)
+		idx, ok = pickByNumber(list, r.st.out)
 	}
 	if !ok || idx < 0 {
-		fmt.Print(MsgCancelled)
+		r.st.out.emit(KindNotice, MsgCancelled)
 		return
 	}
 	if err := r.agent.LoadSession(list[idx].ID); err != nil {
-		fmt.Printf(MsgErrLineFmt+"\n", err)
+		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
 		return
 	}
-	fmt.Printf(MsgLoadedSess, list[idx].ID)
+	r.st.out.emit(KindNotice, fmt.Sprintf(MsgLoadedSess, list[idx].ID))
 	r.warnLegacyPrompt()
 }
 
 func (r *REPL) warnLegacyPrompt() {
 	if r.agent.LegacyPrompt() {
-		fmt.Print(MsgLegacyHint)
+		r.st.out.emit(KindNotice, MsgLegacyHint)
 	}
 }

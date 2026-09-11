@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
@@ -55,7 +56,7 @@ func (p *sessionPicker) render(out io.Writer, first bool) {
 	}
 }
 
-func pickSession(term readline.Terminal, list []agent.SessionInfo) (int, bool) {
+func pickSession(term readline.Terminal, list []agent.SessionInfo, out io.Writer) (int, bool) {
 	if len(list) == 0 {
 		return -1, false
 	}
@@ -64,7 +65,7 @@ func pickSession(term readline.Terminal, list []agent.SessionInfo) (int, bool) {
 	}
 	defer term.Restore()
 	p := &sessionPicker{items: list}
-	p.render(os.Stdout, true)
+	p.render(out, true)
 	for {
 		ev, err := term.ReadKey()
 		if err != nil {
@@ -74,7 +75,7 @@ func pickSession(term readline.Terminal, list []agent.SessionInfo) (int, bool) {
 		if p.done {
 			break
 		}
-		p.render(os.Stdout, false)
+		p.render(out, false)
 	}
 	if p.cancel {
 		return -1, false
@@ -82,12 +83,14 @@ func pickSession(term readline.Terminal, list []agent.SessionInfo) (int, bool) {
 	return p.cursor, true
 }
 
-func pickByNumber(list []agent.SessionInfo) (int, bool) {
-	fmt.Printf(PickNumTitle)
+func pickByNumber(list []agent.SessionInfo, out *output) (int, bool) {
+	var b strings.Builder
+	b.WriteString(PickNumTitle)
 	for i, s := range list {
-		fmt.Printf("  %-3d "+SessRow+"\n", i+1, "", s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary)
+		fmt.Fprintf(&b, "  %-3d "+SessRow+"\n", i+1, "", s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary)
 	}
-	fmt.Print(PickNumPrompt)
+	b.WriteString(PickNumPrompt)
+	out.emit(KindNotice, b.String())
 	var n int
 	if _, err := fmt.Fscan(os.Stdin, &n); err != nil || n < 1 || n > len(list) {
 		return -1, false

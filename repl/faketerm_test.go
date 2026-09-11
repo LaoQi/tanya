@@ -4,10 +4,62 @@ import (
 	"bytes"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
 )
+
+// syncBuf 让测试断言与 spinner goroutine 的写入互斥，-race 下安全。
+type syncBuf struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuf) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuf) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// writeCounter 记录写入次数与内容，用于断言"整块一次写完"。
+type writeCounter struct {
+	mu sync.Mutex
+	n  int
+	b  bytes.Buffer
+}
+
+func (w *writeCounter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.n++
+	return w.b.Write(p)
+}
+
+func (w *writeCounter) count() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.n
+}
+
+func (w *writeCounter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.b.String()
+}
+
+func (b *syncBuf) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
 
 // fakeTerm 是 repl 侧的 readline.Terminal 替身：按键序列驱动 Run，无需真实终端。
 type fakeTerm struct {
@@ -46,15 +98,19 @@ func (f *fakeTerm) ReadKey() (readline.KeyEvent, error) {
 	return ev, nil
 }
 
-func newTestREPL(t *testing.T, term readline.Terminal) (*REPL, *bytes.Buffer, *bytes.Buffer) {
+func newTestREPLAgent(t *testing.T, a *agent.Agent, term readline.Terminal) (*REPL, *syncBuf, *syncBuf) {
 	t.Helper()
-	out, errb := &bytes.Buffer{}, &bytes.Buffer{}
+	out, errb := &syncBuf{}, &syncBuf{}
 	st := NewStreams(out, errb)
-	r, err := NewREPL(nil, "› ", WithStreams(st), WithTerminal(term, false))
+	r, err := NewREPL(a, "› ", WithStreams(st), WithTerminal(term, false))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return r, out, errb
+}
+
+func newTestREPL(t *testing.T, term readline.Terminal) (*REPL, *syncBuf, *syncBuf) {
+	return newTestREPLAgent(t, nil, term)
 }
 
 func TestFakeTermDrivesRun(t *testing.T) {
@@ -109,7 +165,7 @@ func TestGuardCatchesEmitDuringInput(t *testing.T) {
 			violated = true
 		}
 	}
-	term.onKey = func() { r.st.out.emit("噪音") }
+	term.onKey = func() { r.st.out.emit(KindContent, "噪音") }
 	if err := r.Run(); err != nil {
 		t.Fatal(err)
 	}

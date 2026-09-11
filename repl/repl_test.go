@@ -1,8 +1,6 @@
 package repl
 
 import (
-	"io"
-	"os"
 	"strings"
 	"testing"
 
@@ -103,28 +101,15 @@ func TestPrintHistoryFullToolCalls(t *testing.T) {
 	tc.Function.Name = "calc"
 	tc.Function.Arguments = `{"expression":"1+1"}`
 	m := agent.Message{Role: "assistant", ToolCalls: []agent.ToolCall{tc}}
-	r, err := NewREPL(nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := captureStdout(func() { r.printHistoryFull(2, m) })
+	r, buf, _ := newTestREPL(t, newFakeTerm())
+	r.printHistoryFull(2, m)
+	out := buf.String()
 	if !strings.Contains(out, "\x1b[97;1m#2 assistant\x1b[0m") {
 		t.Errorf("消息头应按一级标题渲染: %q", out)
 	}
 	if !strings.Contains(out, "\n[调用 calc]\n") || !strings.Contains(out, "\n→ calc {\"expression\":\"1+1\"}\n") {
 		t.Errorf("正文摘要与工具调用行应原样无颜色: %q", out)
 	}
-}
-
-func captureStdout(fn func()) string {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-	fn()
-	w.Close()
-	os.Stdout = old
-	b, _ := io.ReadAll(r)
-	return string(b)
 }
 
 func TestExitMessageConsistency(t *testing.T) {
@@ -187,33 +172,30 @@ func TestMdToggle(t *testing.T) {
 }
 
 func TestStreamContentBypassWhenOff(t *testing.T) {
-	r, err := NewREPL(nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r, buf, _ := newTestREPL(t, newFakeTerm())
 	r.mdLive = false
-	out := captureStdout(func() {
-		r.stream(agent.Event{Kind: agent.EventContent, Text: "直接输出"})
-	})
+	r.stream(agent.Event{Kind: agent.EventContent, Text: "直接输出"})
+	out := buf.String()
 	if out != "直接输出" {
 		t.Errorf("关闭渲染应直通输出: %q", out)
 	}
 }
 
 func TestPrintHistoryFullRenderedMarkdown(t *testing.T) {
-	r, err := NewREPL(nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r, buf, _ := newTestREPL(t, newFakeTerm())
 	if !r.mdEnabled() {
 		t.Fatal("默认应开启渲染")
 	}
 	m := agent.Message{Role: "assistant", Content: "# 标题\n\n- a\n- b\n\n正文 **粗** 结尾\n"}
-	out := captureStdout(func() { r.printHistoryFull(1, m) })
+	r.printHistoryFull(1, m)
+	out := buf.String()
 	for _, want := range []string{"\x1b[97;1m#1 assistant\x1b[0m", "\x1b[97;1m标题\x1b[0m", "• a", "• b", "\x1b[1m粗\x1b[0m"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("assistant 正文应走 Markdown 渲染，缺 %q: %q", want, out)
 		}
+	}
+	if out == "" {
+		t.Fatal("输出为空则负向断言会静默通过")
 	}
 	if strings.Contains(out, "# 标题\n") || strings.Contains(out, "- a\n") {
 		t.Errorf("渲染开启时不应输出原始 Markdown 文本: %q", out)
@@ -221,18 +203,19 @@ func TestPrintHistoryFullRenderedMarkdown(t *testing.T) {
 }
 
 func TestPrintHistoryFullBypassWhenMdOff(t *testing.T) {
-	r, err := NewREPL(nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r, buf, _ := newTestREPL(t, newFakeTerm())
 	r.mdLive = false
 	if r.mdEnabled() {
 		t.Fatal("/md off 后应旁路")
 	}
 	m := agent.Message{Role: "assistant", Content: "# 标题\n\n- a\n"}
-	out := captureStdout(func() { r.printHistoryFull(1, m) })
+	r.printHistoryFull(1, m)
+	out := buf.String()
 	if !strings.HasPrefix(out, "#1 assistant\n") || !strings.Contains(out, "# 标题") || !strings.Contains(out, "- a") {
 		t.Errorf("旁路时应原样输出（含消息头）: %q", out)
+	}
+	if out == "" {
+		t.Fatal("输出为空则负向断言会静默通过")
 	}
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("旁路时不应出现颜色: %q", out)
@@ -240,17 +223,17 @@ func TestPrintHistoryFullBypassWhenMdOff(t *testing.T) {
 }
 
 func TestPrintHistoryFullUserToolRaw(t *testing.T) {
-	r, err := NewREPL(nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r, buf, _ := newTestREPL(t, newFakeTerm())
 	user := agent.Message{Role: "user", Content: "请解释 **这个** 不算 md"}
-	out := captureStdout(func() { r.printHistoryFull(1, user) })
+	r.printHistoryFull(1, user)
+	out := buf.String()
 	if !strings.Contains(out, "\n请解释 **这个** 不算 md\n") {
 		t.Errorf("user 正文应原样显示不渲染: %q", out)
 	}
 	tool := agent.Message{Role: "tool", Name: "run_shell", Content: "输出 `code` 原文"}
-	out = captureStdout(func() { r.printHistoryFull(2, tool) })
+	buf.Reset()
+	r.printHistoryFull(2, tool)
+	out = buf.String()
 	if !strings.Contains(out, "\n\x1b[90m输出 `code` 原文\x1b[0m\n") {
 		t.Errorf("tool 正文应 Frame 灰色清洗显示: %q", out)
 	}

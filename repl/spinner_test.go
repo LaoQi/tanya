@@ -2,7 +2,6 @@ package repl
 
 import (
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -10,8 +9,7 @@ import (
 )
 
 func TestSpinnerNonTTYNoop(t *testing.T) {
-	var mu sync.Mutex
-	sp := newSpinner(&mu, false)
+	sp := newSpinner(NewStreams(&syncBuf{}, &syncBuf{}).out, false)
 	sp.start(spinWaiting)
 	time.Sleep(250 * time.Millisecond)
 	sp.stop()
@@ -44,10 +42,9 @@ func (w *blockedWriter) Write(p []byte) (int, error) {
 }
 
 func TestSpinnerStopTimeout(t *testing.T) {
-	var mu sync.Mutex
-	sp := newSpinner(&mu, true)
+	sp := newSpinner(newOutput(&syncBuf{}), true)
 	bw := &blockedWriter{entered: make(chan struct{}), release: make(chan struct{})}
-	sp.out = bw
+	sp.out = newOutput(bw)
 	sp.start(spinWaiting)
 	<-bw.entered
 	done := make(chan struct{})
@@ -121,5 +118,26 @@ func TestSpinLineStateColors(t *testing.T) {
 		if colors[k] != code {
 			t.Errorf("%d 应为对应语义色 %q: %q", k, code, colors[k])
 		}
+	}
+}
+
+func TestSpinnerFramesViaOutput(t *testing.T) {
+	old := style.GetProfile()
+	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
+	t.Cleanup(func() { style.SetProfile(old) })
+	var buf syncBuf
+	sp := newSpinner(NewStreams(&buf, &syncBuf{}).out, true)
+	sp.start(spinWaiting)
+	time.Sleep(160 * time.Millisecond)
+	sp.stop()
+	got := buf.String()
+	if !strings.Contains(got, "等待响应") {
+		t.Errorf("帧应经注入 writer 输出: %q", got)
+	}
+	if !strings.HasPrefix(got, style.ClearLineHome()) {
+		t.Errorf("每帧应带清行序列: %q", got)
+	}
+	if !strings.HasSuffix(got, style.ClearLineHome()) {
+		t.Errorf("stop 应补一次清行: %q", got)
 	}
 }

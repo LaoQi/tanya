@@ -19,11 +19,9 @@ func resetThemeState(t *testing.T) {
 
 func TestThemeCommandNoArg(t *testing.T) {
 	resetThemeState(t)
-	r, err := NewREPL(nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := captureStdout(func() { r.handleCommand("/theme") })
+	r, buf, _ := newTestREPL(t, newFakeTerm())
+	r.handleCommand("/theme")
+	out := buf.String()
 	for _, want := range []string{"当前主题: default", "* default", "minimal", "solar", "vivid"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("无参输出应包含 %q: %q", want, out)
@@ -33,11 +31,9 @@ func TestThemeCommandNoArg(t *testing.T) {
 
 func TestThemeCommandSwitch(t *testing.T) {
 	resetThemeState(t)
-	r, err := NewREPL(nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := captureStdout(func() { r.handleCommand("/theme vivid") })
+	r, buf, _ := newTestREPL(t, newFakeTerm())
+	r.handleCommand("/theme vivid")
+	out := buf.String()
 	if !strings.Contains(out, "主题已切换为 vivid") {
 		t.Errorf("切换提示缺失: %q", out)
 	}
@@ -58,11 +54,9 @@ func TestThemeCommandSwitch(t *testing.T) {
 
 func TestThemeCommandBad(t *testing.T) {
 	resetThemeState(t)
-	r, err := NewREPL(nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := captureStdout(func() { r.handleCommand("/theme bogus") })
+	r, _, errb := newTestREPL(t, newFakeTerm())
+	r.handleCommand("/theme bogus")
+	out := errb.String()
 	if !strings.Contains(out, "无效主题") || !strings.Contains(out, "minimal") {
 		t.Errorf("非法主题应报错并列出可用: %q", out)
 	}

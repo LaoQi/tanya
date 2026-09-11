@@ -83,17 +83,13 @@ func TestTurnDuration(t *testing.T) {
 
 func TestTurnSinkGapOnce(t *testing.T) {
 	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
-	r, err := NewREPL(nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r, buf, _ := newTestREPL(t, newFakeTerm())
 	seen := 0
 	r.stream = func(agent.Event) { seen++ }
 	sink := r.turnSink()
-	out := captureStdout(func() {
-		sink(agent.Event{Kind: agent.EventRequestStart})
-		sink(agent.Event{Kind: agent.EventToolStart})
-	})
+	sink(agent.Event{Kind: agent.EventRequestStart})
+	sink(agent.Event{Kind: agent.EventToolStart})
+	out := buf.String()
 	if out != "\n" {
 		t.Errorf("首个事件前应恰好补一个空行: %q", out)
 	}
@@ -104,17 +100,13 @@ func TestTurnSinkGapOnce(t *testing.T) {
 
 func TestTurnSinkNonTTYNoGap(t *testing.T) {
 	ttyProfile(t, style.Profile{TTY: false, Colors: style.LevelNone, Unicode: true})
-	r, err := NewREPL(nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r, buf, _ := newTestREPL(t, newFakeTerm())
 	seen := 0
 	r.stream = func(agent.Event) { seen++ }
 	sink := r.turnSink()
-	out := captureStdout(func() {
-		sink(agent.Event{Kind: agent.EventRequestStart})
-		sink(agent.Event{Kind: agent.EventResponse})
-	})
+	sink(agent.Event{Kind: agent.EventRequestStart})
+	sink(agent.Event{Kind: agent.EventResponse})
+	out := buf.String()
 	if out != "" {
 		t.Errorf("非 TTY 不应补空行: %q", out)
 	}

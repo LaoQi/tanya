@@ -165,9 +165,17 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## REPL
 
-用户可见文案统一为常量：`repl/messages.go`（UI/命令输出/选择器/工具视图/spinner）与 `agent/messages.go`（错误/ToolResult 文本/ContextInfo），调用一律 `Printf`/`Fprintf` 引用常量，换行由调用处的格式串控制；`Bye`/`再见` 已统一为 `MsgBye`。工具描述与系统提示不在此列（模型侧文案，翻译需评估 prompt 影响）。
+用户可见文案统一为常量：`repl/messages.go`（UI/命令输出/选择器/工具视图/spinner）与 `agent/messages.go`（错误/ToolResult 文本/ContextInfo），调用一律引用常量（经 `streams` 写出，见下），换行由调用处的格式串控制；`Bye`/`再见` 已统一为 `MsgBye`。工具描述与系统提示不在此列（模型侧文案，翻译需评估 prompt 影响）。
 
 欢迎屏由 `welcomLogo` + `welcomeText()` 组装：logo ASCII 图 + 一行 `输入 /help 查看命令   tanyan <版本>（构建于 <时间>）`；`repl.Version`/`repl.BuildTime` 由 `main` 注入（`make build` 经 ldflags 写 `main.version`（git describe）与 `main.buildTime`（date），直接 `go build` 为 `dev`/空，空时不渲染构建时间）。`-v` 与欢迎屏共用同一 version 源。
+
+### 输出流与 Kind
+
+输出收敛到 `repl/streams.go`：`streams{out, err}` 是两条独立互斥流，`output` = writer + `sync.Mutex` + 可见集（`visSet`，按 `Kind` 门禁，当前恒为全开，rich/plain 三档在阶段 4 引入）+ 测试钩子 `guard`。`output.Write` 是无门禁通道（raw 期自绘：Editor 提示符/回显、picker），`emit`/`atomic` 是带门禁与 `guard` 的常规通道；`atomic` 回调内只允许写参数 `w`（自锁约束）。每次写入都携带 `Kind`（`repl/flow.go`：Content/Reasoning/ToolBlock/ToolStatus/Notice/Decor/Error/Spinner）。
+
+流分配：**stdout** 承载 assistant 正文、工具块与状态行、命令反馈、回放、欢迎屏、回合分隔线、spinner 帧与输入期回显；**stderr** 承载错误与诊断——`MsgErrLineFmt` 类、`MsgUnknownCmd`、`MsgThemeBad`、`MsgInvalidIndex`、`MsgModelsFail`、`MsgInterruptKept`/`MsgInterruptBare`，以及 `main` 的启动/配置/agent 构造错误（`streams.Fail`）。两 fd 均无缓冲，同一 tty 下写序即调用序，故交互观感与收敛前逐字节一致（阶段 1 以 pty 对比前一提交的二进制验证）；stdout 被重定向时错误与诊断分流到终端，stdout 保持可解析。
+
+`Kind` 不导出包外、不进 `agent.Event`；`main` 侧只用语义化出口 `streams.Print`/`Content`/`Fail`。
 
 ### 输入分发
 

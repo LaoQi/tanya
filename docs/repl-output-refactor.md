@@ -1,6 +1,7 @@
 # repl 输出收敛与数据流封装方案
 
 > 状态：方案定稿（含输出模式与双流收敛），分阶段实施（阶段 0-5，见 §6）
+> 进度：阶段 0、阶段 1 已实施（§3.7 下表为阶段 1 落地后的实际路由）
 > 范围：`repl` 包内重构 + `main.go` 接线
 > 不动的部分：`agent`（协议/事件/history/落盘）、`style` 渲染纯函数与过滤器、`readline` 内部实现
 
@@ -291,15 +292,32 @@ func (t *turn) End(err error)        // md 结算、中断/错误文案（走 st
 
 **路由清单**（rich 模式字节不变，只换通道）：
 
-| 位置 | 现状 | 目标 |
+| 位置 | 收敛前 | 阶段 1 落地 |
 |---|---|---|
-| `main.go:38`（LoadConfig 失败） | `os.Stderr` | `streams.err.emit(KindError, …)` |
+| `main.go:38`（LoadConfig 失败） | `os.Stderr` | `streams.Fail` → `err.emit(KindError, …)` |
 | `main.go:64`（agent.New 失败） | `os.Stderr` | 同上 |
-| `main.go:72`（ask 用法） | `os.Stderr` | 同上（`KindNotice` 亦在此流） |
+| `main.go:72`（ask 用法） | `os.Stderr` | 同上 |
 | `main.go:79`（ask 错误收尾） | `os.Stderr` | 同上；**前导 `\n` 保留**（rich 下给"stdout 已输出半行"补空行，子代理多看一个空行无害） |
 | `main.go:88`/`93`（REPL 构造/Run 失败） | `os.Stderr` | 同上 |
-| `repl.go:223`（回合错误） | `os.Stderr` | 同上 |
-| `repl.go:218-221`（中断提示） | **stdout** | ⚠ 迁到 `streams.err`（唯一路由变更） |
+| `main.go:29`（`-v` 版本） | stdout `Printf` | `streams.Print`（stdout） |
+| `main.go:82`（ask 收尾换行） | stdout `Println` | `streams.Content("\n")`（stdout） |
+| `repl.go:223`（回合错误） | `os.Stderr` | `err.emit(KindError, …)` |
+| `repl.go:218/220`（中断提示） | stdout | ⚠ `err.emit(KindError, …)`（迁 stderr） |
+
+**命令失败一并迁入 stderr**（初稿只列了上表，实施时按"stdout=正文/反馈、stderr=错误/诊断"统一处理，共 8 处；同一 tty 下写序不变，pty 输出逐字节一致）：
+
+| 位置 | 文案 | 收敛前 | 阶段 1 落地 |
+|---|---|---|---|
+| `repl.go:263` | `/load <id>` 失败 `MsgErrLineFmt` | stdout | stderr `KindError` |
+| `repl.go:280` | `/model` 列表失败 `MsgModelsFail` | stdout | stderr `KindError` |
+| `repl.go:310` | 未知命令 `MsgUnknownCmd`（白名单已过滤，实际不可达） | stdout | stderr `KindError` |
+| `repl.go:332` | `/theme` 非法 `MsgThemeBad` | stdout | stderr `KindError` |
+| `repl.go:394` | `/think` 非法 `MsgErrLineFmt` | stdout | stderr `KindError` |
+| `repl.go:422` | `/history n` 索引非法 `MsgInvalidIndex` | stdout | stderr `KindError` |
+| `repl.go:514` | `/load` 列会话失败 `MsgErrLineFmt` | stdout | stderr `KindError` |
+| `repl.go:533` | `/load` 载入失败 `MsgErrLineFmt` | stdout | stderr `KindError` |
+
+判据统一为：**"用户请求未完成/失败"→ stderr（`KindError`）；状态展示与用法提示（`MsgNoSessions`/`MsgCancelled`/`MsgModelsEmpty`/`MsgNoHistoryMsg`/`MsgDialogueEmpty`）→ stdout（`KindNotice`）**。
 
 `agent` 包内的错误经由返回值上浮，不在包内写流。
 
@@ -546,6 +564,8 @@ script -qec "./tanyan -p --verbose -n ask '跑一条命令并总结'" /dev/null 
 | 3 toolView 结构体化 | 闭包 → 结构体；状态成字段 | `toolview_test` 全量迁移通过；pty 目视 2/3 | 独立提交 |
 | 4 输出模式 | 三档 `visSet`；`-p/--plain`、`--verbose`；plain 六条语义 | §5.6 阶段 4 用例 + §5.7 golden + pty 目视 4/5 | 独立提交（前置：写入均带 `Kind`） |
 | 5（可选）回放归一 | `/history` 复用实时渲染策略 | 回放帧断言 + 目视 | 独立提交 |
+
+实施记录：阶段 0、阶段 1 已完成，各为独立提交（按上表回滚点可单独 revert）；阶段 1 的 rich 模式行为用 pty 输出与阶段 0 二进制逐字节比对验证。
 
 **阶段 1 的收益已经足够大**：即使后续不做，也已获得"单点输出 + 双流 + 可注入测试"的全部收益。阶段 4 是子代理可用性的门槛，建议紧接着做。
 
