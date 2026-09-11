@@ -180,7 +180,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 `/help` `/new` `/sessions` `/load` `/context` `/history` `/model` `/exit`：
 
-- `/history` 无参截断列表（单行 120 rune）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染（`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 `/md` 开关与 TTY 旁路约束），user/tool 消息与工具参数原样
+- `/history` 无参截断列表（`style.OneLine` 先剥离 ANSI 转义与控制字符、压成单行，再按 120 rune 截断，避免 `\r`/`\x1b[K` 覆盖已打印行与未闭合 SGR 泄漏）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染（`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 `/md` 开关与 TTY 旁路约束），user/tool 消息与工具参数原样
 - `/model` 无参实时调接口列出可用模型（`*` 标注当前，失败仍显示当前模型），带参直接切换不校验；带尾随空格支持补全（接口列表在 REPL 内首次加载后缓存，失败不重试）
 - `/think` 无参显示当前思考等级（未设置显示"未设置"）；带参 `minimal/low/medium/high/max` 设置，`off` 关闭，非法值报错不变更；带尾随空格补全等级候选（含 off，静态列表）
 - `/load` 无参打开方向键选择菜单（`repl/picker.go`，非 TTY 降级为序号输入），候选 Display 带时间/条数/简介

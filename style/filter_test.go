@@ -109,3 +109,23 @@ func TestHasSGR(t *testing.T) {
 		}
 	}
 }
+
+func TestOneLine(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"a\nb", "a b"},
+		{"a\r\nb", "a b"},
+		{"a\r\x1b[K\x1b[33m等待\x1b[0m\r\x1b[Kpong", "a 等待 pong"},
+		{"a\x1b[31m红\x1b[0mb", "a红b"},
+		{"a\x1b[33mb", "ab"},
+		{"a\x1b]0;title\x07b", "ab"},
+		{"a\x07b\tc", "ab c"},
+		{"  前导尾随  ", "前导尾随"},
+		{"中文标签", "中文标签"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := OneLine(c.in); got != c.want {
+			t.Errorf("OneLine(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

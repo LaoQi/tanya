@@ -458,7 +458,7 @@ func truncateRunes(s string, n int) string {
 }
 
 func historyLine(n int, m agent.Message) string {
-	text := strings.ReplaceAll(historyText(m), "\n", " ")
+	text := style.OneLine(historyText(m))
 	return fmt.Sprintf("%3d %-9s %s", n, historyLabel(m), truncateRunes(text, 120))
 }
 
