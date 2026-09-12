@@ -59,6 +59,8 @@ tanyan -n              # 只读会话：可载入历史，不写入
 tanyan -n ask "问题"   # 单发且不写入会话历史
 tanyan -c x.yaml       # 指定配置文件
 tanyan -m local        # 会话存到当前目录 .tanya/
+tanyan -p              # 纯文本输出：无颜色/动画/工具块，stdout 只留答案与命令反馈
+tanyan -p --verbose    # 纯文本输出但保留工具块与状态行（仍无颜色与光标控制）
 tanyan -v              # 显示版本号
 ```
 
@@ -71,6 +73,8 @@ tanyan -v              # 显示版本号
 | `global` | `~/.local/share/tanyan/sessions/<workspace-id>/` |
 
 只读会话（`-n` / `--no-save`，只由命令行开启，配置文件与 env 均无法设置）：`ask` 单发与 REPL 通用。历史会话照常列出与载入，之后的对话只存在于内存、不写入会话文件，也不创建会话目录（REPL 启动时在欢迎屏下方显示黄色警告，`ask` 保持静默）。
+
+纯文本输出（`-p` / `--plain`，只由命令行开启，配置文件与 env 均无法设置）：`ask` 单发与 REPL 通用，供本程序作为子 agent 被调用时拿到可解析的输出——stdout 只承载 assistant 正文与命令反馈（无颜色、无 spinner、无光标控制、无 markdown 装饰、无工具块与状态行），stderr 承载错误与诊断；`ask` 结束时若正文已以换行结尾则不再补空行，stdout 严格等于答案。`--verbose` 必须与 `--plain` 同用，作用是在该模式下恢复工具块与状态行的**纯文本**形态（仍不启用颜色与光标控制）。默认（不带 `-p`）行为完全不变。
 
 REPL 输入按前缀分发：
 

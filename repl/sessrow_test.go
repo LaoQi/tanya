@@ -56,7 +56,7 @@ func TestPickByNumberOutput(t *testing.T) {
 		t.Fatalf("应扫描到 1 个会话: %d", len(list))
 	}
 	out := &syncBuf{}
-	pickByNumber(list, NewStreams(out, &syncBuf{}).out)
+	pickByNumber(list, NewStreams(out, &syncBuf{}, modeRich).out)
 	want := "输入序号选择会话（回车取消）:\n  1   20260101-100000  " + list[0].ModTime.Format("01-02 15:04") + "    2条  第一条\n序号: "
 	if out.String() != want {
 		t.Errorf("got %q want %q", out, want)

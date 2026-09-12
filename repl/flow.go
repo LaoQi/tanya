@@ -34,7 +34,7 @@ type flow struct {
 
 func (f *flow) emit(kind Kind, s string) { f.st.out.emit(kind, s) }
 
-func (f *flow) mdEnabled() bool { return f.live && f.prof.TTY }
+func (f *flow) mdEnabled() bool { return f.live && f.prof.TTY && f.st.decor() }
 
 // turn 承载一次对话回合：懒补首行空行、结算 markdown、收尾文案与分隔线。
 type turn struct {

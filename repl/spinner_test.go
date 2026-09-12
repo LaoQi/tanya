@@ -9,7 +9,7 @@ import (
 )
 
 func TestSpinnerNonTTYNoop(t *testing.T) {
-	sp := newSpinner(NewStreams(&syncBuf{}, &syncBuf{}).out, false)
+	sp := newSpinner(NewStreams(&syncBuf{}, &syncBuf{}, modeRich).out, false)
 	sp.start(spinWaiting)
 	time.Sleep(250 * time.Millisecond)
 	sp.stop()
@@ -42,9 +42,9 @@ func (w *blockedWriter) Write(p []byte) (int, error) {
 }
 
 func TestSpinnerStopTimeout(t *testing.T) {
-	sp := newSpinner(newOutput(&syncBuf{}), true)
+	sp := newSpinner(newOutput(&syncBuf{}, allVisible()), true)
 	bw := &blockedWriter{entered: make(chan struct{}), release: make(chan struct{})}
-	sp.out = newOutput(bw)
+	sp.out = newOutput(bw, allVisible())
 	sp.start(spinWaiting)
 	<-bw.entered
 	done := make(chan struct{})
@@ -126,7 +126,7 @@ func TestSpinnerFramesViaOutput(t *testing.T) {
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var buf syncBuf
-	sp := newSpinner(NewStreams(&buf, &syncBuf{}).out, true)
+	sp := newSpinner(NewStreams(&buf, &syncBuf{}, modeRich).out, true)
 	sp.start(spinWaiting)
 	time.Sleep(160 * time.Millisecond)
 	sp.stop()

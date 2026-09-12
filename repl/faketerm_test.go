@@ -9,6 +9,7 @@ import (
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
+	"github.com/LaoQi/tanyan/style"
 )
 
 // syncBuf 让测试断言与 spinner goroutine 的写入互斥，-race 下安全。
@@ -101,7 +102,7 @@ func (f *fakeTerm) ReadKey() (readline.KeyEvent, error) {
 func newTestREPLAgent(t *testing.T, a *agent.Agent, term readline.Terminal) (*REPL, *syncBuf, *syncBuf) {
 	t.Helper()
 	out, errb := &syncBuf{}, &syncBuf{}
-	st := NewStreams(out, errb)
+	st := NewStreams(out, errb, modeRich)
 	r, err := NewREPL(a, "› ", WithStreams(st), WithTerminal(term, false))
 	if err != nil {
 		t.Fatal(err)
@@ -111,6 +112,21 @@ func newTestREPLAgent(t *testing.T, a *agent.Agent, term readline.Terminal) (*RE
 
 func newTestREPL(t *testing.T, term readline.Terminal) (*REPL, *syncBuf, *syncBuf) {
 	return newTestREPLAgent(t, nil, term)
+}
+
+// newTestREPLMode 以指定输出模式与 profile 构造（profile 需在建 REPL 之前设置：构造期会快照）。
+func newTestREPLMode(t *testing.T, term readline.Terminal, mode outMode, prof style.Profile) (*REPL, *syncBuf, *syncBuf) {
+	t.Helper()
+	out, errb := &syncBuf{}, &syncBuf{}
+	st := NewStreams(out, errb, mode)
+	old := style.GetProfile()
+	style.SetProfile(prof)
+	t.Cleanup(func() { style.SetProfile(old) })
+	r, err := NewREPL(nil, "› ", WithStreams(st), WithTerminal(term, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r, out, errb
 }
 
 func TestFakeTermDrivesRun(t *testing.T) {

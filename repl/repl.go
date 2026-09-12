@@ -51,7 +51,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 		opt(&o)
 	}
 	if o.st == nil {
-		o.st = NewStreams(os.Stdout, os.Stderr)
+		o.st = NewStreams(os.Stdout, os.Stderr, modeRich)
 	}
 	term, raw := o.term, o.raw
 	if term == nil {
@@ -87,7 +87,7 @@ func (r *REPL) print(text string, kind Kind) {
 }
 
 func (r *REPL) mdEnabled() bool {
-	return r.mdLive && r.prof.TTY
+	return r.mdLive && r.prof.TTY && r.st.decor()
 }
 
 func turnSep(prof style.Profile, d time.Duration) string {

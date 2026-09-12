@@ -258,7 +258,7 @@ type toolView struct {
 func NewToolView(st *streams, prof style.Profile, width func() int, maxLines int) *toolView {
 	return &toolView{
 		st:       st,
-		sp:       newSpinner(st.out, prof.TTY && st.out.allows(KindSpinner)),
+		sp:       newSpinner(st.out, prof.TTY),
 		prof:     prof,
 		width:    width,
 		maxLines: maxLines,
@@ -266,6 +266,9 @@ func NewToolView(st *streams, prof style.Profile, width func() int, maxLines int
 }
 
 // Content 输出正文（原 REPL.print 的语义）：停动画、若上一块是工具块先补空行、跟踪行尾状态。
+// animate 报告是否允许启动动画：设备是 TTY 且当前模式放行动画帧。
+func (v *toolView) animate() bool { return v.prof.TTY && v.st.out.allows(KindSpinner) }
+
 func (v *toolView) Content(kind Kind, text string) {
 	if text == "" {
 		return
@@ -285,7 +288,9 @@ func (v *toolView) Content(kind Kind, text string) {
 func (v *toolView) Handle(e agent.Event) {
 	switch e.Kind {
 	case agent.EventRequestStart:
-		v.sp.start(spinWaiting)
+		if v.animate() {
+			v.sp.start(spinWaiting)
+		}
 	case agent.EventReasoning:
 		v.sp.setKind(spinThinking)
 	case agent.EventContent:
@@ -309,19 +314,22 @@ func (v *toolView) Handle(e agent.Event) {
 			}
 		})
 		v.dirty = false
-		if !e.Interactive {
+		if !e.Interactive && v.animate() {
 			v.sp.start(spinRunning)
 		}
 	case agent.EventToolEnd:
 		v.sp.stop()
-		block := RenderToolEnd(e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
-		if v.prof.TTY && !e.Interactive {
-			block = RenderToolEndInline(e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
+		// 工具块被屏蔽时不置 justEnded：否则下一条正文前会留下孤立空行。
+		if v.st.out.allows(KindToolBlock) {
+			block := RenderToolEnd(e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
+			if v.prof.TTY && v.st.cursor() && !e.Interactive {
+				block = RenderToolEndInline(e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
+			}
+			v.st.out.atomic(KindToolBlock, func(w io.Writer) {
+				io.WriteString(w, block)
+			})
+			v.justEnded = true
 		}
-		v.st.out.atomic(KindToolBlock, func(w io.Writer) {
-			io.WriteString(w, block)
-		})
-		v.justEnded = true
 		v.dirty = false
 	}
 }

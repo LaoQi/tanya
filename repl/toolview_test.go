@@ -250,7 +250,7 @@ func TestToolViewReasoningLabel(t *testing.T) {
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var buf syncBuf
-	view := NewToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
+	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), style.GetProfile(), func() int { return 80 }, 20)
 	view.Handle(agent.Event{Kind: agent.EventRequestStart})
 	time.Sleep(150 * time.Millisecond)
 	view.Handle(agent.Event{Kind: agent.EventReasoning, Text: "想"})
@@ -270,7 +270,7 @@ func TestToolViewInteractive(t *testing.T) {
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var buf syncBuf
-	view := NewToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
+	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), style.GetProfile(), func() int { return 80 }, 20)
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true})
 	time.Sleep(250 * time.Millisecond)
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "sudo -S true", ExitCode: 1}}})
@@ -294,7 +294,7 @@ func TestToolViewNonInteractive(t *testing.T) {
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var buf syncBuf
-	view := NewToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
+	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), style.GetProfile(), func() int { return 80 }, 20)
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	time.Sleep(250 * time.Millisecond)
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", ExitCode: 0}}})
@@ -437,7 +437,7 @@ func TestToolBlockSingleWrite(t *testing.T) {
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var wc writeCounter
-	view := NewToolView(NewStreams(&wc, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
+	view := NewToolView(NewStreams(&wc, &syncBuf{}, modeRich), style.GetProfile(), func() int { return 80 }, 20)
 	before := wc.count()
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
 		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
@@ -455,7 +455,7 @@ func TestToolViewStateFields(t *testing.T) {
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var buf syncBuf
-	st := NewStreams(&buf, &syncBuf{})
+	st := NewStreams(&buf, &syncBuf{}, modeRich)
 	view := NewToolView(st, style.GetProfile(), func() int { return 80 }, 20)
 	if view.st != st || view.maxLines != 20 || !view.prof.TTY || view.width() != 80 {
 		t.Errorf("构造应把 writer/profile/宽度/行数写成字段: %+v", view)
@@ -486,7 +486,7 @@ func TestToolViewContentSemantics(t *testing.T) {
 	style.SetProfile(style.Profile{TTY: false, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var buf syncBuf
-	view := NewToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
+	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), style.GetProfile(), func() int { return 80 }, 20)
 	view.Content(KindContent, "")
 	if buf.String() != "" {
 		t.Errorf("空文本不应输出: %q", buf.String())
