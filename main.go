@@ -65,7 +65,7 @@ func main() {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
-	sink := repl.WireToolView(st, prof, repl.ToolWidth, a.ToolOutputLines())
+	sink := repl.NewToolView(st, prof, repl.ToolWidth, a.ToolOutputLines())
 
 	if isAsk {
 		q := strings.Join(args[1:], " ")
@@ -74,7 +74,7 @@ func main() {
 			os.Exit(1)
 		}
 		ctx, done := repl.InterruptContext()
-		err := a.Ask(ctx, q, sink)
+		err := a.Ask(ctx, q, sink.Handle)
 		done()
 		if err != nil {
 			st.Fail("\n"+repl.MsgErrLineFmt+"\n", err)

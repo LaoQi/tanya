@@ -72,25 +72,25 @@ func (t *turn) Handle(e agent.Event) {
 		t.writeContent(e.Text)
 	case agent.EventToolStart, agent.EventResponse:
 		t.settleMd()
-		t.r.view(e)
+		t.r.view.Handle(e)
 	default:
-		t.r.view(e)
+		t.r.view.Handle(e)
 	}
 }
 
 func (t *turn) writeContent(s string) {
 	if !t.f.mdEnabled() {
-		t.r.print(s)
+		t.r.print(s, KindContent)
 		return
 	}
 	for _, blk := range t.f.md.Write(s) {
-		t.r.print(t.f.rend.Block(blk))
+		t.r.print(t.f.rend.Block(blk), KindContent)
 	}
 }
 
 func (t *turn) settleMd() {
 	for _, blk := range t.f.md.Close() {
-		t.r.print(t.f.rend.Block(blk))
+		t.r.print(t.f.rend.Block(blk), KindContent)
 	}
 }
 

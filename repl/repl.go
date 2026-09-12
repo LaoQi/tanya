@@ -24,7 +24,7 @@ type REPL struct {
 	prof      style.Profile
 	promptTpl string
 	prompt    style.Template
-	view      agent.EventSink
+	view      *toolView
 	mdLive    bool
 	rend      style.Renderer
 }
@@ -78,12 +78,12 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if a != nil {
 		maxLines = a.ToolOutputLines()
 	}
-	r.view = WireToolView(o.st, r.prof, func() int { return toolWidth(term) }, maxLines)
+	r.view = NewToolView(o.st, r.prof, func() int { return toolWidth(term) }, maxLines)
 	return r, nil
 }
 
-func (r *REPL) print(text string) {
-	r.view(agent.Event{Kind: agent.EventContent, Text: text})
+func (r *REPL) print(text string, kind Kind) {
+	r.view.Content(kind, text)
 }
 
 func (r *REPL) mdEnabled() bool {
@@ -459,10 +459,10 @@ func (r *REPL) printHistoryFull(n int, m agent.Message) {
 func (r *REPL) printHistoryHead(n int, label string) {
 	head := fmt.Sprintf("#%d %s", n, label)
 	if !r.mdEnabled() {
-		r.st.out.emit(KindContent, head+"\n")
+		r.st.out.emit(KindNotice, head+"\n")
 		return
 	}
-	r.print(r.rend.Block(style.Heading{Level: 1, Inlines: []style.Inline{style.Span{Text: head}}}))
+	r.print(r.rend.Block(style.Heading{Level: 1, Inlines: []style.Inline{style.Span{Text: head}}}), KindNotice)
 }
 
 // printRendered 把整段文本按与 AI 输出一致的管线渲染（/md 开关 + TTY 旁路），供历史回放等一次性展示使用。
@@ -472,7 +472,7 @@ func (r *REPL) printRendered(text string) {
 		return
 	}
 	for _, blk := range mdBlocks(text) {
-		r.print(r.rend.Block(blk))
+		r.print(r.rend.Block(blk), KindContent)
 	}
 }
 

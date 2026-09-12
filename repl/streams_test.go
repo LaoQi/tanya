@@ -91,8 +91,8 @@ func TestOutputAtomicNoInterleave(t *testing.T) {
 	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
 	var buf syncBuf
 	st := NewStreams(&buf, &syncBuf{})
-	sink := WireToolView(st, style.GetProfile(), func() int { return 80 }, 20)
-	sink(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sleep 1"}`})
+	view := NewToolView(st, style.GetProfile(), func() int { return 80 }, 20)
+	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sleep 1"}`})
 
 	pairs := 0
 	deadline := time.Now().Add(300 * time.Millisecond)
@@ -103,7 +103,7 @@ func TestOutputAtomicNoInterleave(t *testing.T) {
 		})
 		pairs++
 	}
-	sink(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"sleep 1"}`,
+	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"sleep 1"}`,
 		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "sleep 1", ExitCode: 0}}})
 
 	got := buf.String()

@@ -245,17 +245,17 @@ func TestRenderResponseInfoNoTTFCWhenImmediate(t *testing.T) {
 	}
 }
 
-func TestWireToolViewReasoningLabel(t *testing.T) {
+func TestToolViewReasoningLabel(t *testing.T) {
 	old := style.GetProfile()
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var buf syncBuf
-	sink := WireToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
-	sink(agent.Event{Kind: agent.EventRequestStart})
+	view := NewToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
+	view.Handle(agent.Event{Kind: agent.EventRequestStart})
 	time.Sleep(150 * time.Millisecond)
-	sink(agent.Event{Kind: agent.EventReasoning, Text: "想"})
+	view.Handle(agent.Event{Kind: agent.EventReasoning, Text: "想"})
 	time.Sleep(150 * time.Millisecond)
-	sink(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{Duration: time.Second}})
+	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{Duration: time.Second}})
 	out := buf.String()
 	if !strings.Contains(out, "等待响应") {
 		t.Errorf("请求开始应显示等待响应: %q", out)
@@ -265,15 +265,15 @@ func TestWireToolViewReasoningLabel(t *testing.T) {
 	}
 }
 
-func TestWireToolViewInteractive(t *testing.T) {
+func TestToolViewInteractive(t *testing.T) {
 	old := style.GetProfile()
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var buf syncBuf
-	sink := WireToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
-	sink(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true})
+	view := NewToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
+	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true})
 	time.Sleep(250 * time.Millisecond)
-	sink(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "sudo -S true", ExitCode: 1}}})
+	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "sudo -S true", ExitCode: 1}}})
 	out := buf.String()
 	if !strings.Contains(out, "等待终端输入") {
 		t.Errorf("交互模式应打印引导行: %q", out)
@@ -289,15 +289,15 @@ func TestWireToolViewInteractive(t *testing.T) {
 	}
 }
 
-func TestWireToolViewNonInteractive(t *testing.T) {
+func TestToolViewNonInteractive(t *testing.T) {
 	old := style.GetProfile()
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var buf syncBuf
-	sink := WireToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
-	sink(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
+	view := NewToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
+	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	time.Sleep(250 * time.Millisecond)
-	sink(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", ExitCode: 0}}})
+	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", ExitCode: 0}}})
 	out := buf.String()
 	if out == "" {
 		t.Fatal("输出为空则负向断言会静默通过")
@@ -437,9 +437,9 @@ func TestToolBlockSingleWrite(t *testing.T) {
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var wc writeCounter
-	sink := WireToolView(NewStreams(&wc, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
+	view := NewToolView(NewStreams(&wc, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
 	before := wc.count()
-	sink(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
+	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
 		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
 	if got := wc.count() - before; got != 1 {
 		t.Errorf("工具块应一次写完（标题+正文+状态行），实际 %d 次", got)
@@ -447,5 +447,56 @@ func TestToolBlockSingleWrite(t *testing.T) {
 	got := wc.String()
 	if !strings.Contains(got, "▸ run_shell echo hi") || !strings.Contains(got, "↳ exit 0") || !strings.Contains(got, "hi") {
 		t.Errorf("块内容不完整: %q", got)
+	}
+}
+
+func TestToolViewStateFields(t *testing.T) {
+	old := style.GetProfile()
+	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
+	t.Cleanup(func() { style.SetProfile(old) })
+	var buf syncBuf
+	st := NewStreams(&buf, &syncBuf{})
+	view := NewToolView(st, style.GetProfile(), func() int { return 80 }, 20)
+	if view.st != st || view.maxLines != 20 || !view.prof.TTY || view.width() != 80 {
+		t.Errorf("构造应把 writer/profile/宽度/行数写成字段: %+v", view)
+	}
+	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
+		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
+	if !view.justEnded || view.dirty {
+		t.Errorf("工具块结束应置 justEnded 并清 dirty: justEnded=%v dirty=%v", view.justEnded, view.dirty)
+	}
+	if !strings.Contains(buf.String(), "▸ run_shell") {
+		t.Errorf("TTY 下应上移重绘块: %q", buf.String())
+	}
+	view.Content(KindContent, "答案")
+	if view.justEnded || !view.dirty {
+		t.Errorf("无换行结尾的正文应保持 dirty: justEnded=%v dirty=%v", view.justEnded, view.dirty)
+	}
+	view.Content(KindContent, "结束\n")
+	if view.dirty {
+		t.Error("以换行结尾的正文应清 dirty")
+	}
+	if !strings.Contains(buf.String(), "\n答案结束\n") {
+		t.Errorf("justEnded 时应先补空行再写正文: %q", buf.String())
+	}
+}
+
+func TestToolViewContentSemantics(t *testing.T) {
+	old := style.GetProfile()
+	style.SetProfile(style.Profile{TTY: false, Colors: style.LevelNone, Unicode: true})
+	t.Cleanup(func() { style.SetProfile(old) })
+	var buf syncBuf
+	view := NewToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
+	view.Content(KindContent, "")
+	if buf.String() != "" {
+		t.Errorf("空文本不应输出: %q", buf.String())
+	}
+	view.Content(KindNotice, "提示\n")
+	if buf.String() != "提示\n" {
+		t.Errorf("Content 应按给定 Kind 输出: %q", buf.String())
+	}
+	view.Content(KindContent, "续写")
+	if buf.String() != "提示\n续写" {
+		t.Errorf("无 justEnded 时不应补空行: %q", buf.String())
 	}
 }

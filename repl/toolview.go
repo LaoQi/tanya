@@ -244,64 +244,85 @@ func textView(text string, width, maxLines int) ([]string, string) {
 	return out, ""
 }
 
-func WireToolView(st *streams, prof style.Profile, width func() int, maxLines int) agent.EventSink {
-	sp := newSpinner(st.out, prof.TTY && st.out.allows(KindSpinner))
-	toolJustEnded := false
-	lineDirty := false
-	return func(e agent.Event) {
-		switch e.Kind {
-		case agent.EventRequestStart:
-			sp.start(spinWaiting)
-		case agent.EventReasoning:
-			sp.setKind(spinThinking)
-		case agent.EventContent:
-			if e.Text == "" {
-				return
-			}
-			sp.stop()
-			justEnded := toolJustEnded
-			st.out.atomic(KindContent, func(w io.Writer) {
-				if justEnded {
-					io.WriteString(w, "\n")
-				}
-				io.WriteString(w, e.Text)
-			})
-			toolJustEnded = false
-			lineDirty = !strings.HasSuffix(e.Text, "\n")
-		case agent.EventResponse:
-			sp.stop()
-			dirty := lineDirty
-			st.out.atomic(KindToolStatus, func(w io.Writer) {
-				if dirty {
-					io.WriteString(w, "\n")
-				}
-				io.WriteString(w, style.Info.Sprint(RenderResponseInfo(e.Response, width())))
-			})
-			lineDirty = false
-		case agent.EventToolStart:
-			sp.stop()
-			st.out.atomic(KindToolBlock, func(w io.Writer) {
-				io.WriteString(w, style.Dim.Frame(RenderToolStart(e.ToolName, e.ToolArgs, width())))
-				if e.Interactive {
-					io.WriteString(w, style.Info.Sprint(MsgInteractiveHint))
-				}
-			})
-			lineDirty = false
-			if !e.Interactive {
-				sp.start(spinRunning)
-			}
-		case agent.EventToolEnd:
-			sp.stop()
-			block := RenderToolEnd(e.ToolName, e.ToolArgs, e.Result, width(), maxLines)
-			if prof.TTY && !e.Interactive {
-				block = RenderToolEndInline(e.ToolName, e.ToolArgs, e.Result, width(), maxLines)
-			}
-			st.out.atomic(KindToolBlock, func(w io.Writer) {
-				io.WriteString(w, block)
-			})
-			toolJustEnded = true
-			lineDirty = false
+// toolView 是工具区渲染器：闭包状态提为字段，仍是 agent.EventSink（Handle 即签名匹配）。
+type toolView struct {
+	st        *streams
+	sp        *spinner
+	prof      style.Profile
+	width     func() int
+	maxLines  int
+	justEnded bool
+	dirty     bool
+}
+
+func NewToolView(st *streams, prof style.Profile, width func() int, maxLines int) *toolView {
+	return &toolView{
+		st:       st,
+		sp:       newSpinner(st.out, prof.TTY && st.out.allows(KindSpinner)),
+		prof:     prof,
+		width:    width,
+		maxLines: maxLines,
+	}
+}
+
+// Content 输出正文（原 REPL.print 的语义）：停动画、若上一块是工具块先补空行、跟踪行尾状态。
+func (v *toolView) Content(kind Kind, text string) {
+	if text == "" {
+		return
+	}
+	v.sp.stop()
+	justEnded := v.justEnded
+	v.st.out.atomic(kind, func(w io.Writer) {
+		if justEnded {
+			io.WriteString(w, "\n")
 		}
+		io.WriteString(w, text)
+	})
+	v.justEnded = false
+	v.dirty = !strings.HasSuffix(text, "\n")
+}
+
+func (v *toolView) Handle(e agent.Event) {
+	switch e.Kind {
+	case agent.EventRequestStart:
+		v.sp.start(spinWaiting)
+	case agent.EventReasoning:
+		v.sp.setKind(spinThinking)
+	case agent.EventContent:
+		v.Content(KindContent, e.Text)
+	case agent.EventResponse:
+		v.sp.stop()
+		dirty := v.dirty
+		v.st.out.atomic(KindToolStatus, func(w io.Writer) {
+			if dirty {
+				io.WriteString(w, "\n")
+			}
+			io.WriteString(w, style.Info.Sprint(RenderResponseInfo(e.Response, v.width())))
+		})
+		v.dirty = false
+	case agent.EventToolStart:
+		v.sp.stop()
+		v.st.out.atomic(KindToolBlock, func(w io.Writer) {
+			io.WriteString(w, style.Dim.Frame(RenderToolStart(e.ToolName, e.ToolArgs, v.width())))
+			if e.Interactive {
+				io.WriteString(w, style.Info.Sprint(MsgInteractiveHint))
+			}
+		})
+		v.dirty = false
+		if !e.Interactive {
+			v.sp.start(spinRunning)
+		}
+	case agent.EventToolEnd:
+		v.sp.stop()
+		block := RenderToolEnd(e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
+		if v.prof.TTY && !e.Interactive {
+			block = RenderToolEndInline(e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
+		}
+		v.st.out.atomic(KindToolBlock, func(w io.Writer) {
+			io.WriteString(w, block)
+		})
+		v.justEnded = true
+		v.dirty = false
 	}
 }
 

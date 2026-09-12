@@ -86,37 +86,27 @@ func TestTurnDuration(t *testing.T) {
 func TestTurnGapOnce(t *testing.T) {
 	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
 	r, buf, _ := newTestREPL(t, newFakeTerm())
-	seen := 0
-	r.view = func(agent.Event) { seen++ }
 	turn := r.beginTurn(nil)
-	turn.Handle(agent.Event{Kind: agent.EventRequestStart})
-	turn.Handle(agent.Event{Kind: agent.EventToolStart})
-	out := buf.String()
-	if out != "\n" {
-		t.Errorf("首个事件前应恰好补一个空行: %q", out)
+	turn.Handle(agent.Event{Kind: agent.EventReasoning})
+	turn.Handle(agent.Event{Kind: agent.EventReasoning})
+	if buf.String() != "\n" {
+		t.Errorf("首个事件前应恰好补一个空行且无其他输出: %q", buf.String())
 	}
-	if seen != 2 {
-		t.Errorf("事件应全部透传: %d", seen)
-	}
-	if turn.Handle(agent.Event{Kind: agent.EventResponse}); buf.String() != "\n" {
-		t.Errorf("空行只应补一次: %q", buf.String())
+	turn.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
+		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", ExitCode: 0}}})
+	if !strings.Contains(buf.String(), "▸ run_shell") {
+		t.Errorf("事件应送达工具视图: %q", buf.String())
 	}
 }
 
 func TestTurnNonTTYNoGap(t *testing.T) {
 	ttyProfile(t, style.Profile{TTY: false, Colors: style.LevelNone, Unicode: true})
 	r, buf, _ := newTestREPL(t, newFakeTerm())
-	seen := 0
-	r.view = func(agent.Event) { seen++ }
 	turn := r.beginTurn(nil)
-	turn.Handle(agent.Event{Kind: agent.EventRequestStart})
-	turn.Handle(agent.Event{Kind: agent.EventResponse})
-	out := buf.String()
-	if out != "" {
-		t.Errorf("非 TTY 不应补空行: %q", out)
-	}
-	if seen != 2 {
-		t.Errorf("事件应全部透传: %d", seen)
+	turn.Handle(agent.Event{Kind: agent.EventReasoning})
+	turn.Handle(agent.Event{Kind: agent.EventReasoning})
+	if buf.String() != "" {
+		t.Errorf("非 TTY 不应补空行: %q", buf.String())
 	}
 }
 
