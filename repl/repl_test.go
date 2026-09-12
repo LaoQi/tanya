@@ -152,10 +152,7 @@ func TestWelcomeText(t *testing.T) {
 }
 
 func TestMdToggle(t *testing.T) {
-	r, err := NewREPL(nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r, _, _ := newTestREPL(t, newFakeTerm())
 	if !r.mdLive {
 		t.Error("md 默认应开启")
 	}
@@ -174,7 +171,8 @@ func TestMdToggle(t *testing.T) {
 func TestStreamContentBypassWhenOff(t *testing.T) {
 	r, buf, _ := newTestREPL(t, newFakeTerm())
 	r.mdLive = false
-	r.stream(agent.Event{Kind: agent.EventContent, Text: "直接输出"})
+	turn := r.beginTurn(nil)
+	turn.writeContent("直接输出")
 	out := buf.String()
 	if out != "直接输出" {
 		t.Errorf("关闭渲染应直通输出: %q", out)

@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -19,7 +20,7 @@ func ttyProfile(t *testing.T, p style.Profile) {
 
 func TestTurnSepTimeOnly(t *testing.T) {
 	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
-	out := turnSep(0)
+	out := turnSep(style.Profile{TTY: true, Colors: style.Level16, Unicode: true}, 0)
 	plain := style.Strip(out)
 	if !regexp.MustCompile(`^\n──── \d{2}:\d{2}:\d{2}\n$`).MatchString(plain) {
 		t.Errorf("回合分隔线格式不符: %q", plain)
@@ -34,7 +35,7 @@ func TestTurnSepTimeOnly(t *testing.T) {
 
 func TestTurnSepWithDuration(t *testing.T) {
 	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
-	plain := style.Strip(turnSep(12*time.Second + 400*time.Millisecond))
+	plain := style.Strip(turnSep(style.Profile{TTY: true, Colors: style.Level16, Unicode: true}, 12*time.Second+400*time.Millisecond))
 	if !regexp.MustCompile(`^\n──── \d{2}:\d{2}:\d{2} · 回合 12\.4s\n$`).MatchString(plain) {
 		t.Errorf("带耗时分隔线格式不符: %q", plain)
 	}
@@ -42,7 +43,7 @@ func TestTurnSepWithDuration(t *testing.T) {
 
 func TestTurnSepNoColor(t *testing.T) {
 	ttyProfile(t, style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
-	out := turnSep(time.Second)
+	out := turnSep(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true}, time.Second)
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("无色环境不应出现 SGR: %q", out)
 	}
@@ -53,10 +54,11 @@ func TestTurnSepNoColor(t *testing.T) {
 
 func TestTurnSepNonTTYBypass(t *testing.T) {
 	ttyProfile(t, style.Profile{TTY: false, Colors: style.LevelNone, Unicode: true})
-	if out := turnSep(0); out != "" {
+	nonTTY := style.Profile{TTY: false, Colors: style.LevelNone, Unicode: true}
+	if out := turnSep(nonTTY, 0); out != "" {
 		t.Errorf("非 TTY 不应打印分隔线: %q", out)
 	}
-	if out := turnSep(3 * time.Second); out != "" {
+	if out := turnSep(nonTTY, 3*time.Second); out != "" {
 		t.Errorf("非 TTY 不应打印带耗时分隔线: %q", out)
 	}
 }
@@ -81,14 +83,14 @@ func TestTurnDuration(t *testing.T) {
 	}
 }
 
-func TestTurnSinkGapOnce(t *testing.T) {
+func TestTurnGapOnce(t *testing.T) {
 	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
 	r, buf, _ := newTestREPL(t, newFakeTerm())
 	seen := 0
-	r.stream = func(agent.Event) { seen++ }
-	sink := r.turnSink()
-	sink(agent.Event{Kind: agent.EventRequestStart})
-	sink(agent.Event{Kind: agent.EventToolStart})
+	r.view = func(agent.Event) { seen++ }
+	turn := r.beginTurn(nil)
+	turn.Handle(agent.Event{Kind: agent.EventRequestStart})
+	turn.Handle(agent.Event{Kind: agent.EventToolStart})
 	out := buf.String()
 	if out != "\n" {
 		t.Errorf("首个事件前应恰好补一个空行: %q", out)
@@ -96,21 +98,99 @@ func TestTurnSinkGapOnce(t *testing.T) {
 	if seen != 2 {
 		t.Errorf("事件应全部透传: %d", seen)
 	}
+	if turn.Handle(agent.Event{Kind: agent.EventResponse}); buf.String() != "\n" {
+		t.Errorf("空行只应补一次: %q", buf.String())
+	}
 }
 
-func TestTurnSinkNonTTYNoGap(t *testing.T) {
+func TestTurnNonTTYNoGap(t *testing.T) {
 	ttyProfile(t, style.Profile{TTY: false, Colors: style.LevelNone, Unicode: true})
 	r, buf, _ := newTestREPL(t, newFakeTerm())
 	seen := 0
-	r.stream = func(agent.Event) { seen++ }
-	sink := r.turnSink()
-	sink(agent.Event{Kind: agent.EventRequestStart})
-	sink(agent.Event{Kind: agent.EventResponse})
+	r.view = func(agent.Event) { seen++ }
+	turn := r.beginTurn(nil)
+	turn.Handle(agent.Event{Kind: agent.EventRequestStart})
+	turn.Handle(agent.Event{Kind: agent.EventResponse})
 	out := buf.String()
 	if out != "" {
 		t.Errorf("非 TTY 不应补空行: %q", out)
 	}
 	if seen != 2 {
 		t.Errorf("事件应全部透传: %d", seen)
+	}
+}
+
+func TestTurnNoGapOnZeroEventTurn(t *testing.T) {
+	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
+	r, buf, _ := newTestREPL(t, newFakeTerm())
+	r.beginTurn(nil).End(errors.New("立即失败"))
+	if n := strings.Count(buf.String(), "\n"); n != 2 {
+		t.Errorf("零事件回合只应有分隔线自身的两个换行（补空行会与它叠成双空行），实际 %d 个: %q", n, buf.String())
+	}
+}
+
+func TestFlowContextCarriers(t *testing.T) {
+	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
+	r, _, _ := newTestREPL(t, newFakeTerm())
+	r.mdLive = false
+	t1 := r.beginTurn(nil)
+	if !t1.f.prof.TTY || t1.f.live || t1.f.md == nil || t1.f.st != r.st {
+		t.Errorf("flow 应携带 prof/live/md/st: %+v", t1.f)
+	}
+	r.mdLive = true
+	t2 := r.beginTurn(nil)
+	if !t2.f.live {
+		t.Error("新回合应读到最新的 /md 开关")
+	}
+	if t1.f.md == t2.f.md {
+		t.Error("每回合应派发独立的 markdown 缓冲")
+	}
+	if t2.f.mdEnabled() != t2.f.live && t2.f.prof.TTY {
+		t.Error("mdEnabled 应同时受开关与 TTY 约束")
+	}
+	s, ok := style.LookupScheme("vivid")
+	if !ok {
+		t.Fatal("缺少 vivid 主题")
+	}
+	r.applyTheme(s)
+	t3 := r.beginTurn(nil)
+	if t3.f.rend != r.rend {
+		t.Error("回合应取当前渲染器（/theme 后同步）")
+	}
+}
+
+func TestTurnEndSettlesMarkdown(t *testing.T) {
+	withPlainProfile(t)
+	r, buf, _ := newTestREPL(t, newFakeTerm())
+	turn := r.beginTurn(nil)
+	turn.f.md.Write("滞留尾行")
+	if buf.String() != "" {
+		t.Errorf("End 之前不应输出尾行: %q", buf.String())
+	}
+	turn.End(nil)
+	if !strings.Contains(buf.String(), "滞留尾行") {
+		t.Errorf("End 应结算 markdown 尾行: %q", buf.String())
+	}
+}
+
+func TestTurnInterruptAndErrorPaths(t *testing.T) {
+	withPlainProfile(t)
+	r, out, errb := newTestREPL(t, newFakeTerm())
+	r.beginTurn(nil).End(&agent.InterruptError{})
+	if !strings.Contains(errb.String(), MsgInterruptBare) {
+		t.Errorf("裸中断应写 stderr: %q", errb.String())
+	}
+	r2, _, errb2 := newTestREPL(t, newFakeTerm())
+	r2.beginTurn(nil).End(&agent.InterruptError{Kept: true})
+	if !strings.Contains(errb2.String(), MsgInterruptKept) {
+		t.Errorf("保留式中断应写 stderr: %q", errb2.String())
+	}
+	r3, out3, errb3 := newTestREPL(t, newFakeTerm())
+	r3.beginTurn(nil).End(errors.New("boom"))
+	if !strings.Contains(errb3.String(), "错误: boom") {
+		t.Errorf("普通错误应写 stderr: %q", errb3.String())
+	}
+	if out.String() != "" || out3.String() != "" {
+		t.Errorf("错误不应写 stdout: %q / %q", out.String(), out3.String())
 	}
 }

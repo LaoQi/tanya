@@ -65,7 +65,7 @@ func main() {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
-	sink := repl.WireToolView(st, repl.ToolWidth, a.ToolOutputLines())
+	sink := repl.WireToolView(st, prof, repl.ToolWidth, a.ToolOutputLines())
 
 	if isAsk {
 		q := strings.Join(args[1:], " ")

@@ -2,7 +2,6 @@ package repl
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -22,11 +21,10 @@ type REPL struct {
 	term      readline.Terminal
 	raw       bool
 	st        *streams
+	prof      style.Profile
 	promptTpl string
 	prompt    style.Template
 	view      agent.EventSink
-	stream    agent.EventSink
-	md        *style.MarkdownBuf
 	mdLive    bool
 	rend      style.Renderer
 }
@@ -73,38 +71,15 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 		return nil, err
 	}
 	r := &REPL{agent: a, ed: ed, term: term, raw: raw, st: o.st, promptTpl: promptTpl, prompt: tpl}
-	r.md = style.NewMarkdownBuf()
 	r.mdLive = true
-	r.rend = style.NewThemedRenderer(style.GetProfile(), sch.MD)
+	r.prof = style.GetProfile()
+	r.rend = style.NewThemedRenderer(r.prof, sch.MD)
 	maxLines := 20
 	if a != nil {
 		maxLines = a.ToolOutputLines()
 	}
-	r.view = WireToolView(o.st, func() int { return toolWidth(term) }, maxLines)
-	r.stream = r.streamEvent
+	r.view = WireToolView(o.st, r.prof, func() int { return toolWidth(term) }, maxLines)
 	return r, nil
-}
-
-func (r *REPL) streamEvent(e agent.Event) {
-	switch e.Kind {
-	case agent.EventContent:
-		r.writeContent(e.Text)
-	case agent.EventToolStart, agent.EventResponse:
-		r.settleMd()
-		r.view(e)
-	default:
-		r.view(e)
-	}
-}
-
-func (r *REPL) writeContent(s string) {
-	if !r.mdEnabled() {
-		r.print(s)
-		return
-	}
-	for _, blk := range r.md.Write(s) {
-		r.print(r.rend.Block(blk))
-	}
 }
 
 func (r *REPL) print(text string) {
@@ -112,17 +87,11 @@ func (r *REPL) print(text string) {
 }
 
 func (r *REPL) mdEnabled() bool {
-	return r.mdLive && style.GetProfile().TTY
+	return r.mdLive && r.prof.TTY
 }
 
-func (r *REPL) settleMd() {
-	for _, blk := range r.md.Close() {
-		r.print(r.rend.Block(blk))
-	}
-}
-
-func turnSep(d time.Duration) string {
-	if !style.GetProfile().TTY {
+func turnSep(prof style.Profile, d time.Duration) string {
+	if !prof.TTY {
 		return ""
 	}
 	text := fmt.Sprintf(TurnSepTimeFmt, time.Now().Format("15:04:05"))
@@ -130,17 +99,6 @@ func turnSep(d time.Duration) string {
 		text += fmt.Sprintf(TurnSepDurFmt, turnDuration(d))
 	}
 	return "\n" + style.Ok.Sprint(text) + "\n"
-}
-
-func (r *REPL) turnSink() agent.EventSink {
-	gap := style.GetProfile().TTY
-	return func(e agent.Event) {
-		if gap {
-			gap = false
-			r.st.out.emit(KindDecor, "\n")
-		}
-		r.stream(e)
-	}
 }
 
 func turnDuration(d time.Duration) string {
@@ -213,7 +171,7 @@ func (r *REPL) Run() error {
 			if r.handleCommand(line) {
 				return nil
 			}
-			r.st.out.emit(KindDecor, turnSep(0))
+			r.st.out.emit(KindDecor, turnSep(r.prof, 0))
 			continue
 		}
 		if text, ok := dialogueText(line); ok {
@@ -231,27 +189,9 @@ func (r *REPL) Run() error {
 func (r *REPL) ask(q string) {
 	readline.SecureTerminal()
 	ctx, done := InterruptContext()
-	r.md.Reset()
-	start := time.Now()
-	err := r.agent.Ask(ctx, q, r.turnSink())
-	turnDur := time.Since(start)
-	for _, blk := range r.md.Close() {
-		r.print(r.rend.Block(blk))
-	}
-	done()
-	if err != nil {
-		var ie *agent.InterruptError
-		if errors.As(err, &ie) {
-			if ie.Kept {
-				r.st.err.emit(KindError, MsgInterruptKept)
-			} else {
-				r.st.err.emit(KindError, MsgInterruptBare)
-			}
-		} else {
-			r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
-		}
-	}
-	r.st.out.emit(KindDecor, turnSep(turnDur))
+	t := r.beginTurn(done)
+	err := r.agent.Ask(ctx, q, t.Handle)
+	t.End(err)
 }
 
 func InterruptContext() (context.Context, func()) {
@@ -371,7 +311,7 @@ func (r *REPL) handleTheme(args []string) {
 }
 
 func (r *REPL) printThemeSample() {
-	if style.GetProfile().Colors == style.LevelNone {
+	if r.prof.Colors == style.LevelNone {
 		return
 	}
 	line := func(text string) []style.Inline {
@@ -411,7 +351,7 @@ func (r *REPL) printThemeSample() {
 func (r *REPL) applyTheme(s style.Scheme) {
 	r.promptTpl = s.Prompt
 	r.prompt, _ = style.ParseTemplate(s.Prompt)
-	r.rend = style.NewThemedRenderer(style.GetProfile(), s.MD)
+	r.rend = style.NewThemedRenderer(r.prof, s.MD)
 }
 
 func (r *REPL) handleThink(args []string) {
@@ -531,17 +471,9 @@ func (r *REPL) printRendered(text string) {
 		r.st.out.emit(KindContent, text+"\n")
 		return
 	}
-	for _, blk := range r.mdBlocks(text) {
+	for _, blk := range mdBlocks(text) {
 		r.print(r.rend.Block(blk))
 	}
-}
-
-func (r *REPL) mdBlocks(text string) []style.Block {
-	buf := style.NewMarkdownBuf()
-	var blks []style.Block
-	blks = append(blks, buf.Write(text)...)
-	blks = append(blks, buf.Close()...)
-	return blks
 }
 
 func (r *REPL) loadSessionInteractive() {

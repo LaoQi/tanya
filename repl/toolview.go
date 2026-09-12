@@ -244,8 +244,8 @@ func textView(text string, width, maxLines int) ([]string, string) {
 	return out, ""
 }
 
-func WireToolView(st *streams, width func() int, maxLines int) agent.EventSink {
-	sp := newSpinner(st.out, style.GetProfile().TTY && st.out.allows(KindSpinner))
+func WireToolView(st *streams, prof style.Profile, width func() int, maxLines int) agent.EventSink {
+	sp := newSpinner(st.out, prof.TTY && st.out.allows(KindSpinner))
 	toolJustEnded := false
 	lineDirty := false
 	return func(e agent.Event) {
@@ -293,7 +293,7 @@ func WireToolView(st *streams, width func() int, maxLines int) agent.EventSink {
 		case agent.EventToolEnd:
 			sp.stop()
 			block := RenderToolEnd(e.ToolName, e.ToolArgs, e.Result, width(), maxLines)
-			if style.GetProfile().TTY && !e.Interactive {
+			if prof.TTY && !e.Interactive {
 				block = RenderToolEndInline(e.ToolName, e.ToolArgs, e.Result, width(), maxLines)
 			}
 			st.out.atomic(KindToolBlock, func(w io.Writer) {

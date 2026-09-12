@@ -250,7 +250,7 @@ func TestWireToolViewReasoningLabel(t *testing.T) {
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var buf syncBuf
-	sink := WireToolView(NewStreams(&buf, &syncBuf{}), func() int { return 80 }, 20)
+	sink := WireToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
 	sink(agent.Event{Kind: agent.EventRequestStart})
 	time.Sleep(150 * time.Millisecond)
 	sink(agent.Event{Kind: agent.EventReasoning, Text: "想"})
@@ -270,7 +270,7 @@ func TestWireToolViewInteractive(t *testing.T) {
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var buf syncBuf
-	sink := WireToolView(NewStreams(&buf, &syncBuf{}), func() int { return 80 }, 20)
+	sink := WireToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
 	sink(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true})
 	time.Sleep(250 * time.Millisecond)
 	sink(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "sudo -S true", ExitCode: 1}}})
@@ -294,7 +294,7 @@ func TestWireToolViewNonInteractive(t *testing.T) {
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var buf syncBuf
-	sink := WireToolView(NewStreams(&buf, &syncBuf{}), func() int { return 80 }, 20)
+	sink := WireToolView(NewStreams(&buf, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
 	sink(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	time.Sleep(250 * time.Millisecond)
 	sink(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", ExitCode: 0}}})
@@ -437,7 +437,7 @@ func TestToolBlockSingleWrite(t *testing.T) {
 	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
 	t.Cleanup(func() { style.SetProfile(old) })
 	var wc writeCounter
-	sink := WireToolView(NewStreams(&wc, &syncBuf{}), func() int { return 80 }, 20)
+	sink := WireToolView(NewStreams(&wc, &syncBuf{}), style.GetProfile(), func() int { return 80 }, 20)
 	before := wc.count()
 	sink(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
 		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})

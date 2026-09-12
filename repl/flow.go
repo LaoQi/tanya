@@ -1,5 +1,14 @@
 package repl
 
+import (
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanyan/style"
+)
+
 // Kind 标记每次输出的类别，是噪音门禁与测试断言的把手（不导出包外、不进 agent.Event）。
 type Kind uint8
 
@@ -13,3 +22,104 @@ const (
 	KindError                      // 错误与中断提示
 	KindSpinner                    // 动画帧与清行
 )
+
+// flow 是一次回合的渲染上下文：REPL 只在构造时快照 profile，渲染器与 markdown 缓冲按回合派生。
+type flow struct {
+	st   *streams
+	prof style.Profile
+	live bool
+	md   *style.MarkdownBuf
+	rend style.Renderer
+}
+
+func (f *flow) emit(kind Kind, s string) { f.st.out.emit(kind, s) }
+
+func (f *flow) mdEnabled() bool { return f.live && f.prof.TTY }
+
+// turn 承载一次对话回合：懒补首行空行、结算 markdown、收尾文案与分隔线。
+type turn struct {
+	r     *REPL
+	f     *flow
+	start time.Time
+	done  func()
+	gap   bool
+}
+
+func (r *REPL) beginTurn(done func()) *turn {
+	return &turn{
+		r:     r,
+		start: time.Now(),
+		done:  done,
+		f: &flow{
+			st:   r.st,
+			prof: r.prof,
+			live: r.mdLive,
+			md:   style.NewMarkdownBuf(),
+			rend: r.rend,
+		},
+	}
+}
+
+func (t *turn) Handle(e agent.Event) {
+	if !t.gap {
+		t.gap = true
+		if t.f.prof.TTY {
+			t.f.emit(KindDecor, "\n")
+		}
+	}
+	switch e.Kind {
+	case agent.EventContent:
+		t.writeContent(e.Text)
+	case agent.EventToolStart, agent.EventResponse:
+		t.settleMd()
+		t.r.view(e)
+	default:
+		t.r.view(e)
+	}
+}
+
+func (t *turn) writeContent(s string) {
+	if !t.f.mdEnabled() {
+		t.r.print(s)
+		return
+	}
+	for _, blk := range t.f.md.Write(s) {
+		t.r.print(t.f.rend.Block(blk))
+	}
+}
+
+func (t *turn) settleMd() {
+	for _, blk := range t.f.md.Close() {
+		t.r.print(t.f.rend.Block(blk))
+	}
+}
+
+func (t *turn) End(err error) {
+	dur := time.Since(t.start)
+	t.settleMd()
+	if t.done != nil {
+		t.done()
+	}
+	if err != nil {
+		var ie *agent.InterruptError
+		if errors.As(err, &ie) {
+			if ie.Kept {
+				t.f.st.err.emit(KindError, MsgInterruptKept)
+			} else {
+				t.f.st.err.emit(KindError, MsgInterruptBare)
+			}
+		} else {
+			t.f.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+		}
+	}
+	t.f.emit(KindDecor, turnSep(t.f.prof, dur))
+}
+
+// mdBlocks 把整段文本按 markdown 管线解析为块（回放等一次性展示用，不复用回合缓冲）。
+func mdBlocks(text string) []style.Block {
+	buf := style.NewMarkdownBuf()
+	var blks []style.Block
+	blks = append(blks, buf.Write(text)...)
+	blks = append(blks, buf.Close()...)
+	return blks
+}
