@@ -61,3 +61,17 @@ func TestIsExitLine(t *testing.T) {
 		}
 	}
 }
+
+func TestSlashCommandsAllHandled(t *testing.T) {
+	a := newSessTestAgent(t, t.TempDir())
+	for _, cmd := range slashCommands {
+		if cmd == "/load" {
+			continue
+		}
+		r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+		r.handleCommand(cmd)
+		if out.String() == "" && errb.String() == "" {
+			t.Errorf("%q 在白名单内但没有任何输出，说明 handleCommand 缺少对应分支", cmd)
+		}
+	}
+}

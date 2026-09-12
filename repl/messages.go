@@ -4,7 +4,6 @@ const (
 	MsgBye          = "再见"
 	MsgErrLineFmt   = "错误: %v"
 	MsgAskUsage     = "用法: tanyan ask \"问题\"\n"
-	MsgUnknownCmd   = "未知命令，输入 /help 查看\n"
 	MsgNoSessions   = "(无历史会话)\n"
 	MsgNoHistoryMsg = "(当前会话无消息)\n"
 	MsgCancelled    = "已取消\n"
