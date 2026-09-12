@@ -276,8 +276,6 @@ func (r *REPL) handleCommand(line string) bool {
 		}
 	case "/theme":
 		r.handleTheme(parts[1:])
-	default:
-		r.st.err.emit(KindError, MsgUnknownCmd)
 	}
 	return false
 }
