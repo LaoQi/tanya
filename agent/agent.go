@@ -639,6 +639,7 @@ func runShellDesc(rt *shellRuntime) string {
 		fmt.Fprintf(&b, "在 %s %s 中执行 shell 命令", runtime.GOOS, rt.profile.Name)
 	}
 	b.WriteString("，返回 stdout/stderr/退出码。读文件、搜索、文本处理等系统操作都用它。")
+	b.WriteString("命令的工作目录为会话启动目录（进程 cwd）。")
 	if len(rt.programs) > 0 {
 		b.WriteString("可用程序: " + strings.Join(rt.programs, ", "))
 	}
