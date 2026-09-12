@@ -14,7 +14,7 @@ import (
 
 func TestStreamsInjectWriter(t *testing.T) {
 	var out, errb bytes.Buffer
-	st := NewStreams(&out, &errb)
+	st := NewStreams(&out, &errb, modeRich)
 	st.out.emit(KindContent, "答案\n")
 	st.err.emit(KindError, "错误\n")
 	if got := out.String(); got != "答案\n" {
@@ -27,7 +27,7 @@ func TestStreamsInjectWriter(t *testing.T) {
 
 func TestOutputEmitEmptyIsNoop(t *testing.T) {
 	var out bytes.Buffer
-	st := NewStreams(&out, &bytes.Buffer{})
+	st := NewStreams(&out, &bytes.Buffer{}, modeRich)
 	st.out.emit(KindContent, "")
 	if out.Len() != 0 {
 		t.Errorf("空串不应写入: %q", out.String())
@@ -36,7 +36,7 @@ func TestOutputEmitEmptyIsNoop(t *testing.T) {
 
 func TestOutputAtomicSingleWrite(t *testing.T) {
 	var out bytes.Buffer
-	st := NewStreams(&out, &bytes.Buffer{})
+	st := NewStreams(&out, &bytes.Buffer{}, modeRich)
 	st.out.atomic(KindToolBlock, func(w io.Writer) {
 		io.WriteString(w, "标题\n")
 		io.WriteString(w, "正文\n")
@@ -48,7 +48,7 @@ func TestOutputAtomicSingleWrite(t *testing.T) {
 
 func TestOutputWriteIsWriter(t *testing.T) {
 	var out bytes.Buffer
-	st := NewStreams(&out, &bytes.Buffer{})
+	st := NewStreams(&out, &bytes.Buffer{}, modeRich)
 	if _, err := st.out.Write([]byte("裸写\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestOutputWriteIsWriter(t *testing.T) {
 
 func TestOutputSetWriter(t *testing.T) {
 	var first, second bytes.Buffer
-	st := NewStreams(&first, &bytes.Buffer{})
+	st := NewStreams(&first, &bytes.Buffer{}, modeRich)
 	st.out.setWriter(&second)
 	st.out.emit(KindContent, "迁移\n")
 	if first.Len() != 0 {
@@ -72,7 +72,7 @@ func TestOutputSetWriter(t *testing.T) {
 
 func TestOutputGuardFiresOnEmitNotWrite(t *testing.T) {
 	var calls int
-	st := NewStreams(&bytes.Buffer{}, &bytes.Buffer{})
+	st := NewStreams(&bytes.Buffer{}, &bytes.Buffer{}, modeRich)
 	st.out.guard = func() { calls++ }
 	st.out.emit(KindContent, "a")
 	st.out.atomic(KindToolBlock, func(w io.Writer) { io.WriteString(w, "b") })
@@ -90,7 +90,7 @@ func TestOutputGuardFiresOnEmitNotWrite(t *testing.T) {
 func TestOutputAtomicNoInterleave(t *testing.T) {
 	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
 	var buf syncBuf
-	st := NewStreams(&buf, &syncBuf{})
+	st := NewStreams(&buf, &syncBuf{}, modeRich)
 	view := NewToolView(st, style.GetProfile(), func() int { return 80 }, 20)
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sleep 1"}`})
 
@@ -166,14 +166,14 @@ func TestStderrRoutedThroughErr(t *testing.T) {
 	}
 
 	var err2 syncBuf
-	st := NewStreams(&syncBuf{}, &err2)
+	st := NewStreams(&syncBuf{}, &err2, modeRich)
 	st.Fail("失败: %v", errors.New("boom"))
 	if !strings.Contains(err2.String(), "失败: boom") {
 		t.Errorf("Fail 应写 stderr: %q", err2.String())
 	}
 
 	var ob syncBuf
-	st2 := NewStreams(&ob, &syncBuf{})
+	st2 := NewStreams(&ob, &syncBuf{}, modeRich)
 	st2.Print("提示\n")
 	st2.Content("正文\n")
 	if ob.String() != "提示\n正文\n" {

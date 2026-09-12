@@ -175,7 +175,9 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 流分配：**stdout** 承载 assistant 正文、工具块与状态行、命令反馈、回放、欢迎屏、回合分隔线、spinner 帧与输入期回显；**stderr** 承载错误与诊断——`MsgErrLineFmt` 类、`MsgUnknownCmd`、`MsgThemeBad`、`MsgInvalidIndex`、`MsgModelsFail`、`MsgInterruptKept`/`MsgInterruptBare`，以及 `main` 的启动/配置/agent 构造错误（`streams.Fail`）。两 fd 均无缓冲，同一 tty 下写序即调用序，故交互观感与收敛前逐字节一致（阶段 1 以 pty 对比前一提交的二进制验证）；stdout 被重定向时错误与诊断分流到终端，stdout 保持可解析。
 
-`Kind` 不导出包外、不进 `agent.Event`；`main` 侧只用语义化出口 `streams.Print`/`Content`/`Fail`。
+`Kind` 不导出包外、不进 `agent.Event`；`main` 侧只用语义化出口 `streams.Print`/`Content`/`End`/`Fail`。
+
+输出模式三档由 `outMode` 决定（`repl.ParseMode(plain, verbose)`，仅 CLI `-p`/`--plain` 与 `--verbose` 可设，env 与 config 不参与）：**rich**（默认，全开）、**plain**（`out.vis` = Content/Notice，其余屏蔽；stderr 不参与屏蔽）、**plain+verbose**（再加 ToolBlock/ToolStatus）。plain 的六条语义：① `Colors=LevelNone`（main 在 profile 计算后强制）；② 不启动 spinner（`toolView.animate()` 同时查 TTY 与可见集，是查询不是快照）；③ 无光标控制（inline 上移重绘按 `streams.cursor()` 退化为追加式，spinner 帧与清行随 KindSpinner 一并屏蔽）；④ 关 markdown（`flow.mdEnabled` 并入 `st.decor()`）；⑤ 屏蔽 Decor（含首行空行与回合分隔线）与工具类；⑥ stdout 只留正文与命令反馈，错误与诊断走 stderr。工具块被屏蔽时**不得**置 `justEnded`，否则下一条正文前会留下孤立空行（`toolView.Handle` 的 ToolEnd 分支按 `allows(KindToolBlock)` 决定是否置位）。`streams.End()` 负责收尾换行：rich 沿用无条件补换行（零行为变更），plain 只在缺少行尾换行时补，保证 stdout 严格等于答案。
 
 ### 输入分发
 

@@ -18,13 +18,22 @@ var (
 )
 
 func main() {
-	st := repl.NewStreams(os.Stdout, os.Stderr)
 	showVersion := flag.Bool("v", false, repl.FlagVersion)
 	configPath := flag.String("c", "", repl.FlagConfig)
 	sessionMode := flag.String("m", "", repl.FlagMode)
 	noSave := flag.Bool("n", false, repl.FlagNoSave)
 	flag.BoolVar(noSave, "no-save", false, repl.FlagNoSave)
+	plain := flag.Bool("p", false, repl.FlagPlain)
+	flag.BoolVar(plain, "plain", false, repl.FlagPlain)
+	verbose := flag.Bool("verbose", false, repl.FlagVerbose)
 	flag.Parse()
+
+	mode, err := repl.ParseMode(*plain, *verbose)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
+		os.Exit(1)
+	}
+	st := repl.NewStreams(os.Stdout, os.Stderr, mode)
 
 	if *showVersion {
 		st.Print(fmt.Sprintf("tanyan %s\n", version))
@@ -48,6 +57,9 @@ func main() {
 			prof.Colors = style.Level16
 		}
 	case "off":
+		prof.Colors = style.LevelNone
+	}
+	if *plain {
 		prof.Colors = style.LevelNone
 	}
 	style.SetProfile(prof)
@@ -80,7 +92,7 @@ func main() {
 			st.Fail("\n"+repl.MsgErrLineFmt+"\n", err)
 			os.Exit(1)
 		}
-		st.Content("\n")
+		st.End()
 		return
 	}
 
