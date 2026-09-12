@@ -1,7 +1,7 @@
 # repl 输出收敛与数据流封装方案
 
 > 状态：方案定稿（含输出模式与双流收敛），分阶段实施（阶段 0-5，见 §6）
-> 进度：阶段 0、阶段 1 已实施（§3.7 下表为阶段 1 落地后的实际路由）
+> 进度：阶段 0、1、2 已实施（§3.7 下表为阶段 1 落地后的实际路由；§3.6 起为空行懒补与 `flow` 字段的实际形态）
 > 范围：`repl` 包内重构 + `main.go` 接线
 > 不动的部分：`agent`（协议/事件/history/落盘）、`style` 渲染纯函数与过滤器、`readline` 内部实现
 
@@ -140,7 +140,7 @@ Run
  ├─ 输入期        ed.Readline(prompt)            ← 输入期唯一写者：Editor（走 streams.out 的裸 Write）
  ├─ dispatch(line) → intent(斜杠/退出/对话)
  │    ├─ 斜杠命令  ─┐
- │    ├─ 回合 r.runTurn(text)                         ├─► flow{st, prof, width, md}
+ │    ├─ 回合 r.ask(text)                            ├─► flow{st, prof, live, md, rend}
  │    └─ 回放 /history                                │        │
  │                                                    │        ├─ st.out.emit(kind, text) / live(...)
  │                                                    │        └─ st.err.emit(kind, text)
@@ -276,9 +276,10 @@ type turn struct {
     start time.Time
 }
 
-func (r *REPL) beginTurn() *turn    // md 复位、写 Decor 首行空行、dirty 复位
+func (r *REPL) beginTurn(done func()) *turn // 派生 flow（prof/live/rend 快照 + 新 md 缓冲）
 func (t *turn) Handle(e agent.Event) // 接替 "streamEvent → view" 两跳
-func (t *turn) End(err error)        // md 结算、中断/错误文案（走 stderr）、turnSep
+func (t *turn) Handle(e agent.Event) // 首个事件前懒补 Decor 空行，再分发
+func (t *turn) End(err error)        // md 结算、done()、中断/错误文案（走 stderr）、turnSep
 ```
 
 现状 `ask()` 里的 `md.Reset` / `md.Close` / 错误分支 / `turnSep`（`repl.go:203-227`）与 `streamEvent`（`repl.go:60`）合并到一处。
@@ -401,7 +402,7 @@ func (t *turn) End(err error)        // md 结算、中断/错误文案（走 st
 | `REPL.stream`（`streamEvent`） | `turn.Handle` |
 | `REPL.print`（借道 `EventContent`） | `REPL.view.Content(text)`（语义等价，去掉事件借用） |
 | `ask()` | `runTurn(q)` = `beginTurn` → `agent.Ask(ctx, q, t.Handle)` → `t.End(err)` |
-| `turnSink()` 的首行空行（`repl.go:107-115`） | 移入 `beginTurn`（`atomic` 内补空行，避免与 spinner 交错） |
+| `turnSink()` 的首行空行（`repl.go:107-115`） | 移入 `turn.Handle` 的**首个事件前**（懒补）——保持"零事件回合（`Ask` 立即报错）不补空行、不与分隔线前导换行叠成双空行"的既有语义；`turnSink` 闭包随之删除 |
 | 新增 | `REPL.st *streams`（由 `NewREPL` 的 Option 注入） |
 
 ### 4.6 写点替换映射（按类别）
@@ -565,7 +566,9 @@ script -qec "./tanyan -p --verbose -n ask '跑一条命令并总结'" /dev/null 
 | 4 输出模式 | 三档 `visSet`；`-p/--plain`、`--verbose`；plain 六条语义 | §5.6 阶段 4 用例 + §5.7 golden + pty 目视 4/5 | 独立提交（前置：写入均带 `Kind`） |
 | 5（可选）回放归一 | `/history` 复用实时渲染策略 | 回放帧断言 + 目视 | 独立提交 |
 
-实施记录：阶段 0、阶段 1 已完成，各为独立提交（按上表回滚点可单独 revert）；阶段 1 的 rich 模式行为用 pty 输出与阶段 0 二进制逐字节比对验证。
+实施记录：阶段 0、1、2 已完成，各为独立提交（按上表回滚点可单独 revert）。行为回归一律用"前一阶段二进制 vs 当前二进制"逐字节比对：阶段 1 与阶段 0 比 pty 输出（14 条命令）；阶段 2 与阶段 1 比 4 类场景（pty 单回合含工具块与 inline 重绘、pty 两回合含 `/md` 切换、回合错误、ask 错误），归一化时钟与耗时后全部一致。
+
+阶段 2 落地要点（与初稿的差异）：`flow` 实际字段为 `{st, prof, live, md, rend}`——`width` 仍归 `toolView`（无消费者），`rend` 与 `prof` 由 `REPL` 在构造期快照并由 `flow` 携带，`/theme` 重建 `REPL.rend` 后新回合自动取到；`turnSep` 由读全局 profile 改为 `turnSep(prof, d)`；`REPL` 侧 `md`/`stream`/`turnSink`/`streamEvent`/`writeContent`/`settleMd`/`mdBlocks` 全部移除（`mdBlocks` 降为包级纯函数供回放用）。全局 `style.GetProfile()` 只剩 `NewREPL` 构造期一处读取。
 
 **阶段 1 的收益已经足够大**：即使后续不做，也已获得"单点输出 + 双流 + 可注入测试"的全部收益。阶段 4 是子代理可用性的门槛，建议紧接着做。
 

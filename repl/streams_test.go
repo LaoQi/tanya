@@ -91,7 +91,7 @@ func TestOutputAtomicNoInterleave(t *testing.T) {
 	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
 	var buf syncBuf
 	st := NewStreams(&buf, &syncBuf{})
-	sink := WireToolView(st, func() int { return 80 }, 20)
+	sink := WireToolView(st, style.GetProfile(), func() int { return 80 }, 20)
 	sink(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sleep 1"}`})
 
 	pairs := 0
@@ -132,7 +132,7 @@ func TestNoticeDecorErrorKinds(t *testing.T) {
 	r.handleCommand("/help")
 	r.st.out.vis = 1 << KindDecor
 	out.Reset()
-	r.st.out.emit(KindDecor, turnSep(0))
+	r.st.out.emit(KindDecor, turnSep(r.prof, 0))
 	if !strings.Contains(out.String(), "─") {
 		t.Errorf("回合分隔线应归 KindDecor: %q", out.String())
 	}
