@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -149,6 +150,7 @@ func probePrograms(lookPath func(string) (string, error)) []string {
 
 type ShellResult struct {
 	Command     string
+	Cwd         string
 	Stdout      []ShellChunk
 	Stderr      []ShellChunk
 	Err         string
@@ -167,6 +169,9 @@ type ShellChunk struct {
 
 func (r *ShellResult) String() string {
 	var b strings.Builder
+	if r.Cwd != "" {
+		fmt.Fprintf(&b, "cwd: %s\n", r.Cwd)
+	}
 	writeStream(&b, "stdout", r.Stdout)
 	writeStream(&b, "stderr", r.Stderr)
 	if r.Interrupted {
@@ -260,7 +265,8 @@ func (c *streamCapture) finish() {
 }
 
 func RunShell(ctx context.Context, command string, timeoutSec int) string {
-	return RunShellResult(ctx, command, timeoutSec, false).String()
+	base, _ := os.Getwd()
+	return RunShellResult(ctx, command, timeoutSec, false, "", base).String()
 }
 
 func shellArgs(profile *shellProfile, command string) []string {
@@ -312,19 +318,53 @@ func statState(stat string) string {
 	return fields[0]
 }
 
-func RunShellResult(ctx context.Context, command string, timeoutSec int, interactive bool) *ShellResult {
+func RunShellResult(ctx context.Context, command string, timeoutSec int, interactive bool, cwd, base string) *ShellResult {
 	timeoutSec = effectiveShellTimeout(timeoutSec, interactive)
 	profile := ShellRuntime().profile
+	dir, err := resolveShellCwd(cwd, base)
+	if err != nil {
+		return &ShellResult{Command: command, Err: err.Error()}
+	}
 	if interactive {
-		if res, ok := runShellBridged(ctx, command, timeoutSec, profile); ok {
+		if res, ok := runShellBridged(ctx, command, timeoutSec, profile, dir); ok {
 			return res
 		}
 	}
-	return runShellForeground(ctx, command, timeoutSec, profile)
+	return runShellForeground(ctx, command, timeoutSec, profile, dir)
 }
 
-func runShellForeground(ctx context.Context, command string, timeoutSec int, profile *shellProfile) *ShellResult {
-	res := &ShellResult{Command: command}
+func resolveShellCwd(cwd, base string) (string, error) {
+	if cwd == "" {
+		return "", nil
+	}
+	dir := cwd
+	if dir == "~" || strings.HasPrefix(dir, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return "", fmt.Errorf(MsgBadCwd, cwd)
+		}
+		if dir == "~" {
+			dir = home
+		} else {
+			dir = filepath.Join(home, dir[2:])
+		}
+	}
+	if !filepath.IsAbs(dir) {
+		if base == "" {
+			return "", fmt.Errorf(MsgBadCwd, cwd)
+		}
+		dir = filepath.Join(base, dir)
+	}
+	dir = filepath.Clean(dir)
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return "", fmt.Errorf(MsgBadCwd, cwd)
+	}
+	return dir, nil
+}
+
+func runShellForeground(ctx context.Context, command string, timeoutSec int, profile *shellProfile, dir string) *ShellResult {
+	res := &ShellResult{Command: command, Cwd: dir}
 	tty := openForegroundTTY()
 	handed := false
 	defer func() { restoreForeground(tty, handed) }()
@@ -333,6 +373,7 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 	defer cancel()
 
 	cmd := exec.CommandContext(runCtx, profile.Path, shellArgs(profile, command)...)
+	cmd.Dir = dir
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.WaitDelay = shellWaitDelay
@@ -379,17 +420,18 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 	return res
 }
 
-func runShellBridged(ctx context.Context, command string, timeoutSec int, profile *shellProfile) (*ShellResult, bool) {
+func runShellBridged(ctx context.Context, command string, timeoutSec int, profile *shellProfile, dir string) (*ShellResult, bool) {
 	bridge := currentTTYBridge()
 	if bridge == nil {
 		return nil, false
 	}
-	res := &ShellResult{Command: command}
+	res := &ShellResult{Command: command, Cwd: dir}
 	start := time.Now()
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(runCtx, profile.Path, shellArgs(profile, command)...)
+	cmd.Dir = dir
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.WaitDelay = shellWaitDelay
 	var capture streamCapture

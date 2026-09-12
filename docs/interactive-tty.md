@@ -140,6 +140,8 @@
 
 ## 6. 地基契约
 
+- `Prepare` 只设置 `SysProcAttr`、三条标准流与 `Env`，**不覆盖 `cmd.Dir`**——`run_shell` 的 `cwd` 参数在桥接路径同样生效，无需扩展接口
+
 ```go
 // agent/tty_bridge.go
 type TTYBridge interface {

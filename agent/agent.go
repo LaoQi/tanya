@@ -312,11 +312,12 @@ func (a *Agent) dispatch(ctx context.Context, tc ToolCall, interactive bool) Too
 		var args struct {
 			Command string `json:"command"`
 			Timeout int    `json:"timeout"`
+			Cwd     string `json:"cwd"`
 		}
 		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 			return ToolResult{Text: fmt.Sprintf(MsgParseArgs, err)}
 		}
-		return ToolResult{Shell: RunShellResult(ctx, args.Command, args.Timeout, interactive)}
+		return ToolResult{Shell: RunShellResult(ctx, args.Command, args.Timeout, interactive, args.Cwd, a.cwd)}
 	}
 	if text, ok := DispatchBuiltin(tc.Function.Name, tc.Function.Arguments); ok {
 		return ToolResult{Text: text}
@@ -639,7 +640,7 @@ func runShellDesc(rt *shellRuntime) string {
 		fmt.Fprintf(&b, "在 %s %s 中执行 shell 命令", runtime.GOOS, rt.profile.Name)
 	}
 	b.WriteString("，返回 stdout/stderr/退出码。读文件、搜索、文本处理等系统操作都用它。")
-	b.WriteString("命令的工作目录为会话启动目录（进程 cwd）。")
+	b.WriteString("默认在会话启动目录（进程 cwd）下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。")
 	if len(rt.programs) > 0 {
 		b.WriteString("可用程序: " + strings.Join(rt.programs, ", "))
 	}
@@ -647,7 +648,7 @@ func runShellDesc(rt *shellRuntime) string {
 }
 
 func runShellParams() string {
-	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"timeout":{"type":"integer","description":"超时秒数，默认 %d（interactive 时 %d），最大 %d"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令在独立 pty 中运行、终端直通应答，停用等待动画，默认超时放宽"}},"required":["command"]}`,
+	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"cwd":{"type":"string","description":"命令执行目录，默认会话启动目录"},"timeout":{"type":"integer","description":"超时秒数，默认 %d（interactive 时 %d），最大 %d"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令在独立 pty 中运行、终端直通应答，停用等待动画，默认超时放宽"}},"required":["command"]}`,
 		shellTimeoutSec, shellInteractiveTimeoutSec, shellTimeoutLimit)
 }
 
