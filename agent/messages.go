@@ -5,6 +5,7 @@ const (
 	MsgErrLine             = MsgErrPrefix + "%s"
 	MsgParseArgs           = MsgErrPrefix + "参数解析失败: %v"
 	MsgUnknownTool         = MsgErrPrefix + "未知工具 %s"
+	MsgBadCwd              = MsgErrPrefix + "cwd 不存在或不是目录: %s"
 	MsgInterruptNotStarted = MsgErrPrefix + "已中断（命令未执行）"
 	MsgInterruptRunning    = MsgErrPrefix + "已中断（进程已终止，输出可能不完整）"
 	MsgTimedOut            = MsgErrPrefix + "执行超时"

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -64,7 +65,7 @@ func withFakeBridge(t *testing.T, b TTYBridge) {
 func TestRunShellBridgedCapture(t *testing.T) {
 	f := &fakeTTYBridge{}
 	withFakeBridge(t, f)
-	res := RunShellResult(context.Background(), `echo hi; echo oops >&2`, 10, true)
+	res := RunShellResult(context.Background(), `echo hi; echo oops >&2`, 10, true, "", "")
 	if !f.prepared || !f.attached || !f.stopped {
 		t.Fatalf("桥接未走全流程: %+v", f)
 	}
@@ -86,7 +87,7 @@ func TestRunShellBridgedCapture(t *testing.T) {
 func TestRunShellBridgePrepareFailureFallsBack(t *testing.T) {
 	f := &fakeTTYBridge{prepareErr: errors.New("no tty")}
 	withFakeBridge(t, f)
-	res := RunShellResult(context.Background(), "echo fallback", 10, true)
+	res := RunShellResult(context.Background(), "echo fallback", 10, true, "", "")
 	if f.attached {
 		t.Fatal("Prepare 失败仍进入桥接")
 	}
@@ -102,7 +103,7 @@ func TestRunShellBridgePrepareFailureFallsBack(t *testing.T) {
 func TestRunShellBridgeAttachFailureFallsBack(t *testing.T) {
 	f := &fakeTTYBridge{attachErr: errors.New("attach failed")}
 	withFakeBridge(t, f)
-	res := RunShellResult(context.Background(), "echo fallback2", 10, true)
+	res := RunShellResult(context.Background(), "echo fallback2", 10, true, "", "")
 	if f.attached {
 		t.Fatal("Attach 失败应回退")
 	}
@@ -118,7 +119,7 @@ func TestRunShellBridgeAttachFailureFallsBack(t *testing.T) {
 func TestRunShellNonInteractiveSkipsBridge(t *testing.T) {
 	f := &fakeTTYBridge{}
 	withFakeBridge(t, f)
-	res := RunShellResult(context.Background(), "echo plain", 10, false)
+	res := RunShellResult(context.Background(), "echo plain", 10, false, "", "")
 	if f.prepared || f.attached {
 		t.Fatalf("非交互不应使用桥接: %+v", f)
 	}
@@ -133,7 +134,7 @@ func TestRunShellNonInteractiveSkipsBridge(t *testing.T) {
 
 func TestRunShellNoBridgeInjected(t *testing.T) {
 	InitTTYBridge(nil)
-	res := RunShellResult(context.Background(), "echo plain", 10, true)
+	res := RunShellResult(context.Background(), "echo plain", 10, true, "", "")
 	if res.Err != "" || res.ExitCode != 0 {
 		t.Fatalf("无桥接注入应走现状路径: %+v", res)
 	}
@@ -144,7 +145,7 @@ func TestRunShellBridgedRealTTYE2E(t *testing.T) {
 		t.Skip("需真实 tty: printf 'hello\\n' | script -qec 'TTY_E2E=1 go test -run TestRunShellBridgedRealTTYE2E -v ./agent' /dev/null")
 	}
 	withFakeBridge(t, readline.NewTTYBridge())
-	res := RunShellResult(context.Background(), `read x < /dev/tty; echo got:$x; tty`, 15, true)
+	res := RunShellResult(context.Background(), `read x < /dev/tty; echo got:$x; tty`, 15, true, "", "")
 	var out strings.Builder
 	for _, c := range res.Stdout {
 		out.WriteString(c.Data)
@@ -163,7 +164,7 @@ func TestRunShellBridgedRealTTYReuse(t *testing.T) {
 	}
 	withFakeBridge(t, readline.NewTTYBridge())
 	for _, want := range []string{"hello", "world"} {
-		res := RunShellResult(context.Background(), `read -r x < /dev/tty; echo got:$x`, 15, true)
+		res := RunShellResult(context.Background(), `read -r x < /dev/tty; echo got:$x`, 15, true, "", "")
 		var out strings.Builder
 		for _, c := range res.Stdout {
 			out.WriteString(c.Data)
@@ -175,7 +176,7 @@ func TestRunShellBridgedRealTTYReuse(t *testing.T) {
 }
 
 func TestRunShellSignaledExitCode(t *testing.T) {
-	res := RunShellResult(context.Background(), "kill -INT $$", 10, false)
+	res := RunShellResult(context.Background(), "kill -INT $$", 10, false, "", "")
 	if res.ExitCode != 130 {
 		t.Fatalf("SIGINT 应记为 130: %+v", res)
 	}
@@ -186,8 +187,31 @@ func TestRunShellSignaledExitCode(t *testing.T) {
 
 func TestRunShellBridgedSignaledExitCode(t *testing.T) {
 	withFakeBridge(t, &fakeTTYBridge{})
-	res := RunShellResult(context.Background(), "kill -INT $$", 10, true)
+	res := RunShellResult(context.Background(), "kill -INT $$", 10, true, "", "")
 	if res.ExitCode != 130 {
 		t.Fatalf("桥接路径 SIGINT 应记为 130: %+v", res)
+	}
+}
+
+func TestRunShellBridgedCwdRealTTYE2E(t *testing.T) {
+	if os.Getenv("TTY_E2E") == "" {
+		t.Skip("需真实 tty: printf '\\n' | script -qec 'TTY_E2E=1 go test -count=1 -run TestRunShellBridgedCwdRealTTYE2E -v ./agent' /dev/null")
+	}
+	withFakeBridge(t, readline.NewTTYBridge())
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := RunShellResult(context.Background(), "pwd", 15, true, dir, "")
+	var out strings.Builder
+	for _, c := range res.Stdout {
+		out.WriteString(c.Data)
+	}
+	got, err := filepath.EvalSymlinks(strings.TrimSpace(out.String()))
+	if err != nil || got != dir {
+		t.Fatalf("桥接下 cwd 未生效: got %q (%v) want %q; res=%+v", got, err, dir, res)
+	}
+	if res.Cwd != dir {
+		t.Errorf("Cwd = %q want %q", res.Cwd, dir)
 	}
 }

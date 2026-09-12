@@ -152,8 +152,8 @@ func TestToolDefsRunShellDesc(t *testing.T) {
 	if !strings.Contains(desc, "在 "+runtime.GOOS+" bash 中执行") || !strings.Contains(desc, "可用程序: ls, grep") {
 		t.Errorf("desc = %q", desc)
 	}
-	if !strings.Contains(desc, "命令的工作目录为会话启动目录（进程 cwd）") {
-		t.Errorf("desc 应说明工作目录: %q", desc)
+	if !strings.Contains(desc, "默认在会话启动目录（进程 cwd）下执行") || !strings.Contains(desc, "cwd 参数") {
+		t.Errorf("desc 应说明默认工作目录与 cwd 参数: %q", desc)
 	}
 	params := runShellParams()
 	if !strings.Contains(params, "默认 60（interactive 时 300），最大 900") {
@@ -161,6 +161,9 @@ func TestToolDefsRunShellDesc(t *testing.T) {
 	}
 	if !strings.Contains(params, `"interactive":{"type":"boolean"`) {
 		t.Error("params 缺少 interactive 参数声明")
+	}
+	if !strings.Contains(params, `"cwd":{"type":"string"`) {
+		t.Error("params 缺少 cwd 参数声明")
 	}
 }
 

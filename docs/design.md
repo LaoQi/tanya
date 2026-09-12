@@ -79,7 +79,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### run_shell（shell.go）
 
-- 参数：`command`（必填）、`timeout`（默认 60s，上限 900s）、`interactive`（布尔，默认 false）
+- 参数：`command`（必填）、`cwd`（可选，命令执行目录，默认会话启动目录）、`timeout`（默认 60s，上限 900s）、`interactive`（布尔，默认 false）
+- 执行目录：默认继承进程 cwd（= 会话启动目录，进程全程不 `os.Chdir`）；显式 `cwd` 时设 `cmd.Dir`（不改进程 cwd），解析规则为 `~`/`~/x` 展开 `$HOME`、相对路径按工作区基准合成（`RunShellResult` 末位 `base` 参数，`dispatch` 传 `a.cwd` 即会话启动目录；`RunShell` 包装与测试直调传 `os.Getwd()`，缺基准时相对路径直接失败而非退回环境 cwd），随后 `os.Stat` 校验——不存在或非目录直接快速失败（`MsgBadCwd`，不启动进程）。显式指定时 `ShellResult.Cwd` 填充解析后的绝对路径，`String()` 首行输出 `cwd: <路径>`。桥接与回退两条路径均生效（`TTYBridge.Prepare` 只改 `SysProcAttr`/标准流/`Env`，不覆盖 `cmd.Dir`）
 - 交互模式（`interactive: true`）：仅由模型显式声明，**不做命令文本猜测**（早期版本有 sudo/ssh 关键词兜底，review 后移除）。声明后 repl 侧停用等待动画、标题行下打印引导行、结束用追加式渲染（避免 `CursorUp` 擦掉用户输入回显）；`timeout` 缺省时默认放宽至 300s（显式值优先，上限仍 900s）。命令在**独立 pty** 中运行（见下条），提示与输出实时可见；非桥接回退路径下命令提示须自行写入 `/dev/tty`，否则被工具捕获不可见
 - 交互式 pty 桥接（`readline/bridge_linux.go` + `agent/tty_bridge.go`，linux 专用；决策与背景见 `docs/interactive-tty.md`）：解决"交互程序拿不到输入"（`/dev/tty` 直通导致 `ttyname(0)` 退化为 `/dev/tty`、pinentry 等无 ctty 程序无法按路径打开）。流程 `Prepare`（分配 pty、`Setsid+Setctty+Ctty=0`、三条标准流全接 slave、`GPG_TTY`/`SSH_TTY` 覆盖为 slave 路径）→ `Attach`（真实 tty 切 raw、初始尺寸复制到 master、启动双向泵）→ `cmd.Start()` → 立即关闭父进程 slave（否则子进程退出后 master 收不到 EIO）→ `waitShell` → `stop()`（恢复 termios、关闭 tty/master、泵收尾 drain 后 `capture.finish()`）
   - 契约：master 输出**同时**写真实 tty（用户实时可见）与 `capture`（Writer，调用方决定去向）。本处 capture 即 `streamCapture` → `ShellResult.Stdout`，交互模式为**单流**（`Stderr` 空，`2|` 区分失效）；`streamCapture` 头尾截断与 `ShellResult` 字段语义不变
@@ -91,7 +92,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
   - 终端状态自愈（`readline/secure.go`）：桥接 `Prepare` 的前台检查**之前**与 REPL 每回合开始前调用 `SecureTerminal()`——① 恢复被外部清掉的 `ISIG`（否则 `^C` 不产生 `SIGINT`，中断路径完全失效）② 限"启动瞬间自己就是终端前台作业"时夺回被 shell 抢占的前台组；后台启动（`&`）/无控制终端场景门控为否，语义不变（`docs/interactive-tty.md` §5.9）
   - 结果语义：被信号终止的子进程按 shell 惯例记 `128 + signum`（`^C` → `exit 130`、`SIGKILL` → `137`），不再是 `-1`（`shellExitCode`，unix 取 `WaitStatus.Signaled()`）
   - 刻意简化（`docs/interactive-tty.md` §7 登记，评审直接引用关闭）：`^C` 计数双杀、中断结果标记、输出清洗、`SIGWINCH` 转发（尽力而为，失败不报错）、桥接期显示对齐
-- 实现：按 `shellProfile` 组装命令（posix `<path> -c`、powershell `<path> -NoProfile -NonInteractive -Command`、cmd `<path> /d /s /c`），捕获 stdout/stderr/退出码/耗时（`ShellResult` 结构化返回：Command/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Stopped/NotStarted/Duration）
+- 实现：按 `shellProfile` 组装命令（posix `<path> -c`、powershell `<path> -NoProfile -NonInteractive -Command`、cmd `<path> /d /s /c`），捕获 stdout/stderr/退出码/耗时（`ShellResult` 结构化返回：Command/Cwd/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Stopped/NotStarted/Duration）
 - 中断语义：运行中被 ctx 取消 → `Interrupted`，结果追加 `error: 已中断（进程已终止，输出可能不完整）`；ctx 已取消导致命令未能启动 → `Interrupted+NotStarted`，追加 `error: 已中断（命令未执行）`（不再把裸 `context canceled` 交给模型）；toolview 状态行分别为 `已中断`/`未执行`，已捕获的首尾输出照常保留
 - shell 解析（`InitShell`，Agent 构造时一次性执行并缓存）：
   - 优先级：配置覆盖（`config.yaml shell:` / env `TANYA_SHELL`，名字或绝对路径，任意 shell 名允许，未知 basename 按 posix `-c` 处理）> 平台自动探测
@@ -185,7 +186,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 直通 shell 执行面（归档）
 
-原「其余输入在本目录直通执行 shell 命令」执行面已归档（2026-09）：体感作用有限——agent 侧已有 `run_shell` 工具，直通面与之重复且绕过上下文/契约。末态完整实现见 commit 60bc02e：执行四件套 `runShellLine`/`suppressInterrupt`/`waitShellCmd`/`reportShellExit`、cd 拦截切面 `repl/localcmd.go`（`tryLocalCommand` 单入口 + `dirChangeCommands` 表）、常量 `MsgShellExitCode`/`MsgShellSuspended`/`MsgKillFailFmt`/`MsgCdBlocked`、`agent.NewShellCmd`/`ProcessStopped` 导出包装。恢复步骤：自 60bc02e 取回上述文件与常量 → `Run()` 末分支 `r.ask(line)` 改回 `r.runShellLine(line)`。归档期间进程 cwd 恒为启动目录（全程不 `os.Chdir`、不设 `cmd.Dir`），`run_shell` 契约不受影响。
+原「其余输入在本目录直通执行 shell 命令」执行面已归档（2026-09）：体感作用有限——agent 侧已有 `run_shell` 工具，直通面与之重复且绕过上下文/契约。末态完整实现见 commit 60bc02e：执行四件套 `runShellLine`/`suppressInterrupt`/`waitShellCmd`/`reportShellExit`、cd 拦截切面 `repl/localcmd.go`（`tryLocalCommand` 单入口 + `dirChangeCommands` 表）、常量 `MsgShellExitCode`/`MsgShellSuspended`/`MsgKillFailFmt`/`MsgCdBlocked`、`agent.NewShellCmd`/`ProcessStopped` 导出包装。恢复步骤：自 60bc02e 取回上述文件与常量 → `Run()` 末分支 `r.ask(line)` 改回 `r.runShellLine(line)`。归档后进程 cwd 恒为启动目录（全程不 `os.Chdir`）；`run_shell` 默认即在此执行，另可用 `cwd` 参数为单次命令指定目录（设 `cmd.Dir`，进程 cwd 不变）。
 
 ### 斜杠命令
 
