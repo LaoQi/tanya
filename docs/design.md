@@ -251,6 +251,8 @@ env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERA
 
 标准库 `testing` + `httptest` mock LLM（`agent/mock_test.go`，脚本化 `mockStep`，content/arguments 多 chunk 发送以覆盖流式合并）。覆盖 calc/shell/config/SSE 解析/trim/会话往返/Ask 全链路/回调。readline 用 fakeTerm 注入按键，真实终端行为 pty 人工验证。repl 覆盖渲染纯函数与非 TTY 降级。
 
+repl 输出侧测试方法（输出收敛方案阶段 0-4 建立）：① **注入 writer**——`NewStreams(out, err, mode)` 可注入，测试用 `syncBuf`（互斥缓冲，`-race` 安全）与 `writeCounter`（断言"整块一次写完"），不再替换 `os.Stdout`；② **fakeTerm 驱动 Run**——`repl/faketerm_test.go` 实现 `readline.Terminal`，带 `inKey` 标志与 `onKey` 钩子；③ **写权协议断言**——`output.guard` 仅在 `emit`/`atomic` 触发（裸 `Write` 不触发，避免 Editor 合法回显误报），"输入期不得 emit"由正向用例 + 反向对照用例（故意在 `ReadKey` 内写入必被捕获）双保险；④ **可见集矩阵**——`Kind` × 三档模式的可见性以硬编码表锁定；⑤ **golden 字节**——rich 非 TTY 与 TTY 内联重绘各一条基线，plain/plain+verbose 各一条；⑥ **跨提交逐字节回归**——用 `git worktree` 检出上一阶段提交构建旧二进制，同 cwd、同 ldflags 跑同一输入序列（pty 经 `script -qec`），归一化时钟与耗时后 `cmp`，作为"默认行为零变更"的硬证据。pty 目视模板见 `scripts/repl_tty_check.sh`（自动跑前两条，其余人工）。
+
 pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（测试自身分配 pty 充当真实 tty，经 `newBridgeTTY` 注入）断言子进程 `/dev/tty` 可读、`tty` 输出为 pty slave、`GPG_TTY` 覆盖、初始尺寸复制、raw 设置与恢复、子进程退出后 master 收到 EIO（防忘关 slave）、Attach 前预置输入不丢、子进程存活时 `stop()` 及时返回；② `agent/shell_bridge_test.go` 用 fake bridge（os.Pipe 造流）断言桥接全流程、Prepare/Attach 失败回退现状路径、非交互不触桥接；③ 真实 tty E2E（gated，用 `script -qec` 驱动真实 /dev/tty，不参与默认 `go test`）：`TTY_BRIDGE_E2E=1`（readline 单命令）、`TTY_E2E=1`（agent 全链路）、`TTY_E2E_REUSE=1`（同进程连续两次交互命令，覆盖 `ownTTY` 打开/恢复/重开复用路径）。
 
 ## 环境探针（envprobe）

@@ -1,7 +1,7 @@
 # repl 输出收敛与数据流封装方案
 
 > 状态：方案定稿（含输出模式与双流收敛），分阶段实施（阶段 0-5，见 §6）
-> 进度：阶段 0-4 已实施（阶段 5 可选，未做）。§3.4/§3.5/§3.7 已按实际形态改写
+> 进度：阶段 0-4 已实施；阶段 5 拆出独立评估（`docs/repl-replay-rendering.md`，结论：建议不做或降级）。§3.4/§3.5/§3.7 已按实际形态改写
 > 范围：`repl` 包内重构 + `main.go` 接线
 > 不动的部分：`agent`（协议/事件/history/落盘）、`style` 渲染纯函数与过滤器、`readline` 内部实现
 
@@ -567,7 +567,7 @@ script -qec "./tanyan -p --verbose -n ask '跑一条命令并总结'" /dev/null 
 | 2 flow + Kind 枚举 + turn | `repl/flow.go`；`REPL` 字段下沉（含 `rend`）；`turn` 生命周期 | §5.6 阶段 2 用例；行为与阶段 1 一致（对比 pty 输出） | 独立提交 |
 | 3 toolView 结构体化 | 闭包 → 结构体；状态成字段 | `toolview_test` 全量迁移通过；pty 目视 2/3 | 独立提交 |
 | 4 输出模式 | 三档 `visSet`；`-p/--plain`、`--verbose`；plain 六条语义 | §5.6 阶段 4 用例 + §5.7 golden + pty 目视 4/5 | 独立提交（前置：写入均带 `Kind`） |
-| 5（可选）回放归一 | `/history` 复用实时渲染策略 | 回放帧断言 + 目视 | 独立提交 |
+| 5（可选）回放归一 | ⏸ **拆出独立评估**：历史数据结构与实时事件不等价（`agent.Message` 无 Kind/ToolResult，工具消息只剩 `ShellResult.String()` 扁平文本），见 `docs/repl-replay-rendering.md`（结论：建议不做或降级为"只统一样式函数"） | — | — |
 
 阶段 4 落地要点（与初稿的差异）：不引入 `live` 原语——plain 下的光标控制由"KindSpinner/ToolBlock 屏蔽 + inline 重绘按 `streams.cursor()` 退化"双重保证，再加一个与 `emit` 同义的函数无收益；模式解析收敛为可测的 `repl.ParseMode(plain, verbose)`（初稿只说"无 `--plain` 时报错"，未给落点）；`--verbose` 无 `--plain` 的错误文案走裸 stderr（发生在 `streams` 构造之前，与 flag 解析错误同级）；`toolView.animate()`/`streams.cursor()` 为运行期查询而非构造期快照（阶段 1/3 审计遗留项）；§7 预警的"屏蔽漏项 → 结构性空行"在阶段 4 实测复现并修复（ToolEnd 被屏蔽时不置 `justEnded`）。
 
