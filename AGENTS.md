@@ -47,7 +47,8 @@ style/             富文本管线（语义色/主题/markdown/模板/宽度/ANS
 - `docs/interactive-tty.md` 交互式 run_shell pty 桥接设计与落地差异
 - `docs/render-pipeline.md` 富文本渲染管线方案
 - `docs/render-refs-compare.md` 渲染参考项目对比（持续补录；`refs/` 不入库）
-- `docs/repl-output-refactor.md` repl 输出收敛与数据流封装方案（含输出模式与双流收敛，分阶段实施）
+- `docs/repl-output-refactor.md` repl 输出收敛与数据流封装方案（含输出模式与双流收敛；阶段 0-4 已实施）
+- `docs/repl-replay-rendering.md` `/history` 回放复用实时渲染评估（原阶段 5，未实施；结论：数据不等价，建议不做或只统一样式）
 - `docs/cache-probe.md` prompt cache 机制探测结论（脚本 `scripts/cache_probe.py`）
 - `docs/probe-redesign.md` 环境探针重构方案（已实施，归档）
 - `docs/todos.md` 待办清单
