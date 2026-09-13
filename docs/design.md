@@ -111,7 +111,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 工具视图渲染（repl/toolview.go）
 
-- `WireToolView` 接线全部回调，块状视图：`▸ 工具名 命令` 标题行 + 缩进输出行（stderr 加 `2|` 前缀）+ 亮蓝状态行
+- `WireToolView` 接线全部回调，块状视图：`▸ 工具名 命令` 标题行 + 缩进输出行（stderr 加 `2|` 前缀）+ 亮蓝状态行；`run_shell` **显式指定** `cwd` 时标题区改为三行——首行仅工具名（进行中带 `⋯`），其后 `cwd: <原样值>`（不缩写）与折叠后的命令各占一行（逐行按宽度截断；inline 重绘按标题行数上移），未指定时保持单行、与旧版逐字节一致
 - 状态行总是输出（语义色 `Info`，无色环境纯文本）：`↳ exit 0 · 0.3s · 12 行`；异常时首段为 `exit 2`/`执行超时`/`已中断`/`挂起已终止`/`错误: ...`；输出被截断时行数段显示 `共 N 行`；builtin 工具无状态行（截断时仅显示 `共 N 行`）
 - 颜色走 `style` 语义色 + Profile 驱动（`colors` 配置 / `NO_COLOR` / 非 TTY → 纯文本）：工具块 `Dim`、spinner 等待 `Warn`/思考 `Think`/执行 `Run` 三色、状态行 `Info`，可用 `palette` 配置覆盖
 - **捕获输出的 ANSI 治理**（`style/filter.go`）：块组装内聚于 `renderToolBlock`，输出区无 SGR 时整块 `Dim.Frame`（全清洗 + 块级包裹，标题/输出单一包裹点）；检测到 SGR（`HasSGR`）时输出区改走直显——`Passthrough` 保色渲染（SGR 原样保留、布局序列/OSC/C0 仍清洗、脏状态结尾闭合），标题行独立 Frame，状态行 `Info` 显式后置（不依赖 SGR 时序巧合）。预览类彩色输出（如欢迎屏效果）在灰色块内原色可见，用户与模型双通道分离：**模型侧文本不做任何变换**（原始输出、信息保真、缓存与历史零影响），显示侧机制对模型完全不可见

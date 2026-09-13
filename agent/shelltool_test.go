@@ -19,7 +19,10 @@ func testShellTool(t *testing.T, mutate ...func(*shellToolConfig)) *shellTool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Fatalf("UserHomeDir 不可用: err=%v home=%q", err, home)
+	}
 	cfg := shellToolConfig{GOOS: runtime.GOOS, LookPath: exec.LookPath, Home: home, Workspace: cwd}
 	for _, f := range mutate {
 		f(&cfg)

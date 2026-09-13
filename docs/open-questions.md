@@ -1,25 +1,13 @@
 # 会话遗留：已定结论与待评估点
 
 本文件记录一轮设计讨论（2026-09，`run_shell` 引入 `cwd` 参数之后）产出的**已定结论**与**待决点**：A 节防重复讨论，B 节是待评估/待决策清单，C 节是已知行为（防误报）。
-实施类设计另行归档：`docs/shell-tool.md`（run_shell 组件化，已定稿未实施）。
+实施类设计另行归档：`docs/shell-tool.md`（run_shell 组件化，已实施；见该文 §15 偏差记录）。
 
 ## A. 已定结论（登记，不再重复讨论）
 
-### A1 进程事实层（`env` 包）：首版不做
+### A1 进程事实层（`env` 包）：不立
 
-- 动机曾经成立（同一事实多处采样、没有统一暴露点），但**为 `cwd` 单独立层收益不足**：`cwd` 在 `Agent` 内只有 5 处引用（`agent.go:79/181/192/509/320`），跨包消费者只有 `repl.cwdLabel`（`dispatch.go:40`）一处纯显示；且"进程全程不 `os.Chdir`"使冻结值与 `os.Getwd()` 等价
-- 结论：`cwd` 的问题不是"缺全局暴露点"，而是"shell 层没有所有者" → 用 `docs/shell-tool.md` 的组件化解决，不新立 `env` 包
-- 若将来立 `env`（触发条件：出现真正"跨包共享 + 启动即需冻结"的事实，`home` 是最接近的候选），准入规则如下：
-
-| 规则 | 内容 |
-|---|---|
-| 时标 | 只有进程级、启动即定稿的进 `env`；会话级留 `Agent`，请求级留 `context`，实时值由能力层现查 |
-| 性质 | 事实进 `env`；端口走注入（接口定义在消费方、接线在 `main`）；决策在装配点算一次交给消费方 |
-| 共享性 | **消费方独占的不进 `env`**（如 `style.Profile` 由 style 独占 + repl 构造期快照、readline 的前台状态） |
-| 依赖方向 | `env` 只依赖标准库，禁止反向依赖；可用架构守卫测试（解析 `env/*.go` 的 import）强制 |
-| 只读 | 无 lazy、无 setter；装配失败直接退出；测试用单一 `env.Use(t, …)` 注入 |
-| 纯函数红线 | `envSection`/`promptBuilder.build`/`resolveSessionDir` 继续收参数，禁止读 `env`（`promptBuilder` 经注入 reader 读 AGENTS.md） |
-| 大小 | 若立，首批只放 `cwd` + `home`；`OS`/`arch` 是编译期常量，永不进 |
+`cwd` 的问题不是"缺全局暴露点"，而是"shell 层没有所有者"——已由 shellTool 组件化解决（`docs/shell-tool.md`）。进程事实就此收口：不新立 `env` 包，归属结论见 A2/A3。
 
 ### A2 不用 `context` 承载进程事实
 
@@ -29,7 +17,7 @@
 - 全仓 `context.WithValue` 使用数 = 0；引入即新范式，且只服务一个字符串
 - 结论：ctx 属请求层（取消/超时），进程事实不进 ctx
 
-### A3 tty 事实与颜色能力不进 `env`
+### A3 tty 事实与颜色能力不设共享层
 
 - 颜色能力/`style.Profile`：只有 `style.DetectProfile` 计算（自身读 `NO_COLOR`/`TERM`/`COLORTERM`/`WT_SESSION`/`TANYA_COLOR`），消费方是 style 自身（`template.go:28`、`filter.go:23`）与 repl 构造期快照（`repl.go:75`）→ 消费方独占，无需共享暴露点
 - 终端尺寸：实时值（`ToolWidth` 作为 `func() int` 传给 `NewToolView`；`readline/editor.go` 换行时现查）→ 属"会变"，不进
@@ -45,7 +33,7 @@
 
 ### B1 `Agent` 是否拆分（god struct 诊断）——已实施
 
-诊断数据（`agent/agent.go:29-45`，16 字段 / 30 方法 / 660 行）：
+诊断数据（拆分前基线：`agent/agent.go:29-45`，16 字段 / 30 方法 / 660 行）：
 
 | 簇 | 字段 | 生命周期 |
 |---|---|---|
@@ -62,21 +50,19 @@
 建议的接缝顺序（未决）：先切无状态两簇（状态行格式化 → 纯函数；提示词组装 → 组装器，`cwd` 在此定格），再切持久化簇（`sessionStore`），剩下 `Agent` = `cfg` + `client` + `history` + 循环 + 分发，`Ask` 为唯一入口。
 **结案（已实施）**：立项文档 `docs/agent-split.md`；与 shellTool 的先后关系为先 shellTool（已完成）。落地为「内聚重组 + `Agent` 留门面」：`agent/stats.go`（`usageStats`）、`agent/prompt.go`（`promptBuilder`）、`agent/session.go`（`sessionStore`）三簇剥离，`main.go`/`repl/` 零改动；字段 16 → 9、方法 26 → 25、`agent/agent.go` 690 → 407 行。偏差记录见该文 §10。
 
-### B2 `env` 立层时机
-
-见 A1。触发条件（出现真正跨包共享且需冻结的事实）与首批范围（`cwd` + `home`）已定，时机未定。
-
 ### B3 `dispatch` 与 `toolInteractive` 重复解析参数（已实施）
 
-原状：`toolInteractive`（`agent.go:286`）与 `dispatch`（`agent.go:311`）各解析一遍 `tc.Function.Arguments`，新增 `cwd` 后两个匿名 struct 分叉。
+原状（拆分前行号）：`toolInteractive`（`agent.go:286`）与 `dispatch`（`agent.go:311`）各解析一遍 `tc.Function.Arguments`，新增 `cwd` 后两个匿名 struct 分叉。
 
 落地：收进单一结构 `runShellArgs{Command, Timeout, Cwd, Interactive}` + `parseRunShellArgs`；`runTurn` 只对 `run_shell` 解析一次（拿到 `args, argErr`），`Interactive` 供 `EventToolStart/End` 用，`dispatch(ctx, tc, args, argErr)` 复用同一份（不再自己 Unmarshal）；`toolInteractive` 删除。行为等价（事件 `Interactive`、参数解析失败的 `MsgParseArgs` 文本均不变，含 JSON 坏值时事件 `Interactive=false`）。
 
 待补测试（并入测试补充批次）：`runTurn` 级断言事件 `Interactive` 与坏 JSON 的 `参数解析失败` 结果（本次以一次性临时用例验证过，未留档）。
 
-### B4 工具块不显示 `cwd`
+### B4 工具块不显示 `cwd`（已实施）
 
-模型可见文本含 `cwd: <路径>`（`ShellResult.String()` 只喂 history/`Content()`），但 repl 工具块标题只渲染 command（`toolArgsDisplay` 只解析 `command`），用户看不到命令落点；`interactive` 同理不显示。待决：是否在标题补 `cwd=…`（注意与 `docs/repl-output-refactor.md` 的输出可见性矩阵保持一致）。
+原状：模型可见文本含 `cwd: <路径>`（`ShellResult.String()` 只喂 history/`Content()`），但 repl 工具块标题只渲染 command，用户看不到命令落点。
+
+落地：`toolArgsDisplay` 返回 `(cwd, 命令)`，**仅显式指定** `cwd` 时标题区渲染三行——首行 `▸ run_shell ⋯`（结束重绘时无 `⋯`），其后 `cwd: <原样值>` 与命令各占一行（逐行截断；inline 重绘按标题行数上移，未指定时为 1 行、行为不变）；`interactive` 不额外标注（已有 `⏎ 等待终端输入` 引导行）。用例：`TestToolArgsDisplayCwd`、`TestRenderToolStartCwd`、`TestRenderToolStartCwdWidth`。
 
 ### B5 测试环境治理（已实施）
 
@@ -102,7 +88,7 @@
 
 ### B8 并行工具调用（组件之外）
 
-`runTurn`（`agent.go:275`）现为顺序 dispatch、顺序 `EventToolStart/End`、顺序 append history。并行化需要事件与 history 的按 index 收敛方案；`docs/shell-tool.md` §5 已声明组件侧（可重入 + 终端租约）就绪，调度侧未设计。
+`runTurn`（`agent.go:183`）现为顺序 dispatch、顺序 `EventToolStart/End`、顺序 append history。并行化需要事件与 history 的按 index 收敛方案；`docs/shell-tool.md` §5 已声明组件侧（可重入 + 终端租约）就绪，调度侧未设计。
 
 ### B9 `shellTool` 实施本身（已完成）
 
@@ -114,4 +100,4 @@ S1–S4 已实施：`agent/shelltool.go` 组件 + 包级状态清零 + `WithTTYB
 - C2 进程全程不 `os.Chdir`：`cwd` 参数只设 `cmd.Dir`，不改变进程状态；因此 `b` 目录调用不影响后续调用
 - C3 `cwd: <路径>` 行仅在**显式指定** `cwd` 时出现；未指定时输出与旧版逐字节一致（`TestRunShellCwdDefault` 锁定）
 - C4 tty/颜色事实的分散是有意的（消费方独占），见 A3
-- C5 `agent/shell_cwd_test.go` 中原 `TestResolveShellCwd`（含 `home, _ := os.UserHomeDir()` 未查错）已随组件化删除：`Home` 改为注入，`~` 展开用例由 `TestShellToolResolveCwdInjected` 覆盖（`t.TempDir()` 作 home，无需读 `$HOME`）：`HOME` 缺失时 `~`/`~/` 用例会退化成断言 `"" == ""` 而掩盖失败（review 遗留，未修）
+- C5 `agent/shell_cwd_test.go` 中原 `TestResolveShellCwd`（含 `home, _ := os.UserHomeDir()` 未查错）已随组件化删除：`Home` 改为注入，`~` 展开用例由 `TestShellToolResolveCwdInjected` 覆盖（`t.TempDir()` 作 home，无需读 `$HOME`）：`agent/shelltool_test.go` 的 `testShellTool` 默认 home 亦为该未查错形态（`HOME` 缺失时 `~`/`~/` 用例会退化成断言 `"" == ""` 而掩盖失败）——已修为查错 + 非空断言（review 遗留已闭环）
