@@ -18,13 +18,12 @@ func defaultEnvProbe(cwd string) envProbeData {
 	return envProbeData{workspace: workspaceMarker(cwd)}
 }
 
-func envSection(cwd string, probe envProbeFunc) string {
+func envSection(cwd string, probe envProbeFunc, profile *shellProfile) string {
 	data := probe(cwd)
 	var b strings.Builder
 	b.WriteString("# 环境\n")
 	fmt.Fprintf(&b, "OS: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Fprintf(&b, "CWD: %s\n", shortPath(cwd))
-	profile := ShellRuntime().profile
 	ttyNote, ttyLine := "", ""
 	if ttyStdinSupported() {
 		ttyNote = "；有控制终端时 run_shell 子进程 stdin 直通 tty，可应答密码/确认"

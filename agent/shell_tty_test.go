@@ -27,8 +27,10 @@ func TestRunShellForegroundTTY(t *testing.T) {
 	if cur != syscall.Getpgrp() {
 		t.Skip("当前进程组非前台（嵌套/后台环境）")
 	}
-	res := RunShellResult(context.Background(),
-		`sleep 0.2; read -r _ _ _ _ pgrp _ _ tpgid _ < /proc/self/stat; [ "$pgrp" = "$tpgid" ] && echo FG-OK || echo FG-FAIL`, 10, false, "", "")
+	res := testShellTool(t).run(context.Background(), shellRequest{
+		Command:    `sleep 0.2; read -r _ _ _ _ pgrp _ _ tpgid _ < /proc/self/stat; [ "$pgrp" = "$tpgid" ] && echo FG-OK || echo FG-FAIL`,
+		TimeoutSec: 10,
+	})
 	var out strings.Builder
 	for _, c := range res.Stdout {
 		out.WriteString(c.Data)
@@ -67,7 +69,7 @@ func TestRunShellStdinRead(t *testing.T) {
 	if cur != syscall.Getpgrp() {
 		t.Skip("当前进程组非前台（嵌套/后台环境）")
 	}
-	res := RunShellResult(context.Background(), `read -r -t 5 line; echo "RC=$? GOT=$line"`, 10, false, "", "")
+	res := testShellTool(t).run(context.Background(), shellRequest{Command: `read -r -t 5 line; echo "RC=$? GOT=$line"`, TimeoutSec: 10})
 	var out strings.Builder
 	for _, c := range res.Stdout {
 		out.WriteString(c.Data)
@@ -116,7 +118,7 @@ func TestRunShellStopDetection(t *testing.T) {
 	if cur != syscall.Getpgrp() {
 		t.Skip("当前进程组非前台（嵌套/后台环境）")
 	}
-	res := RunShellResult(context.Background(), `kill -TSTP $$`, 10, false, "", "")
+	res := testShellTool(t).run(context.Background(), shellRequest{Command: `kill -TSTP $$`, TimeoutSec: 10})
 	if !res.Stopped {
 		t.Fatalf("未检测到挂起: %+v", res)
 	}

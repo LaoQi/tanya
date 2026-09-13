@@ -71,8 +71,9 @@ func main() {
 	agent.ProtectTerminalSignals()
 	readline.InitTerminalGuard()
 	readline.SecureTerminal()
-	agent.InitTTYBridge(readline.NewTTYBridge())
-	a, err := agent.New(cfg, agent.NoSave(*noSave))
+	a, err := agent.New(cfg,
+		agent.NoSave(*noSave),
+		agent.WithTTYBridge(readline.NewTTYBridge()))
 	if err != nil {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)

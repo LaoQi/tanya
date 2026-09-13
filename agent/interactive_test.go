@@ -2,23 +2,28 @@ package agent
 
 import "testing"
 
-func TestToolInteractive(t *testing.T) {
+func TestParseRunShellArgs(t *testing.T) {
 	cases := []struct {
-		name string
-		tool string
-		args string
-		want bool
+		name    string
+		args    string
+		want    runShellArgs
+		wantErr bool
 	}{
-		{"explicit true", "run_shell", `{"command":"sudo -S true","interactive":true}`, true},
-		{"explicit false", "run_shell", `{"command":"sudo -S true","interactive":false}`, false},
-		{"absent", "run_shell", `{"command":"sudo -S true"}`, false},
-		{"other tool", "get_time", `{"interactive":true}`, false},
-		{"bad json", "run_shell", `{bad`, false},
+		{"full", `{"command":"pwd","cwd":"/tmp","timeout":30,"interactive":true}`,
+			runShellArgs{Command: "pwd", Cwd: "/tmp", Timeout: 30, Interactive: true}, false},
+		{"explicit false", `{"command":"sudo -S true","interactive":false}`,
+			runShellArgs{Command: "sudo -S true"}, false},
+		{"absent", `{"command":"pwd"}`, runShellArgs{Command: "pwd"}, false},
+		{"bad json", `{bad`, runShellArgs{}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := toolInteractive(c.tool, c.args); got != c.want {
-				t.Fatalf("toolInteractive(%q,%q)=%v want %v", c.tool, c.args, got, c.want)
+			got, err := parseRunShellArgs(c.args)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("parseRunShellArgs(%q) err=%v want err=%v", c.args, err, c.wantErr)
+			}
+			if got != c.want {
+				t.Fatalf("parseRunShellArgs(%q)=%+v want %+v", c.args, got, c.want)
 			}
 		})
 	}

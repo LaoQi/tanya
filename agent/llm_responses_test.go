@@ -32,7 +32,7 @@ func TestResponsesContentAndUsage(t *testing.T) {
 	})
 	cfg.ReasoningEffort = "high"
 	var sb strings.Builder
-	msg, err := NewClient(cfg).ChatStream(context.Background(),
+	msg, err := NewClient(cfg, testToolDefs()).ChatStream(context.Background(),
 		[]Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "hi"}},
 		EventSink(func(e Event) {
 			if e.Kind == EventContent {
@@ -106,7 +106,7 @@ func TestResponsesToolLoopReasoningReplay(t *testing.T) {
 		},
 		mockStep{content: "结果是 3"},
 	)
-	c := NewClient(cfg)
+	c := NewClient(cfg, nil)
 	ctx := context.Background()
 
 	first, err := c.ChatStream(ctx, []Message{{Role: "user", Content: "算 1+2"}}, nil)
@@ -179,7 +179,7 @@ func TestResponsesToolLoopReasoningReplay(t *testing.T) {
 func TestResponsesEffortOmitsTemperature(t *testing.T) {
 	m, cfg := responsesLLM(t, mockStep{content: "ok"}, mockStep{content: "ok"})
 	cfg.ReasoningEffort = "high"
-	if _, err := NewClient(cfg).ChatStream(context.Background(),
+	if _, err := NewClient(cfg, nil).ChatStream(context.Background(),
 		[]Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestResponsesEffortOmitsTemperature(t *testing.T) {
 	}
 
 	cfg.ReasoningEffort = ""
-	if _, err := NewClient(cfg).ChatStream(context.Background(),
+	if _, err := NewClient(cfg, nil).ChatStream(context.Background(),
 		[]Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestResponsesTTFTToolCallOnly(t *testing.T) {
 	_, cfg := responsesLLM(t, mockStep{
 		toolCalls: []mockToolCall{{id: "call_1", name: "calc", args: `{"expression":"1+2"}`}},
 	})
-	msg, err := NewClient(cfg).ChatStream(context.Background(),
+	msg, err := NewClient(cfg, nil).ChatStream(context.Background(),
 		[]Message{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +223,7 @@ func TestResponsesCompletedMultiMessageItems(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.BaseURL = srv.URL
 	cfg.APIKey = "test-key"
-	msg, err := NewClient(cfg).ChatStream(context.Background(),
+	msg, err := NewClient(cfg, nil).ChatStream(context.Background(),
 		[]Message{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestResponsesCompletedSkipsMessageWhenDelta(t *testing.T) {
 	cfg.BaseURL = srv.URL
 	cfg.APIKey = "test-key"
 	var sb strings.Builder
-	msg, err := NewClient(cfg).ChatStream(context.Background(),
+	msg, err := NewClient(cfg, nil).ChatStream(context.Background(),
 		[]Message{{Role: "user", Content: "hi"}}, EventSink(func(e Event) {
 			if e.Kind == EventContent {
 				sb.WriteString(e.Text)
@@ -264,7 +264,7 @@ func TestResponsesCompletedSkipsMessageWhenDelta(t *testing.T) {
 func TestResponsesNoEffortNoReasoningField(t *testing.T) {
 	m, cfg := responsesLLM(t, mockStep{content: "ok"})
 	cfg.ReasoningEffort = ""
-	if _, err := NewClient(cfg).ChatStream(context.Background(),
+	if _, err := NewClient(cfg, nil).ChatStream(context.Background(),
 		[]Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestResponsesNoReasoningInReplayWhenAbsent(t *testing.T) {
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", Content: "ok"},
 	}
-	if _, err := NewClient(cfg).ChatStream(context.Background(), a.buildMessages(), nil); err != nil {
+	if _, err := NewClient(cfg, nil).ChatStream(context.Background(), a.buildMessages(), nil); err != nil {
 		t.Fatal(err)
 	}
 	input, _ := m.rawReqs[0]["input"].([]any)
@@ -309,7 +309,7 @@ func TestResponsesSkipEmptyContentReasoningInReplay(t *testing.T) {
 			{ID: "rs_2", Content: "有的推理"},
 		}},
 	}
-	if _, err := NewClient(cfg).ChatStream(context.Background(), a.buildMessages(), nil); err != nil {
+	if _, err := NewClient(cfg, nil).ChatStream(context.Background(), a.buildMessages(), nil); err != nil {
 		t.Fatal(err)
 	}
 	input, _ := m.rawReqs[0]["input"].([]any)
@@ -353,7 +353,7 @@ func TestResponsesFailedEvent(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.BaseURL = srv.URL
 	cfg.APIKey = "test-key"
-	_, err := NewClient(cfg).ChatStream(context.Background(),
+	_, err := NewClient(cfg, nil).ChatStream(context.Background(),
 		[]Message{{Role: "user", Content: "hi"}}, nil)
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("应返回 failed 事件错误: %v", err)
@@ -369,7 +369,7 @@ func TestResponsesErrorEvent(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.BaseURL = srv.URL
 	cfg.APIKey = "test-key"
-	_, err := NewClient(cfg).ChatStream(context.Background(),
+	_, err := NewClient(cfg, nil).ChatStream(context.Background(),
 		[]Message{{Role: "user", Content: "hi"}}, nil)
 	if err == nil || !strings.Contains(err.Error(), "bad") {
 		t.Errorf("应返回 error 事件: %v", err)
@@ -382,7 +382,7 @@ func TestResponses404Hint(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.BaseURL = srv.URL
 	cfg.APIKey = "test-key"
-	_, err := NewClient(cfg).ChatStream(context.Background(),
+	_, err := NewClient(cfg, nil).ChatStream(context.Background(),
 		[]Message{{Role: "user", Content: "hi"}}, nil)
 	if err == nil || !strings.Contains(err.Error(), MsgRespHint404) {
 		t.Errorf("404 应附带协议提示: %v", err)
@@ -452,7 +452,7 @@ func TestResponsesReasoningDeltaEvents(t *testing.T) {
 			content.WriteString(e.Text)
 		}
 	})
-	msg, err := NewClient(cfg).ChatStream(context.Background(),
+	msg, err := NewClient(cfg, nil).ChatStream(context.Background(),
 		[]Message{{Role: "user", Content: "hi"}}, sink)
 	if err != nil {
 		t.Fatal(err)
@@ -485,7 +485,7 @@ func TestResponsesToolCallDeltaEvents(t *testing.T) {
 			args.WriteString(e.ToolArgs)
 		}
 	})
-	msg, err := NewClient(cfg).ChatStream(context.Background(),
+	msg, err := NewClient(cfg, nil).ChatStream(context.Background(),
 		[]Message{{Role: "user", Content: "hi"}}, sink)
 	if err != nil {
 		t.Fatal(err)

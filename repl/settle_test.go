@@ -1,7 +1,6 @@
 package repl
 
 import (
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,16 +18,6 @@ func withPlainProfile(t *testing.T) {
 
 func newSettleAgent(t *testing.T) *agent.Agent {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	old, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(home); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(old) })
 	cfg := &agent.Config{
 		BaseURL:         "http://127.0.0.1:1",
 		Model:           "test-model",

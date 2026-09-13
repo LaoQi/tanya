@@ -7,33 +7,6 @@ import (
 	"testing"
 )
 
-func withShellRuntime(t *testing.T, rt *shellRuntime) {
-	t.Helper()
-	shellRuntimeMu.Lock()
-	oldCur, oldSet, oldErr := shellRuntimeCur, shellRuntimeSet, shellRuntimeErr
-	shellRuntimeCur, shellRuntimeSet, shellRuntimeErr = rt, true, nil
-	shellRuntimeMu.Unlock()
-	t.Cleanup(func() {
-		shellRuntimeMu.Lock()
-		shellRuntimeCur, shellRuntimeSet, shellRuntimeErr = oldCur, oldSet, oldErr
-		shellRuntimeMu.Unlock()
-	})
-}
-
-func stubShellLookPath(t *testing.T, existing ...string) {
-	t.Helper()
-	shellRuntimeMu.Lock()
-	oldCur, oldSet, oldErr, oldPath := shellRuntimeCur, shellRuntimeSet, shellRuntimeErr, shellLookPath
-	shellRuntimeCur, shellRuntimeSet, shellRuntimeErr = nil, false, nil
-	shellLookPath = lookPathStub(existing...)
-	shellRuntimeMu.Unlock()
-	t.Cleanup(func() {
-		shellRuntimeMu.Lock()
-		shellRuntimeCur, shellRuntimeSet, shellRuntimeErr, shellLookPath = oldCur, oldSet, oldErr, oldPath
-		shellRuntimeMu.Unlock()
-	})
-}
-
 func lookPathStub(existing ...string) func(string) (string, error) {
 	return func(name string) (string, error) {
 		for _, e := range existing {
@@ -120,31 +93,16 @@ func TestProbePrograms(t *testing.T) {
 	}
 }
 
-func TestResolveShellRuntime(t *testing.T) {
-	if rt, err := resolveShellRuntime("", "linux", lookPathStub()); err == nil || rt != nil {
-		t.Errorf("无 shell 应报错: %+v err=%v", rt, err)
-	}
-	rt, err := resolveShellRuntime("", "linux", lookPathStub("bash", "ls"))
-	if err != nil || rt.profile == nil || strings.Join(rt.programs, ",") != "ls" {
-		t.Errorf("有 shell 才探测: %+v err=%v", rt, err)
-	}
-}
-
 func TestToolDefsHasRunShell(t *testing.T) {
-	withShellRuntime(t, &shellRuntime{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}})
-	defs := ToolDefs()
+	defs := ToolDefs(&shellTool{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}})
 	if len(defs) == 0 || defs[0].Function.Name != "run_shell" {
 		t.Errorf("run_shell 应恒定注册在首位: %+v", defs)
 	}
 }
 
 func TestToolDefsRunShellDesc(t *testing.T) {
-	withShellRuntime(t, &shellRuntime{
-		profile:  &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix},
-		programs: []string{"ls", "grep"},
-	})
 	var desc string
-	for _, d := range ToolDefs() {
+	for _, d := range ToolDefs(&shellTool{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}, programs: []string{"ls", "grep"}}) {
 		if d.Function.Name == "run_shell" {
 			desc = d.Function.Description
 		}
@@ -167,31 +125,12 @@ func TestToolDefsRunShellDesc(t *testing.T) {
 	}
 }
 
-func TestInitShellUnavailable(t *testing.T) {
-	stubShellLookPath(t)
-	err := InitShell("")
-	if err == nil || !strings.Contains(err.Error(), "未找到可用 shell") {
-		t.Fatalf("无 shell 应报错: %v", err)
-	}
-	if err2 := InitShell("bash"); err2 == nil {
-		t.Error("重复调用应返回缓存的错误")
-	}
-}
-
-func TestInitShellOverrideUnavailable(t *testing.T) {
-	stubShellLookPath(t, "bash")
-	err := InitShell("zsh")
-	if err == nil || !strings.Contains(err.Error(), "配置的 shell") {
-		t.Fatalf("override 无效应报错: %v", err)
-	}
-}
-
 func TestNewWithoutShell(t *testing.T) {
 	isolatePromptEnv(t)
-	stubShellLookPath(t)
 	cfg := defaultConfig()
+	cfg.Shell = "/no/such/shell-tanyan"
 	cfg.GlobalSession = t.TempDir()
-	if _, err := New(cfg); err == nil || !strings.Contains(err.Error(), "未找到可用 shell") {
-		t.Fatalf("无 shell 时 New 应报错: %v", err)
+	if _, err := New(cfg); err == nil || !strings.Contains(err.Error(), "配置的 shell") {
+		t.Fatalf("无可用 shell 时 New 应报错: %v", err)
 	}
 }

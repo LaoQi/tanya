@@ -26,7 +26,7 @@ func TestListModels(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.BaseURL = srv.URL
 	cfg.APIKey = "test-key"
-	ids, err := NewClient(cfg).ListModels()
+	ids, err := NewClient(cfg, nil).ListModels()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestListModelsAPIError(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.BaseURL = srv.URL
 	cfg.APIKey = "test-key"
-	_, err := NewClient(cfg).ListModels()
+	_, err := NewClient(cfg, nil).ListModels()
 	if err == nil || !strings.Contains(err.Error(), "502") {
 		t.Errorf("应返回错误: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestChatStreamReasoningEffort(t *testing.T) {
 	cfg.APIKey = "test-key"
 	cfg.ApiProtocol = "chat"
 	cfg.ReasoningEffort = "max"
-	if _, err := NewClient(cfg).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+	if _, err := NewClient(cfg, nil).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(raw), `"reasoning_effort":"max"`) {
@@ -72,7 +72,7 @@ func TestChatStreamReasoningEffort(t *testing.T) {
 
 	raw = nil
 	cfg.ReasoningEffort = ""
-	if _, err := NewClient(cfg).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+	if _, err := NewClient(cfg, nil).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(raw), "reasoning_effort") {
@@ -103,7 +103,7 @@ func TestChatStripsReasoningItems(t *testing.T) {
 		{Role: "assistant", Content: "ok", ReasoningItems: []ReasoningItem{{ID: "rs_1", Content: "想了一下"}}},
 		{Role: "user", Content: "next"},
 	}
-	if _, err := NewClient(cfg).ChatStream(context.Background(), history, nil); err != nil {
+	if _, err := NewClient(cfg, nil).ChatStream(context.Background(), history, nil); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(raw), "reasoning_items") {
@@ -119,7 +119,7 @@ func TestChatEffortOmitsTemperature(t *testing.T) {
 	cfg.APIKey = "test-key"
 	cfg.ApiProtocol = "chat"
 	cfg.ReasoningEffort = "high"
-	if _, err := NewClient(cfg).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+	if _, err := NewClient(cfg, nil).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(raw), `"temperature"`) {
@@ -128,7 +128,7 @@ func TestChatEffortOmitsTemperature(t *testing.T) {
 
 	raw = nil
 	cfg.ReasoningEffort = ""
-	if _, err := NewClient(cfg).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+	if _, err := NewClient(cfg, nil).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(raw), `"temperature"`) {
@@ -138,7 +138,7 @@ func TestChatEffortOmitsTemperature(t *testing.T) {
 
 func TestChatStreamContent(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "你好，世界"})
-	c := NewClient(m.config())
+	c := NewClient(m.config(), nil)
 	var sb strings.Builder
 	msg, err := c.ChatStream(context.Background(),
 		[]Message{{Role: "user", Content: "hi"}},
@@ -166,7 +166,7 @@ func TestChatStreamToolCallsMerge(t *testing.T) {
 		{id: "call_1", name: "run_shell", args: `{"command":"echo hi","timeout":30}`},
 		{id: "call_2", name: "calc", args: `{"expression":"1+2"}`},
 	}})
-	c := NewClient(m.config())
+	c := NewClient(m.config(), nil)
 	msg, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ func TestChatStreamToolCallsMerge(t *testing.T) {
 
 func TestChatStreamHTTPError(t *testing.T) {
 	m := newMockLLM(t, mockStep{status: 500})
-	c := NewClient(m.config())
+	c := NewClient(m.config(), nil)
 	_, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
 	if err == nil || !strings.Contains(err.Error(), "500") {
 		t.Errorf("应返回 500 错误: %v", err)
@@ -198,7 +198,7 @@ func TestChatStreamHTTPError(t *testing.T) {
 func TestChatStreamNoAPIKey(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.APIKey = ""
-	c := NewClient(cfg)
+	c := NewClient(cfg, nil)
 	_, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
 	if err == nil || !strings.Contains(err.Error(), "api_key") {
 		t.Errorf("应提示缺少 api_key: %v", err)
@@ -207,7 +207,7 @@ func TestChatStreamNoAPIKey(t *testing.T) {
 
 func TestChatStreamUsage(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "ok", usage: &Usage{PromptTokens: 120, CompletionTokens: 5, TotalTokens: 125}})
-	c := NewClient(m.config())
+	c := NewClient(m.config(), nil)
 	msg, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -225,7 +225,7 @@ func TestChatStreamUsage(t *testing.T) {
 
 func TestChatStreamNoUsage(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "ok"})
-	c := NewClient(m.config())
+	c := NewClient(m.config(), nil)
 	msg, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -237,7 +237,7 @@ func TestChatStreamNoUsage(t *testing.T) {
 
 func TestChatStreamRequestFormat(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "ok"})
-	c := NewClient(m.config())
+	c := NewClient(m.config(), testToolDefs())
 	_, err := c.ChatStream(context.Background(), []Message{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "hi"},
@@ -262,7 +262,7 @@ func TestChatStreamRequestFormat(t *testing.T) {
 
 func TestChatStreamReasoningEvents(t *testing.T) {
 	m := newMockLLM(t, mockStep{reasoning: "先想一想", content: "答案是 42"})
-	c := NewClient(m.config())
+	c := NewClient(m.config(), nil)
 	var kinds []EventKind
 	var reasoning, content strings.Builder
 	sink := EventSink(func(e Event) {
@@ -297,7 +297,7 @@ func TestChatStreamReasoningEvents(t *testing.T) {
 
 func TestChatStreamTimingDimensions(t *testing.T) {
 	m := newMockLLM(t, mockStep{reasoning: "想", content: "答"})
-	c := NewClient(m.config())
+	c := NewClient(m.config(), nil)
 	msg, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatal(err)

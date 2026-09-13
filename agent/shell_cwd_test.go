@@ -27,43 +27,12 @@ func shellStdout(res *ShellResult) string {
 	return b.String()
 }
 
-func TestResolveShellCwd(t *testing.T) {
-	home, _ := os.UserHomeDir()
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	file := filepath.Join(t.TempDir(), "f")
-	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cases := []struct{ in, want string }{
-		{"", ""},
-		{"/tmp", "/tmp"},
-		{"~", home},
-		{"~/", home},
-		{".", cwd},
-		{"..", filepath.Dir(cwd)},
-	}
-	for _, c := range cases {
-		got, err := resolveShellCwd(c.in, cwd)
-		if err != nil || got != c.want {
-			t.Errorf("resolveShellCwd(%q) = %q, %v; want %q", c.in, got, err, c.want)
-		}
-	}
-	for _, bad := range []string{"/no/such/dir-tanyan", file} {
-		if got, err := resolveShellCwd(bad, cwd); err == nil {
-			t.Errorf("resolveShellCwd(%q) 应报错，得到 %q", bad, got)
-		}
-	}
-}
-
 func TestRunShellCwdDefault(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	res := RunShellResult(context.Background(), "pwd", 10, false, "", "")
+	res := testShellTool(t).run(context.Background(), shellRequest{Command: "pwd", TimeoutSec: 10})
 	if got := strings.TrimSpace(shellStdout(res)); got != cwd {
 		t.Errorf("默认目录应为进程 cwd: got %q want %q", got, cwd)
 	}
@@ -77,7 +46,7 @@ func TestRunShellCwdDefault(t *testing.T) {
 
 func TestRunShellCwdEffective(t *testing.T) {
 	dir := t.TempDir()
-	res := RunShellResult(context.Background(), "pwd", 10, false, dir, "")
+	res := testShellTool(t).run(context.Background(), shellRequest{Command: "pwd", TimeoutSec: 10, Cwd: dir})
 	want, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +68,7 @@ func TestRunShellCwdRelative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res := RunShellResult(context.Background(), "pwd", 10, false, ".", cwd)
+	res := testShellTool(t, func(cfg *shellToolConfig) { cfg.Workspace = cwd }).run(context.Background(), shellRequest{Command: "pwd", TimeoutSec: 10, Cwd: "."})
 	if res.Cwd != cwd {
 		t.Errorf("相对路径应按会话启动目录解析: got %q want %q", res.Cwd, cwd)
 	}
@@ -113,7 +82,7 @@ func TestRunShellCwdMissing(t *testing.T) {
 	base := t.TempDir()
 	marker := filepath.Join(base, "marker")
 	missing := filepath.Join(base, "nope")
-	res := RunShellResult(context.Background(), "touch "+marker, 10, false, missing, "")
+	res := testShellTool(t).run(context.Background(), shellRequest{Command: "touch " + marker, TimeoutSec: 10, Cwd: missing})
 	if !strings.Contains(res.Err, "cwd") {
 		t.Errorf("应报 cwd 错误: %q", res.Err)
 	}
@@ -133,9 +102,8 @@ func TestRunShellCwdMissing(t *testing.T) {
 
 func TestRunShellInteractiveCwd(t *testing.T) {
 	b := &dirRecBridge{}
-	withFakeBridge(t, b)
 	dir := t.TempDir()
-	res := RunShellResult(context.Background(), "echo hi", 10, true, dir, "")
+	res := bridgeTool(t, b).run(context.Background(), shellRequest{Command: "echo hi", TimeoutSec: 10, Interactive: true, Cwd: dir})
 	if b.dir != dir {
 		t.Errorf("桥接子进程 dir = %q want %q", b.dir, dir)
 	}
@@ -170,28 +138,13 @@ func TestAskShellToolCwd(t *testing.T) {
 	}
 }
 
-func TestResolveShellCwdWorkspaceBase(t *testing.T) {
-	ws := t.TempDir()
-	sub := filepath.Join(ws, "sub")
-	if err := os.Mkdir(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	got, err := resolveShellCwd("sub", ws)
-	if err != nil || got != sub {
-		t.Fatalf("相对路径应按工作区合成: got %q, %v; want %q", got, err, sub)
-	}
-	if got, err := resolveShellCwd("sub", ""); err == nil || got != "" {
-		t.Errorf("缺工作区基准时相对路径应报错: got %q, %v", got, err)
-	}
-}
-
 func TestRunShellCwdRelativeToWorkspace(t *testing.T) {
 	ws := t.TempDir()
 	sub := filepath.Join(ws, "sub")
 	if err := os.Mkdir(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	res := RunShellResult(context.Background(), "pwd", 10, false, "sub", ws)
+	res := testShellTool(t, func(cfg *shellToolConfig) { cfg.Workspace = ws }).run(context.Background(), shellRequest{Command: "pwd", TimeoutSec: 10, Cwd: "sub"})
 	if res.Cwd != sub {
 		t.Fatalf("Cwd = %q want %q", res.Cwd, sub)
 	}

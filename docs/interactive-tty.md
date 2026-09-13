@@ -148,7 +148,7 @@ type TTYBridge interface {
     Prepare(cmd *exec.Cmd) (*os.File, error)
     Attach(capture io.Writer) (stop func(), err error)
 }
-func InitTTYBridge(b TTYBridge) // 未注入或 Prepare 失败 → 回退现状路径
+func WithTTYBridge(b TTYBridge) Option // 未注入或 Prepare 失败 → 回退现状路径
 ```
 
 - 执行器产出：① 实时流（内部泵给真实 tty）② 捕获流（`capture` Writer，master 输出全量副本）
@@ -160,7 +160,7 @@ func InitTTYBridge(b TTYBridge) // 未注入或 Prepare 失败 → 回退现状�
 | 前台命令·给模型（长期） | 上下文追加器 | b1 |
 | 前台命令·不给模型（长期） | `io.Discard` | b2 |
 
-- 实现归属 `readline`（复用 `getTermios`/`setTermios` 与 raw 语义，不复制 termios 代码），生产实例由 `main.go` 接线，范式对齐 `InitShell`/`WireToolView`
+- 实现归属 `readline`（复用 `getTermios`/`setTermios` 与 raw 语义，不复制 termios 代码），生产实例由 `main.go` 经 `agent.WithTTYBridge` 注入 `agent.New`（构造期定格，无包级注入点）
 - 生产入口 `readline.NewTTYBridge()`（内部打开 `/dev/tty` 与分配 pty）；另留内部注入构造 `newBridgeTTY(tty *os.File, master *os.File)`，供集成测试以外层 pty 充当"真实 tty"（§8）
 - 全 pty 下 stdout/stderr 合并于同一 slave 流，捕获为**单流**；交互模式将其填入 `ShellResult.Stdout`（`Stderr` 空，`2|` 区分失效，见 §7）
 
@@ -192,7 +192,7 @@ func InitTTYBridge(b TTYBridge) // 未注入或 Prepare 失败 → 回退现状�
 | A1 `^Z` 语义 | **不改代码**。实测：桥接期按 `^Z` 仅回显、子进程不挂起、命令跑完（与 §7 登记一致）。附带发现见 §5.9——非桥接时段按 `^Z` 会走 shell 作业控制：`./tanyan` 直接运行因 `ProtectTerminalSignals` 免疫，但 **`go run .` 启动时 wrapper 会被停止**，shell 抢走终端后 `^C` 失效。**交付/自测请用 `make build` 产出的 `./tanyan`，不要用 `go run .`** |
 | A2 `Attach(cmd, capture)` 未用 `cmd` | **已删参**（接口、两处实现、fake、调用点、文档同步） |
 | A3 双 `TTYBridge` 定义 | **保留**：agent 不 import readline 的依赖倒置，漂移会在 `main.go` 注入处编译期暴露 |
-| A4 `RunShellResult` 新增 `interactive` 参数 | **保留**：模块非公共库，仓库内调用点已同步 |
+| A4 `RunShellResult` 新增 `interactive` 参数 | **保留**：模块非公共库，仓库内调用点已同步。（后续 shellTool 组件化中该函数已删除，语义由 `shellRequest.Interactive` 承接） |
 | A5 `stop()` 丢显示副本 | 不改，登记 §7 |
 | A6 typeahead 被 flush 丢弃 | 不改，登记 §7（候选改进见 §10） |
 | A7 桥接期写入互斥 | 复核无问题，登记 §7 |
@@ -228,7 +228,7 @@ func InitTTYBridge(b TTYBridge) // 未注入或 Prepare 失败 → 回退现状�
 |---|---|
 | `readline/bridge_linux.go`（新） | pty 分配（`Prepare` 设 `Ctty:0` 与三标准流）+ 真实 tty 打开 + 双向泵 + 初始尺寸/`SIGWINCH` 转发 + raw 管理 + capture 写出 + `stop()` 关闭顺序 + `newBridgeTTY` 注入构造 |
 | `readline/bridge_stub.go`（新，非 Linux） | 返回 `ErrUnsupported`，走回退 |
-| `agent/tty_bridge.go`（新） | `TTYBridge` 接口 + `InitTTYBridge` 注入点 |
+| `agent/tty_bridge.go`（新） | `TTYBridge` 接口（注入点后改为 `agent.WithTTYBridge` Option） |
 | `agent/shell.go` | `interactive=true` 且 bridge 可用时走桥接：`cmd.Stdin/Stdout/Stderr` 全接 slave（**不再接管道路径**）、捕获改由 `Attach` 的 `capture=streamCapture` 接入，Start 后关 slave，`defer stop()`；否则回退现状路径 |
 | `main.go` | 接线（`readline` 实现注入 agent） |
 | `docs/design.md` | 交互模式契约更新（落地后） |

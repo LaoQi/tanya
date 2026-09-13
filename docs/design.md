@@ -77,10 +77,10 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## 工具
 
-### run_shell（shell.go）
+### run_shell（`agent/shelltool.go` 组件 + `agent/shell.go` 叶子）
 
 - 参数：`command`（必填）、`cwd`（可选，命令执行目录，默认会话启动目录）、`timeout`（默认 60s，上限 900s）、`interactive`（布尔，默认 false）
-- 执行目录：默认继承进程 cwd（= 会话启动目录，进程全程不 `os.Chdir`）；显式 `cwd` 时设 `cmd.Dir`（不改进程 cwd），解析规则为 `~`/`~/x` 展开 `$HOME`、相对路径按工作区基准合成（`RunShellResult` 末位 `base` 参数，`dispatch` 传 `a.cwd` 即会话启动目录；`RunShell` 包装与测试直调传 `os.Getwd()`，缺基准时相对路径直接失败而非退回环境 cwd），随后 `os.Stat` 校验——不存在或非目录直接快速失败（`MsgBadCwd`，不启动进程）。显式指定时 `ShellResult.Cwd` 填充解析后的绝对路径，`String()` 首行输出 `cwd: <路径>`。桥接与回退两条路径均生效（`TTYBridge.Prepare` 只改 `SysProcAttr`/标准流/`Env`，不覆盖 `cmd.Dir`）
+- 执行目录：默认继承进程 cwd（= 会话启动目录，进程全程不 `os.Chdir`）；显式 `cwd` 时设 `cmd.Dir`（不改进程 cwd），解析规则为 `~`/`~/x` 展开家目录、相对路径按工作区基准合成（家目录与工作区由 `agent.New` 各读一次注入 `shellTool`，构造后只读；缺基准时相对路径直接失败而非退回环境 cwd），随后 `os.Stat` 校验——不存在或非目录直接快速失败（`MsgBadCwd`，不启动进程）。显式指定时 `ShellResult.Cwd` 填充解析后的绝对路径，`String()` 首行输出 `cwd: <路径>`。桥接与回退两条路径均生效（`TTYBridge.Prepare` 只改 `SysProcAttr`/标准流/`Env`，不覆盖 `cmd.Dir`）
 - 交互模式（`interactive: true`）：仅由模型显式声明，**不做命令文本猜测**（早期版本有 sudo/ssh 关键词兜底，review 后移除）。声明后 repl 侧停用等待动画、标题行下打印引导行、结束用追加式渲染（避免 `CursorUp` 擦掉用户输入回显）；`timeout` 缺省时默认放宽至 300s（显式值优先，上限仍 900s）。命令在**独立 pty** 中运行（见下条），提示与输出实时可见；非桥接回退路径下命令提示须自行写入 `/dev/tty`，否则被工具捕获不可见
 - 交互式 pty 桥接（`readline/bridge_linux.go` + `agent/tty_bridge.go`，linux 专用；决策与背景见 `docs/interactive-tty.md`）：解决"交互程序拿不到输入"（`/dev/tty` 直通导致 `ttyname(0)` 退化为 `/dev/tty`、pinentry 等无 ctty 程序无法按路径打开）。流程 `Prepare`（分配 pty、`Setsid+Setctty+Ctty=0`、三条标准流全接 slave、`GPG_TTY`/`SSH_TTY` 覆盖为 slave 路径）→ `Attach`（真实 tty 切 raw、初始尺寸复制到 master、启动双向泵）→ `cmd.Start()` → 立即关闭父进程 slave（否则子进程退出后 master 收不到 EIO）→ `waitShell` → `stop()`（恢复 termios、关闭 tty/master、泵收尾 drain 后 `capture.finish()`）
   - 契约：master 输出**同时**写真实 tty（用户实时可见）与 `capture`（Writer，调用方决定去向）。本处 capture 即 `streamCapture` → `ShellResult.Stdout`，交互模式为**单流**（`Stderr` 空，`2|` 区分失效）；`streamCapture` 头尾截断与 `ShellResult` 字段语义不变
@@ -94,12 +94,13 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
   - 刻意简化（`docs/interactive-tty.md` §7 登记，评审直接引用关闭）：`^C` 计数双杀、中断结果标记、输出清洗、`SIGWINCH` 转发（尽力而为，失败不报错）、桥接期显示对齐
 - 实现：按 `shellProfile` 组装命令（posix `<path> -c`、powershell `<path> -NoProfile -NonInteractive -Command`、cmd `<path> /d /s /c`），捕获 stdout/stderr/退出码/耗时（`ShellResult` 结构化返回：Command/Cwd/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Stopped/NotStarted/Duration）
 - 中断语义：运行中被 ctx 取消 → `Interrupted`，结果追加 `error: 已中断（进程已终止，输出可能不完整）`；ctx 已取消导致命令未能启动 → `Interrupted+NotStarted`，追加 `error: 已中断（命令未执行）`（不再把裸 `context canceled` 交给模型）；toolview 状态行分别为 `已中断`/`未执行`，已捕获的首尾输出照常保留
-- shell 解析（`InitShell`，Agent 构造时一次性执行并缓存）：
+- shell 解析（`newShellTool`，Agent 构造时一次性解析并定格）：
   - 优先级：配置覆盖（`config.yaml shell:` / env `TANYA_SHELL`，名字或绝对路径，任意 shell 名允许，未知 basename 按 posix `-c` 处理）> 平台自动探测
   - 自动探测：windows 仅 `pwsh`（强制 PowerShell 7，不回退 5.1/cmd）；linux/darwin `bash` → `sh` → `ash`
-  - 全部落空（含配置的 shell 不存在）：解析返回错误（`MsgNoShellFmt`/`MsgShellOverrideFmt`，含候选清单与配置提示），`agent.New` 立即透传，`main.go` 打印后以 1 退出——无降级路径，`ShellRuntime()` 在其后恒非 nil，profile 的非空成为不变量（`run_shell` 恒定注册、env 段恒定输出 SHELL/TIMEOUT/OUTPUT 行、system prompt 恒为 `DefaultSystemPrompt`）
+  - 全部落空（含配置的 shell 不存在）：解析返回错误（`MsgNoShellFmt`/`MsgShellOverrideFmt`，含候选清单与配置提示），`agent.New` 立即透传，`main.go` 打印后以 1 退出——无降级路径，`shellTool.profile` 在其后恒非 nil，profile 的非空成为不变量（`run_shell` 恒定注册、env 段恒定输出 SHELL/TIMEOUT/OUTPUT 行、system prompt 恒为 `DefaultSystemPrompt`）
 - 程序探测：profile 就绪后对固定清单（ls/cat/head/tail/grep/rg/fd/sed/awk/find/sort/wc/cut/tr/xargs/git/curl/wget/go/node/python）逐个 LookPath，存在的拼入 run_shell 工具描述 `可用程序: ...`，仅在工具描述出现，不重复注入 env 段
 - 输出捕获：stdout/stderr 各保留头 30000 字节 + 尾 30000 字节（`streamCapture` 滚动窗口），中间字节计数丢弃，模型仍可见首尾内容
+- 组件化（`docs/shell-tool.md`）：`shellTool` 是 shell 执行层唯一所有者，`profile`/`programs`/`workspace`/`home`/`bridge` 在构造期定格、之后只读，`run` 每调用状态全在栈上（可重入）；唯一可变字段是终端租约 `ttyMu`——真实终端进程内只有一份，桥接与前台移交两条路径都在锁内。组件内不读环境（无 `os.Getwd`/`os.UserHomeDir`/`exec.LookPath`/`runtime.GOOS`），`agent.New` 装配点各读一次注入。包级可变状态（`shellRuntime*`/`shellLookPath`/`ttyBridgeMu`+`ttyBridgeCur`）已删除；`envSection`/`runShellDesc`/`ToolDefs` 为纯函数，工具清单在 `NewClient` 构造期注入 client（请求组装不再伸手读包级清单）
 - 实测契约（sudo 两模式对照）：`sudo` 默认模式自开 `/dev/tty` 完成提示与密码输入——前台移交后提示实时可见、密码不回显，仅最终错误走 stderr 回流；`sudo -S` 强制从 stdin 读密码时提示改写 stderr（被捕获，等待期间不可见），交互命令应避免 `-S` 类强制 stdin 选项
 - 终端前台移交（unix，shell_tty_unix.go；illumos/ios 与 windows 等 !unix 平台无实现，降级 no-op，`ttyStdinSupported()` 为假）：执行前打开 `/dev/tty`，仅当自身进程组已是前台时 `TIOCSPGRP` 移交子进程组（`handoverForeground`），子进程结束后以 `handed` 门控归还（`restoreForeground`，避免从未交接时抢占 shell 的前台）；无控制终端 / 非前台（嵌套、后台运行）自动跳过，行为与旧版一致。移交前台的同时将 `cmd.Stdin` 接到 `/dev/tty`（tty 打开成功时），子进程 stdin 直通用户终端，可直接在终端应答 ssh/git/sudo 等密码与确认提示，不再静默挂死至超时；无 tty 时 stdin 保持原状（/dev/null）
 - 信号防护（`ProtectTerminalSignals`，main 启动时 `sync.Once` 一次性）：`Notify(SIGTSTP)` 吞没（命令间隙 Ctrl+Z 不挂起自身）、`Ignore(SIGTTIN/SIGTTOU)`（自身后台 tty 读写不停止）；SIGQUIT 保持 Go 默认（全栈转储）。忽略处置随 exec 被子进程继承，子进程后台读写 tty 得 EIO 而非停止
@@ -223,7 +224,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - Tab 补全菜单：多候选时在输入行下方渲染菜单，选中项反显（`\x1b[7m`）；`↑/↓` 循环选择（菜单打开时不触发历史导航）、`Tab` 循环下一项、`Enter` 仅插入选中项（再次 Enter 提交）、`Esc` 关闭、任意输入关闭菜单正常编辑；单候选直接补全、公共前缀先行扩展的行为不变；候选超 8 行滚动窗口显示
 - keys：ESC 序列/控制键/UTF-8 状态机；width：`style` 薄包装（宽度表/ANSI 剥离/感知截断均由 `style` 提供，截断自动复位悬空 SGR 防串色）
 - 非 TTY 降级：`Degraded` 按行读取，无动画/菜单
-- tty 桥接（`bridge.go` 接口 + `bridge_linux.go` 实现 + `bridge_stub.go` 非 Linux 返回 `ErrUnsupported`）：为 `interactive: true` 的 run_shell 提供"命令在自己的 pty 中运行"的执行器（`TTYBridge.Prepare/Attach`），复用本包 termios 读写与 raw 语义；生产入口 `readline.NewTTYBridge()` 由 `main.go` 注入 `agent.InitTTYBridge`，测试可用 `newBridgeTTY(tty)` 以外层 pty 充当真实 tty
+- tty 桥接（`bridge.go` 接口 + `bridge_linux.go` 实现 + `bridge_stub.go` 非 Linux 返回 `ErrUnsupported`）：为 `interactive: true` 的 run_shell 提供"命令在自己的 pty 中运行"的执行器（`TTYBridge.Prepare/Attach`），复用本包 termios 读写与 raw 语义；生产入口 `readline.NewTTYBridge()` 由 `main.go` 经 `agent.WithTTYBridge` 注入到 `agent.New`（构造期定格进 `shellTool.bridge`），测试可在 `shellToolConfig` 里直接给 fake bridge
 - 终端状态自愈（`secure.go` + `secure_stub.go`）：`InitTerminalGuard`（启动时记录"自己是否为终端前台作业"，并 `signal.Ignore(SIGTTIN/SIGTTOU)`——`tcsetpgrp` 在前台被抢时需忽略 `SIGTTOU` 才不被停住）+ `SecureTerminal`（恢复 `ISIG`、必要时夺回前台组）
 - 平台划分：termios 请求常量按平台族分文件（`termios_sysv.go` linux/android/aix/solaris 用 TCGETS/TCSETS/TCSETSF，`termios_bsd.go` darwin/freebsd/netbsd/openbsd/dragonfly 用 TIOCGETA/TIOCSETA/TIOCSETAF）；illumos/ios 在该版 x/sys 无 ioctl 支持，`terminal_unix_stub.go` 直接返回 ErrUnsupported 走 Degraded 降级，保证全 unix GOOS 可编译
 
@@ -277,5 +278,5 @@ pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（�
 
 - 事实源单一：SHELL/TIMEOUT/OUTPUT 三行由解析后的 `shellProfile` 与 `shell.go` 常量程序化生成（`invocation()`/`shellTimeoutSec`/`shellInteractiveTimeoutSec`/`shellTimeoutLimit`/`shellMaxOutput`），TTY 行为固定契约文案，无第二份硬编码描述；四行恒定输出（shell 缺失时进程已在启动阶段退出）
 - 平台条件：`TTY:` 行与 SHELL 行的 tty 直通说明仅在 `ttyStdinSupported()` 为真（unix 且非 illumos/ios）时输出，其余平台 SHELL 行退化为 `（非交互）`，不宣称不存在的 /dev/tty 能力
-- 探测机制：`envSection` 为纯函数，WORKSPACE 标记文件（`os.Stat`，8 种标志文件固定顺序）经注入的 `envProbeFunc` 取得；shell 契约读包级 `ShellRuntime()`（`InitShell` 在 Agent 构造时解析缓存，envprobe 不再自行 LookPath）；主路径零 exec、零易变信息
+- 探测机制：`envSection` 为纯函数，WORKSPACE 标记文件（`os.Stat`，8 种标志文件固定顺序）经注入的 `envProbeFunc` 取得；shell 契约由入参 `*shellProfile` 注入（`shellTool.profile`，SHELL 行取 `profile.invocation()`），不再读包级状态；主路径零 exec、零易变信息
 - 可测性：分层测试——persistPrompt 只含规则 / envSection 注入 fake probe 断言渲染 / runtimePrompt 拼接（probe 为 nil 时退化） / 同参数两次渲染字节相等
