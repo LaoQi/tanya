@@ -143,7 +143,7 @@ func TestNoticeTurnPersisted(t *testing.T) {
 	if err := a.Ask(ctx, "问题", nil); err == nil {
 		t.Fatal("中断应返回错误")
 	}
-	data, err := os.ReadFile(a.sessionPath)
+	data, err := os.ReadFile(a.store.path())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestNoticeTurnPersisted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a2.LoadSession(strings.TrimSuffix(filepath.Base(a.sessionPath), ".jsonl")); err != nil {
+	if err := a2.LoadSession(strings.TrimSuffix(filepath.Base(a.store.path()), ".jsonl")); err != nil {
 		t.Fatal(err)
 	}
 	if len(a2.history) != 4 {
@@ -186,15 +186,15 @@ func TestSaveWriteFailureKeepsCursor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.sessionPath = "/dev/full"
+	a.store.file = "/dev/full"
 	a.history = []Message{{Role: "user", Content: "x"}}
 	if err := a.save(); err == nil {
 		t.Fatal("写入 /dev/full 应失败")
 	}
-	if a.saved != 0 {
-		t.Fatalf("失败时 saved 不应推进: %d", a.saved)
+	if a.store.saved != 0 {
+		t.Fatalf("失败时 saved 不应推进: %d", a.store.saved)
 	}
-	if a.systemSaved {
+	if a.store.systemSaved {
 		t.Fatal("失败时 systemSaved 不应置位")
 	}
 }

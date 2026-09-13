@@ -182,3 +182,22 @@ func TestAskShellToolRelativeCwdUsesWorkspace(t *testing.T) {
 		t.Errorf("相对 cwd 应按工作区（a.cwd）解析: %q", content)
 	}
 }
+
+func TestRunShellCwdKeepsProcessCwd(t *testing.T) {
+	before, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	res := testShellTool(t).run(context.Background(), shellRequest{Command: "pwd", TimeoutSec: 10, Cwd: dir})
+	if res.Err != "" || res.ExitCode != 0 {
+		t.Fatalf("run: %+v", res)
+	}
+	after, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Errorf("进程 cwd 被改变: %q → %q", before, after)
+	}
+}

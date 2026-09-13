@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -126,21 +127,6 @@ func TestShellToolResolveCwdNoBaseline(t *testing.T) {
 	}
 }
 
-func TestShellToolToolDesc(t *testing.T) {
-	tool := testShellTool(t, func(c *shellToolConfig) { c.Programs = []string{"ls", "grep"} })
-	desc := tool.toolDesc()
-	if !strings.Contains(desc, "可用程序: ls, grep") || !strings.Contains(desc, "cwd 参数") {
-		t.Errorf("toolDesc = %q", desc)
-	}
-}
-
-func TestShellToolRunNonInteractive(t *testing.T) {
-	res := testShellTool(t).run(context.Background(), shellRequest{Command: "echo hi", TimeoutSec: 10})
-	if res.ExitCode != 0 || res.Err != "" || !strings.Contains(res.String(), "hi") {
-		t.Fatalf("run: %+v", res)
-	}
-}
-
 func TestShellToolRunBadCwd(t *testing.T) {
 	res := testShellTool(t).run(context.Background(), shellRequest{
 		Command:    "echo hi",
@@ -175,5 +161,65 @@ func TestShellToolConcurrentRun(t *testing.T) {
 		if i > 0 && !strings.Contains(got, fmt.Sprintf("exit code: %d", i)) {
 			t.Errorf("并发第 %d 次退出码丢失: %q", i, got)
 		}
+	}
+}
+
+func TestNewShellToolEmptyPrograms(t *testing.T) {
+	calls := 0
+	lookPath := func(name string) (string, error) {
+		calls++
+		if name == "bash" {
+			return "/usr/bin/bash", nil
+		}
+		return "", errors.New("not found")
+	}
+	tool, err := newShellTool(shellToolConfig{GOOS: "linux", LookPath: lookPath, Programs: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tool.programs == nil || len(tool.programs) != 0 {
+		t.Errorf("空切片应表示显式无程序: %#v", tool.programs)
+	}
+	if calls != 1 {
+		t.Errorf("空切片应跳过程序探针: LookPath 调用 %d 次", calls)
+	}
+	if desc := tool.toolDesc(); strings.Contains(desc, "可用程序") {
+		t.Errorf("无程序时不应追加可用程序段: %q", desc)
+	}
+}
+
+func TestShellToolInteractiveBadCwdSkipsBridge(t *testing.T) {
+	f := &fakeTTYBridge{}
+	res := bridgeTool(t, f).run(context.Background(), shellRequest{
+		Command:     "echo hi",
+		TimeoutSec:  10,
+		Interactive: true,
+		Cwd:         filepath.Join(t.TempDir(), "nope"),
+	})
+	if !strings.Contains(res.Err, "cwd") {
+		t.Fatalf("非法 cwd 应快速失败: %+v", res)
+	}
+	if f.prepared || f.attached {
+		t.Errorf("非法 cwd 不应触碰终端租约: prepared=%v attached=%v", f.prepared, f.attached)
+	}
+}
+
+func TestShellToolDescGolden(t *testing.T) {
+	tool := &shellTool{
+		profile:  &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix},
+		programs: []string{"ls", "grep"},
+	}
+	want := "在 " + runtime.GOOS + " bash 中执行 shell 命令，返回 stdout/stderr/退出码。读文件、搜索、文本处理等系统操作都用它。" +
+		"默认在会话启动目录（进程 cwd）下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。" +
+		"可用程序: ls, grep"
+	if got := tool.toolDesc(); got != want {
+		t.Errorf("toolDesc 全串不匹配:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestRunShellParamsGolden(t *testing.T) {
+	want := `{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"cwd":{"type":"string","description":"命令执行目录，默认会话启动目录"},"timeout":{"type":"integer","description":"超时秒数，默认 60（interactive 时 300），最大 900"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令在独立 pty 中运行、终端直通应答，停用等待动画，默认超时放宽"}},"required":["command"]}`
+	if got := runShellParams(); got != want {
+		t.Errorf("runShellParams 全串不匹配:\n got %q\nwant %q", got, want)
 	}
 }

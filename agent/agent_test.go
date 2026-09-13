@@ -70,10 +70,10 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	if err := a.save(); err != nil {
 		t.Fatal(err)
 	}
-	id := strings.TrimSuffix(filepath.Base(a.sessionPath), ".jsonl")
+	id := strings.TrimSuffix(filepath.Base(a.store.path()), ".jsonl")
 
 	b := newTestAgent(t)
-	b.sessionDir = a.sessionDir
+	b.store.dir = a.store.dir
 	if err := b.LoadSession(id); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := newTestAgent(t)
-	c.sessionDir = a.sessionDir
+	c.store.dir = a.store.dir
 	if err := c.LoadSession(id); err != nil {
 		t.Fatal(err)
 	}
@@ -112,24 +112,24 @@ func TestLoadSessionInvalid(t *testing.T) {
 
 func TestNewSessionResetsUsage(t *testing.T) {
 	a := newTestAgent(t)
-	a.lastUsage = &Usage{PromptTokens: 1200}
+	a.stats.record(&Usage{PromptTokens: 1200})
 	a.NewSession()
-	if a.lastUsage != nil {
+	if a.stats.last != nil {
 		t.Error("/new 应清理上次用量")
 	}
 }
 
 func TestLoadSessionResetsUsage(t *testing.T) {
 	a := newTestAgent(t)
-	p := filepath.Join(a.sessionDir, "20260101-090000.jsonl")
+	p := filepath.Join(a.store.dir, "20260101-090000.jsonl")
 	if err := os.WriteFile(p, []byte(`{"role":"user","content":"历史会话"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	a.lastUsage = &Usage{PromptTokens: 1200}
+	a.stats.record(&Usage{PromptTokens: 1200})
 	if err := a.LoadSession("20260101-090000"); err != nil {
 		t.Fatal(err)
 	}
-	if a.lastUsage != nil {
+	if a.stats.last != nil {
 		t.Error("/load 应清理上次用量")
 	}
 }
@@ -137,7 +137,7 @@ func TestLoadSessionResetsUsage(t *testing.T) {
 func TestListSessions(t *testing.T) {
 	a := newTestAgent(t)
 	write := func(name, content string) {
-		p := filepath.Join(a.sessionDir, name+".jsonl")
+		p := filepath.Join(a.store.dir, name+".jsonl")
 		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -162,7 +162,7 @@ func TestListSessions(t *testing.T) {
 
 func TestListSessionsIncrementalRefresh(t *testing.T) {
 	a := newTestAgent(t)
-	p := filepath.Join(a.sessionDir, "20260101-100000.jsonl")
+	p := filepath.Join(a.store.dir, "20260101-100000.jsonl")
 	if err := os.WriteFile(p, []byte(`{"role":"user","content":"第一条"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestListSessionsIncrementalRefresh(t *testing.T) {
 	if err != nil || list[0].Msgs != 2 {
 		t.Errorf("追加后条数应刷新: %+v %v", list, err)
 	}
-	if err := os.WriteFile(filepath.Join(a.sessionDir, "20260102-100000.jsonl"), []byte(`{"role":"user","content":"第二条"}`+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(a.store.dir, "20260102-100000.jsonl"), []byte(`{"role":"user","content":"第二条"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	list, err = a.ListSessions()
@@ -220,10 +220,10 @@ func TestWorkspaceID(t *testing.T) {
 
 func TestNewSessionPerWorkspace(t *testing.T) {
 	a := newTestAgent(t)
-	if a.sessionDir == a.cfg.GlobalSession || !strings.HasPrefix(a.sessionDir, a.cfg.GlobalSession+string(filepath.Separator)) {
-		t.Errorf("sessionDir 应为 cfg.GlobalSession 下的工作区子目录: %q", a.sessionDir)
+	if a.store.dir == a.cfg.GlobalSession || !strings.HasPrefix(a.store.dir, a.cfg.GlobalSession+string(filepath.Separator)) {
+		t.Errorf("sessionDir 应为 cfg.GlobalSession 下的工作区子目录: %q", a.store.dir)
 	}
-	if _, err := os.Stat(a.sessionDir); err != nil {
+	if _, err := os.Stat(a.store.dir); err != nil {
 		t.Errorf("工作区目录未创建: %v", err)
 	}
 }
@@ -271,10 +271,10 @@ func TestNewLocalMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(a.sessionDir, filepath.Join(".tanya", "sessions")) {
-		t.Errorf("local 模式目录: %q", a.sessionDir)
+	if !strings.HasSuffix(a.store.dir, filepath.Join(".tanya", "sessions")) {
+		t.Errorf("local 模式目录: %q", a.store.dir)
 	}
-	if _, err := os.Stat(a.sessionDir); err != nil {
+	if _, err := os.Stat(a.store.dir); err != nil {
 		t.Errorf("目录未创建: %v", err)
 	}
 }
@@ -412,11 +412,11 @@ func TestSaveLoadSystemSnapshot(t *testing.T) {
 	if err := a.save(); err != nil {
 		t.Fatal(err)
 	}
-	id := strings.TrimSuffix(filepath.Base(a.sessionPath), ".jsonl")
+	id := strings.TrimSuffix(filepath.Base(a.store.path()), ".jsonl")
 
 	writeAgents(t, filepath.Join(cwd, "AGENTS.md"), "规则 v2")
 	b := newTestAgent(t)
-	b.sessionDir = a.sessionDir
+	b.store.dir = a.store.dir
 	if err := b.LoadSession(id); err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +431,7 @@ func TestSaveLoadSystemSnapshot(t *testing.T) {
 	if err := b.save(); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(b.sessionPath)
+	data, err := os.ReadFile(b.store.path())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +439,7 @@ func TestSaveLoadSystemSnapshot(t *testing.T) {
 		t.Errorf("system 行应仅 1 条: %d", got)
 	}
 	c := newTestAgent(t)
-	c.sessionDir = a.sessionDir
+	c.store.dir = a.store.dir
 	if err := c.LoadSession(id); err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +458,7 @@ func TestLoadSessionLegacyFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeAgents(t, filepath.Join(cwd, "AGENTS.md"), "旧规则")
-	legacy := filepath.Join(a.sessionDir, "20260101-090000.jsonl")
+	legacy := filepath.Join(a.store.dir, "20260101-090000.jsonl")
 	content := `{"role":"user","content":"历史问题"}` + "\n" + `{"role":"assistant","content":"历史回答"}` + "\n"
 	if err := os.WriteFile(legacy, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -476,7 +476,7 @@ func TestLoadSessionLegacyFormat(t *testing.T) {
 
 func TestLegacySessionNotAppendSystem(t *testing.T) {
 	a := newTestAgent(t)
-	legacy := filepath.Join(a.sessionDir, "20260101-090001.jsonl")
+	legacy := filepath.Join(a.store.dir, "20260101-090001.jsonl")
 	content := `{"role":"user","content":"历史问题"}` + "\n"
 	if err := os.WriteFile(legacy, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -505,7 +505,7 @@ func TestListSessionsSkipsSystemLine(t *testing.T) {
 	content := `{"role":"system","content":"sys"}` + "\n" +
 		`{"role":"user","content":"标题问题"}` + "\n" +
 		`{"role":"assistant","content":"好"}` + "\n"
-	p := filepath.Join(a.sessionDir, "20260101-100000.jsonl")
+	p := filepath.Join(a.store.dir, "20260101-100000.jsonl")
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -526,15 +526,15 @@ func TestPromptCache(t *testing.T) {
 	if a.PromptCache() != "" {
 		t.Error("无 usage 应为空")
 	}
-	a.lastUsage = &Usage{PromptTokens: 1200, CacheHitTokens: 980}
+	a.stats.record(&Usage{PromptTokens: 1200, CacheHitTokens: 980})
 	if got := a.PromptCache(); got != "980" {
 		t.Errorf("DeepSeek 风格: got %q", got)
 	}
-	a.lastUsage = &Usage{PromptTokens: 1200, PromptTokensDetails: &promptTokensDetails{CachedTokens: 600}}
+	a.stats.record(&Usage{PromptTokens: 1200, PromptTokensDetails: &promptTokensDetails{CachedTokens: 600}})
 	if got := a.PromptCache(); got != "600" {
 		t.Errorf("OpenAI 风格: got %q", got)
 	}
-	a.lastUsage = &Usage{PromptTokens: 1200}
+	a.stats.record(&Usage{PromptTokens: 1200})
 	if a.PromptCache() != "" {
 		t.Error("无缓存数据应为空")
 	}
@@ -545,15 +545,15 @@ func TestPromptCacheRate(t *testing.T) {
 	if a.PromptCacheRate() != "" {
 		t.Error("无 usage 应为空")
 	}
-	a.lastUsage = &Usage{PromptTokens: 1200, CacheHitTokens: 980}
+	a.stats.record(&Usage{PromptTokens: 1200, CacheHitTokens: 980})
 	if got := a.PromptCacheRate(); got != "81.67%" {
 		t.Errorf("DeepSeek 风格: got %q", got)
 	}
-	a.lastUsage = &Usage{PromptTokens: 1200, PromptTokensDetails: &promptTokensDetails{CachedTokens: 600}}
+	a.stats.record(&Usage{PromptTokens: 1200, PromptTokensDetails: &promptTokensDetails{CachedTokens: 600}})
 	if got := a.PromptCacheRate(); got != "50.00%" {
 		t.Errorf("OpenAI 风格: got %q", got)
 	}
-	a.lastUsage = &Usage{PromptTokens: 1200}
+	a.stats.record(&Usage{PromptTokens: 1200})
 	if a.PromptCacheRate() != "" {
 		t.Error("无缓存数据应为空")
 	}
@@ -564,15 +564,15 @@ func TestPromptSummary(t *testing.T) {
 	if got := a.PromptSummary(); got != a.PromptUsage() {
 		t.Errorf("无 usage 应仅显示估算总量: %q", got)
 	}
-	a.lastUsage = &Usage{PromptTokens: 1200}
+	a.stats.record(&Usage{PromptTokens: 1200})
 	if got := a.PromptSummary(); got != "1.2k" {
 		t.Errorf("无缓存应仅显示总量: %q", got)
 	}
-	a.lastUsage = &Usage{PromptTokens: 1200, CacheHitTokens: 980}
+	a.stats.record(&Usage{PromptTokens: 1200, CacheHitTokens: 980})
 	if got := a.PromptSummary(); got != "980/1.2k 81.67%" {
 		t.Errorf("有缓存应为 缓存/总量 命中率: %q", got)
 	}
-	a.lastUsage = &Usage{PromptTokens: 1200, PromptTokensDetails: &promptTokensDetails{CachedTokens: 600}}
+	a.stats.record(&Usage{PromptTokens: 1200, PromptTokensDetails: &promptTokensDetails{CachedTokens: 600}})
 	if got := a.PromptSummary(); got != "600/1.2k 50.00%" {
 		t.Errorf("OpenAI 风格: %q", got)
 	}
@@ -603,7 +603,7 @@ func TestLegacyPromptFlag(t *testing.T) {
 	assertLegacy := func(firstLine string) {
 		t.Helper()
 		a := newTestAgent(t)
-		path := filepath.Join(a.sessionDir, "20260101-080000.jsonl")
+		path := filepath.Join(a.store.dir, "20260101-080000.jsonl")
 		content := firstLine + "\n" + `{"role":"user","content":"q"}` + "\n"
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -621,7 +621,7 @@ func TestLegacyPromptFlag(t *testing.T) {
 
 func TestLegacyPromptFlagNewFormat(t *testing.T) {
 	a := newTestAgent(t)
-	path := filepath.Join(a.sessionDir, "20260101-080100.jsonl")
+	path := filepath.Join(a.store.dir, "20260101-080100.jsonl")
 	content := `{"role":"system","content":"规则"}` + "\n" + `{"role":"user","content":"q"}` + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -662,5 +662,26 @@ func TestTotalTokensCountsMultipleReasoningItems(t *testing.T) {
 	single := a.totalTokens()
 	if multi-single != estimateTokens(strings.Repeat("b", 100)) {
 		t.Fatalf("多条 reasoning 未全部计入: 差 %d", multi-single)
+	}
+}
+
+func TestNewWiresTTYBridge(t *testing.T) {
+	isolatePromptEnv(t)
+	cfg := defaultConfig()
+	cfg.GlobalSession = t.TempDir()
+	f := &fakeTTYBridge{}
+	a, err := New(cfg, WithTTYBridge(f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.tool == nil || a.tool.bridge != TTYBridge(f) {
+		t.Errorf("WithTTYBridge 未接入组件: %+v", a.tool)
+	}
+	b, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.tool.bridge != nil {
+		t.Errorf("未注入时 bridge 应为 nil: %#v", b.tool.bridge)
 	}
 }

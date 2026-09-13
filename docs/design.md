@@ -9,7 +9,7 @@
 ```
 main.go            package main：入口、flag 子命令、ask 单发
 repl/              package repl：REPL 循环、斜杠命令、补全、工具视图渲染、等待动画
-agent/             package agent：全部核心逻辑（config / llm / agent / shell / builtin）
+agent/             package agent：全部核心逻辑（config / llm / agent / prompt / session / stats / shell / builtin）
 readline/          package readline：自研终端输入层（editor / keys / terminal）
 style/             package style：富文本管线（语义色/宽度截断/模板/IR，SGR 唯一产地），设计见 docs/render-pipeline.md
 ```
@@ -149,7 +149,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
   - `auto`：当前目录存在 `.tanya/` → local，否则 global
   - `local`：`<启动目录>/.tanya/sessions/`（.tanya 本身即项目隔离，不叠加 workspace-id）
   - `global`：`global_session/<workspace-id>/`，workspace-id 由启动目录派生（可读路径转义 + 短哈希）
-- 只读会话（`-n` / `--no-save`）：由 CLI 经 `agent.New(cfg, agent.NoSave(true))` 传入，`Config` 无对应字段，配置文件与 env 均无法开启；`ask` 单发与 REPL 通用。读路径全部保留（启动预扫描、`ListSessions`、`LoadSession` 照常，既有会话不会被截断或改写），写路径在 `save()` 首行返回 nil 被整体关闭（覆盖成功/中断/错误三条路径）；`MkdirAll(sessionDir)` 在只读模式下跳过，目录缺失时 `refreshSessions` 按空列表处理不报错。内存 history 照常维护（中断保留语义不变），进程退出即丢。REPL 启动时在欢迎屏下方以语义色 `Warn` 打一行 `MsgNoSaveWarn`（`REPL.noSaveWarn`，agent 为 nil 或可写时不输出），`ask` 静默
+- 只读会话（`-n` / `--no-save`）：由 CLI 经 `agent.New(cfg, agent.NoSave(true))` 传入，`Config` 无对应字段，配置文件与 env 均无法开启；`ask` 单发与 REPL 通用。读路径全部保留（启动预扫描、`ListSessions`、`LoadSession` 照常，既有会话不会被截断或改写），写路径在 `sessionStore.append` 首行（`disabled`）返回 nil 被整体关闭（覆盖成功/中断/错误三条路径）；`MkdirAll(store.dir)` 在只读模式下跳过，目录缺失时 `store.refresh` 按空列表处理不报错。内存 history 照常维护（中断保留语义不变），进程退出即丢。REPL 启动时在欢迎屏下方以语义色 `Warn` 打一行 `MsgNoSaveWarn`（`REPL.noSaveWarn`，agent 为 nil 或可写时不输出），`ask` 静默
 - 落盘：`<timestamp>.jsonl`，每轮结束追加写入新消息（一行一条 Message JSON），记录完整历史（回放/审计用）；回合因中断/错误保留产出时同样落盘（含终止提示行）
 - 落盘原子性：本批消息先编码进内存缓冲再单次追加写入，写入报错或短写时 `Truncate` 回滚到写入前大小，`saved` 游标与文件内容始终一致（重试不会产生重复行/半行）
 - 首行持久化 system prompt 快照（`systemSaved` 标志防重复），`/load` 还原后前缀与当初逐字节一致；旧格式文件（无 system 首行）回退为载入时快照当前 AGENTS.md，且保持不补写；system 行不计入 `/sessions` 条数与标题

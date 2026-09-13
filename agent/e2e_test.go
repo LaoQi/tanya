@@ -334,3 +334,75 @@ func TestAskToolEventsCarryResult(t *testing.T) {
 		t.Errorf("ToolStart 应先于 ToolEnd 且携带结果: start=%v result=%v", startBeforeEnd, sawResult)
 	}
 }
+
+func TestRunTurnInteractiveEventPassthrough(t *testing.T) {
+	m := newMockLLM(t,
+		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "run_shell", args: `{"command":"echo hi","interactive":true}`}}},
+		mockStep{toolCalls: []mockToolCall{{id: "call_2", name: "run_shell", args: `{"command":"echo hi"}`}}},
+		mockStep{content: "完成"},
+	)
+	a, err := New(m.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	type toolEvent struct {
+		name        string
+		interactive bool
+	}
+	var starts, ends []toolEvent
+	sink := EventSink(func(e Event) {
+		switch e.Kind {
+		case EventToolStart:
+			starts = append(starts, toolEvent{e.ToolName, e.Interactive})
+		case EventToolEnd:
+			ends = append(ends, toolEvent{e.ToolName, e.Interactive})
+		}
+	})
+	if err := a.Ask(context.Background(), "测试", sink); err != nil {
+		t.Fatal(err)
+	}
+	if len(starts) != 2 || len(ends) != 2 {
+		t.Fatalf("工具事件数: start=%d end=%d", len(starts), len(ends))
+	}
+	for i, want := range []bool{true, false} {
+		if starts[i].name != "run_shell" || ends[i].name != "run_shell" {
+			t.Errorf("第 %d 次事件工具名: %q / %q", i+1, starts[i].name, ends[i].name)
+		}
+		if starts[i].interactive != want || ends[i].interactive != want {
+			t.Errorf("第 %d 次 Interactive: start=%v end=%v want %v",
+				i+1, starts[i].interactive, ends[i].interactive, want)
+		}
+	}
+}
+
+func TestRunTurnBadJSONArgs(t *testing.T) {
+	m := newMockLLM(t,
+		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "run_shell", args: `{"command":`}}},
+		mockStep{content: "已忽略"},
+	)
+	a, err := New(m.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var interactive []bool
+	sink := EventSink(func(e Event) {
+		if e.Kind == EventToolStart {
+			interactive = append(interactive, e.Interactive)
+		}
+	})
+	if err := a.Ask(context.Background(), "测试", sink); err != nil {
+		t.Fatal(err)
+	}
+	if len(interactive) != 1 || interactive[0] {
+		t.Errorf("坏 JSON 时事件 Interactive 应为 false: %v", interactive)
+	}
+	var toolMsg string
+	for _, msg := range a.history {
+		if msg.Role == "tool" {
+			toolMsg = msg.Content
+		}
+	}
+	if !strings.Contains(toolMsg, "参数解析失败") {
+		t.Errorf("tool 结果应为参数解析失败: %q", toolMsg)
+	}
+}
