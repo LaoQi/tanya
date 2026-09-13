@@ -15,8 +15,8 @@ func fakeProbe(workspace string) envProbeFunc {
 }
 
 func TestEnvSectionFull(t *testing.T) {
-	withShellRuntime(t, &shellRuntime{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}})
-	out := envSection("/home/u/proj", fakeProbe("go.mod, Makefile"))
+	profile := &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}
+	out := envSection("/home/u/proj", fakeProbe("go.mod, Makefile"), profile)
 	wantSub := []string{
 		"# 环境",
 		"OS: " + runtime.GOOS + "/" + runtime.GOARCH,
@@ -38,10 +38,10 @@ func TestEnvSectionFull(t *testing.T) {
 }
 
 func TestEnvSectionDeterministic(t *testing.T) {
-	withShellRuntime(t, &shellRuntime{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}})
+	profile := &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}
 	cwd := "/home/u/proj"
 	probe := fakeProbe("go.mod")
-	if envSection(cwd, probe) != envSection(cwd, probe) {
+	if envSection(cwd, probe, profile) != envSection(cwd, probe, profile) {
 		t.Error("同参数两次渲染应字节相同")
 	}
 }

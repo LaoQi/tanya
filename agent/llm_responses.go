@@ -98,8 +98,7 @@ func buildResponsesInput(messages []Message) (string, []any) {
 	return instructions, items
 }
 
-func responsesTools() []responsesTool {
-	defs := ToolDefs()
+func responsesTools(defs []ToolDef) []responsesTool {
 	tools := make([]responsesTool, 0, len(defs))
 	for _, d := range defs {
 		tools = append(tools, responsesTool{
@@ -170,7 +169,7 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 		Input:        input,
 		Temperature:  temperatureParam(c.cfg),
 		Reasoning:    reasoningParam(c.cfg.ReasoningEffort),
-		Tools:        responsesTools(),
+		Tools:        responsesTools(c.tools),
 		Stream:       true,
 	})
 	if err != nil {

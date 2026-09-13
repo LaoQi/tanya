@@ -3,12 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -58,47 +55,6 @@ var shellPrograms = []string{
 	"ls", "cat", "head", "tail", "grep", "rg", "fd", "sed", "awk",
 	"find", "sort", "wc", "cut", "tr", "xargs",
 	"git", "curl", "wget", "go", "node", "python",
-}
-
-type shellRuntime struct {
-	profile  *shellProfile
-	programs []string
-}
-
-var (
-	shellRuntimeMu  sync.Mutex
-	shellRuntimeCur *shellRuntime
-	shellRuntimeSet bool
-	shellRuntimeErr error
-	shellLookPath   = exec.LookPath
-)
-
-func InitShell(override string) error {
-	shellRuntimeMu.Lock()
-	defer shellRuntimeMu.Unlock()
-	if !shellRuntimeSet {
-		shellRuntimeCur, shellRuntimeErr = resolveShellRuntime(override, runtime.GOOS, shellLookPath)
-		shellRuntimeSet = true
-	}
-	return shellRuntimeErr
-}
-
-func ShellRuntime() *shellRuntime {
-	shellRuntimeMu.Lock()
-	defer shellRuntimeMu.Unlock()
-	if !shellRuntimeSet {
-		shellRuntimeCur, shellRuntimeErr = resolveShellRuntime("", runtime.GOOS, shellLookPath)
-		shellRuntimeSet = true
-	}
-	return shellRuntimeCur
-}
-
-func resolveShellRuntime(override, goos string, lookPath func(string) (string, error)) (*shellRuntime, error) {
-	profile, err := resolveProfile(override, goos, lookPath)
-	if err != nil {
-		return nil, err
-	}
-	return &shellRuntime{profile: profile, programs: probePrograms(lookPath)}, nil
 }
 
 func resolveProfile(override, goos string, lookPath func(string) (string, error)) (*shellProfile, error) {
@@ -264,11 +220,6 @@ func (c *streamCapture) finish() {
 	}
 }
 
-func RunShell(ctx context.Context, command string, timeoutSec int) string {
-	base, _ := os.Getwd()
-	return RunShellResult(ctx, command, timeoutSec, false, "", base).String()
-}
-
 func shellArgs(profile *shellProfile, command string) []string {
 	args := make([]string, 0, len(profile.ExtraArgs)+2)
 	args = append(args, profile.ExtraArgs...)
@@ -316,51 +267,6 @@ func statState(stat string) string {
 		return ""
 	}
 	return fields[0]
-}
-
-func RunShellResult(ctx context.Context, command string, timeoutSec int, interactive bool, cwd, base string) *ShellResult {
-	timeoutSec = effectiveShellTimeout(timeoutSec, interactive)
-	profile := ShellRuntime().profile
-	dir, err := resolveShellCwd(cwd, base)
-	if err != nil {
-		return &ShellResult{Command: command, Err: err.Error()}
-	}
-	if interactive {
-		if res, ok := runShellBridged(ctx, command, timeoutSec, profile, dir); ok {
-			return res
-		}
-	}
-	return runShellForeground(ctx, command, timeoutSec, profile, dir)
-}
-
-func resolveShellCwd(cwd, base string) (string, error) {
-	if cwd == "" {
-		return "", nil
-	}
-	dir := cwd
-	if dir == "~" || strings.HasPrefix(dir, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil || home == "" {
-			return "", fmt.Errorf(MsgBadCwd, cwd)
-		}
-		if dir == "~" {
-			dir = home
-		} else {
-			dir = filepath.Join(home, dir[2:])
-		}
-	}
-	if !filepath.IsAbs(dir) {
-		if base == "" {
-			return "", fmt.Errorf(MsgBadCwd, cwd)
-		}
-		dir = filepath.Join(base, dir)
-	}
-	dir = filepath.Clean(dir)
-	info, err := os.Stat(dir)
-	if err != nil || !info.IsDir() {
-		return "", fmt.Errorf(MsgBadCwd, cwd)
-	}
-	return dir, nil
 }
 
 func runShellForeground(ctx context.Context, command string, timeoutSec int, profile *shellProfile, dir string) *ShellResult {
@@ -420,8 +326,7 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 	return res
 }
 
-func runShellBridged(ctx context.Context, command string, timeoutSec int, profile *shellProfile, dir string) (*ShellResult, bool) {
-	bridge := currentTTYBridge()
+func runShellBridged(ctx context.Context, bridge TTYBridge, command string, timeoutSec int, profile *shellProfile, dir string) (*ShellResult, bool) {
 	if bridge == nil {
 		return nil, false
 	}

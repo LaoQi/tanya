@@ -11,35 +11,35 @@ import (
 )
 
 func TestRunShellStdout(t *testing.T) {
-	got := RunShell(context.Background(), "echo hello", 10)
+	got := runShellString(t, context.Background(), "echo hello", 10)
 	if !strings.Contains(got, "stdout:\nhello") {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestRunShellExitCode(t *testing.T) {
-	got := RunShell(context.Background(), "exit 3", 10)
+	got := runShellString(t, context.Background(), "exit 3", 10)
 	if !strings.Contains(got, "exit code: 3") {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestRunShellStderr(t *testing.T) {
-	got := RunShell(context.Background(), "echo oops >&2", 10)
+	got := runShellString(t, context.Background(), "echo oops >&2", 10)
 	if !strings.Contains(got, "stderr:\noops") {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestRunShellNoOutput(t *testing.T) {
-	got := RunShell(context.Background(), "true", 10)
+	got := runShellString(t, context.Background(), "true", 10)
 	if !strings.Contains(got, "退出码 0") {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestRunShellTimeout(t *testing.T) {
-	got := RunShell(context.Background(), "sleep 5", 1)
+	got := runShellString(t, context.Background(), "sleep 5", 1)
 	if !strings.Contains(got, "超时") {
 		t.Errorf("got %q", got)
 	}
@@ -51,7 +51,7 @@ func TestRunShellInterrupt(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		cancel()
 	}()
-	got := RunShell(ctx, "sleep 5", 60)
+	got := runShellString(t, ctx, "sleep 5", 60)
 	if !strings.Contains(got, "已中断") || !strings.Contains(got, "输出可能不完整") {
 		t.Errorf("got %q", got)
 	}
@@ -60,7 +60,7 @@ func TestRunShellInterrupt(t *testing.T) {
 func TestRunShellInterruptNotStarted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	got := RunShell(ctx, "echo hi", 60)
+	got := runShellString(t, ctx, "echo hi", 60)
 	if !strings.Contains(got, "命令未执行") {
 		t.Errorf("got %q", got)
 	}
@@ -70,14 +70,14 @@ func TestRunShellInterruptNotStarted(t *testing.T) {
 }
 
 func TestRunShellTimeoutClamp(t *testing.T) {
-	got := RunShell(context.Background(), "echo ok", 9999)
+	got := runShellString(t, context.Background(), "echo ok", 9999)
 	if !strings.Contains(got, "ok") {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestRunShellTruncation(t *testing.T) {
-	got := RunShell(context.Background(), "head -c 200000 /dev/zero | tr '\\0' 'a'", 30)
+	got := runShellString(t, context.Background(), "head -c 200000 /dev/zero | tr '\\0' 'a'", 30)
 	if !strings.Contains(got, "中间截断 150000 字节") {
 		t.Errorf("应包含中间截断标记: len=%d", len(got))
 	}
@@ -88,7 +88,7 @@ func TestRunShellTruncation(t *testing.T) {
 
 func TestRunShellKillsProcessGroup(t *testing.T) {
 	marker := fmt.Sprintf("tanyan_pg_%d", os.Getpid())
-	got := RunShell(context.Background(), "exec -a "+marker+" sleep 30 & wait", 1)
+	got := runShellString(t, context.Background(), "exec -a "+marker+" sleep 30 & wait", 1)
 	if !strings.Contains(got, "超时") {
 		t.Fatalf("got %q", got)
 	}
@@ -100,7 +100,7 @@ func TestRunShellKillsProcessGroup(t *testing.T) {
 
 func TestRunShellWaitDelay(t *testing.T) {
 	start := time.Now()
-	got := RunShell(context.Background(), "sleep 30 & echo ok", 60)
+	got := runShellString(t, context.Background(), "sleep 30 & echo ok", 60)
 	elapsed := time.Since(start)
 	if !strings.Contains(got, "ok") {
 		t.Errorf("got %q", got)

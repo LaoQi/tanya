@@ -30,8 +30,9 @@ agent/             核心逻辑
   llm_responses.go responses 协议 client（input items 映射、reasoning 明文捕获/回传、usage 映射）
   agent.go         对话 loop、上下文估算、会话持久化（规则/事实分离）
   envprobe.go      环境探针（平台 + cwd + run_shell 契约 + 工作区标记，恒定注入）
-  shell.go         run_shell 工具（平台 shell 解析、cwd 参数解析与校验、头尾截断、结构化返回、interactive 走 pty 桥接）
-  tty_bridge.go    TTYBridge 接口与注入点（实现由 readline 提供）
+  shelltool.go     run_shell 组件（profile/程序清单/工作区/家目录/bridge 构造期定格，cwd 解析与终端租约）
+  shell.go         run_shell 叶子（shell 参数组装、头尾截断、超时与等待、结构化返回）
+  tty_bridge.go    TTYBridge 接口（实现由 readline 提供，经 WithTTYBridge 注入）
   event.go         Event 词汇表（统一协议增量与生命周期）
   builtin.go       内置小工具：get_time / get_env / calc
   messages.go      agent 侧文案常量
@@ -51,6 +52,8 @@ style/             富文本管线（语义色/主题/markdown/模板/宽度/ANS
 - `docs/repl-replay-rendering.md` `/history` 回放复用实时渲染评估（原阶段 5，未实施；结论：数据不等价，建议不做或只统一样式）
 - `docs/cache-probe.md` prompt cache 机制探测结论（脚本 `scripts/cache_probe.py`）
 - `docs/probe-redesign.md` 环境探针重构方案（已实施，归档）
+- `docs/shell-tool.md` run_shell 组件化（shellTool）设计与实施（S1–S4 已实施，含落地偏差记录）
+- `docs/open-questions.md` 会话遗留：已定结论（env/ctx/tty 事实归属）与待评估清单
 - `docs/todos.md` 待办清单
 
 ## 构建与测试
@@ -63,4 +66,4 @@ go test -race ./...   # 竞态检测
 go run . ask "你好"   # 单发冒烟（需配置 api_key）
 ```
 
-测试约定：LLM mock 见 `agent/mock_test.go`（`newMockLLM` + 脚本化 `mockStep`，多 chunk 发送覆盖流式合并）；会话目录一律用 `t.TempDir()`，多 agent 共享会话时显式同步 `cfg.GlobalSession`；系统提示组装测试用 `isolatePromptEnv` 隔离 HOME 与 cwd；readline 包用 fakeTerm 注入按键，真实终端行为用 pty（`script`）人工验证；pty 桥接三层测试与 E2E 门控变量（`TTY_BRIDGE_E2E` / `TTY_E2E` / `TTY_E2E_REUSE`）见 `docs/design.md`《测试》。交互/中断类手工验证用 `make build` 产出的 `./tanyan`：**不要用 `go run .`**（`^Z` 会停住 wrapper，shell 抢走终端前台后 `^C` 失效）。
+测试约定：LLM mock 见 `agent/mock_test.go`（`newMockLLM` + 脚本化 `mockStep`，多 chunk 发送覆盖流式合并）；会话目录一律用 `t.TempDir()`，多 agent 共享会话时显式同步 `cfg.GlobalSession`；包级基线隔离由 `agent`/`repl` 各自的 `TestMain` 提供（HOME 与 cwd 都指到临时目录，`TestProcessEnvIsolated` 守卫），用例不得依赖开发者真实 HOME/配置；需要"每用例一个干净 cwd"时用 `isolatePromptEnv`；readline 包用 fakeTerm 注入按键，真实终端行为用 pty（`script`）人工验证；pty 桥接三层测试与 E2E 门控变量（`TTY_BRIDGE_E2E` / `TTY_E2E` / `TTY_E2E_REUSE`）见 `docs/design.md`《测试》。交互/中断类手工验证用 `make build` 产出的 `./tanyan`：**不要用 `go run .`**（`^Z` 会停住 wrapper，shell 抢走终端前台后 `^C` 失效）。

@@ -80,12 +80,13 @@ type ToolDef struct {
 }
 
 type Client struct {
-	cfg  *Config
-	http *http.Client
+	cfg   *Config
+	http  *http.Client
+	tools []ToolDef
 }
 
-func NewClient(cfg *Config) *Client {
-	return &Client{cfg: cfg, http: &http.Client{}}
+func NewClient(cfg *Config, tools []ToolDef) *Client {
+	return &Client{cfg: cfg, http: &http.Client{}, tools: tools}
 }
 
 type chatRequest struct {
@@ -189,7 +190,7 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventS
 		Messages:        wire,
 		Temperature:     temperatureParam(c.cfg),
 		ReasoningEffort: c.cfg.ReasoningEffort,
-		Tools:           ToolDefs(),
+		Tools:           c.tools,
 		Stream:          true,
 		StreamOptions:   &streamOptions{IncludeUsage: true},
 	})

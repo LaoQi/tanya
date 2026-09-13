@@ -1,0 +1,189 @@
+# run_shell 组件化：shellTool 设计与实施
+
+状态：**S1–S4 已实施**（组件落在 `agent/shelltool.go`，包级可变状态清零；`AGENTS.md`/`docs/design.md`/`docs/interactive-tty.md` 已同步）。本文保留设计意图与决策，落地偏差见 §15。
+相关的诊断与评估过程见 `docs/open-questions.md`（尤其 B1「Agent 是否拆分」）。
+
+## 1. 要解决的问题
+
+shell 执行层没有所有者，三条症状同一根因：
+
+- `resolveShellCwd` 是包级自由函数，拿不到"谁的工作区"，只能在**参数穿线**（当前 `base` 参数：`RunShellResult` 6 参、两个相邻 string）与**现查环境**（`os.Getwd()`）之间二选一
+- 包级可变状态三组：`shellRuntime`（`InitShell` 缓存 + 懒解析 + mutex）、`shellLookPath`、`ttyBridgeCur`
+- LLM client 伸手读包级工具清单：`llm.go:192` / `llm_responses.go:102` 调 `ToolDefs()`，而 `ToolDefs()` 内部读 `ShellRuntime()`（`agent.go:618`）
+
+组件化的目标不是"多一个类型"，而是给这些状态一个**所有者**：由 `Agent` 在构造期定格，之后只读。
+
+## 2. 定位与四条硬约束
+
+| 约束 | 含义 |
+|---|---|
+| 参数可构建 | 构造只吃参数（含注入的函数），不读环境、不依赖包级状态 |
+| 可测试 | 解析/展开/桥接/失败路径都可在无 chdir、无全局注入的前提下单测 |
+| 可重入 | `run` 可被并发调用；实例字段构造后只读，每调用状态全在栈上 |
+| 禁读环境 | 组件内部不得出现 `os.Getwd`/`os.UserHomeDir`/`os.Getenv`/`exec.LookPath`/`runtime.GOOS` |
+
+保留的副作用只有两件（工具本职）：启动子进程、打开 `/dev/tty` 交接终端。
+`time.Now()`（只为 `Duration` 字段）记账保留，不做时钟注入（属过度设计；将来要做确定性录制再加 `now func() time.Time`）。
+
+## 3. 类型与文件布局
+
+```go
+// agent/shelltool.go（新增）
+type shellToolConfig struct {
+	Override  string                      // cfg.Shell
+	GOOS      string                      // runtime.GOOS
+	LookPath  func(string) (string, error)
+	Home      string                      // ~ 展开用，注入
+	Workspace string                      // 相对 cwd 的基准，注入
+	Bridge    TTYBridge                   // nil = 不启用桥接
+	Programs  []string                    // nil = shellProgramCandidates
+}
+
+type shellRequest struct {
+	Command     string
+	TimeoutSec  int
+	Interactive bool
+	Cwd         string
+}
+
+type shellTool struct {
+	profile   *shellProfile          // 只读
+	programs  []string               // 只读
+	workspace string                 // 只读
+	home      string                 // 只读
+	bridge    TTYBridge              // 只读
+	ttyMu     sync.Mutex             // 唯一可变字段：真实终端租约
+}
+
+func newShellTool(cfg shellToolConfig) (*shellTool, error)
+func (t *shellTool) run(ctx context.Context, req shellRequest) *ShellResult
+func (t *shellTool) resolveCwd(cwd string) (string, error)
+func (t *shellTool) toolDesc() string
+func (t *shellTool) invocation() string   // env 段 SHELL 行用
+```
+
+文件布局：
+
+- `agent/shelltool.go`（新增）：`shellTool` / `shellToolConfig` / `shellRequest` / 构造 / `run` / `resolveCwd` / `toolDesc` / `invocation`
+- `agent/shell.go` 退化为"解析器 + 叶子"：`ShellResult`/`ShellChunk`/`streamCapture`/`writeStream`/`shellArgs`/`shellExitCode`/`waitShell`/`statState`/超时常量 + `shellProfile`/`resolveProfile`/`newProfile`/`probePrograms`（纯构造器，继续收 `goos`/`lookPath` 参数）
+- 平台文件不动：`shell_tty_unix.go`/`shell_tty_stub_unix.go`/`shell_other.go`/`shell_proc_linux.go`/`shell_proc_other.go`/`shell_unix.go`
+- `agent/tty_bridge.go`：保留 `TTYBridge` 接口，删包级注入，改 Option
+
+## 4. 隐式依赖注入表
+
+| 现状（自行读取/全局） | 改造后来源 |
+|---|---|
+| `os.Getwd()`（`RunShell` 包装、`base` 参数） | `shellToolConfig.Workspace`（`agent.New` 读一次） |
+| `os.UserHomeDir()`（`shell.go:342` 的 `~` 展开） | `shellToolConfig.Home` |
+| `runtime.GOOS`（`resolveShellRuntime`/`resolveProfile`） | `shellToolConfig.GOOS` |
+| `exec.LookPath`（包级 `shellLookPath` 变量） | `shellToolConfig.LookPath` |
+| 包级 `shellRuntime`/`shellRuntimeMu/Cur/Set/Err` | 删除，取值全部来自 config |
+| 包级 `ttyBridgeCur`/`ttyBridgeMu` | `shellToolConfig.Bridge`（来自 `WithTTYBridge` Option） |
+| `openForegroundTTY()` 打开 `/dev/tty` | 保留（工具本职副作用） |
+| `time.Now()` | 保留（记账） |
+
+## 5. 可重入与并发契约
+
+- **字段只读 + 每调用局部状态**：`ShellResult`、`streamCapture`、`exec.Cmd`、pty/tty 句柄、计时全在调用栈上；`run` 可被并发调用而不共享可变状态
+- **唯一需要串行的是物理资源**：真实终端（前台进程组 + raw mode）进程内只有一份。凡触碰它的路径——桥接 `Attach`、`openForegroundTTY` + `handoverForeground`——由实例级 `ttyMu` 串行。这不是妥协而是物理限制的显式化：两个子进程不可能同时拥有终端前台组
+- **今天等价于 `run` 串行**：当前所有调用都尝试交接终端。将来要真正并行，需要的不是拆锁，而是把"是否需要终端"变成显式输入（`shellRequest` 加字段，或按 `Interactive` 与宿主能力判定），让读文件/grep 之类完全不碰 `ttyMu`；这一步留给并行调度落地时做，组件内部到时无需改动
+- **并发验收用例**：`-race` 下 N 个 goroutine 并发 `run` 非交互命令，断言各自 `ShellResult`（stdout/退出码/耗时）互不串扰
+
+组件之外、并行工具调用还缺的部分（本设计不覆盖，登记备查）：`runTurn`（`agent.go:275`）现为顺序 `for _, tc := range resp.ToolCalls` + 顺序 `EventToolStart/End` + 顺序 append history；将来并行化需要事件与 history 的按 index 收敛。
+
+## 6. 装配点（`agent.New`）
+
+```go
+cwd, err := os.Getwd()                       // 装配点读一次
+home, _ := os.UserHomeDir()                  // 装配点读一次
+tool, err := newShellTool(shellToolConfig{
+	Override: cfg.Shell, GOOS: runtime.GOOS,
+	LookPath: exec.LookPath, Home: home,
+	Workspace: cwd, Bridge: bridge,      // 来自 WithTTYBridge Option
+})
+if err != nil {
+	return nil, err                      // 保留"启动即要求可用 shell、无降级路径"
+}
+client := NewClient(cfg, ToolDefs(tool.profile))   // 工具清单随 client 定格
+```
+
+## 7. 消费者改造
+
+| 位置 | 现状 | 改后 |
+|---|---|---|
+| `dispatch`（`agent.go:320`） | `RunShellResult(ctx, cmd, timeout, interactive, cwd, a.cwd)` | `a.tool.run(ctx, shellRequest{Command:…, Cwd:…, TimeoutSec:…, Interactive: interactive})` |
+| `envSection`（`envprobe.go:21`） | 内部读包级 `ShellRuntime().profile` | 签名加 `profile *shellProfile`（保持纯函数）；`runtimePrompt()` 传 `a.tool.profile` |
+| `runShellDesc`（`agent.go:632`） | 收 `*shellRuntime` | 收 `*shellProfile` + `[]string`（描述还需要可用程序清单） |
+| `ToolDefs()`（`agent.go:609`） | 内部读 `ShellRuntime()` | 纯函数 `ToolDefs(tool *shellTool)`（描述依赖 profile+programs，收组件而非单 profile） |
+| `llm.go:192` / `llm_responses.go:102` | 每次请求调包级 `ToolDefs()` | `NewClient(cfg, tools []ToolDef)` 构造期注入，请求组装读 `c.tools` |
+| `main.go:74` | `agent.InitTTYBridge(readline.NewTTYBridge())` | `agent.New(cfg, agent.NoSave(*noSave), agent.WithTTYBridge(readline.NewTTYBridge()))` |
+| `Option`/`NoSave`（`agent.go:63`） | `func(*Agent)`，选项在构造后应用 | `func(*Options)`（`Options{noSave, bridge}`），构造前算出，bridge 供 `newShellTool` 使用 |
+| `shell_test.go` | `RunShell(ctx, cmd, timeout)` | 测试内构造 runner 后 `run(...)` |
+
+## 8. 删除 / 保留 / 新增
+
+**删除**（已完成，`rg` 归零）：`InitShell`、`ShellRuntime`、`shellRuntime`、`shellRuntimeMu`/`shellRuntimeCur`/`shellRuntimeSet`/`shellRuntimeErr`、`shellLookPath`、`resolveShellRuntime`、`RunShell`、`RunShellResult`、`resolveShellCwd`（→ `shellTool.resolveCwd` 方法）、`InitTTYBridge`/`currentTTYBridge`/`ttyBridgeMu`/`ttyBridgeCur`。
+
+**保留**：`ShellResult`/`String()`/`ShellChunk`/`streamCapture`/`writeStream`/`shellArgs`/`shellExitCode`/`effectiveShellTimeout`/`statState`/`waitShell`；`shellProfile`/`resolveProfile`/`newProfile`/`probePrograms`；全部平台文件；`ttyStdinSupported()`（编译期平台常量）。
+
+**新增**（已完成）：`shellTool`、`shellToolConfig`、`shellRequest`、`Options`、`WithTTYBridge`。
+
+## 9. 不变量（改造必须保持）
+
+1. shell 解析失败 → `New` 报错退出，无 noshell 降级路径
+2. profile 非空不变量：`run_shell` 恒定注册、env 段恒定输出 SHELL/TIMEOUT/OUTPUT 行
+3. 工具清单**顺序与内容字节级不变**（prompt cache 依赖，见 `docs/cache-probe.md`）
+4. 进程 cwd 不变（全程不 `os.Chdir`）；`cwd` 参数只设 `cmd.Dir`，且桥接与回退两条路径都设置
+5. bridge 未注入或 `Prepare` 失败 → 回退 foreground
+6. 输出头尾截断、超时（60/300/900）、`128 + signum`、中断与挂起标记语义不变
+
+## 10. 测试策略
+
+| 测试类型 | 现状做法 | 改造后 |
+|---|---|---|
+| profile 解析 | 改包级 `shellRuntime`（`withShellRuntime`）+ `InitShell` 缓存语义 | `newShellTool(shellToolConfig{GOOS: "windows", LookPath: stub})`，含错误路径（override 不存在 / 全落空）——已落地（`TestNewShellTool*`） |
+| 相对 cwd | 依赖进程 cwd 或 chdir | `Workspace` 注入，**不再需要 chdir**——已落地（`TestShellToolResolveCwdInjected`） |
+| `~` 展开 | 依赖真实 `$HOME` | `Home` 注入，可测成功与失败两条分支——已落地（含 `~user` 不支持、基准缺失） |
+| 桥接路径 | `InitTTYBridge(fake)` + Cleanup 复原 | 构造时注入 fake bridge——已落地（`bridgeTool(t, fake)`，全局桩用例删除） |
+| 并发 | 不可能 | 并发 `run` 用例（§5）——已落地（`TestShellToolConcurrentRun`，8 路 `-race` 绿） |
+| 门控 E2E | `TTY_E2E` / `TTY_E2E_REUSE` | 保持，用于验证组件化未破坏真实 tty 路径 |
+
+副作用：**测试顺序无关**——不再存在"包级值被先跑的测试定格"的路径（本轮 `cwd` 实现中曾被这一点咬到）。
+
+## 11. 分步实施
+
+| 步 | 内容 | 验证 |
+|---|---|---|
+| S1 | 新增 `shelltool.go`；`Agent` 持有 `a.tool`；`dispatch` 改走组件；`resolveCwd` 读 `t.workspace`（`base` 参数与 6 参形态消失）；旧包级入口暂留 | ✅ 与 S2 合并落地（S2 删掉包级状态后 `RunShellResult` 无法编译，故旧入口未暂留，直接随 S4 清理掉） |
+| S2 | `envSection(profile)`、`runShellDesc(profile)`、`ToolDefs` + client 注入；删全部 shell 包级状态与 `shellLookPath` | ✅ 全量 + `-race` 绿；`rg` 归零；工具清单与 env 段经 worktree 对拍与 HEAD **逐字节一致** |
+| S3 | `WithTTYBridge` Option，删 `InitTTYBridge`/`currentTTYBridge`；main 改接线 | ✅ 已完成（`Options{noSave, bridge}`；门控 E2E 需真实 tty，未在本机执行） |
+| S4 | 清理导出面（删 `RunShell`）；测试 helper 收敛；新增并发用例；文档同步（AGENTS/design/interactive-tty） | ✅ 已完成（`RunShell*` 随 S2 删除；helper 见 §10；并发用例 `-race` 绿；三份文档已同步） |
+
+## 12. 收益 / 代价
+
+**收益**：工作区归属明确（参数之争根治）；包级可变状态净减三组；LLM client 不再伸手读包级工具清单；测试注入从"改全局 + 复原"变成"构造时给值"，并顺带消除测试顺序耦合；`Agent` 少一类职责，为拆分铺接缝。
+
+**代价**：`New` 每次构造多约 21 次 `LookPath`（可从组件上移到进程级 memo，若实测在意）；改动跨 `shell.go`/`agent.go`/`envprobe.go`/`llm.go`/`llm_responses.go`/`tty_bridge.go`/`main.go` + 5 个测试文件；删除部分导出符号（本仓库惯例：模块非公共库，仓库内调用点同步）。
+
+## 13. 决策记录（全部按推荐采纳）
+
+1. bridge 与 shell 同轮组件化（S3），同属"去包级单例"
+2. `ToolDefs` 改纯函数 + client 构造注入（而非让 client 继续读包级/Agent）
+3. `HOME` 也走注入（由"禁读环境"直接推出）
+4. "终端租约"暂不提前提为 `shellRequest` 字段，等并行调度落地时再加，避免猜错抽象
+5. `time.Now()` 不注入（记账）
+
+## 14. 与当前代码的关系
+
+原 `cwd` 参数实现（`RunShellResult` 6 参 + `base`）的过渡形态已随本轮删除：`base` 被 `shellTool.workspace` 取代，请求形态收敛为 `shellRequest`，`docs/design.md` 的 run_shell「执行目录」段与组件化说明已同步改写。
+
+## 15. 落地偏差记录（实施时定稿）
+
+1. `ToolDefs(tool *shellTool)` 而非 `ToolDefs(profile)`：`run_shell` 描述同时依赖 `profile` 与 `programs`，收组件避免两个参数各传一半；实现上 `ToolDefs` 调 `tool.toolDesc()`（`toolDesc` 是设计的组件方法，由此有了实际调用点）
+2. `envSection(cwd, probe, profile)` 保留 `profile` 参数而不收组件：守"纯函数/收参数"红线，组件只作为取 profile 的来源（`a.tool.profile`）
+3. `shellTool.invocation()` 未落地：env 段的 SHELL 行直接用 `profile.invocation()`，包一层方法只会成为死代码
+4. `RunShell`/`RunShellResult`/`resolveShellCwd` 提前到本轮删除：S2 删包级状态后它们无法编译，故 S1 未"暂留"旧入口
+5. S1 原计划的"过渡双解析"（`New` 里既 `InitShell` 又 `newShellTool`）未出现：改用单一解析路径（`New` 只调 `newShellTool`），避免 `shell:` 覆盖在描述/环境段短暂失效
+6. `Option` 签名从 `func(*Agent)` 改为 `func(*Options)`：`bridge` 必须在构造 shellTool 之前算出来，而 `NoSave` 仍是 `Agent` 字段（构造后赋值）；`NoSave`/新增 `WithTTYBridge` 的对外用法不变
+7. B6（构造缺项失败语义）定调为沿用 `MsgBadCwd`，不新增文案、不 panic
+8. `newShellTool` 的 `Programs` 为 nil 时才探测（`nil` = 未注入）；空切片 `[]string{}` 视为"显式无程序"

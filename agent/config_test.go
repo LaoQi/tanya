@@ -213,7 +213,7 @@ func TestUserAgentHeader(t *testing.T) {
 	cfg.BaseURL = srv.URL + "/v1"
 	cfg.APIKey = "test-key"
 	cfg.ApiProtocol = "chat"
-	c := NewClient(cfg)
+	c := NewClient(cfg, nil)
 	if _, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 		t.Fatal(err)
 	}

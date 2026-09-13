@@ -259,19 +259,11 @@ func TestResolveSessionDir(t *testing.T) {
 }
 
 func TestNewLocalMode(t *testing.T) {
-	tmp := t.TempDir()
-	old, err := os.Getwd()
+	isolatePromptEnv(t)
+	tmp, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chdir(tmp); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := os.Chdir(old); err != nil {
-			t.Fatal(err)
-		}
-	}()
 	cfg := defaultConfig()
 	cfg.GlobalSession = filepath.Join(tmp, "global")
 	cfg.SessionMode = "local"
@@ -593,7 +585,7 @@ func TestRuntimePromptAppendsEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.probe = fakeProbe("go.mod")
-	want := a.systemPrompt() + "\n\n" + envSection(cwd, a.probe)
+	want := a.systemPrompt() + "\n\n" + envSection(cwd, a.probe, a.tool.profile)
 	if a.runtimePrompt() != want {
 		t.Errorf("runtimePrompt 拼接异常:\n got %q\nwant %q", a.runtimePrompt(), want)
 	}

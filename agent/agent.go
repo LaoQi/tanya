@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -29,6 +30,7 @@ const DefaultSystemPrompt = `你是 tanyan（兼容 Pi/opencode），运行在�
 type Agent struct {
 	cfg            *Config
 	client         *Client
+	tool           *shellTool
 	history        []Message
 	cwd            string
 	probe          envProbeFunc
@@ -58,32 +60,53 @@ type sessionFileStat struct {
 	size  int64
 }
 
-type Option func(*Agent)
+type Options struct {
+	noSave bool
+	bridge TTYBridge
+}
+
+type Option func(*Options)
 
 func NoSave(v bool) Option {
-	return func(a *Agent) { a.noSave = v }
+	return func(o *Options) { o.noSave = v }
+}
+
+func WithTTYBridge(b TTYBridge) Option {
+	return func(o *Options) { o.bridge = b }
 }
 
 func New(cfg *Config, opts ...Option) (*Agent, error) {
-	if err := InitShell(cfg.Shell); err != nil {
+	cwd, err := os.Getwd()
+	if err != nil {
 		return nil, err
 	}
-	cwd, err := os.Getwd()
+	home, _ := os.UserHomeDir()
+	var o Options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	tool, err := newShellTool(shellToolConfig{
+		Override:  cfg.Shell,
+		GOOS:      runtime.GOOS,
+		LookPath:  exec.LookPath,
+		Home:      home,
+		Workspace: cwd,
+		Bridge:    o.bridge,
+	})
 	if err != nil {
 		return nil, err
 	}
 	sessionDir := resolveSessionDir(cfg, cwd)
 	a := &Agent{
 		cfg:          cfg,
-		client:       NewClient(cfg),
+		client:       NewClient(cfg, ToolDefs(tool)),
+		tool:         tool,
 		cwd:          cwd,
 		probe:        defaultEnvProbe,
 		sessionDir:   sessionDir,
 		sessionCache: map[string]SessionInfo{},
 		sessionStat:  map[string]sessionFileStat{},
-	}
-	for _, opt := range opts {
-		opt(a)
+		noSave:       o.noSave,
 	}
 	if !a.noSave {
 		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
@@ -178,7 +201,7 @@ func isLegacyPrompt(p string) bool {
 func (a *Agent) runtimePrompt() string {
 	p := a.promptSnapshot
 	if a.probe != nil {
-		p += "\n\n" + envSection(a.cwd, a.probe)
+		p += "\n\n" + envSection(a.cwd, a.probe, a.tool.profile)
 	}
 	return p
 }
@@ -270,10 +293,14 @@ func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
 			break
 		}
 		for _, tc := range resp.ToolCalls {
-			interactive := toolInteractive(tc.Function.Name, tc.Function.Arguments)
-			sink.Emit(Event{Kind: EventToolStart, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, Interactive: interactive})
-			res := a.dispatch(ctx, tc, interactive)
-			sink.Emit(Event{Kind: EventToolEnd, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, Result: res, Interactive: interactive})
+			var args runShellArgs
+			var argErr error
+			if tc.Function.Name == "run_shell" {
+				args, argErr = parseRunShellArgs(tc.Function.Arguments)
+			}
+			sink.Emit(Event{Kind: EventToolStart, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, Interactive: args.Interactive})
+			res := a.dispatch(ctx, tc, args, argErr)
+			sink.Emit(Event{Kind: EventToolEnd, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, Result: res, Interactive: args.Interactive})
 			a.history = append(a.history, Message{
 				Role:       "tool",
 				ToolCallID: tc.ID,
@@ -285,14 +312,17 @@ func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
 	return nil
 }
 
-func toolInteractive(name, args string) bool {
-	if name != "run_shell" {
-		return false
-	}
-	var a struct {
-		Interactive bool `json:"interactive"`
-	}
-	return json.Unmarshal([]byte(args), &a) == nil && a.Interactive
+type runShellArgs struct {
+	Command     string `json:"command"`
+	Timeout     int    `json:"timeout"`
+	Cwd         string `json:"cwd"`
+	Interactive bool   `json:"interactive"`
+}
+
+func parseRunShellArgs(raw string) (runShellArgs, error) {
+	var args runShellArgs
+	err := json.Unmarshal([]byte(raw), &args)
+	return args, err
 }
 
 type ToolResult struct {
@@ -307,17 +337,17 @@ func (r ToolResult) Content() string {
 	return r.Text
 }
 
-func (a *Agent) dispatch(ctx context.Context, tc ToolCall, interactive bool) ToolResult {
+func (a *Agent) dispatch(ctx context.Context, tc ToolCall, args runShellArgs, argErr error) ToolResult {
 	if tc.Function.Name == "run_shell" {
-		var args struct {
-			Command string `json:"command"`
-			Timeout int    `json:"timeout"`
-			Cwd     string `json:"cwd"`
+		if argErr != nil {
+			return ToolResult{Text: fmt.Sprintf(MsgParseArgs, argErr)}
 		}
-		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-			return ToolResult{Text: fmt.Sprintf(MsgParseArgs, err)}
-		}
-		return ToolResult{Shell: RunShellResult(ctx, args.Command, args.Timeout, interactive, args.Cwd, a.cwd)}
+		return ToolResult{Shell: a.tool.run(ctx, shellRequest{
+			Command:     args.Command,
+			TimeoutSec:  args.Timeout,
+			Interactive: args.Interactive,
+			Cwd:         args.Cwd,
+		})}
 	}
 	if text, ok := DispatchBuiltin(tc.Function.Name, tc.Function.Arguments); ok {
 		return ToolResult{Text: text}
@@ -606,7 +636,7 @@ func scanSession(path, id string, modTime time.Time) SessionInfo {
 	return si
 }
 
-func ToolDefs() []ToolDef {
+func ToolDefs(tool *shellTool) []ToolDef {
 	def := func(name, desc, params string) ToolDef {
 		var t ToolDef
 		t.Type = "function"
@@ -615,7 +645,7 @@ func ToolDefs() []ToolDef {
 		t.Function.Parameters = json.RawMessage(params)
 		return t
 	}
-	defs := []ToolDef{def("run_shell", runShellDesc(ShellRuntime()), runShellParams())}
+	defs := []ToolDef{def("run_shell", tool.toolDesc(), runShellParams())}
 	return append(defs,
 		def("get_time",
 			"获取当前日期时间（含时区）",
@@ -629,20 +659,20 @@ func ToolDefs() []ToolDef {
 	)
 }
 
-func runShellDesc(rt *shellRuntime) string {
+func runShellDesc(profile *shellProfile, programs []string) string {
 	var b strings.Builder
-	switch rt.profile.Kind {
+	switch profile.Kind {
 	case KindPowerShell:
 		fmt.Fprintf(&b, "在 %s pwsh 中执行命令（PowerShell 语法）", runtime.GOOS)
 	case KindCmd:
 		fmt.Fprintf(&b, "在 %s cmd 中执行命令（cmd 语法）", runtime.GOOS)
 	default:
-		fmt.Fprintf(&b, "在 %s %s 中执行 shell 命令", runtime.GOOS, rt.profile.Name)
+		fmt.Fprintf(&b, "在 %s %s 中执行 shell 命令", runtime.GOOS, profile.Name)
 	}
 	b.WriteString("，返回 stdout/stderr/退出码。读文件、搜索、文本处理等系统操作都用它。")
 	b.WriteString("默认在会话启动目录（进程 cwd）下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。")
-	if len(rt.programs) > 0 {
-		b.WriteString("可用程序: " + strings.Join(rt.programs, ", "))
+	if len(programs) > 0 {
+		b.WriteString("可用程序: " + strings.Join(programs, ", "))
 	}
 	return b.String()
 }
