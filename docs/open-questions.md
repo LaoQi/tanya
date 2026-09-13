@@ -18,7 +18,7 @@
 | 共享性 | **消费方独占的不进 `env`**（如 `style.Profile` 由 style 独占 + repl 构造期快照、readline 的前台状态） |
 | 依赖方向 | `env` 只依赖标准库，禁止反向依赖；可用架构守卫测试（解析 `env/*.go` 的 import）强制 |
 | 只读 | 无 lazy、无 setter；装配失败直接退出；测试用单一 `env.Use(t, …)` 注入 |
-| 纯函数红线 | `envSection`/`buildSystemPrompt`/`resolveSessionDir` 继续收参数，禁止读 `env` |
+| 纯函数红线 | `envSection`/`promptBuilder.build`/`resolveSessionDir` 继续收参数，禁止读 `env`（`promptBuilder` 经注入 reader 读 AGENTS.md） |
 | 大小 | 若立，首批只放 `cwd` + `home`；`OS`/`arch` 是编译期常量，永不进 |
 
 ### A2 不用 `context` 承载进程事实
@@ -43,7 +43,7 @@
 
 ## B. 待决 / 待评估
 
-### B1 `Agent` 是否拆分（god struct 诊断）
+### B1 `Agent` 是否拆分（god struct 诊断）——已实施
 
 诊断数据（`agent/agent.go:29-45`，16 字段 / 30 方法 / 660 行）：
 
@@ -60,7 +60,7 @@
 三条判据均成立：① 六类生命周期挤在一个类型；② 30 个方法里 13 个是只碰 1–2 字段的薄访问器/格式化器（`Model`/`SetModel`/`ReasoningEffort`/`SetReasoningEffort`/`ToolOutputLines`/`ListModels`/`NoSave`/`History` + `ContextInfo`/`PromptUsage`/`PromptCache`/`PromptCacheRate`/`PromptSummary`）；③ 五类互不相关的变化（存储格式/提示词模板/状态行显示/模型交互/工具新增）都改它；repl 的接触点约 20 个。
 
 建议的接缝顺序（未决）：先切无状态两簇（状态行格式化 → 纯函数；提示词组装 → 组装器，`cwd` 在此定格），再切持久化簇（`sessionStore`），剩下 `Agent` = `cfg` + `client` + `history` + 循环 + 分发，`Ask` 为唯一入口。
-**待决**：是否立项、拆到哪一步、与 `docs/shell-tool.md` 的先后关系。
+**结案（已实施）**：立项文档 `docs/agent-split.md`；与 shellTool 的先后关系为先 shellTool（已完成）。落地为「内聚重组 + `Agent` 留门面」：`agent/stats.go`（`usageStats`）、`agent/prompt.go`（`promptBuilder`）、`agent/session.go`（`sessionStore`）三簇剥离，`main.go`/`repl/` 零改动；字段 16 → 9、方法 26 → 25、`agent/agent.go` 690 → 407 行。偏差记录见该文 §10。
 
 ### B2 `env` 立层时机
 

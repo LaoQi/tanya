@@ -22,7 +22,7 @@ func TestNoSaveAskLeavesNoTrace(t *testing.T) {
 	if len(a.History()) != 2 {
 		t.Fatalf("内存历史应保留 user+assistant: %d", len(a.History()))
 	}
-	if _, err := os.Stat(a.sessionDir); !os.IsNotExist(err) {
+	if _, err := os.Stat(a.store.dir); !os.IsNotExist(err) {
 		t.Fatalf("只读模式不应创建会话目录: %v", err)
 	}
 	entries, err := os.ReadDir(cfg.GlobalSession)
@@ -45,7 +45,7 @@ func TestSaveCreatesSessionFile(t *testing.T) {
 	if err := a.Ask(context.Background(), "问题", nil); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := os.ReadDir(a.sessionDir)
+	entries, err := os.ReadDir(a.store.dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestNoSaveReadsExistingSessions(t *testing.T) {
 	if err := warm.Ask(context.Background(), "先存一轮", nil); err != nil {
 		t.Fatal(err)
 	}
-	path := warm.sessionPath
+	path := warm.store.path()
 	id := strings.TrimSuffix(filepath.Base(path), ".jsonl")
 	before, err := os.Stat(path)
 	if err != nil {
@@ -114,7 +114,7 @@ func TestNoSaveMissingDirIsEmpty(t *testing.T) {
 	if len(list) != 0 {
 		t.Fatalf("目录缺失应返回空列表: %d", len(list))
 	}
-	if _, err := os.Stat(a.sessionDir); !os.IsNotExist(err) {
+	if _, err := os.Stat(a.store.dir); !os.IsNotExist(err) {
 		t.Fatalf("只读模式不应创建目录: %v", err)
 	}
 }

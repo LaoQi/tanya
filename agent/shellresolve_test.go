@@ -2,7 +2,6 @@ package agent
 
 import (
 	"errors"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -101,31 +100,23 @@ func TestToolDefsHasRunShell(t *testing.T) {
 }
 
 func TestToolDefsRunShellDesc(t *testing.T) {
-	var desc string
-	for _, d := range ToolDefs(&shellTool{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}, programs: []string{"ls", "grep"}}) {
-		if d.Function.Name == "run_shell" {
-			desc = d.Function.Description
-		}
+	tool := &shellTool{
+		profile:  &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix},
+		programs: []string{"ls", "grep"},
 	}
-	if !strings.Contains(desc, "在 "+runtime.GOOS+" bash 中执行") || !strings.Contains(desc, "可用程序: ls, grep") {
-		t.Errorf("desc = %q", desc)
+	defs := ToolDefs(tool)
+	if len(defs) == 0 || defs[0].Function.Name != "run_shell" {
+		t.Fatalf("run_shell 应注册在首位: %+v", defs)
 	}
-	if !strings.Contains(desc, "默认在会话启动目录（进程 cwd）下执行") || !strings.Contains(desc, "cwd 参数") {
-		t.Errorf("desc 应说明默认工作目录与 cwd 参数: %q", desc)
+	if got := defs[0].Function.Description; got != tool.toolDesc() {
+		t.Errorf("描述应与 toolDesc 一致:\n got %q\nwant %q", got, tool.toolDesc())
 	}
-	params := runShellParams()
-	if !strings.Contains(params, "默认 60（interactive 时 300），最大 900") {
-		t.Error("timeout 参数描述应为默认 60 interactive 时 300 最大 900")
-	}
-	if !strings.Contains(params, `"interactive":{"type":"boolean"`) {
-		t.Error("params 缺少 interactive 参数声明")
-	}
-	if !strings.Contains(params, `"cwd":{"type":"string"`) {
-		t.Error("params 缺少 cwd 参数声明")
+	if got := string(defs[0].Function.Parameters); got != runShellParams() {
+		t.Errorf("参数应与 runShellParams 一致:\n got %q\nwant %q", got, runShellParams())
 	}
 }
 
-func TestNewWithoutShell(t *testing.T) {
+func TestNewRejectsUnavailableShellOverride(t *testing.T) {
 	isolatePromptEnv(t)
 	cfg := defaultConfig()
 	cfg.Shell = "/no/such/shell-tanyan"

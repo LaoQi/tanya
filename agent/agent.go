@@ -1,23 +1,15 @@
 package agent
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 const DefaultSystemPrompt = `你是 tanyan（兼容 Pi/opencode），运行在终端中的极简编码代理。
@@ -28,22 +20,15 @@ const DefaultSystemPrompt = `你是 tanyan（兼容 Pi/opencode），运行在�
 坚持迭代直到任务完成：修改后主动验证（编译、测试、运行），确认无误再收尾。`
 
 type Agent struct {
-	cfg            *Config
-	client         *Client
-	tool           *shellTool
-	history        []Message
-	cwd            string
-	probe          envProbeFunc
-	promptSnapshot string
-	legacySystem   bool
-	sessionDir     string
-	sessionPath    string
-	saved          int
-	systemSaved    bool
-	lastUsage      *Usage
-	sessionCache   map[string]SessionInfo
-	sessionStat    map[string]sessionFileStat
-	noSave         bool
+	cfg     *Config
+	client  *Client
+	tool    *shellTool
+	history []Message
+	cwd     string
+	probe   envProbeFunc
+	prompt  *promptBuilder
+	store   *sessionStore
+	stats   usageStats
 }
 
 type ResponseInfo struct {
@@ -53,11 +38,6 @@ type ResponseInfo struct {
 	FirstContent   time.Duration
 	Usage          *Usage
 	ContextTokens  int
-}
-
-type sessionFileStat struct {
-	mtime time.Time
-	size  int64
 }
 
 type Options struct {
@@ -98,123 +78,62 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 	}
 	sessionDir := resolveSessionDir(cfg, cwd)
 	a := &Agent{
-		cfg:          cfg,
-		client:       NewClient(cfg, ToolDefs(tool)),
-		tool:         tool,
-		cwd:          cwd,
-		probe:        defaultEnvProbe,
-		sessionDir:   sessionDir,
-		sessionCache: map[string]SessionInfo{},
-		sessionStat:  map[string]sessionFileStat{},
-		noSave:       o.noSave,
+		cfg:    cfg,
+		client: NewClient(cfg, ToolDefs(tool)),
+		tool:   tool,
+		cwd:    cwd,
+		probe:  defaultEnvProbe,
+		prompt: newPromptBuilder(cwd, globalAgentsPath(), readAgentsFile),
+		store:  newSessionStore(sessionDir, o.noSave),
 	}
-	if !a.noSave {
+	if !o.noSave {
 		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 			return nil, err
 		}
 	}
 	a.NewSession()
-	a.refreshSessions()
+	a.store.refresh()
 	return a, nil
 }
 
-func resolveSessionDir(cfg *Config, cwd string) string {
-	mode := cfg.SessionMode
-	if mode == "" {
-		mode = "auto"
-	}
-	localBase := filepath.Join(cwd, ".tanya")
-	switch mode {
-	case "local":
-		return filepath.Join(localBase, "sessions")
-	case "global":
-		return filepath.Join(cfg.GlobalSession, workspaceID(cwd))
-	default:
-		if isDir(localBase) {
-			return filepath.Join(localBase, "sessions")
-		}
-		return filepath.Join(cfg.GlobalSession, workspaceID(cwd))
-	}
-}
-
-func isDir(p string) bool {
-	fi, err := os.Stat(p)
-	return err == nil && fi.IsDir()
-}
-
-func workspaceID(dir string) string {
-	var b strings.Builder
-	for _, r := range dir {
-		switch {
-		case r == '/' || r == filepath.Separator:
-			b.WriteByte('-')
-		case r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-':
-			b.WriteRune(r)
-		default:
-			b.WriteByte('-')
-		}
-	}
-	name := strings.Trim(b.String(), "-")
-	if name == "" {
-		name = "root"
-	}
-	sum := sha256.Sum256([]byte(dir))
-	return fmt.Sprintf("%s-%s", name, hex.EncodeToString(sum[:4]))
-}
-
-func globalAgentsPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "tanyan", "AGENTS.md")
-}
-
-func readAgentsFile(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(b))
-}
-
-func buildSystemPrompt(cwd string) string {
-	prompt := DefaultSystemPrompt
-	if global := readAgentsFile(globalAgentsPath()); global != "" {
-		prompt += "\n\n# 全局说明（~/.config/tanyan/AGENTS.md）\n\n" + global
-	}
-	if project := readAgentsFile(filepath.Join(cwd, "AGENTS.md")); project != "" {
-		prompt += "\n\n# 项目说明（AGENTS.md）\n\n" + project
-	}
-	return prompt
-}
-
 func (a *Agent) systemPrompt() string {
-	return a.promptSnapshot
+	return a.prompt.system()
 }
 
 func (a *Agent) LegacyPrompt() bool {
-	return a.legacySystem
-}
-
-func isLegacyPrompt(p string) bool {
-	return strings.Contains(p, "## 运行环境") || strings.Contains(p, "## 可用工具")
+	return a.prompt.legacyPrompt()
 }
 
 func (a *Agent) runtimePrompt() string {
-	p := a.promptSnapshot
-	if a.probe != nil {
-		p += "\n\n" + envSection(a.cwd, a.probe, a.tool.profile)
+	if a.probe == nil {
+		return a.prompt.runtime("")
 	}
-	return p
+	return a.prompt.runtime(envSection(a.cwd, a.probe, a.tool.profile))
 }
 
 func (a *Agent) NewSession() {
 	a.history = nil
-	a.saved = 0
-	a.lastUsage = nil
-	a.legacySystem = false
-	a.systemSaved = false
-	a.promptSnapshot = buildSystemPrompt(a.cwd)
-	a.sessionPath = filepath.Join(a.sessionDir, time.Now().Format("20060102-150405")+".jsonl")
+	a.stats.reset()
+	a.prompt.reset()
+	a.store.rotate()
 }
+
+func (a *Agent) save() error {
+	return a.store.append(a.history, a.prompt.system())
+}
+
+func (a *Agent) LoadSession(id string) error {
+	history, system, err := a.store.load(id)
+	if err != nil {
+		return err
+	}
+	a.prompt.adopt(system)
+	a.history = history
+	a.stats.reset()
+	return nil
+}
+
+func (a *Agent) ListSessions() ([]SessionInfo, error) { return a.store.list() }
 
 const noticeLimit = 200
 
@@ -287,7 +206,7 @@ func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
 		}
 		a.history = append(a.history, *resp)
 		if resp.Usage != nil {
-			a.lastUsage = resp.Usage
+			a.stats.record(resp.Usage)
 		}
 		if len(resp.ToolCalls) == 0 {
 			break
@@ -389,57 +308,23 @@ func (a *Agent) totalTokens() int {
 }
 
 func (a *Agent) ContextInfo() string {
-	var tokenLine string
-	if a.lastUsage != nil {
-		tokenLine = fmt.Sprintf(MsgTokenAPI,
-			a.lastUsage.TotalTokens, a.lastUsage.PromptTokens, a.lastUsage.CompletionTokens)
-	} else {
-		tokenLine = fmt.Sprintf(MsgTokenEstimate, a.totalTokens())
-	}
-	return fmt.Sprintf(MsgContextInfo, tokenLine, len(a.history), a.sessionPath)
+	return a.stats.contextInfo(a.totalTokens(), len(a.history), a.store.path())
 }
 
 func (a *Agent) PromptUsage() string {
-	if a.lastUsage != nil {
-		return formatTokens(a.lastUsage.PromptTokens)
-	}
-	return "~" + formatTokens(a.totalTokens())
+	return a.stats.promptUsage(a.totalTokens())
 }
 
 func (a *Agent) PromptCache() string {
-	if a.lastUsage == nil {
-		return ""
-	}
-	hit := a.lastUsage.CacheHit()
-	if hit <= 0 {
-		return ""
-	}
-	return formatTokens(hit)
+	return a.stats.promptCache()
 }
 
 func (a *Agent) PromptCacheRate() string {
-	if a.lastUsage == nil {
-		return ""
-	}
-	hit := a.lastUsage.CacheHit()
-	if hit <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("%.2f%%", float64(hit)/float64(a.lastUsage.PromptTokens)*100)
+	return a.stats.promptCacheRate()
 }
 
 func (a *Agent) PromptSummary() string {
-	if a.lastUsage == nil || a.lastUsage.CacheHit() <= 0 {
-		return a.PromptUsage()
-	}
-	return formatTokens(a.lastUsage.CacheHit()) + "/" + formatTokens(a.lastUsage.PromptTokens) + " " + a.PromptCacheRate()
-}
-
-func formatTokens(n int) string {
-	if n < 1000 {
-		return fmt.Sprintf("%d", n)
-	}
-	return fmt.Sprintf("%.1fk", float64(n)/1000)
+	return a.stats.summary(a.totalTokens())
 }
 
 func (a *Agent) Model() string { return a.cfg.Model }
@@ -464,177 +349,9 @@ func (a *Agent) SetReasoningEffort(level string) error {
 
 func (a *Agent) History() []Message { return a.history }
 
-func (a *Agent) NoSave() bool { return a.noSave }
+func (a *Agent) NoSave() bool { return a.store.disabled }
 
 func (a *Agent) ListModels() ([]string, error) { return a.client.ListModels() }
-
-func (a *Agent) save() error {
-	if a.noSave {
-		return nil
-	}
-	if a.saved >= len(a.history) {
-		return nil
-	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	if !a.systemSaved {
-		if err := enc.Encode(Message{Role: "system", Content: a.promptSnapshot}); err != nil {
-			return err
-		}
-	}
-	for _, m := range a.history[a.saved:] {
-		if err := enc.Encode(m); err != nil {
-			return err
-		}
-	}
-	f, err := os.OpenFile(a.sessionPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	prev := info.Size()
-	n, err := f.Write(buf.Bytes())
-	if err == nil && n != buf.Len() {
-		err = io.ErrShortWrite
-	}
-	if err != nil {
-		_ = f.Truncate(prev)
-		return err
-	}
-	a.systemSaved = true
-	a.saved = len(a.history)
-	return nil
-}
-
-func (a *Agent) LoadSession(id string) error {
-	if strings.ContainsAny(id, "/\\") || strings.Contains(id, "..") {
-		return fmt.Errorf(MsgBadSessionID)
-	}
-	path := filepath.Join(a.sessionDir, id+".jsonl")
-	f, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf(MsgSessionGone, id)
-	}
-	defer f.Close()
-	var msgs []Message
-	dec := json.NewDecoder(f)
-	for {
-		var m Message
-		if err := dec.Decode(&m); err != nil {
-			break
-		}
-		msgs = append(msgs, m)
-	}
-	var history []Message
-	if len(msgs) > 0 && msgs[0].Role == "system" && msgs[0].Content != "" {
-		a.promptSnapshot = msgs[0].Content
-		history = msgs[1:]
-		a.systemSaved = true
-		a.legacySystem = isLegacyPrompt(msgs[0].Content)
-	} else {
-		a.promptSnapshot = buildSystemPrompt(a.cwd)
-		history = msgs
-		a.systemSaved = true
-		a.legacySystem = false
-	}
-	a.history = history
-	a.sessionPath = path
-	a.saved = len(history)
-	a.lastUsage = nil
-	return nil
-}
-
-type SessionInfo struct {
-	ID      string
-	ModTime time.Time
-	Msgs    int
-	Summary string
-}
-
-func (a *Agent) ListSessions() ([]SessionInfo, error) {
-	if err := a.refreshSessions(); err != nil {
-		return nil, err
-	}
-	list := make([]SessionInfo, 0, len(a.sessionCache))
-	for _, si := range a.sessionCache {
-		list = append(list, si)
-	}
-	sort.Slice(list, func(i, j int) bool { return list[i].ID > list[j].ID })
-	return list, nil
-}
-
-func (a *Agent) refreshSessions() error {
-	entries, err := os.ReadDir(a.sessionDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	seen := map[string]bool{}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		id := strings.TrimSuffix(e.Name(), ".jsonl")
-		seen[id] = true
-		st := sessionFileStat{mtime: info.ModTime(), size: info.Size()}
-		if old, ok := a.sessionStat[id]; ok && old == st {
-			continue
-		}
-		a.sessionStat[id] = st
-		a.sessionCache[id] = scanSession(filepath.Join(a.sessionDir, e.Name()), id, info.ModTime())
-	}
-	for id := range a.sessionStat {
-		if !seen[id] {
-			delete(a.sessionStat, id)
-			delete(a.sessionCache, id)
-		}
-	}
-	return nil
-}
-
-func scanSession(path, id string, modTime time.Time) SessionInfo {
-	si := SessionInfo{ID: id, ModTime: modTime}
-	f, err := os.Open(path)
-	if err != nil {
-		return si
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var m Message
-		if json.Unmarshal(line, &m) != nil {
-			si.Msgs++
-			continue
-		}
-		if m.Role == "system" {
-			continue
-		}
-		si.Msgs++
-		if si.Summary == "" && m.Role == "user" && m.Content != "" {
-			s := strings.ReplaceAll(m.Content, "\n", " ")
-			if utf8.RuneCountInString(s) > 30 {
-				s = string([]rune(s)[:30]) + "..."
-			}
-			si.Summary = s
-		}
-	}
-	return si
-}
 
 func ToolDefs(tool *shellTool) []ToolDef {
 	def := func(name, desc, params string) ToolDef {

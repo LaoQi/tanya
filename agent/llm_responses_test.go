@@ -407,7 +407,7 @@ func TestResponsesAgentLoopSessionReasoning(t *testing.T) {
 		t.Fatal(err)
 	}
 	found := false
-	for _, line := range readLines(t, a.sessionPath) {
+	for _, line := range readLines(t, a.store.path()) {
 		var msg Message
 		if json.Unmarshal([]byte(line), &msg) != nil {
 			continue
