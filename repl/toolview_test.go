@@ -388,9 +388,64 @@ func TestRenderToolEndSGRMixedStderr(t *testing.T) {
 }
 
 func TestToolArgsDisplayCollapsesMultiline(t *testing.T) {
-	got := toolArgsDisplay("run_shell", `{"command":"cat > a <<'EOF'\n  line one \n\nline two\nEOF"}`)
-	if want := "cat > a <<'EOF'; line one; line two; EOF"; got != want {
-		t.Errorf("got %q, want %q", got, want)
+	cwd, cmd := toolArgsDisplay("run_shell", `{"command":"cat > a <<'EOF'\n  line one \n\nline two\nEOF"}`)
+	if cwd != "" {
+		t.Errorf("未指定 cwd 应为空: %q", cwd)
+	}
+	if want := "cat > a <<'EOF'; line one; line two; EOF"; cmd != want {
+		t.Errorf("got %q, want %q", cmd, want)
+	}
+}
+
+func TestToolArgsDisplayCwd(t *testing.T) {
+	cases := []struct{ name, args, wantCwd, wantCmd string }{
+		{"未指定 cwd", `{"command":"ls -la","timeout":60}`, "", "ls -la"},
+		{"显式 cwd 原样", `{"command":"ls","cwd":"/tmp/abc"}`, "/tmp/abc", "ls"},
+		{"cwd 相对路径", `{"command":"ls","cwd":"sub"}`, "sub", "ls"},
+		{"cwd 带空白", `{"command":"ls","cwd":" /tmp/a "}`, "/tmp/a", "ls"},
+		{"cwd 空串", `{"command":"ls","cwd":""}`, "", "ls"},
+		{"坏 JSON", `{bad`, "", "{bad"},
+	}
+	for _, c := range cases {
+		cwd, cmd := toolArgsDisplay("run_shell", c.args)
+		if cwd != c.wantCwd || cmd != c.wantCmd {
+			t.Errorf("%s: got (%q, %q), want (%q, %q)", c.name, cwd, cmd, c.wantCwd, c.wantCmd)
+		}
+	}
+	if cwd, cmd := toolArgsDisplay("get_time", `{"cwd":"/tmp","command":"x"}`); cwd != "" || cmd != "" {
+		t.Errorf("非 run_shell 不应显示参数: (%q, %q)", cwd, cmd)
+	}
+}
+
+func TestRenderToolStartCwd(t *testing.T) {
+	got := RenderToolStart("run_shell", `{"command":"ls -la","cwd":"/tmp/abc"}`, 80)
+	if !strings.HasPrefix(got, "\n▸ run_shell ⋯\n  cwd: /tmp/abc\n  ls -la\n") {
+		t.Errorf("应为首行工具名、cwd 与命令各占一行: %q", got)
+	}
+	block := RenderToolEnd("run_shell", `{"command":"ls -la","cwd":"/tmp/abc"}`, agent.ToolResult{Text: "ok"}, 80, 20)
+	if !strings.Contains(block, "▸ run_shell\n  cwd: /tmp/abc\n  ls -la\n") {
+		t.Errorf("结束标题应与起始同构: %q", block)
+	}
+	inline := RenderToolEndInline("run_shell", `{"command":"ls -la","cwd":"/tmp/abc"}`, agent.ToolResult{Text: "ok"}, 80, 20)
+	if want := strings.Repeat(style.CursorUp(1)+style.ClearLineHome(), 3); !strings.HasPrefix(inline, want) {
+		t.Errorf("三行标题应上移三行重绘: %q", inline)
+	}
+	// 未指定 cwd 时与旧版逐字节一致
+	plain := RenderToolStart("run_shell", `{"command":"ls -la"}`, 80)
+	if want := "\n▸ run_shell ls -la ⋯\n"; plain != want {
+		t.Errorf("got %q, want %q", plain, want)
+	}
+	if strings.Contains(plain, "cwd") {
+		t.Errorf("未指定 cwd 不应出现 cwd 行: %q", plain)
+	}
+}
+
+func TestRenderToolStartCwdWidth(t *testing.T) {
+	long := `{"command":"` + strings.Repeat("y", 300) + `","cwd":"` + strings.Repeat("/seg", 50) + `"}`
+	for _, line := range strings.Split(strings.Trim(RenderToolStart("run_shell", long, 80), "\n"), "\n") {
+		if w := style.Width(line); w > 78 {
+			t.Errorf("标题行宽度 %d 越界: %q", w, line)
+		}
 	}
 }
 

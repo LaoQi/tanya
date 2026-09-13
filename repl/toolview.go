@@ -33,16 +33,39 @@ func toolWidth(term readline.Terminal) int {
 }
 
 func RenderToolStart(name, args string, width int) string {
-	budget := width - 6 - style.Width(name)
-	return fmt.Sprintf("\n▸ %s %s ⋯\n", name, style.Truncate(toolArgsDisplay(name, args), budget))
+	lines := toolTitleLines(name, args, "⋯", width-3)
+	var b strings.Builder
+	b.WriteString("\n▸ " + lines[0] + "\n")
+	for _, l := range lines[1:] {
+		b.WriteString(l + "\n")
+	}
+	return b.String()
 }
 
-func toolEndTitle(name, args string, res agent.ToolResult) string {
-	title := name
-	if disp := toolArgsDisplay(name, args); disp != "" {
-		title += " " + disp
+func toolTitleLines(name, args, mark string, width int) []string {
+	cwd, cmd := toolArgsDisplay(name, args)
+	head := name
+	if cwd == "" {
+		if cmd != "" {
+			head += " " + cmd
+		}
+		if mark != "" {
+			head += " " + mark
+		}
+		return []string{style.Truncate(head, width)}
 	}
-	return title
+	if mark != "" {
+		head += " " + mark
+	}
+	lines := []string{style.Truncate(head, width), style.Truncate("  cwd: "+cwd, width)}
+	if cmd != "" {
+		lines = append(lines, style.Truncate("  "+cmd, width))
+	}
+	return lines
+}
+
+func toolTitleLineCount(name, args string, width int) int {
+	return len(toolTitleLines(name, args, "⋯", width))
 }
 
 func toolEndBody(res agent.ToolResult, width, maxLines int) (string, string) {
@@ -71,15 +94,19 @@ func toolEndBody(res agent.ToolResult, width, maxLines int) (string, string) {
 }
 
 func renderToolBlock(lead, name, args string, res agent.ToolResult, width, maxLines int) string {
-	title := style.Truncate(toolEndTitle(name, args, res), width-3)
+	lines := toolTitleLines(name, args, "", width-3)
+	title := "▸ " + lines[0] + "\n"
+	for _, l := range lines[1:] {
+		title += l + "\n"
+	}
 	out, status := toolEndBody(res, width, maxLines)
 	var b strings.Builder
 	b.WriteString(lead)
 	if style.HasSGR(out) {
-		b.WriteString(style.Dim.Frame("▸ " + title + "\n"))
+		b.WriteString(style.Dim.Frame(title))
 		b.WriteString(style.Passthrough(out))
 	} else {
-		b.WriteString(style.Dim.Frame("▸ " + title + "\n" + out))
+		b.WriteString(style.Dim.Frame(title + out))
 	}
 	if status != "" {
 		b.WriteString(style.Info.Sprint("  ↳ "+status) + "\n")
@@ -92,7 +119,8 @@ func RenderToolEnd(name, args string, res agent.ToolResult, width, maxLines int)
 }
 
 func RenderToolEndInline(name, args string, res agent.ToolResult, width, maxLines int) string {
-	return renderToolBlock(style.CursorUp(1)+style.ClearLineHome(), name, args, res, width, maxLines)
+	lead := strings.Repeat(style.CursorUp(1)+style.ClearLineHome(), toolTitleLineCount(name, args, width-3))
+	return renderToolBlock(lead, name, args, res, width, maxLines)
 }
 
 func RenderResponseInfo(info agent.ResponseInfo, width int) string {
@@ -138,17 +166,18 @@ func shortTokens(n int) string {
 	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
 
-func toolArgsDisplay(name, args string) string {
+func toolArgsDisplay(name, args string) (string, string) {
 	if name != "run_shell" {
-		return ""
+		return "", ""
 	}
 	var a struct {
 		Command string `json:"command"`
+		Cwd     string `json:"cwd"`
 	}
-	if err := json.Unmarshal([]byte(args), &a); err == nil && strings.TrimSpace(a.Command) != "" {
-		return collapseCommand(a.Command)
+	if err := json.Unmarshal([]byte(args), &a); err != nil || strings.TrimSpace(a.Command) == "" {
+		return "", collapseCommand(args)
 	}
-	return collapseCommand(args)
+	return strings.TrimSpace(a.Cwd), collapseCommand(a.Command)
 }
 
 func collapseCommand(s string) string {
