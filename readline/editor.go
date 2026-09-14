@@ -232,7 +232,7 @@ func (e *Editor) clearKeepHistory() {
 		return
 	}
 	var b strings.Builder
-	b.WriteString(strings.Repeat("\n", size.Rows*2))
+	b.WriteString(strings.Repeat("\n", size.Rows))
 	b.WriteString(term.LineStart())
 	if size.Rows > 1 {
 		b.WriteString(term.CursorUp(size.Rows - 1))
