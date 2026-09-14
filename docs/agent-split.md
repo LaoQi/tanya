@@ -1,13 +1,13 @@
 # Agent 拆分：接缝重组设计与实施
 
-状态：**S0–S4 已实施**（`agent/stats.go`、`agent/prompt.go`、`agent/session.go` 落地，`main.go`/`repl/` 零改动；`AGENTS.md`/`docs/design.md`/`docs/open-questions.md`/`docs/todos.md` 已同步）。落地偏差见 §10。
-相关：`docs/open-questions.md` B1（诊断与评估过程）、`docs/shell-tool.md`（已完成的接缝准备：工具簇已外移，方法数 30→26）。
+状态：**S0–S4 已实施**（`agent/stats.go`、`agent/prompt.go`、`agent/session.go` 落地，`main.go`/`repl/` 零改动；`AGENTS.md`/`docs/design.md`/`docs/todos.md` 已同步）。落地偏差见 §10。
+相关：`docs/shell-tool.md`（已完成的接缝准备：工具簇已外移，方法数 30→26）。
 
 ## 1. 要解决的问题
 
 `Agent` 是 god struct：一个类型承担六类互不相关的生命周期，任何一处变化都改同一文件。
 
-诊断复核（本次实测，对照 B1 原记录）：
+诊断复核（本次实测，对照立项时的 B1 记录；B1 原文随 `docs/open-questions.md` 清理删除）：
 
 | 项 | B1 记录 | 实测 | 说明 |
 |---|---|---|---|
@@ -49,7 +49,7 @@ shellTool 组件化摘走了「工具运行」与部分「进程事实」（工�
 
 ### 4.1 S1 状态行（新增 `agent/stats.go`）
 
-现状（`agent.go:377–443`）：字段 `lastUsage *Usage`；方法 `ContextInfo` / `PromptUsage` / `PromptCache` / `PromptCacheRate` / `PromptSummary` / `formatTokens`。
+拆分前基线（`agent.go`）：字段 `lastUsage *Usage`；方法 `ContextInfo` / `PromptUsage` / `PromptCache` / `PromptCacheRate` / `PromptSummary` / `formatTokens`。
 
 ```go
 type usageStats struct{ last *Usage }
@@ -72,7 +72,7 @@ func formatTokens(n int) string
 
 ### 4.2 S2 提示词组装（新增 `agent/prompt.go`）
 
-现状（`agent.go:165–216`）：字段 `promptSnapshot`、`legacySystem` + `cwd`（`cwd` 与 shellTool 的 workspace 同源但不共享）；函数 `globalAgentsPath` / `readAgentsFile` / `buildSystemPrompt` / `isLegacyPrompt`；方法 `systemPrompt` / `LegacyPrompt` / `runtimePrompt`。
+拆分前基线（`agent.go`）：字段 `promptSnapshot`、`legacySystem` + `cwd`（`cwd` 与 shellTool 的 workspace 同源但不共享）；函数 `globalAgentsPath` / `readAgentsFile` / `buildSystemPrompt` / `isLegacyPrompt`；方法 `systemPrompt` / `LegacyPrompt` / `runtimePrompt`。
 
 ```go
 type promptBuilder struct {
@@ -102,7 +102,7 @@ func (p *promptBuilder) runtime(env string) string  // env 由 Agent 传入，�
 
 ### 4.3 S3 会话持久化（新增 `agent/session.go`）
 
-现状（`agent.go:121–165`、`471–638`）：字段 `sessionDir` / `sessionPath` / `saved` / `systemSaved` / `sessionCache` / `sessionStat` / `noSave`；方法 `save` / `LoadSession` / `ListSessions` / `refreshSessions` + `scanSession`、`sessionFileStat`、`SessionInfo`、`resolveSessionDir` / `workspaceID` / `isDir`。
+拆分前基线（`agent.go`）：字段 `sessionDir` / `sessionPath` / `saved` / `systemSaved` / `sessionCache` / `sessionStat` / `noSave`；方法 `save` / `LoadSession` / `ListSessions` / `refreshSessions` + `scanSession`、`sessionFileStat`、`SessionInfo`、`resolveSessionDir` / `workspaceID` / `isDir`。
 
 ```go
 type sessionStore struct {
@@ -189,7 +189,7 @@ S0–S4 均已完成（实施结论见 §10），下表保留原始分工。
 
 - 三簇拆法与边界（D2 门面、D7 类型选择）：认可，按 §4 实施
 - 实施粒度：S0 → S1 → S2 → S3 → S4 顺序推进，每阶段独立验证（当前工作区不做 git 提交，改动累积）
-- B7（Windows `~\` 展开）：本方案不动，仍留在 `docs/open-questions.md`
+- Windows `~\` 展开（原 B7）：本方案不动，已在 `docs/design.md`《工具》run_shell 的"波浪号边界"条结案（不实现、不宣传）
 
 ## 10. 落地偏差记录（实施时定稿）
 

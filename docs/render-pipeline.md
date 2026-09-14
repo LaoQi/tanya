@@ -178,7 +178,7 @@ type Style struct {
 - **色深约束（落地修订）**：原决议拟放宽为"IR 支持 Color16 与 RGB 两档、渲染按 profile 降级"，实际**未采纳 RGB 一档**——`KindRGB`/`Color.RGB` 已删除，IR 只保留 `Kind16`；`term.ColorLevel` 也收敛为 `None`/`Level16`（`Level256`/`LevelTrue` 删除，`SGR` 本就只产 16 色）
 - **无降级链**：不做 `RGB →(256) →(16) →None` 量化，`Style.SGR` 直接产出 16 色 SGR，profile 为 `LevelNone` 时整段退化为纯文本；"256 色是量化产物，不进 IR"的原判断保留
 - 颜色一律 16 色基本 SGR（30-37/90-97/40-47/100-107），与 `AGENTS.md` 铁律一致
-- **`Style.Bg` 通道为预留**：结构（`Style.Bg`）与编码（40-47/100-107）保留可用（`empty`/`SGR`/`markup.mergeStyle` 均已支持），但 markup 无 `[bg:...]` 语法入口、渲染侧无写入方；启用条件与理由见 `docs/open-questions.md` A5
+- **`Style.Bg` 通道为预留**：结构（`Style.Bg`）与编码（40-47/100-107）保留可用（`empty`/`SGR`/`markup.mergeStyle` 均已支持），但 markup 无 `[bg:...]` 语法入口、渲染侧无写入方；启用条件与理由见 `docs/style-split.md` §7.4（唯一权威登记处）
 
 ## 5. 语义色与 palette
 
@@ -259,7 +259,7 @@ func (t Template) Render(resolve func(string) (string, bool)) string    // 绑�
 
 **落地修订**：`ParseTemplate` 需传入 `theme.Semantics`（标记里的语义名要此时解析成具体色，`style` 已无全局语义色）；对外入口是 `Template.Render`（内部仍走 `Bind` + `render.Sprint`），passthrough 分支在无色 profile 下用 `term.Strip` 兜底。
 
-- resolve 返回 false（未知占位符）则原样保留——与现 `renderPrompt` Replacer 行为一致，零新转义规则
+- resolve 返回 false（未知占位符）则原样保留——与原 `renderPrompt` Replacer 行为一致（该函数已由 `Template.Render` 替代），零新转义规则
 - 变量表留在 repl（style 不知道 `{cwd}` 是什么）：
 
 ```go
@@ -326,7 +326,7 @@ func (b *MarkdownBuf) Close() []Block               // 收尾：未闭合块降�
 - 实施修订（偏离原设计的 `\n\n` 段落界）：**段落按行即时出块**——每个完整行立即作为单行 Paragraph 提交，否则单段长回答会整段缓冲到响应结束，流式体验不可接受；可见输出与按段分组完全一致，代价是跨行行内标记不解析（v1 行内本就按行解析）
 - 块级分组：代码围栏（闭合出块）、列表/引用（组断出块）、标题/分隔线（单行即时）；未闭合围栏在流结束 `Close()` 降级为 `RawText` 原样
 - 行内未闭合标记按行解析，行尾不闭合自然按原样文本输出（乐观降级，不重绘、不闪屏）
-- 工具调用时序：`OnToolStart`/`OnResponse` 回调链先**结算缓冲**再交原回调——结算走 `Close()`（不只刷完整行），把流式响应滞留的**无 `\n` 尾行**输出为段落并闭合未完结块。若仅按行 flush，末行会滞留到下次写入/`Close()`，状态行与工具块抢先在正文尾行前上屏，把渲染内容从中间劈开；结算保证整条正文先于工具块/状态行输出
+- 工具调用时序：`EventToolStart`/`EventResponse` 事件链先**结算缓冲**再交渲染——结算走 `Close()`（不只刷完整行），把流式响应滞留的**无 `\n` 尾行**输出为段落并闭合未完结块。若仅按行 flush，末行会滞留到下次写入/`Close()`，状态行与工具块抢先在正文尾行前上屏，把渲染内容从中间劈开；结算保证整条正文先于工具块/状态行输出
 - markdown 渲染默认开启，非 TTY 与 plain 输出走旁路（原 `/md` 开关已移除）：模型输出原样直出；`/history n|all` 回放的 assistant 正文走同一管线渲染（`mdEnabled` 判断 + 整段 `Write`/`Close` → `Renderer.Block`），消息头 `#N 角色` 因 `#` 与序号连写不构成 markdown 标题语法，单独构造 `Heading{Level:1}` IR 按标题渲染；user/tool 消息与工具参数永远原样（工具输出红线）
 
 ### 范围
