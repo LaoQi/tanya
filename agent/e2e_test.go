@@ -406,3 +406,33 @@ func TestRunTurnBadJSONArgs(t *testing.T) {
 		t.Errorf("tool 结果应为参数解析失败: %q", toolMsg)
 	}
 }
+
+func TestAskChatReplaysReasoningContent(t *testing.T) {
+	m := newMockLLM(t,
+		mockStep{reasoning: "先看看目录", toolCalls: []mockToolCall{{id: "call_1", name: "run_shell", args: `{"command":"echo hi"}`}}},
+		mockStep{reasoning: "再作答", content: "完成"},
+	)
+	a, err := New(m.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Ask(context.Background(), "跑一下", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.history[1].ReasoningItems) != 1 || a.history[1].ReasoningItems[0].Content != "先看看目录" {
+		t.Fatalf("chat 历史应落思维链: %+v", a.history[1].ReasoningItems)
+	}
+	if len(m.reqs) != 2 {
+		t.Fatalf("请求数: %d", len(m.reqs))
+	}
+	second := m.reqs[1].Messages
+	if len(second) != 4 || second[0].Role != "system" || second[2].Role != "assistant" {
+		t.Fatalf("第二轮请求消息异常: %+v", second)
+	}
+	if second[2].ReasoningContent != "先看看目录" {
+		t.Errorf("第二轮应回传 reasoning_content: %+v", second[2])
+	}
+	if len(second[2].ReasoningItems) != 0 {
+		t.Errorf("wire 上不应出现 reasoning_items: %+v", second[2])
+	}
+}

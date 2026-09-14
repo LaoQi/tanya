@@ -14,19 +14,20 @@ import (
 )
 
 type ReasoningItem struct {
-	ID      string `json:"id"`
+	ID      string `json:"id,omitempty"`
 	Content string `json:"content,omitempty"`
 }
 
 type Message struct {
-	Role           string          `json:"role"`
-	Content        string          `json:"content,omitempty"`
-	ToolCalls      []ToolCall      `json:"tool_calls,omitempty"`
-	ToolCallID     string          `json:"tool_call_id,omitempty"`
-	Name           string          `json:"name,omitempty"`
-	ReasoningItems []ReasoningItem `json:"reasoning_items,omitempty"`
-	Usage          *Usage          `json:"-"`
-	Stat           *RequestStat    `json:"-"`
+	Role             string          `json:"role"`
+	Content          string          `json:"content,omitempty"`
+	ToolCalls        []ToolCall      `json:"tool_calls,omitempty"`
+	ToolCallID       string          `json:"tool_call_id,omitempty"`
+	Name             string          `json:"name,omitempty"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	ReasoningItems   []ReasoningItem `json:"reasoning_items,omitempty"`
+	Usage            *Usage          `json:"-"`
+	Stat             *RequestStat    `json:"-"`
 }
 
 type RequestStat struct {
@@ -44,11 +45,22 @@ type Usage struct {
 	CacheMissTokens  int `json:"prompt_cache_miss_tokens,omitempty"`
 	ReasoningTokens  int `json:"reasoning_tokens,omitempty"`
 
-	PromptTokensDetails *promptTokensDetails `json:"prompt_tokens_details,omitempty"`
+	PromptTokensDetails     *promptTokensDetails     `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *completionTokensDetails `json:"completion_tokens_details,omitempty"`
 }
 
 type promptTokensDetails struct {
 	CachedTokens int `json:"cached_tokens"`
+}
+
+type completionTokensDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
+func (u *Usage) normalize() {
+	if u.ReasoningTokens == 0 && u.CompletionTokensDetails != nil {
+		u.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens
+	}
 }
 
 func (u *Usage) CacheHit() int {
@@ -179,12 +191,32 @@ func temperatureParam(cfg *Config) *float64 {
 	return &cfg.Temperature
 }
 
-func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventSink) (*Message, error) {
+func chatWireMessages(messages []Message) []Message {
 	wire := make([]Message, len(messages))
 	copy(wire, messages)
 	for i := range wire {
 		wire[i].ReasoningItems = nil
+		wire[i].ReasoningContent = ""
+		if messages[i].Role == "assistant" {
+			wire[i].ReasoningContent = joinReasoning(messages[i].ReasoningItems)
+		}
 	}
+	return wire
+}
+
+func joinReasoning(items []ReasoningItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range items {
+		b.WriteString(r.Content)
+	}
+	return b.String()
+}
+
+func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventSink) (*Message, error) {
+	wire := chatWireMessages(messages)
 	body, err := json.Marshal(chatRequest{
 		Model:           c.cfg.Model,
 		Messages:        wire,
@@ -221,6 +253,7 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventS
 	msg := &Message{Role: "assistant"}
 	var firstEvent, firstReasoning, firstContent time.Duration
 	var usage *Usage
+	var reasoning strings.Builder
 	type toolAcc struct {
 		id, typ, name, args string
 	}
@@ -249,13 +282,15 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventS
 		}
 		if chunk.Usage != nil {
 			usage = chunk.Usage
-			sink.Emit(Event{Kind: EventUsage, Usage: chunk.Usage})
+			usage.normalize()
+			sink.Emit(Event{Kind: EventUsage, Usage: usage})
 		}
 		for _, ch := range chunk.Choices {
 			if ch.Delta.ReasoningContent != "" {
 				if firstReasoning == 0 {
 					firstReasoning = time.Since(start)
 				}
+				reasoning.WriteString(ch.Delta.ReasoningContent)
 				sink.Emit(Event{Kind: EventReasoning, Text: ch.Delta.ReasoningContent})
 			}
 			if ch.Delta.Content != "" {
@@ -287,6 +322,9 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventS
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf(MsgReadStream, err)
+	}
+	if reasoning.Len() > 0 {
+		msg.ReasoningItems = append(msg.ReasoningItems, ReasoningItem{Content: reasoning.String()})
 	}
 	msg.Usage = usage
 	msg.Stat = &RequestStat{Duration: time.Since(start), FirstEvent: firstEvent, FirstReasoning: firstReasoning, FirstContent: firstContent}

@@ -91,7 +91,7 @@ func rawChatServer(t *testing.T, raw *[]byte) *httptest.Server {
 	return srv
 }
 
-func TestChatStripsReasoningItems(t *testing.T) {
+func TestChatReplaysReasoningContent(t *testing.T) {
 	var raw []byte
 	srv := rawChatServer(t, &raw)
 	cfg := defaultConfig()
@@ -108,6 +108,29 @@ func TestChatStripsReasoningItems(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "reasoning_items") {
 		t.Errorf("chat 请求不应携带 reasoning_items: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"reasoning_content":"想了一下"`) {
+		t.Errorf("chat 请求应回传 reasoning_content: %s", raw)
+	}
+}
+
+func TestChatOmitsAbsentReasoning(t *testing.T) {
+	var raw []byte
+	srv := rawChatServer(t, &raw)
+	cfg := defaultConfig()
+	cfg.BaseURL = srv.URL
+	cfg.APIKey = "test-key"
+	cfg.ApiProtocol = "chat"
+	history := []Message{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "ok"},
+		{Role: "user", Content: "next"},
+	}
+	if _, err := NewClient(cfg, nil).ChatStream(context.Background(), history, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "reasoning_content") {
+		t.Errorf("历史无思维链时不应发送 reasoning_content: %s", raw)
 	}
 }
 
@@ -287,8 +310,8 @@ func TestChatStreamReasoningEvents(t *testing.T) {
 	if msg.Content != "答案是 42" {
 		t.Errorf("思维链不应污染正文: %q", msg.Content)
 	}
-	if len(msg.ReasoningItems) != 0 {
-		t.Errorf("chat 协议不应累积思维链到 Message: %+v", msg.ReasoningItems)
+	if len(msg.ReasoningItems) != 1 || msg.ReasoningItems[0].Content != "先想一想" || msg.ReasoningItems[0].ID != "" {
+		t.Errorf("chat 协议应累积思维链到 Message: %+v", msg.ReasoningItems)
 	}
 	if len(kinds) == 0 || kinds[0] != EventReasoning {
 		t.Errorf("思维链事件应先于正文: %v", kinds)
@@ -314,5 +337,22 @@ func TestChatStreamTimingDimensions(t *testing.T) {
 	}
 	if st.FirstContent < st.FirstReasoning {
 		t.Errorf("FirstContent 不应早于 FirstReasoning: %v < %v", st.FirstContent, st.FirstReasoning)
+	}
+}
+
+func TestChatStreamReasoningTokens(t *testing.T) {
+	m := newMockLLM(t, mockStep{content: "ok", usage: &Usage{
+		PromptTokens:            120,
+		CompletionTokens:        50,
+		TotalTokens:             170,
+		CompletionTokensDetails: &completionTokensDetails{ReasoningTokens: 42},
+	}})
+	c := NewClient(m.config(), nil)
+	msg, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Usage == nil || msg.Usage.ReasoningTokens != 42 {
+		t.Errorf("completion_tokens_details 应映射到 Usage.ReasoningTokens: %+v", msg.Usage)
 	}
 }

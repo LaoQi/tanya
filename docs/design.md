@@ -49,9 +49,11 @@ render/markup/     内联标记解析
 
 OpenAI 兼容 Chat Completions API（`/chat/completions`，SSE 流式），一套代码兼容 OpenAI/DeepSeek/GLM/Ollama/vLLM。
 
-请求体固定字段：`model` / `messages` / `temperature` / `tools` / `stream` / `stream_options`；`reasoning_effort`（OpenAI 标准思考等级，minimal/low/medium/high/max）仅配置或 `/think` 设置后携带，`omitempty` 缺省不发送。设置 `reasoning_effort` 后 `temperature` 不发送（指针 + omitempty，兼容 o 系/gpt-5 仅支持 `temperature=1`），chat 与 responses 两协议一致。请求构造时剥离 `Message.ReasoningItems`（拷贝置空），思维链历史不上线 chat 端点。厂商私有思考参数（GLM `thinking`、Qwen `enable_thinking` 等）不支持。
+请求体固定字段：`model` / `messages` / `temperature` / `tools` / `stream` / `stream_options`；`reasoning_effort`（OpenAI 标准思考等级，minimal/low/medium/high/max）仅配置或 `/think` 设置后携带，`omitempty` 缺省不发送。设置 `reasoning_effort` 后 `temperature` 不发送（指针 + omitempty，兼容 o 系/gpt-5 仅支持 `temperature=1`），chat 与 responses 两协议一致。厂商私有思考参数（GLM `thinking`、Qwen `enable_thinking` 等）不支持。
 
-流式解析要点：`data:` 行逐条解析 JSON chunk；content 直接拼接并经回调输出；tool_calls 按 `index` 分组做增量合并（id/type/name 覆盖、arguments 拼接），`[DONE]` 结束。`stream_options.include_usage` 捕获 usage；首个 chunk 时刻记 TTFT、流结束记总耗时，存于 `Message.Stat`（`json:"-"` 不落盘）。
+思维链按 DeepSeek 思考模式文档处理：响应侧 `delta.reasoning_content` 增量累积为单条 `ReasoningItem`（`ID` 空）随会话落盘（`reasoning_items` 字段）；请求侧 `chatWireMessages` 把 `ReasoningItems` 顺序拼接折叠为 assistant 消息顶层 `reasoning_content` 回传（带 `tools` 时官方要求历史推理链完整回传，缺失属未定义行为），wire 上不出现 `reasoning_items`，历史无思维链的轮次省略该字段。第三方端点对缺失 `reasoning_content` 的宽容度不一，四场景探测脚本见 `scripts/chat_reason_probe.py`（自建透传网关实测四种形状均 200，未执行该硬校验）。
+
+流式解析要点：`data:` 行逐条解析 JSON chunk；content 直接拼接并经回调输出；tool_calls 按 `index` 分组做增量合并（id/type/name 覆盖、arguments 拼接），`[DONE]` 结束。`stream_options.include_usage` 捕获 usage（`completion_tokens_details.reasoning_tokens` 经 `Usage.normalize()` 归一为 `Usage.ReasoningTokens`，与 responses 口径对齐）；首个 chunk 时刻记 TTFT、流结束记总耗时，存于 `Message.Stat`（`json:"-"` 不落盘）。
 
 ### responses 协议（llm_responses.go `responsesStream`）
 
@@ -68,7 +70,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 ### 协议无关约束
 
 - `Message` 为内部规范格式（含 `ReasoningItems`），会话 jsonl 直接持久化，旧会话（无 reasoning 字段）双协议均可回放
-- chat 协议忽略 `ReasoningItems`（无对应物，请求构造时剥离不上线），思维链能力为 responses 协议独有
+- `ReasoningItems` 为两协议共用的内部思维链表示：responses 回传为独立 reasoning item（`ID` 空时省略 `id` 字段，兼容 chat 侧落盘的思维链），chat 回传为 assistant 消息的 `reasoning_content` 字符串（多 item 顺序拼接）
 - `/models` 列表（GET `/models`）与协议无关，按 id 排序返回，供 `/model` 命令与补全
 
 ## Agent Loop
