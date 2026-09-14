@@ -1,8 +1,6 @@
-package style
+package ir
 
-type Document struct {
-	Blocks []Block
-}
+import rstyle "github.com/LaoQi/tanyan/render/style"
 
 type Block interface {
 	blockNode()
@@ -47,7 +45,7 @@ type RawText struct {
 }
 
 type Span struct {
-	Style Style
+	Style rstyle.Style
 	Text  string
 }
 
@@ -69,11 +67,3 @@ func (RawText) blockNode()   {}
 func (Span) inlineNode()      {}
 func (CodeSpan) inlineNode()  {}
 func (SoftBreak) inlineNode() {}
-
-func P(in ...Inline) Paragraph {
-	return Paragraph{Inlines: in}
-}
-
-func Doc(blocks ...Block) Document {
-	return Document{Blocks: blocks}
-}

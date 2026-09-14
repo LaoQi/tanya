@@ -1,8 +1,10 @@
-package style
+package theme
+
+import rstyle "github.com/LaoQi/tanyan/render/style"
 
 // Semantics 是 UI 语义色集合，对应全局 Dim/Info/Warn/Ok/Error/Accent/Think/Run。
 type Semantics struct {
-	Dim, Info, Warn, Ok, Error, Accent, Think, Run Style
+	Dim, Info, Warn, Ok, Error, Accent, Think, Run rstyle.Style
 }
 
 // Scheme 是完整配色主题：语义色 + 提示符模板 + markdown 渲染样式。
@@ -16,12 +18,12 @@ type Scheme struct {
 
 const DefaultPrompt = "[white]{cwd}[/] [blue]{model}[/] [yellow]{effort}[/] [green]{stat}[/] [white]>[/] "
 
-func fg(v uint8) Style     { return Style{Fg: Color16(v)} }
-func fgBold(v uint8) Style { return Style{Fg: Color16(v), Attr: AttrBold} }
+func fg(v uint8) rstyle.Style     { return rstyle.Style{Fg: rstyle.Color16(v)} }
+func fgBold(v uint8) rstyle.Style { return rstyle.Style{Fg: rstyle.Color16(v), Attr: rstyle.AttrBold} }
 
-func mdTheme(h1, h2, h3, h4, h5, h6, codeBlock, codeInline Style) Theme {
+func mdTheme(h1, h2, h3, h4, h5, h6, codeBlock, codeInline rstyle.Style) Theme {
 	return Theme{
-		Headings:    [6]Style{h1, h2, h3, h4, h5, h6},
+		Headings:    [6]rstyle.Style{h1, h2, h3, h4, h5, h6},
 		CodeBlock:   codeBlock,
 		CodeInline:  codeInline,
 		QuotePrefix: "▌ ",
@@ -41,7 +43,7 @@ var schemeList = []Scheme{
 			Warn:   fg(3),
 			Ok:     fg(2),
 			Error:  fg(9),
-			Accent: Style{Attr: AttrReverse},
+			Accent: rstyle.Style{Attr: rstyle.AttrReverse},
 			Think:  fg(5),
 			Run:    fg(6),
 		},
@@ -57,11 +59,11 @@ var schemeList = []Scheme{
 			Warn:   fg(3),
 			Ok:     fg(10),
 			Error:  fg(9),
-			Accent: Style{Attr: AttrReverse},
+			Accent: rstyle.Style{Attr: rstyle.AttrReverse},
 			Think:  fg(5),
 			Run:    fg(6),
 		},
-		MD: mdTheme(fgBold(15), fgBold(7), fgBold(8), fg(8), fg(8), fg(8), fg(8), Style{Attr: AttrUnderline}),
+		MD: mdTheme(fgBold(15), fgBold(7), fgBold(8), fg(8), fg(8), fg(8), fg(8), rstyle.Style{Attr: rstyle.AttrUnderline}),
 	},
 	{
 		Name:   "solar",
@@ -73,7 +75,7 @@ var schemeList = []Scheme{
 			Warn:   fg(3),
 			Ok:     fg(10),
 			Error:  fg(9),
-			Accent: Style{Attr: AttrReverse},
+			Accent: rstyle.Style{Attr: rstyle.AttrReverse},
 			Think:  fg(5),
 			Run:    fg(6),
 		},
@@ -89,7 +91,7 @@ var schemeList = []Scheme{
 			Warn:   fg(11),
 			Ok:     fg(10),
 			Error:  fg(9),
-			Accent: Style{Attr: AttrReverse},
+			Accent: rstyle.Style{Attr: rstyle.AttrReverse},
 			Think:  fg(5),
 			Run:    fg(6),
 		},
@@ -105,7 +107,7 @@ var schemeList = []Scheme{
 			Warn:   fg(3),
 			Ok:     fg(10),
 			Error:  fg(9),
-			Accent: Style{Attr: AttrReverse},
+			Accent: rstyle.Style{Attr: rstyle.AttrReverse},
 			Think:  fg(5),
 			Run:    fg(6),
 		},
@@ -121,7 +123,7 @@ var schemeList = []Scheme{
 			Warn:   fg(11),
 			Ok:     fg(10),
 			Error:  fg(9),
-			Accent: Style{Attr: AttrReverse},
+			Accent: rstyle.Style{Attr: rstyle.AttrReverse},
 			Think:  fg(5),
 			Run:    fg(6),
 		},
@@ -137,7 +139,7 @@ var schemeList = []Scheme{
 			Warn:   fg(3),
 			Ok:     fg(10),
 			Error:  fg(9),
-			Accent: Style{Attr: AttrReverse},
+			Accent: rstyle.Style{Attr: rstyle.AttrReverse},
 			Think:  fg(5),
 			Run:    fg(6),
 		},
@@ -145,9 +147,7 @@ var schemeList = []Scheme{
 	},
 }
 
-var curScheme = "default"
-
-func SchemeNames() []string {
+func Names() []string {
 	out := make([]string, len(schemeList))
 	for i, s := range schemeList {
 		out[i] = s.Name
@@ -155,12 +155,12 @@ func SchemeNames() []string {
 	return out
 }
 
-func HasScheme(name string) bool {
-	_, ok := LookupScheme(name)
+func Has(name string) bool {
+	_, ok := Lookup(name)
 	return ok
 }
 
-func LookupScheme(name string) (Scheme, bool) {
+func Lookup(name string) (Scheme, bool) {
 	for _, s := range schemeList {
 		if s.Name == name {
 			return s, true
@@ -169,30 +169,36 @@ func LookupScheme(name string) (Scheme, bool) {
 	return Scheme{}, false
 }
 
-func CurrentSchemeName() string { return curScheme }
-
-func CurrentScheme() Scheme {
-	s, _ := LookupScheme(curScheme)
-	return s
+type Theme struct {
+	Headings    [6]rstyle.Style
+	CodeBlock   rstyle.Style
+	CodeInline  rstyle.Style
+	QuotePrefix string
+	Bullet      string
+	Rule        string
 }
 
-// ApplyScheme 切换内置主题：更新全局语义色并叠加用户 palette 覆盖，返回新主题。
-func ApplyScheme(name string) (Scheme, bool) {
-	s, ok := LookupScheme(name)
-	if !ok {
-		return Scheme{}, false
+func DefaultTheme() Theme {
+	return Theme{
+		Headings: [6]rstyle.Style{
+			{Attr: rstyle.AttrBold, Fg: rstyle.Color16(15)},
+			{Attr: rstyle.AttrBold, Fg: rstyle.Color16(14)},
+			{Attr: rstyle.AttrBold, Fg: rstyle.Color16(12)},
+			{Fg: rstyle.Color16(7)},
+			{Fg: rstyle.Color16(8)},
+			{Fg: rstyle.Color16(8)},
+		},
+		CodeBlock:   rstyle.Style{Fg: rstyle.Color16(8)},
+		CodeInline:  rstyle.Style{Fg: rstyle.Color16(10)},
+		QuotePrefix: "▌ ",
+		Bullet:      "• ",
+		Rule:        "────",
 	}
-	Dim = s.Sem.Dim
-	Info = s.Sem.Info
-	Warn = s.Sem.Warn
-	Ok = s.Sem.Ok
-	Error = s.Sem.Error
-	Accent = s.Sem.Accent
-	Think = s.Sem.Think
-	Run = s.Sem.Run
-	curScheme = name
-	if userPalette != nil {
-		applySemanticPalette(userPalette)
+}
+
+func (t Theme) Heading(level int) rstyle.Style {
+	if level < 1 || level > 6 {
+		return rstyle.Style{}
 	}
-	return s, true
+	return t.Headings[level-1]
 }

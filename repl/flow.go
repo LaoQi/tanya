@@ -3,10 +3,14 @@ package repl
 import (
 	"errors"
 	"fmt"
+	"github.com/LaoQi/tanyan/render"
+	"github.com/LaoQi/tanyan/render/ir"
+	"github.com/LaoQi/tanyan/render/markdown"
+	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanyan/render/theme"
 	"time"
 
 	"github.com/LaoQi/tanyan/agent"
-	"github.com/LaoQi/tanyan/style"
 )
 
 // Kind 标记每次输出的类别，是噪音门禁与测试断言的把手（不导出包外、不进 agent.Event）。
@@ -26,10 +30,11 @@ const (
 // flow 是一次回合的渲染上下文：REPL 只在构造时快照 profile，渲染器与 markdown 缓冲按回合派生。
 type flow struct {
 	st   *streams
-	prof style.Profile
+	prof term.Profile
+	sem  theme.Semantics
 	live bool
-	md   *style.MarkdownBuf
-	rend style.Renderer
+	md   *markdown.MarkdownBuf
+	rend render.Renderer
 }
 
 func (f *flow) emit(kind Kind, s string) { f.st.out.emit(kind, s) }
@@ -53,8 +58,9 @@ func (r *REPL) beginTurn(done func()) *turn {
 		f: &flow{
 			st:   r.st,
 			prof: r.prof,
+			sem:  r.sem,
 			live: r.mdLive,
-			md:   style.NewMarkdownBuf(),
+			md:   markdown.NewMarkdownBuf(),
 			rend: r.rend,
 		},
 	}
@@ -112,13 +118,13 @@ func (t *turn) End(err error) {
 			t.f.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
 		}
 	}
-	t.f.emit(KindDecor, turnSep(t.f.prof, dur))
+	t.f.emit(KindDecor, turnSep(t.f.prof, t.f.sem, dur))
 }
 
 // mdBlocks 把整段文本按 markdown 管线解析为块（回放等一次性展示用，不复用回合缓冲）。
-func mdBlocks(text string) []style.Block {
-	buf := style.NewMarkdownBuf()
-	var blks []style.Block
+func mdBlocks(text string) []ir.Block {
+	buf := markdown.NewMarkdownBuf()
+	var blks []ir.Block
 	blks = append(blks, buf.Write(text)...)
 	blks = append(blks, buf.Close()...)
 	return blks

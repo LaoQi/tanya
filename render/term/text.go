@@ -1,13 +1,14 @@
-package style
+package term
 
 import (
 	"strings"
+	"unicode/utf8"
 )
 
 const (
-	ansiMarker    rune = 0x1b
-	truncateTail       = "~"
-	resetSequence      = "\x1b[0m"
+	ansiMarker   rune = 0x1b
+	truncateTail      = "~"
+	Reset             = "\x1b[0m"
 )
 
 func runeWidth(r rune) int {
@@ -76,43 +77,25 @@ func runeWidth(r rune) int {
 	return 1
 }
 
-func isTerminator(r rune) bool {
-	return (r >= 0x40 && r <= 0x5a) || (r >= 0x61 && r <= 0x7a)
-}
-
 func Strip(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	inEsc := false
-	for _, r := range s {
-		switch {
-		case inEsc:
-			if isTerminator(r) {
-				inEsc = false
-			}
-		case r == ansiMarker:
-			inEsc = true
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	return Sanitize(s, false)
 }
 
 func Width(s string) int {
 	n := 0
-	inEsc := false
-	for _, r := range s {
-		switch {
-		case inEsc:
-			if isTerminator(r) {
-				inEsc = false
+	i := 0
+	for i < len(s) {
+		if s[i] == byte(ansiMarker) {
+			_, _, next := scanSequence(s, i)
+			if next <= i {
+				break
 			}
-		case r == ansiMarker:
-			inEsc = true
-		default:
-			n += runeWidth(r)
+			i = next
+			continue
 		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		n += runeWidth(r)
+		i += size
 	}
 	return n
 }
@@ -126,43 +109,38 @@ func Truncate(s string, w int) string {
 	}
 	max := w - runeWidth(rune(truncateTail[0]))
 	var b strings.Builder
-	b.Grow(len(s) + len(resetSequence) + len(truncateTail))
+	b.Grow(len(s) + len(Reset) + len(truncateTail))
 	cur := 0
-	inEsc := false
-	var seq strings.Builder
 	var sgr strings.Builder
-	for _, r := range s {
-		switch {
-		case inEsc:
-			seq.WriteRune(r)
-			if isTerminator(r) {
-				inEsc = false
-				out := seq.String()
-				seq.Reset()
-				if r == 'm' && strings.HasPrefix(out, "\x1b[") {
-					if out == "\x1b[0m" || out == "\x1b[m" {
-						sgr.Reset()
-					} else {
-						sgr.WriteString(out)
-					}
-				}
-				b.WriteString(out)
+	i := 0
+	for i < len(s) {
+		if s[i] == byte(ansiMarker) {
+			seq, kind, next := scanSequence(s, i)
+			if next <= i {
+				break
 			}
-		case r == ansiMarker:
-			inEsc = true
-			seq.Reset()
-			seq.WriteRune(r)
-		default:
-			cur += runeWidth(r)
-			if cur > max {
-				b.WriteString(truncateTail)
-				if sgr.Len() > 0 {
-					b.WriteString(resetSequence)
+			b.WriteString(seq)
+			if kind == seqSGR {
+				if seq == Reset || seq == "\x1b[m" {
+					sgr.Reset()
+				} else {
+					sgr.WriteString(seq)
 				}
-				return b.String()
 			}
-			b.WriteRune(r)
+			i = next
+			continue
 		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+		cur += runeWidth(r)
+		if cur > max {
+			b.WriteString(truncateTail)
+			if sgr.Len() > 0 {
+				b.WriteString(Reset)
+			}
+			return b.String()
+		}
+		b.WriteRune(r)
 	}
 	return b.String()
 }

@@ -1,9 +1,14 @@
-package style
+package render
 
-import "testing"
+import (
+	"github.com/LaoQi/tanyan/render/ir"
+	"testing"
+
+	"github.com/LaoQi/tanyan/render/term"
+)
 
 func TestParseTemplateMarkup(t *testing.T) {
-	tpl, err := ParseTemplate("[white]{cwd}[/] [blue]{model}[/]")
+	tpl, err := ParseTemplate("[white]{cwd}[/] [blue]{model}[/]", defSem())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +33,7 @@ func TestParseTemplateMarkup(t *testing.T) {
 
 func TestTemplateDefaultPromptEquivalence(t *testing.T) {
 	src := "[white]{cwd}[/] [blue]{model}[/] [yellow]{effort}[/] [green]{stat}[/] [white]>[/] "
-	tpl, err := ParseTemplate(src)
+	tpl, err := ParseTemplate(src, defSem())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +58,7 @@ func TestTemplateDefaultPromptEquivalence(t *testing.T) {
 }
 
 func TestTemplateUnknownPlaceholderKept(t *testing.T) {
-	tpl, _ := ParseTemplate("[white]{cwd} {nope}[/]")
+	tpl, _ := ParseTemplate("[white]{cwd} {nope}[/]", defSem())
 	resolve := func(name string) (string, bool) {
 		if name == "cwd" {
 			return "/x", true
@@ -68,7 +73,7 @@ func TestTemplateUnknownPlaceholderKept(t *testing.T) {
 }
 
 func TestTemplateResolveFalseKeepsLiteral(t *testing.T) {
-	tpl, _ := ParseTemplate("[red]x{nope}[/]")
+	tpl, _ := ParseTemplate("[red]x{nope}[/]", defSem())
 	resolve := func(string) (string, bool) { return "", false }
 	got := tpl.Render(resolve)
 	want := "\x1b[31mx{nope}\x1b[0m"
@@ -78,7 +83,7 @@ func TestTemplateResolveFalseKeepsLiteral(t *testing.T) {
 }
 
 func TestTemplateValueWithMarkupChars(t *testing.T) {
-	tpl, _ := ParseTemplate("[white]{cwd}[/]")
+	tpl, _ := ParseTemplate("[white]{cwd}[/]", defSem())
 	resolve := func(name string) (string, bool) {
 		return "~[red]{x}~", true
 	}
@@ -90,7 +95,7 @@ func TestTemplateValueWithMarkupChars(t *testing.T) {
 }
 
 func TestTemplateEmptyValueSpanSkipped(t *testing.T) {
-	tpl, _ := ParseTemplate("[yellow]{effort}[/] [white]>[/] ")
+	tpl, _ := ParseTemplate("[yellow]{effort}[/] [white]>[/] ", defSem())
 	resolve := func(name string) (string, bool) {
 		if name == "effort" {
 			return "", true
@@ -108,7 +113,7 @@ func TestTemplateEmptyValueSpanSkipped(t *testing.T) {
 }
 
 func TestTemplatePassthroughANSI(t *testing.T) {
-	tpl, err := ParseTemplate("\x1b[37m{cwd}\x1b[0m >")
+	tpl, err := ParseTemplate("\x1b[37m{cwd}\x1b[0m >", defSem())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,15 +126,15 @@ func TestTemplatePassthroughANSI(t *testing.T) {
 	if got := tpl.Render(resolve); got != "\x1b[37m/p\x1b[0m >" {
 		t.Errorf("彩色直通: %q", got)
 	}
-	defer SetProfile(GetProfile())
-	SetProfile(Profile{TTY: false, Colors: LevelNone})
+	defer term.SetProfile(term.GetProfile())
+	term.SetProfile(term.Profile{TTY: false, Colors: term.LevelNone})
 	if got := tpl.Render(resolve); got != "/p >" {
 		t.Errorf("无色应剥离: %q", got)
 	}
 }
 
 func TestBindSplitsSpans(t *testing.T) {
-	tpl, _ := ParseTemplate("[red]a {cwd} b[/]")
+	tpl, _ := ParseTemplate("[red]a {cwd} b[/]", defSem())
 	resolve := func(name string) (string, bool) {
 		return "X", name == "cwd"
 	}
@@ -142,4 +147,14 @@ func TestBindSplitsSpans(t *testing.T) {
 			t.Errorf("切分后样式丢失: %+v", sp)
 		}
 	}
+}
+
+func spans(in []ir.Inline) []ir.Span {
+	var out []ir.Span
+	for _, i := range in {
+		if s, ok := i.(ir.Span); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }

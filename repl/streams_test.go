@@ -3,13 +3,13 @@ package repl
 import (
 	"bytes"
 	"errors"
+	"github.com/LaoQi/tanyan/render/term"
 	"io"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/LaoQi/tanyan/agent"
-	"github.com/LaoQi/tanyan/style"
 )
 
 func TestStreamsInjectWriter(t *testing.T) {
@@ -88,10 +88,10 @@ func TestOutputGuardFiresOnEmitNotWrite(t *testing.T) {
 }
 
 func TestOutputAtomicNoInterleave(t *testing.T) {
-	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
+	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	var buf syncBuf
 	st := NewStreams(&buf, &syncBuf{}, modeRich)
-	view := NewToolView(st, style.GetProfile(), func() int { return 80 }, 20)
+	view := NewToolView(st, term.GetProfile(), testSem(), func() int { return 80 }, 20)
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sleep 1"}`})
 
 	pairs := 0
@@ -110,7 +110,7 @@ func TestOutputAtomicNoInterleave(t *testing.T) {
 	if pairs == 0 {
 		t.Fatal("未产生写入")
 	}
-	if !strings.Contains(got, style.ClearLineHome()) {
+	if !strings.Contains(got, term.ClearLineHome()) {
 		t.Error("并发场景下未出现 spinner 帧，断言无意义")
 	}
 	if n := strings.Count(got, "<<A>><<B>>"); n != pairs {
@@ -119,7 +119,7 @@ func TestOutputAtomicNoInterleave(t *testing.T) {
 }
 
 func TestNoticeDecorErrorKinds(t *testing.T) {
-	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
+	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	a := newSessTestAgent(t, t.TempDir())
 	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
 
@@ -132,7 +132,7 @@ func TestNoticeDecorErrorKinds(t *testing.T) {
 	r.handleCommand("/help")
 	r.st.out.vis = 1 << KindDecor
 	out.Reset()
-	r.st.out.emit(KindDecor, turnSep(r.prof, 0))
+	r.st.out.emit(KindDecor, turnSep(r.prof, testSem(), 0))
 	if !strings.Contains(out.String(), "─") {
 		t.Errorf("回合分隔线应归 KindDecor: %q", out.String())
 	}

@@ -1,4 +1,4 @@
-package style
+package term
 
 import "testing"
 
@@ -15,8 +15,8 @@ func TestDetectProfile(t *testing.T) {
 		{"NO_COLOR", true, map[string]string{"NO_COLOR": "1"}, LevelNone, true},
 		{"强制开色", false, map[string]string{"TANYA_COLOR": "1"}, Level16, false},
 		{"强制关色", true, map[string]string{"TANYA_COLOR": "0"}, LevelNone, true},
-		{"256 色", true, map[string]string{"TERM": "xterm-256color"}, Level256, true},
-		{"truecolor", true, map[string]string{"COLORTERM": "truecolor"}, LevelTrue, true},
+		{"256 色终端按 16 色渲染", true, map[string]string{"TERM": "xterm-256color"}, Level16, true},
+		{"truecolor 终端按 16 色渲染", true, map[string]string{"COLORTERM": "truecolor"}, Level16, true},
 		{"dumb", true, map[string]string{"TERM": "dumb"}, LevelNone, true},
 		{"dumb 下强制开色恢复 16 色", true, map[string]string{"TERM": "dumb", "TANYA_COLOR": "1"}, Level16, true},
 	}

@@ -2,14 +2,14 @@ package repl
 
 import (
 	"errors"
+	"github.com/LaoQi/tanyan/render/term"
 	"strings"
 	"testing"
 
 	"github.com/LaoQi/tanyan/agent"
-	"github.com/LaoQi/tanyan/style"
 )
 
-var plainProf = style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true}
+var plainProf = term.Profile{TTY: true, Colors: term.LevelNone}
 
 func TestParseMode(t *testing.T) {
 	if _, err := ParseMode(false, true); err == nil {
@@ -75,8 +75,8 @@ func TestVisSetMatrix(t *testing.T) {
 	}
 }
 
-func feedAskPath(st *streams, prof style.Profile) *toolView {
-	view := NewToolView(st, prof, func() int { return 80 }, 20)
+func feedAskPath(st *streams, prof term.Profile) *toolView {
+	view := NewToolView(st, prof, testSem(), func() int { return 80 }, 20)
 	view.Handle(agent.Event{Kind: agent.EventRequestStart})
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
@@ -210,11 +210,11 @@ func TestEndTightensNewlineOnlyInPlain(t *testing.T) {
 }
 
 func TestRichStreamsByteIdentical(t *testing.T) {
-	nonTTY := style.Profile{TTY: false, Colors: style.LevelNone, Unicode: true}
+	nonTTY := term.Profile{TTY: false, Colors: term.LevelNone}
 	ttyProfile(t, nonTTY)
 	var out syncBuf
 	st := NewStreams(&out, &syncBuf{}, modeRich)
-	view := NewToolView(st, nonTTY, func() int { return 80 }, 20)
+	view := NewToolView(st, nonTTY, testSem(), func() int { return 80 }, 20)
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
 		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
@@ -225,11 +225,11 @@ func TestRichStreamsByteIdentical(t *testing.T) {
 		t.Errorf("rich 非 TTY 输出应为基线字节\n got %q\nwant %q", got, want)
 	}
 
-	tty := style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true}
+	tty := term.Profile{TTY: true, Colors: term.LevelNone}
 	ttyProfile(t, tty)
 	var out2 syncBuf
 	st2 := NewStreams(&out2, &syncBuf{}, modeRich)
-	view2 := NewToolView(st2, tty, func() int { return 80 }, 20)
+	view2 := NewToolView(st2, tty, testSem(), func() int { return 80 }, 20)
 	view2.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
 		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
 	want2 := "\x1b[1A\r\x1b[K▸ run_shell echo hi\n  hi\n  ↳ exit 0 · 0ms · 1 行\n"

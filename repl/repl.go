@@ -3,6 +3,10 @@ package repl
 import (
 	"context"
 	"fmt"
+	"github.com/LaoQi/tanyan/render"
+	"github.com/LaoQi/tanyan/render/ir"
+	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanyan/render/theme"
 	"io"
 	"os"
 	"os/signal"
@@ -12,7 +16,6 @@ import (
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
-	"github.com/LaoQi/tanyan/style"
 )
 
 type REPL struct {
@@ -21,18 +24,23 @@ type REPL struct {
 	term      readline.Terminal
 	raw       bool
 	st        *streams
-	prof      style.Profile
+	prof      term.Profile
+	sch       theme.Scheme
+	sem       theme.Semantics
+	palette   map[string]string
 	promptTpl string
-	prompt    style.Template
+	prompt    render.Template
 	view      *toolView
 	mdLive    bool
-	rend      style.Renderer
+	rend      render.Renderer
 }
 
 type options struct {
-	st   *streams
-	term readline.Terminal
-	raw  bool
+	st        *streams
+	term      readline.Terminal
+	raw       bool
+	themeName string
+	palette   map[string]string
 }
 
 type Option func(*options)
@@ -41,8 +49,29 @@ func WithStreams(st *streams) Option {
 	return func(o *options) { o.st = st }
 }
 
-func WithTerminal(term readline.Terminal, raw bool) Option {
-	return func(o *options) { o.term, o.raw = term, raw }
+func WithTerminal(dev readline.Terminal, raw bool) Option {
+	return func(o *options) { o.term, o.raw = dev, raw }
+}
+
+func WithTheme(name string, palette map[string]string) Option {
+	return func(o *options) { o.themeName, o.palette = name, palette }
+}
+
+// Semantics 按主题名与 palette 覆盖计算语义色集合；主题名非法时回落 default。
+func Semantics(name string, palette map[string]string) theme.Semantics {
+	sch, ok := theme.Lookup(name)
+	if !ok {
+		sch, _ = theme.Lookup("default")
+	}
+	return theme.Apply(sch.Sem, palette)
+}
+
+// ValidateTheme 校验主题名（配置校验归表现层，agent 不依赖 theme）。
+func ValidateTheme(name string) error {
+	if !theme.Has(name) {
+		return fmt.Errorf(MsgBadTheme, name, strings.Join(theme.Names(), "/"))
+	}
+	return nil
 }
 
 func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
@@ -53,32 +82,41 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if o.st == nil {
 		o.st = NewStreams(os.Stdout, os.Stderr, modeRich)
 	}
-	term, raw := o.term, o.raw
-	if term == nil {
-		term, raw = readline.NewTerminal()
+	dev, raw := o.term, o.raw
+	if dev == nil {
+		dev, raw = readline.NewTerminal()
 	}
-	ed := readline.NewEditor(term, raw)
+	ed := readline.NewEditor(dev, raw)
 	ed.SetOutput(o.st.out)
 	c := &completer{listSessions: a.ListSessions, listModels: a.ListModels}
 	ed.SetComplete(c.complete)
 	ed.SetGhost(c.suggest)
-	sch := style.CurrentScheme()
+	name := o.themeName
+	if name == "" {
+		name = "default"
+	}
+	sch, ok := theme.Lookup(name)
+	if !ok {
+		sch, _ = theme.Lookup("default")
+	}
+	sem := theme.Apply(sch.Sem, o.palette)
 	if promptTpl == "" {
 		promptTpl = sch.Prompt
 	}
-	tpl, err := style.ParseTemplate(promptTpl)
+	tpl, err := render.ParseTemplate(promptTpl, sem)
 	if err != nil {
 		return nil, err
 	}
-	r := &REPL{agent: a, ed: ed, term: term, raw: raw, st: o.st, promptTpl: promptTpl, prompt: tpl}
+	r := &REPL{agent: a, ed: ed, term: dev, raw: raw, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
 	r.mdLive = true
-	r.prof = style.GetProfile()
-	r.rend = style.NewThemedRenderer(r.prof, sch.MD)
+	r.prof = term.GetProfile()
+	r.rend = render.NewThemedRenderer(r.prof, sch.MD)
+	ed.SetStyles(sem.Dim, sem.Accent)
 	maxLines := 20
 	if a != nil {
 		maxLines = a.ToolOutputLines()
 	}
-	r.view = NewToolView(o.st, r.prof, func() int { return toolWidth(term) }, maxLines)
+	r.view = NewToolView(o.st, r.prof, r.sem, func() int { return toolWidth(dev) }, maxLines)
 	return r, nil
 }
 
@@ -90,7 +128,7 @@ func (r *REPL) mdEnabled() bool {
 	return r.mdLive && r.prof.TTY && r.st.decor()
 }
 
-func turnSep(prof style.Profile, d time.Duration) string {
+func turnSep(prof term.Profile, sem theme.Semantics, d time.Duration) string {
 	if !prof.TTY {
 		return ""
 	}
@@ -98,7 +136,7 @@ func turnSep(prof style.Profile, d time.Duration) string {
 	if d > 0 {
 		text += fmt.Sprintf(TurnSepDurFmt, turnDuration(d))
 	}
-	return "\n" + style.Ok.Sprint(text) + "\n"
+	return "\n" + sem.Ok.Sprint(text) + "\n"
 }
 
 func turnDuration(d time.Duration) string {
@@ -141,7 +179,7 @@ func (r *REPL) noSaveWarn() string {
 	if r.agent == nil || !r.agent.NoSave() {
 		return ""
 	}
-	return style.Warn.Sprint(MsgNoSaveWarn) + "\n"
+	return r.sem.Warn.Sprint(MsgNoSaveWarn) + "\n"
 }
 
 func (r *REPL) Run() error {
@@ -171,7 +209,7 @@ func (r *REPL) Run() error {
 			if r.handleCommand(line) {
 				return nil
 			}
-			r.st.out.emit(KindDecor, turnSep(r.prof, 0))
+			r.st.out.emit(KindDecor, turnSep(r.prof, r.sem, 0))
 			continue
 		}
 		if text, ok := dialogueText(line); ok {
@@ -283,23 +321,23 @@ func (r *REPL) handleCommand(line string) bool {
 func (r *REPL) handleTheme(args []string) {
 	if len(args) == 0 {
 		var b strings.Builder
-		fmt.Fprintf(&b, MsgCurTheme, style.CurrentSchemeName())
+		fmt.Fprintf(&b, MsgCurTheme, r.sch.Name)
 		b.WriteString(MsgThemeHead)
-		for _, n := range style.SchemeNames() {
+		for _, n := range theme.Names() {
 			mark := MsgMarkPlain
-			if n == style.CurrentSchemeName() {
+			if n == r.sch.Name {
 				mark = MsgMarkCurrent
 			}
-			if s, ok := style.LookupScheme(n); ok {
+			if s, ok := theme.Lookup(n); ok {
 				fmt.Fprintf(&b, "%s%s  %s\n", mark, s.Name, s.Desc)
 			}
 		}
 		r.st.out.emit(KindNotice, b.String())
 		return
 	}
-	s, ok := style.ApplyScheme(args[0])
+	s, ok := theme.Lookup(args[0])
 	if !ok {
-		bad := fmt.Sprintf(MsgThemeBad, args[0], strings.Join(style.SchemeNames(), "/"))
+		bad := fmt.Sprintf(MsgBadTheme, args[0], strings.Join(theme.Names(), "/"))
 		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", bad))
 		return
 	}
@@ -309,18 +347,18 @@ func (r *REPL) handleTheme(args []string) {
 }
 
 func (r *REPL) printThemeSample() {
-	if r.prof.Colors == style.LevelNone {
+	if r.prof.Colors == term.LevelNone {
 		return
 	}
-	line := func(text string) []style.Inline {
-		return []style.Inline{style.Span{Text: text}}
+	line := func(text string) []ir.Inline {
+		return []ir.Inline{ir.Span{Text: text}}
 	}
-	blocks := []style.Block{
-		style.Heading{Level: 1, Inlines: line("一级标题")},
-		style.Heading{Level: 2, Inlines: line("二级标题")},
-		style.Heading{Level: 3, Inlines: line("三级标题")},
-		style.Paragraph{Inlines: []style.Inline{style.Span{Text: "正文段落，"}, style.CodeSpan{Text: "行内代码"}, style.Span{Text: "与结尾。"}}},
-		style.CodeBlock{Lines: []string{"代码块内容"}},
+	blocks := []ir.Block{
+		ir.Heading{Level: 1, Inlines: line("一级标题")},
+		ir.Heading{Level: 2, Inlines: line("二级标题")},
+		ir.Heading{Level: 3, Inlines: line("三级标题")},
+		ir.Paragraph{Inlines: []ir.Inline{ir.Span{Text: "正文段落，"}, ir.CodeSpan{Text: "行内代码"}, ir.Span{Text: "与结尾。"}}},
+		ir.CodeBlock{Lines: []string{"代码块内容"}},
 	}
 	var b strings.Builder
 	for _, blk := range blocks {
@@ -341,15 +379,19 @@ func (r *REPL) printThemeSample() {
 	})
 	b.WriteString(prompt)
 	b.WriteString("\n")
-	b.WriteString(style.Dim.Sprint("工具行 ") + style.Info.Sprint("状态行 ") + style.Warn.Sprint("等待中 ") + style.Think.Sprint("思考中 ") + style.Run.Sprint("执行中 ") + style.Ok.Sprint("成功 ") + style.Error.Sprint("错误") + "\n")
+	b.WriteString(r.sem.Dim.Sprint("工具行 ") + r.sem.Info.Sprint("状态行 ") + r.sem.Warn.Sprint("等待中 ") + r.sem.Think.Sprint("思考中 ") + r.sem.Run.Sprint("执行中 ") + r.sem.Ok.Sprint("成功 ") + r.sem.Error.Sprint("错误") + "\n")
 	r.st.out.emit(KindNotice, b.String())
 }
 
-// applyTheme 把渲染器与提示符切到给定主题（语义色已在 ApplyScheme 中更新）。
-func (r *REPL) applyTheme(s style.Scheme) {
+// applyTheme 把语义色、渲染器与提示符切到给定主题（palette 覆盖重放）。
+func (r *REPL) applyTheme(s theme.Scheme) {
+	r.sch = s
+	r.sem = theme.Apply(s.Sem, r.palette)
 	r.promptTpl = s.Prompt
-	r.prompt, _ = style.ParseTemplate(s.Prompt)
-	r.rend = style.NewThemedRenderer(r.prof, s.MD)
+	r.prompt, _ = render.ParseTemplate(s.Prompt, r.sem)
+	r.rend = render.NewThemedRenderer(r.prof, s.MD)
+	r.ed.SetStyles(r.sem.Dim, r.sem.Accent)
+	r.view.setSemantics(r.sem)
 }
 
 func (r *REPL) handleThink(args []string) {
@@ -432,7 +474,7 @@ func truncateRunes(s string, n int) string {
 }
 
 func historyLine(n int, m agent.Message) string {
-	text := style.OneLine(historyText(m))
+	text := term.OneLine(historyText(m))
 	return fmt.Sprintf("%3d %-9s %s", n, historyLabel(m), truncateRunes(text, 120))
 }
 
@@ -442,7 +484,7 @@ func (r *REPL) printHistoryFull(n int, m agent.Message) {
 		r.printRendered(m.Content)
 	} else if text := historyText(m); text != "" {
 		if m.Role == "tool" {
-			r.st.out.emit(KindToolBlock, style.Dim.Frame(text)+"\n")
+			r.st.out.emit(KindToolBlock, r.sem.Dim.Frame(text)+"\n")
 		} else {
 			r.st.out.emit(KindNotice, text+"\n")
 		}
@@ -453,14 +495,14 @@ func (r *REPL) printHistoryFull(n int, m agent.Message) {
 }
 
 // printHistoryHead 把消息头（#N 角色）按一级标题渲染——`#` 与序号连写不构成 markdown 标题语法，
-// 因此不走 markdown 解析，直接构造 Heading IR。
+// 因此不走 markdown 解析，直接构造 ir.Heading IR。
 func (r *REPL) printHistoryHead(n int, label string) {
 	head := fmt.Sprintf("#%d %s", n, label)
 	if !r.mdEnabled() {
 		r.st.out.emit(KindNotice, head+"\n")
 		return
 	}
-	r.print(r.rend.Block(style.Heading{Level: 1, Inlines: []style.Inline{style.Span{Text: head}}}), KindNotice)
+	r.print(r.rend.Block(ir.Heading{Level: 1, Inlines: []ir.Inline{ir.Span{Text: head}}}), KindNotice)
 }
 
 // printRendered 把整段文本按与 AI 输出一致的管线渲染（/md 开关 + TTY 旁路），供历史回放等一次性展示使用。
@@ -487,7 +529,7 @@ func (r *REPL) loadSessionInteractive() {
 	var idx int
 	var ok bool
 	if r.raw {
-		idx, ok = pickSession(r.term, list, r.st.out)
+		idx, ok = pickSession(r.term, list, r.st.out, r.sem)
 	} else {
 		idx, ok = pickByNumber(list, r.st.out)
 	}

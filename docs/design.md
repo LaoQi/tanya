@@ -11,7 +11,14 @@ main.go            package main：入口、flag 子命令、ask 单发
 repl/              package repl：REPL 循环、斜杠命令、补全、工具视图渲染、等待动画
 agent/             package agent：全部核心逻辑（config / llm / agent / prompt / session / stats / shell / builtin）
 readline/          package readline：自研终端输入层（editor / keys / terminal）
-style/             package style：富文本管线（语义色/宽度截断/模板/IR，SGR 唯一产地），设计见 docs/render-pipeline.md
+render/            package render：渲染管线（IR → ANSI：Renderer、提示符模板），可 import 其下子包
+render/style/      样式词汇与编码（SGR 唯一产地）
+render/term/       终端原语（ANSI 词法/清洗、宽度/截断、光标控制、能力档案；零依赖叶子）
+render/ir/         渲染 IR（Block/Inline）
+render/theme/      配色（语义色/方案/markdown 样式集/palette；无全局可变状态）
+render/markdown/   流式 markdown 解析
+render/markup/     内联标记解析
+设计见 docs/render-pipeline.md 与 docs/style-split.md
 ```
 
 设计取舍：
@@ -19,7 +26,7 @@ style/             package style：富文本管线（语义色/宽度截断/模�
 - **不做细粒度拆包**：代码总量小，按包分职责即可
 - **不做工具注册表**：工具硬编码于 `ToolDefs()` 和 `Agent.dispatch` 的 switch，存量小且预计长期以 shell 为主
 - **依赖仅 2 个**：`gopkg.in/yaml.v3`（配置）、`golang.org/x/sys/unix`（raw mode）；终端输入层与富文本管线自研
-- **颜色铁律**：SGR 序列仅 `style` 包产生（业务代码不得出现裸 `\x1b` 色码，readline 光标操作除外）；同一 IR 按终端能力档案（Profile）降级，无色终端自动纯文本
+- **颜色铁律**：SGR 与 CSI 仅 `render/style`、`render/term` 产生（业务代码不得出现裸 `\x1b`，readline 的光标操作也走 `term.Cursor*`）；同一 IR 按终端能力档案（`term.Profile`）降级，无色终端自动纯文本
 
 ## 运行模式
 
@@ -113,8 +120,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 - `WireToolView` 接线全部回调，块状视图：`▸ 工具名 命令` 标题行 + 缩进输出行（stderr 加 `2|` 前缀）+ 亮蓝状态行；`run_shell` **显式指定** `cwd` 时标题区改为三行——首行仅工具名（进行中带 `⋯`），其后 `cwd: <原样值>`（不缩写）与折叠后的命令各占一行（逐行按宽度截断；inline 重绘按标题行数上移），未指定时保持单行、与旧版逐字节一致
 - 状态行总是输出（语义色 `Info`，无色环境纯文本）：`↳ exit 0 · 0.3s · 12 行`；异常时首段为 `exit 2`/`执行超时`/`已中断`/`挂起已终止`/`错误: ...`；输出被截断时行数段显示 `共 N 行`；builtin 工具无状态行（截断时仅显示 `共 N 行`）
-- 颜色走 `style` 语义色 + Profile 驱动（`colors` 配置 / `NO_COLOR` / 非 TTY → 纯文本）：工具块 `Dim`、spinner 等待 `Warn`/思考 `Think`/执行 `Run` 三色、状态行 `Info`，可用 `palette` 配置覆盖
-- **捕获输出的 ANSI 治理**（`style/filter.go`）：块组装内聚于 `renderToolBlock`，输出区无 SGR 时整块 `Dim.Frame`（全清洗 + 块级包裹，标题/输出单一包裹点）；检测到 SGR（`HasSGR`）时输出区改走直显——`Passthrough` 保色渲染（SGR 原样保留、布局序列/OSC/C0 仍清洗、脏状态结尾闭合），标题行独立 Frame，状态行 `Info` 显式后置（不依赖 SGR 时序巧合）。预览类彩色输出（如欢迎屏效果）在灰色块内原色可见，用户与模型双通道分离：**模型侧文本不做任何变换**（原始输出、信息保真、缓存与历史零影响），显示侧机制对模型完全不可见
+- 颜色走 `theme.Semantics` 语义色 + `term.Profile` 驱动（`colors` 配置 / `NO_COLOR` / 非 TTY → 纯文本）：工具块 `Dim`、spinner 等待 `Warn`/思考 `Think`/执行 `Run` 三色、状态行 `Info`，可用 `palette` 配置覆盖
+- **捕获输出的 ANSI 治理**（`render/term` 清洗 + `Renderer.Frame/Passthrough`）：块组装内聚于 `renderToolBlock`，输出区无 SGR 时整块 `Dim.Frame`（全清洗 + 块级包裹，标题/输出单一包裹点）；检测到 SGR（`HasSGR`）时输出区改走直显——`Passthrough` 保色渲染（SGR 原样保留、布局序列/OSC/C0 仍清洗、脏状态结尾闭合），标题行独立 Frame，状态行 `Info` 显式后置（不依赖 SGR 时序巧合）。预览类彩色输出（如欢迎屏效果）在灰色块内原色可见，用户与模型双通道分离：**模型侧文本不做任何变换**（原始输出、信息保真、缓存与历史零影响），显示侧机制对模型完全不可见
 - `/history` 查看 tool 消息时正文走 `Dim.Frame`（纯显示侧，历史存储不动），顺带解决历史串裸序列漏进视图的问题
 - 显示行数上限 `tool_output_lines`（默认 20，范围 1-1000），超出保留头 3 行 + 尾 2 行并提示 `/history n` 查看完整输出
 - 执行开始即打印标题行（`⋯` 标记进行中，调用点 `Dim.Frame` 包裹，模型可控的 args 一并清洗）；结束在 TTY 下 `\x1b[1A\r\x1b[K` 上移重绘标题替换 `⋯`（光标控制序列在 Frame 之外），非 TTY 直接打印完整块
@@ -249,7 +256,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_SESSION_MODE` / `TANYA_THEME` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES`。
 
-配色主题：`style/theme.go` 内置 `Scheme` 聚合（语义色 + 提示符模板 + markdown `Theme`），`ApplyScheme` 更新全局语义色并叠加用户 `palette` 覆盖；REPL `/theme [name]` 切换后提示符与渲染器即时重建，默认启动主题取 `theme` 配置。`DefaultPrompt` 常量归属 style 包（default 主题提示符），`agent.DefaultPrompt` 仅为兼容引用。
+配色主题：`render/theme` 内置 `Scheme` 聚合（语义色 + 提示符模板 + markdown 样式集），**无全局可变状态**——`Lookup` 取方案、`Apply(sem, palette)` 纯函数叠加覆盖；REPL 持有当前 `Scheme`/`Semantics`，`/theme [name]` 切换后语义色、渲染器与提示符即时重建（palette 重放），readline 通过 `SetStyles` 注入。默认启动主题取 `theme` 配置，校验由 `repl.ValidateTheme` 承担（agent 不依赖表现层）。
 
 ## 测试
 

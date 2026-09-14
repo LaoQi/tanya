@@ -1,4 +1,4 @@
-package style
+package term
 
 import "strconv"
 
@@ -14,5 +14,14 @@ func CursorUp(n int) string {
 	}
 	return "\x1b[" + strconv.Itoa(n) + "A"
 }
+
+func CursorForward(n int) string {
+	if n < 1 {
+		return ""
+	}
+	return "\x1b[" + strconv.Itoa(n) + "C"
+}
+
+func ClearToEOL() string { return "\x1b[J" }
 
 func ScreenHome() string { return "\x1b[2J\x1b[H" }

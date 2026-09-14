@@ -1,19 +1,19 @@
 package repl
 
 import (
+	"github.com/LaoQi/tanyan/render/term"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/LaoQi/tanyan/agent"
-	"github.com/LaoQi/tanyan/style"
 )
 
 func withPlainProfile(t *testing.T) {
 	t.Helper()
-	old := style.GetProfile()
-	style.SetProfile(style.Profile{TTY: false, Colors: style.LevelNone, Unicode: true})
-	t.Cleanup(func() { style.SetProfile(old) })
+	old := term.GetProfile()
+	term.SetProfile(term.Profile{TTY: false, Colors: term.LevelNone})
+	t.Cleanup(func() { term.SetProfile(old) })
 }
 
 func newSettleAgent(t *testing.T) *agent.Agent {

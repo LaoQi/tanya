@@ -1,11 +1,15 @@
 # 富文本渲染管线方案
 
-> 状态：**分阶段实施中**——阶段 1（style 包骨架与存量收编）、阶段 2（markup 模板与 palette 配置）、阶段 3（markdown 管线与 `/md` 开关）已实施；阶段 4（表格、truecolor palette、非终端 Renderer）待排期。参考项目对比分析见 `docs/render-refs-compare.md`（持续补录）。目标：为 tanyan 建立统一的富文本中间表示（IR）与渲染管线，收敛现散落各处的颜色/终端控制代码，支撑后续 Markdown 输出染色与跨终端（Windows Terminal 等）渲染。
+> 状态：**已实施**——第 1 节的升级需求全部落地，包结构由单包 `style` 拆为 `render` 树（`term`/`style`/`ir`/`theme`/`markdown`/`markup` + `render`），拆包决策与落地偏差见 `docs/style-split.md`。
+>
+> 原计划分阶段推进：阶段 1（管线骨架与存量收编）、阶段 2（markup 模板与 palette 配置）、阶段 3（markdown 管线与 `/md` 开关）已完成；阶段 4（表格、truecolor palette、非终端 Renderer）待排期（truecolor 一档已明确删除，见 §4）。目标：为 tanyan 建立统一的富文本中间表示（IR）与渲染管线，收敛散落各处的颜色/终端控制代码，支撑 Markdown 输出染色与跨终端（Windows Terminal 等）渲染。
 > 决策背景（备选方案对比与取舍过程）见文末附录。参考项目对比分析见 `docs/render-refs-compare.md`（持续补录）。
+>
+> 阅读约定：本文保留方案原貌，凡与落地现状不符之处一律以 **「落地修订」** / **「落地」** 就地标注（§3/§4/§5/§6/§8/§9/§11/§12/§15），未标注者即原样落地。
 
 ## 1. 背景与问题
 
-现状：颜色与终端控制散落 5 处，模式不统一——
+（下表为**方案提出时的现状**，用于说明设计动机；其中各项均已收编，见 §11。）
 
 | 位置 | 现状 |
 |---|---|
@@ -27,10 +31,10 @@
 
 ```
 ━━━ 解析层（多来源，可插拔）━━━      ━━━ IR ━━━              ━━━ 渲染层 ━━━
-配置模板标记 → Inline                Document                TerminalRenderer
-Markdown(阶段3) → Document   ──→    []Block/[]Inline  ──→   (TermProfile 驱动：
-代码常量(类型API) → Span              唯一表示                 色深降级/纯文本降级)
-工具输出 → 原样 Text(铁律)
+配置模板标记 → []Inline              []Block/[]Inline        Renderer
+Markdown(阶段3) → []Block    ──→    唯一表示          ──→   (term.Profile 驱动：
+代码常量(类型API) → Span                                    有无颜色降级/纯文本降级)
+工具输出 → 原样 RawText(铁律)
 ```
 
 原则：**所有富文本在 IR 层汇合，IR 以下互不知晓，渲染器只认 IR + 终端能力档案**。加一种来源（markdown）、换一种终端（Windows Terminal）、换一种输出（远期 HTML）都不动另外两层。
@@ -39,7 +43,7 @@ Markdown(阶段3) → Document   ──→    []Block/[]Inline  ──→   (Ter
 
 ```
                  解析（启动时一次）              绑定（每轮循环）         渲染（唯一出口）
-prompt 模板 ──→ ParseTemplate ──→ Template ──→ Bind(变量表) ──→ []Inline ──→ Renderer.Inline
+prompt 模板 ──→ ParseTemplate ──→ Template ──→ Render(变量表) ──→ 已渲染串 ──→ Readline
 markdown  ──→ MarkdownBuf    ──→ []Block  ──→（无）                       ──→ Renderer.Block
 代码常量  ──→ 类型 API        ──→ []Inline ──→（无）                       ──→ Renderer
 工具输出  ──→ RawText          ──→ Block   ──→（无）                       ──→ Renderer
@@ -47,10 +51,12 @@ markdown  ──→ MarkdownBuf    ──→ []Block  ──→（无）        
 
 收编后的两条铁律（可机器审计，一条 grep 验证）：
 
-1. 全项目只有 `style/render.go` 产生 SGR 序列（`\x1b[3Xm` 类）
-2. 业务代码不出现裸 `\x1b`（`readline/editor.go` 的光标操作与 `style` 控制原语除外）
+1. SGR 序列只由 `render/style`（`Style.SGR`）产生
+2. CSI/控制序列只由 `render/term`（`Cursor*`/`Clear*`/`ScreenHome`）产生；业务代码与 readline 均不出现裸 `\x1b`（`grep -rn '\\x1b' readline/ repl/` 应为空）
 
 ### 2.2 包结构与依赖方向
+
+原方案的单包蓝图（**未按此落地**，最终拆为 `render` 树，见本节末）：
 
 ```
 style/
@@ -64,14 +70,29 @@ style/
   control.go  光标控制命名原语（LineStart/ClearLine/CursorUp/ClearScreen...）
 ```
 
-新增顶级包 `style`，零外部依赖（依赖仍仅 yaml + x/sys）。依赖方向：`main → repl → agent → style`、`readline → style`。不放进 readline：`agent.DefaultPrompt` 也要用，agent 不应依赖终端输入层。readline 保留内部光标操作（终端层操作终端是其职责），只把颜色与宽度交给 style。
+以上为方案提出时的单包蓝图。**落地**：实施时该包被拆为 `render` 树——`render/term`（零依赖叶子）、`render/style`、`render/ir`、`render/theme`、`render/markdown`、`render/markup`、`render`（编排层），`agent` 不再依赖表现层。落地后的依赖方向（全部父→子或指向叶子，无环）：
 
-## 3. IR 定义（style/doc.go）
+```
+render/term     → ∅
+render/style    → render/term
+render/ir       → render/style
+render/theme    → render/style
+render/markdown → render/ir, render/style, render/term
+render/markup   → render/ir, render/style, render/term, render/theme
+render          → render/ir, render/style, render/term, render/theme
+readline        → render/style, render/term
+repl            → render(+子包), readline, agent
+agent           → ∅
+```
+
+拆包理由与两个环陷阱（`theme ↔ render`、`render ↔ render/markdown`）见 `docs/style-split.md`。原判断"不放进 readline"依然成立：readline 只取颜色词汇（`render/style`）与终端原语（`render/term`），光标操作也改走 `term.Cursor*`。
+
+## 3. IR 定义（render/ir/ir.go）
 
 双层结构：Block 管格式，Inline 管颜色——markdown 的天然分层。全部值类型、可 `==`/`DeepEqual` 比较，约 120 行。
 
 ```
-Document ─── Blocks[] ──┬─ Paragraph ── Inlines[] ──┬─ Span{Style,Text}
+[]Block ────────────────┬─ Paragraph ── Inlines[] ──┬─ Span{Style,Text}
                         ├─ Heading{Level}           ├─ CodeSpan
                         ├─ CodeBlock{Lang,Lines[]}  ├─ SoftBreak
                         ├─ List ── Items[] ── ListItem ── Blocks[]（递归）
@@ -81,8 +102,6 @@ Document ─── Blocks[] ──┬─ Paragraph ── Inlines[] ──┬─
 ```
 
 ```go
-type Document struct{ Blocks []Block }
-
 type Block interface{ blockNode() }   // sealed：非导出标记方法
 type Inline interface{ inlineNode() }
 
@@ -128,47 +147,52 @@ type SoftBreak struct{}               // 段内换行；终端渲染为 \n，硬
 设计要点：
 
 - `List.Items` 用 `[]ListItem{Blocks}` 而非 `[][]Inline`：模型回答中嵌套列表、列表项下挂代码块常见，IR 存不住的结构渲染器救不回来
-- sealed interface（非导出标记方法）防外部随意扩展，类型共 8 个
+- sealed interface（非导出标记方法）防外部随意扩展，类型共 10 个（Block 7 + Inline 3）
+- **落地修订**：`Document`/`Doc()`/`P()` 已删除（`Document` 只被测试引用），块以 `[]Block` 传递；`Renderer.Doc` 一并删除。`ir` 为只依赖 `render/style` 的叶子子包（父包保留编排能力，否则 `render` 永远不能 import `render/markdown`）
 - 来源可信度编码在块类型里：工具输出进 `RawText`，模型输出进 `Paragraph/CodeBlock/...`
 
-## 4. Color / Style（style/color.go）
+## 4. Color / Style（render/style/style.go）
 
 ```go
 type ColorKind uint8
 const (
-    ColorNone ColorKind = iota   // 零值 = 未设置，省掉 HasFg/HasBg 布尔
-    Color16                      // V16: 0-15
-    RGB                          // RGB: 0xRRGGBB
+    KindNone ColorKind = iota   // 零值 = 未设置，省掉 HasFg/HasBg 布尔
+    Kind16                      // V16: 0-15（16 色基本 SGR）
 )
 
 type Color struct {
     Kind ColorKind
     V16  uint8
-    RGB  uint32
 }
 
 type Attr uint8
-const ( AttrBold Attr = 1 << iota; AttrUnderline; AttrReverse )   // SGR 1/4/7；dim 用 BrightBlack 表达
+const ( AttrBold Attr = 1 << iota; AttrUnderline; AttrReverse; AttrItalic )   // SGR 1/4/7/3；dim 用 BrightBlack 表达
 
 type Style struct {
-    Fg, Bg Color     // ColorNone = 不改动该通道
+    Fg, Bg Color     // KindNone = 不改动该通道
     Attr   Attr
 }
 ```
 
 - 全部零值即"无样式"，`Style{}` 可当 Plain 用，`==` 可比，测试断言直观
-- **色深约束放宽决议**：现约束"一律 16 色硬 SGR"放宽为——IR 支持 Color16 与 RGB 两档，默认 palette 全部 Color16（保持现观感与约束精神），渲染按 profile 降级。RGB 仅为 palette 显式配置与将来 markdown 代码高亮预留。256 色是量化产物，不进 IR
-- 降级链：`RGB →(256) 最近色 →(16) 最近色 →(None) 丢弃`
+- **色深约束（落地修订）**：原决议拟放宽为"IR 支持 Color16 与 RGB 两档、渲染按 profile 降级"，实际**未采纳 RGB 一档**——`KindRGB`/`Color.RGB` 已删除，IR 只保留 `Kind16`；`term.ColorLevel` 也收敛为 `None`/`Level16`（`Level256`/`LevelTrue` 删除，`SGR` 本就只产 16 色）
+- **无降级链**：不做 `RGB →(256) →(16) →None` 量化，`Style.SGR` 直接产出 16 色 SGR，profile 为 `LevelNone` 时整段退化为纯文本；"256 色是量化产物，不进 IR"的原判断保留
+- 颜色一律 16 色基本 SGR（30-37/90-97/40-47/100-107），与 `AGENTS.md` 铁律一致
 
 ## 5. 语义色与 palette
 
 UI 代码只引用语义名，具体色集中一处、可配置覆盖：
 
 ```go
-var (Dim, Info, Warn, Ok, Error, Accent, Think, Run Style)   // 启动时按 palette 填充
+type Semantics struct { Dim, Info, Warn, Ok, Error, Accent, Think, Run rstyle.Style }   // 值类型
+
+func Apply(base Semantics, m map[string]string) Semantics   // 纯函数：内置方案语义色 + 用户 palette 覆盖
+func (s Semantics) ByName(name string) (rstyle.Style, bool) // 标记语法中的语义名解析
 ```
 
-对应现状：`Dim`←90（工具块/ghost）、`Info`←94（状态行）、`Warn`←33（等待中）、`Think`←35（思考中）、`Run`←36（执行中）、`Ok`←32（选中标记）、`Error`（新补，当前错误文案未上色）。
+**落地修订**：原设计的 8 个包级变量已删除（`style` 包不得有可变全局）。`theme` 只提供纯函数——`Lookup(name)` 取内置方案、`Apply(sem, palette)` 叠加覆盖；当前 `Semantics` 由 `repl` 持有（`REPL.sem`），readline 经 `SetStyles` 注入，`/theme` 切换只改 REPL 自身状态并重放 palette。
+
+`default` 方案的语义色取值（其余方案见 `render/theme/theme.go`）：`Dim`←90（工具块/ghost）、`Info`←94（状态行）、`Warn`←33（等待中）、`Think`←35（思考中）、`Run`←36（执行中）、`Ok`←32（选中标记）、`Error`←91（错误文案）。
 
 ```yaml
 colors: auto        # auto | on | off
@@ -177,30 +201,37 @@ palette:            # 覆盖语义色（可选）
   error: red
 ```
 
-换主题 = 换 palette，IR 与渲染器零改动。渲染器不认识"语义"概念——IR 里存的是解析后的具体色，语义名在解析时经 palette 查表落成具体值。
+换主题 = 换语义色集合，IR 与渲染器零改动。渲染器不认识"语义"概念——IR 里存的是解析后的具体色，语义名在解析时经 `Semantics.ByName` 落成具体值。
 
-## 6. 终端能力档案（style/term.go）
+## 6. 终端能力档案（render/term/profile.go）
 
 ```go
-type TermProfile struct {
-    Colors  ColorLevel   // None / Basic16 / Extended256 / TrueColor
-    Unicode bool         // braille spinner、制表符可用性
+type ColorLevel uint8
+const ( LevelNone ColorLevel = iota; Level16 )
+
+type Profile struct {
+    TTY    bool          // 输出是否指向终端
+    Colors ColorLevel    // 有无颜色（仅两档）
 }
 
-func DetectProfile() TermProfile
+func DetectProfile(isTTY bool) Profile
+func SetProfile(p Profile); func GetProfile() Profile   // 进程级默认档案
 ```
 
-探测优先级：yaml `colors`/env `TANYA_COLOR` 强制档 > `WT_SESSION`（Windows Terminal → TrueColor+Unicode）> `COLORTERM=truecolor` > `TERM=*-256color` > TERM 缺失 → Basic16 > `dumb`/非 TTY → None。
+**落地修订**：原设计的 `Unicode` 字段与 256/truecolor 两档已删除（`Unicode` 只写不读，属死能力；`SGR` 只产 16 色，`Extended256`/`TrueColor` 与 `Level16` 无行为差异）。
+
+探测优先级：`NO_COLOR` 非空 → None > `TERM=dumb` → None > env `TANYA_COLOR`（`1/on/true` 提升、`0/off/false` 关闭）> 非 TTY → None > 否则 Basic16。**`colors` 配置的强制档在 `main.go` 落定**（`on` 时把 None 提到 Level16、`off` 时压到 None），`--plain` 同样压 None，之后 `term.SetProfile` 写入进程级档案。
 
 渲染器按 profile 输出，同一份 IR：
 
 ```
-TrueColor:  \x1b[38;2;R;G;Bm...
-Basic16:    \x1b[97m...（RGB 量化到最近 16 色）
-None:       纯文本（去 ANSI，制表符换 ASCII 替代）——重定向文件/管道自动干净，零分支代码
+Level16:  \x1b[97m ...（16 色 SGR）
+LevelNone: 纯文本（去 ANSI）——重定向文件/管道自动干净，零分支代码
 ```
 
-## 7. 配置标记语法（style/markup.go）
+消费方：`Style.SGR/Frame`、`term.Passthrough`、repl 构造期快照（`repl.prof`）。`Profile` 是名副其实的进程事实，故保留进程级默认值；语义色则不再全局（见 §5）。
+
+## 7. 配置标记语法（render/markup/markup.go）
 
 采用 **BBCode 风格**（多方案对比后选定，过程见附录）：
 
@@ -214,22 +245,24 @@ None:       纯文本（去 ANSI，制表符换 ASCII 替代）——重定向�
 - `ParseTemplate` 阶段先解析标记再绑定占位符值，**值永不解析**（Bind 纯字符串替换；值中的 ANSI 在渲染边界剥除，注入安全是结构性的）
 - 存量兼容：加载时探测到 `\x1b` 的旧配置走 passthrough 模板——着色时原样输出、无色时 `Strip` 兜底，不进 IR 不解析
 
-## 8. Template（style/template.go）
+## 8. Template（render/template.go）
 
 模板 = 带槽位的 IR。解析一次，槽位以 `Span{Text:"{cwd}"}` 形态存在，渲染前绑定：
 
 ```go
-type Template struct{ inlines []Inline }
+type Template struct{ passthrough bool; raw string; inlines []ir.Inline }
 
-func ParseTemplate(src string) (Template, error)          // markup → IR，启动时一次
-func (t Template) Bind(resolve func(string) (string, bool)) []Inline
+func ParseTemplate(src string, sem theme.Semantics) (Template, error)   // markup → IR，启动时一次
+func (t Template) Render(resolve func(string) (string, bool)) string    // 绑定 + 渲染，返回可直接输出的串
 ```
+
+**落地修订**：`ParseTemplate` 需传入 `theme.Semantics`（标记里的语义名要此时解析成具体色，`style` 已无全局语义色）；对外入口是 `Template.Render`（内部仍走 `Bind` + `render.Sprint`），passthrough 分支在无色 profile 下用 `term.Strip` 兜底。
 
 - resolve 返回 false（未知占位符）则原样保留——与现 `renderPrompt` Replacer 行为一致，零新转义规则
 - 变量表留在 repl（style 不知道 `{cwd}` 是什么）：
 
 ```go
-tpl, _ := style.ParseTemplate(promptSrc)            // repl 启动时
+tpl, _ := render.ParseTemplate(promptSrc, sem)      // repl 启动时
 
 vars := func(name string) (string, bool) {          // REPL 循环里
     switch name {
@@ -240,37 +273,39 @@ vars := func(name string) (string, bool) {          // REPL 循环里
     }
     return "", false
 }
-line, err := r.ed.Readline(r.rend.Inline(tpl.Bind(vars)))
+line, err := r.ed.Readline(tpl.Render(vars))        // 已渲染串直接喂编辑器
 ```
 
-- 成本：解析一次；每轮 Bind+渲染微秒级。编辑器拿到渲染好的串，`stringWidthANSI` 照常测量，readline 零改动
+- 成本：解析一次；每轮 Render 微秒级。编辑器拿到渲染好的串，`term.Width` 照常测量，readline 零改动
 - prompt 是渲染频率最高、需每次绑定数据、被编辑器测量宽度的富文本——收进管线是管线一致性的试金石
 - 附带收益：改 prompt 配色、改工具块配色都收敛到 palette 一处，prompt/工具块/状态行/菜单共用一份主题
 
-## 9. 渲染器（style/render.go）
+## 9. 渲染器（render/render.go）
 
-IR 唯一消费方，全进程唯一 SGR 发射点：
+IR 唯一消费方与唯一编排点（SGR 字节仍只由 `render/style` 产生）：
 
 ```go
 type Renderer struct {
-    w     io.Writer
-    Prof  TermProfile    // 色深 + Unicode，探测一次
-    Width int
-    Theme Theme          // 标题色阶/引用前缀/代码底色等渲染格式，palette 可覆盖
+    Prof  term.Profile   // 色档 + TTY，构造期快照
+    Theme theme.Theme    // 标题色阶/引用前缀/代码底色等渲染格式
 }
 
-func (r *Renderer) Doc(d Document)    // 整段渲染
-func (r *Renderer) Block(b Block)     // 流式增量渲染
-func (r *Renderer) Inline(i Inline)   // 提示符等行内场景（不自动折行）
+func NewThemedRenderer(prof term.Profile, th theme.Theme) Renderer
+func (r Renderer) Block(b ir.Block) string           // 流式增量渲染
+func (r Renderer) Inline(in ...ir.Inline) string     // 提示符等行内场景（不自动折行）
 ```
+
+**落地修订**：`Doc` 已删除（只被测试引用）；`Renderer` 不再持有 `io.Writer`/`Width`（返回字符串由调用方写流，宽度由 `repl.ToolWidth` 现查）；`Prof`/`Theme` 为值字段；原设计的"探测一次"落在 repl 构造期快照（`REPL.prof`）。
 
 ### 宽度工具（一并迁移）
 
-`stripANSI/stringWidth/Truncate` 实现移入 `style/render.go`（导出 `Strip/Width/Truncate/Pad`），`style.Width` 统一 ANSI-aware——顺带修掉"参数含 ANSI 被截坏"的隐患。readline 保留私有包装；repl 调 `readline.Truncate` 的点改调 `style.Truncate`。
+`stripANSI/stringWidth/Truncate` 实现移入 **`render/term/text.go`**（导出 `Strip/Width/Truncate/OneLine`，无 `Pad`），统一 ANSI-aware——顺带修掉"参数含 ANSI 被截坏"的隐患。readline 保留私有包装（`readline/width.go`）；repl 调 `term.Truncate`。
+
+**落地修订**：三个函数统一走 `scanSequence`，因此 OSC（窗口标题、超链接）、字符集选择序列也被正确跳过——修掉旧 `Strip` 把 `\x1b]0;my-title\x07` 留在文本里的缺陷（新用例 `TestStripOSCAndNonCSISequences`/`TestWidthOSC`/`TestTruncateOSC`）。
 
 补充（参考 reflow 后发现的设计缺口，详见 `render-refs-compare.md` 议题 6）：**截断须处理样式复位**——截断点若处于样式内，SGR 处于打开状态会向后续输出串色，`Truncate` 需跟踪活跃 SGR 序列并在截断处显式复位（reflow `ansi/writer.go` 的 lastseq 模式）。IR 路径的折行/截断由渲染器按 span 边界切分，天然免疫此类问题。宽度口径是否升级为字素簇（uniseg 依赖）实施前裁决。
 
-## 10. Markdown 管线（阶段3）
+## 10. Markdown 管线（render/markdown）
 
 ### 解析边界与安全
 
@@ -298,7 +333,7 @@ func (b *MarkdownBuf) Close() []Block               // 收尾：未闭合块降�
 - 第一批：块级四样（代码块/标题/列表/引用）+ 行内三样（粗体/斜体/行内码）
 - 远期：表格、truecolor palette、非终端 Renderer
 
-## 10.5 ANSI 过滤器（style/filter.go）
+## 10.5 ANSI 过滤器（`render/term/ansi.go`：清洗/Passthrough；`render/style/frame.go`：Frame）
 
 **变更背景**：工具块此前整体 `Dim.Sprint` 包裹，捕获输出中的任意 `\x1b[0m` 会提前终止块级灰色（同块前灰后白），彩色序列穿透块样式，状态行 `Info` 靠 SGR 时序巧合存活；预览类彩色输出（如欢迎屏效果）无法在块内原样呈现。
 
@@ -325,35 +360,35 @@ func (b *MarkdownBuf) Close() []Block               // 收尾：未闭合块降�
 
 **红线**：过滤器为纯函数；`Frame` 的 profile 依赖仅显示侧；模型通道不得接入任何过滤出口。
 
-**测试锚点**：`style/filter_test.go`（清洗/保色/脏态闭合/扩展色/无色退化/未闭合/`HasSGR`）；`repl/toolview_test.go`（直显区保色与状态行后置、单色块单开单闭、非 TTY 零转义、stderr 标记行直显）；`repl/repl_test.go`（/history tool 正文 Frame 化）。
+**测试锚点**：`render/term/ansi_test.go + render/style/frame_test.go`（清洗/保色/脏态闭合/扩展色/无色退化/未闭合/`HasSGR`）；`repl/toolview_test.go`（直显区保色与状态行后置、单色块单开单闭、非 TTY 零转义、stderr 标记行直显）；`repl/repl_test.go`（/history tool 正文 Frame 化）。
 
 ## 11. 现有代码收编清单
 
 | 现状 | 收编后 |
 |---|---|
-| `DefaultPrompt`（agent 包，裸 ANSI 常量） | 改为 markup 字符串，agent 不再关心颜色 |
-| `toolview.go` 的 `ansi*` 常量 + `tint/dim` | 删除；构造处直接 `style.Dim.Text(...)`；`tty bool` 参数消失（profile 驱动） |
-| `spinner.go` 橙色 + `\r\x1b[K` | 颜色走管线；`\r\x1b[K` 换 `style.LineStart+ClearLine`（控制序列归 control.go，这是布局不是颜色） |
-| `picker.go`/`messages.go` 常量内嵌色码与控制符 | `PickTitle` 等还原为纯文案；上色移到渲染点（`style.Ok.Text(...)`） |
-| welcome 横幅 | 变成一个 Document，`Renderer.Doc` 输出 |
-| `renderPrompt`（repl） | `Template.Bind` 替代，变量表留 repl |
-| readline `stripANSI/stringWidth` | 迁 style，readline 留私有包装 |
+| `DefaultPrompt`（agent 包，裸 ANSI 常量） | 改为 markup 字符串；常量落 `render/theme.DefaultPrompt`，agent 已无该符号 |
+| `toolview.go` 的 `ansi*` 常量 + `tint/dim` | 删除；着色在渲染点（`renderToolBlock(sem, …)`），纯文本进 IR；`tty bool` 参数消失（profile 驱动） |
+| `spinner.go` 橙色 + `\r\x1b[K` | 颜色走管线；`\r\x1b[K` 换 `term.ClearLineHome()`（控制序列归 `render/term/control.go`，这是布局不是颜色） |
+| `picker.go`/`messages.go` 常量内嵌色码与控制符 | `PickTitle` 等还原为纯文案；上色移到渲染点（`sem.Ok.Sprint(...)`） |
+| welcome 横幅 | **未按此实施**：`Document`/`Renderer.Doc` 已删除，横幅仍为静态文案（`repl/messages.go`） |
+| `renderPrompt`（repl） | `Template.Render` 替代（`r.resolveVars` 提供变量表，留在 repl） |
+| readline `stripANSI/stringWidth` | 迁 `render/term`，readline 留私有包装 |
 
-## 12. 构造 API（style/build.go）
+## 12. 构造 API
+
+**落地修订**：原设计的 `style/build.go`（`Style.Text`/`P`/`Doc` 三个构造糖）未落地——它们只是薄封装，且 `P`/`Doc` 随 `Document` 一起删除。现状是直接用值类型构造：
 
 ```go
-var (Dim, Info, Warn, Ok, Error, Accent Style)   // 语义色
-
-func (s Style) Text(t string) Span      // style.Dim.Text("▸ run_shell")
-func P(in ...Inline) Paragraph
-func Doc(blocks ...Block) Document
+ir.Span{Style: sem.Dim, Text: "▸ run_shell"}          // 取代 style.Dim.Text(...)
+ir.Paragraph{Inlines: []ir.Inline{...}}               // 取代 P(...)
+[]ir.Block{...}                                       // 取代 Doc(...)
 ```
 
-收编后 `dim("▸ "+name, tty)` → `style.Dim.Text("▸ " + name)`。
+收编后 `dim("▸ "+name, tty)` → `sem.Dim.Sprint("▸ " + name)`（`Sprint` 读进程 profile 决定是否着色）。
 
 ## 13. IR 契约（不变量）
 
-1. **所有 string 字段不含 ANSI 转义与控制字符**——剥离发生在解析边界，渲染器是全进程唯一产生 `\x1b` 的地方，结构性消灭"双重染色/转义泄漏"
+1. **所有 string 字段不含 ANSI 转义与控制字符**——剥离发生在解析边界，`\x1b` 只由 `render/style`（SGR）与 `render/term`（CSI 与清洗）产生，结构性消灭"双重染色/转义泄漏"
 2. **RawText 字节级保真**——渲染器对它只做折行/截断这类视图操作，永不解释；工具输出"不可信"编码在块类型里，不靠约定
 3. **IR 无布局**——不含宽度、换行点、对齐；折行永远是渲染时行为（resize 后下次渲染自动用新宽度）
 4. **结构无环**——Quote/ListItem 持有 Block 值切片，构造上不可能成环
@@ -369,12 +404,14 @@ func Doc(blocks ...Block) Document
 
 ## 15. 实施阶段（每阶段全量测试后合入）
 
-- **阶段 1（纯等价替换）**：style 包骨架（IR/color/profile/renderer/control）+ toolview/picker/spinner/messages 迁移 + width 迁移 + 文案纯化。行为零变化，SGR 断言类测试改断言新输出
+- **阶段 1（纯等价替换）**：render 树骨架（IR/color/profile/renderer/control）+ toolview/picker/spinner/messages 迁移 + width 迁移 + 文案纯化。行为零变化，SGR 断言类测试改断言新输出
 - **阶段 2（配置与模板）**：markup 解析器 + `template.go` + prompt 切换 + `DefaultPrompt` 改写 markup + 旧 ANSI 配置 passthrough 兼容 + `colors`/`palette` 配置生效
 - **阶段 3（markdown）**：块级解析 + 流式缓冲器先行，行内第二批；`/md` 开关
 - **阶段 4（远期可选）**：表格、truecolor palette、非终端 Renderer
 
 验证：`go build/vet/test/-race ./...`，每阶段加 pty 人工冒烟（REPL 提示符、工具块、/load 菜单、spinner）。
+
+**落地状态**：阶段 1–3 已实施（含包结构从单包 `style` 改为 `render` 树的大拆分，见 `docs/style-split.md`）；阶段 4（表格、truecolor palette、非终端 Renderer）仍未做——truecolor 一档已在拆包时明确删除（§4），表格与非终端 Renderer 保持远期。
 
 ## 附录 A. 标记语法备选对比（决策记录）
 
@@ -395,5 +432,5 @@ sentinel（哨兵字节）方案评估：`\x01W{cwd}\x02` 类控制字节标签�
 
 ## 附录 B. 与现有文档的关系
 
-- 实施后：本文 §3/§4/§6/§9 目标态并入 `docs/design.md`（新增"富文本管线"章节），`### 工具视图渲染`/`### 等待动画`/`### 提示符模板` 各节相应改写
+- **已同步**：包结构落为 `render` 树（细节见 `docs/style-split.md`），`docs/design.md` 的「架构」段与 `### 工具视图渲染`/`### 等待动画`/`### 提示符模板` 各节已按现状改写；本文各节的「落地修订」标注即为两者差异清单，不再另立"富文本管线"章节
 - 本文参照 `docs/probe-redesign.md` 先例：作为决策过程与设计定稿归档保留

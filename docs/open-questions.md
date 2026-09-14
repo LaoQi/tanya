@@ -19,10 +19,12 @@
 
 ### A3 tty 事实与颜色能力不设共享层
 
-- 颜色能力/`style.Profile`：只有 `style.DetectProfile` 计算（自身读 `NO_COLOR`/`TERM`/`COLORTERM`/`WT_SESSION`/`TANYA_COLOR`），消费方是 style 自身（`template.go:28`、`filter.go:23`）与 repl 构造期快照（`repl.go:75`）→ 消费方独占，无需共享暴露点
+- 颜色能力/`term.Profile`：只有 `term.DetectProfile` 计算（自身读 `NO_COLOR`/`TERM`/`COLORTERM`/`WT_SESSION`/`TANYA_COLOR`），消费方是 `term`（`style.SGR`/`Frame`/`Passthrough`）与 repl 构造期快照 → 消费方独占，无需共享暴露点
+- **收口（style 拆包后）**：语义色不再是全局，`theme.Semantics` 为值传递（repl 持有当前方案），readline 经 `SetStyles` 注入；仅 `term` 保留进程级默认 Profile（终端能力是名副其实的进程事实）。
 - 终端尺寸：实时值（`ToolWidth` 作为 `func() int` 传给 `NewToolView`；`readline/editor.go` 换行时现查）→ 属"会变"，不进
 - 启动前台状态/`ISIG` 修复：readline 独占（`InitTerminalGuard`/`SecureTerminal`）
 - `ttyStdinSupported()` 是编译期平台常量（`shell_tty_unix.go:19`），消费方是 agent 的 env 段与 stdin 直通语义
+- **收口（style 拆包后）**：`handoverForeground`（agent）与 `foregroundTTY`（readline/bridge）两处"当前前台组是否为本进程组"的判定仍分散，未合并
 - **自纠**：此前"tty 事实被三处各自判定同一事实"的说法不成立——三处问的不是同一个问题（stdin 直通能力 / 输出是否 tty / 尺寸与前台归属），不构成重复采样
 
 ### A4 当前 `cwd` 形态属过渡

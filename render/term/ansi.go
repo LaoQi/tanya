@@ -1,4 +1,4 @@
-package style
+package term
 
 import "strings"
 
@@ -10,17 +10,8 @@ const (
 	seqOther
 )
 
-func (s Style) Frame(text string) string {
-	clean := sanitize(text, false)
-	seq := current.sgr(s)
-	if seq == "" {
-		return clean
-	}
-	return seq + clean + resetSequence
-}
-
 func Passthrough(text string) string {
-	return sanitize(text, current.Colors != LevelNone)
+	return Sanitize(text, current.Colors != LevelNone)
 }
 
 func HasSGR(s string) bool {
@@ -39,7 +30,7 @@ func HasSGR(s string) bool {
 	return false
 }
 
-func sanitize(s string, keepSGR bool) string {
+func Sanitize(s string, keepSGR bool) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	dirty := false
@@ -65,7 +56,7 @@ func sanitize(s string, keepSGR bool) string {
 		i = next
 	}
 	if dirty {
-		b.WriteString(resetSequence)
+		b.WriteString(Reset)
 	}
 	return b.String()
 }

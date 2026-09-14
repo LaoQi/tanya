@@ -3,6 +3,7 @@ package readline
 import (
 	"bytes"
 	"errors"
+	rstyle "github.com/LaoQi/tanyan/render/style"
 	"io"
 	"strings"
 	"testing"
@@ -36,7 +37,9 @@ func (f *fakeTerm) ReadKey() (KeyEvent, error) {
 
 func newFakeEditor(events ...KeyEvent) (*Editor, *fakeTerm, *bytes.Buffer) {
 	f := &fakeTerm{events: events, out: &bytes.Buffer{}}
-	return NewEditor(f, true), f, f.out
+	ed := NewEditor(f, true)
+	ed.SetStyles(rstyle.Style{Fg: rstyle.Color16(8)}, rstyle.Style{Attr: rstyle.AttrReverse})
+	return ed, f, f.out
 }
 
 func runes(s string) []KeyEvent {
