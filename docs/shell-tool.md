@@ -66,7 +66,7 @@ func (t *shellTool) invocation() string   // env 段 SHELL 行用
 
 - `agent/shelltool.go`（新增）：`shellTool` / `shellToolConfig` / `shellRequest` / 构造 / `run` / `resolveCwd` / `toolDesc` / `invocation`
 - `agent/shell.go` 退化为"解析器 + 叶子"：`ShellResult`/`ShellChunk`/`streamCapture`/`writeStream`/`shellArgs`/`shellExitCode`/`waitShell`/`statState`/超时常量 + `shellProfile`/`resolveProfile`/`newProfile`/`probePrograms`（纯构造器，继续收 `goos`/`lookPath` 参数）
-- 平台文件不动：`shell_tty_unix.go`/`shell_tty_stub_unix.go`/`shell_other.go`/`shell_proc_linux.go`/`shell_proc_other.go`/`shell_unix.go`
+- 平台文件：`shell_proc_linux.go`/`shell_proc_other.go`/`shell_unix.go`/`shell_other.go`（进程组与信号）保持；tty 组（原 `shell_tty_unix.go`/`shell_tty_stub_unix.go`）后随 `ctty` 抽包删除（`docs/ctty.md`）
 - `agent/tty_bridge.go`：保留 `TTYBridge` 接口，删包级注入，改 Option
 
 ## 4. 隐式依赖注入表
@@ -85,7 +85,7 @@ func (t *shellTool) invocation() string   // env 段 SHELL 行用
 ## 5. 可重入与并发契约
 
 - **字段只读 + 每调用局部状态**：`ShellResult`、`streamCapture`、`exec.Cmd`、pty/tty 句柄、计时全在调用栈上；`run` 可被并发调用而不共享可变状态
-- **唯一需要串行的是物理资源**：真实终端（前台进程组 + raw mode）进程内只有一份。凡触碰它的路径——桥接 `Attach`、`openForegroundTTY` + `handoverForeground`——由实例级 `ttyMu` 串行。这不是妥协而是物理限制的显式化：两个子进程不可能同时拥有终端前台组
+- **唯一需要串行的是物理资源**：真实终端（前台进程组 + raw mode）进程内只有一份。凡触碰它的路径——桥接 `Attach`、`ctty.Open` + 前台移交——由实例级 `ttyMu` 串行。这不是妥协而是物理限制的显式化：两个子进程不可能同时拥有终端前台组
 - **今天等价于 `run` 串行**：当前所有调用都尝试交接终端。将来要真正并行，需要的不是拆锁，而是把"是否需要终端"变成显式输入（`shellRequest` 加字段，或按 `Interactive` 与宿主能力判定），让读文件/grep 之类完全不碰 `ttyMu`；这一步留给并行调度落地时做（见本节末"并行工具调用：预留"），组件内部到时无需改动
 - **并发验收用例**：`-race` 下 N 个 goroutine 并发 `run` 非交互命令，断言各自 `ShellResult`（stdout/退出码/耗时）互不串扰
 
@@ -130,7 +130,7 @@ client := NewClient(cfg, ToolDefs(tool.profile))   // 工具清单随 client 定
 
 **删除**（已完成，`rg` 归零）：`InitShell`、`ShellRuntime`、`shellRuntime`、`shellRuntimeMu`/`shellRuntimeCur`/`shellRuntimeSet`/`shellRuntimeErr`、`shellLookPath`、`resolveShellRuntime`、`RunShell`、`RunShellResult`、`resolveShellCwd`（→ `shellTool.resolveCwd` 方法）、`InitTTYBridge`/`currentTTYBridge`/`ttyBridgeMu`/`ttyBridgeCur`。
 
-**保留**：`ShellResult`/`String()`/`ShellChunk`/`streamCapture`/`writeStream`/`shellArgs`/`shellExitCode`/`effectiveShellTimeout`/`statState`/`waitShell`；`shellProfile`/`resolveProfile`/`newProfile`/`probePrograms`；全部平台文件；`ttyStdinSupported()`（编译期平台常量）。
+**保留**：`ShellResult`/`String()`/`ShellChunk`/`streamCapture`/`writeStream`/`shellArgs`/`shellExitCode`/`effectiveShellTimeout`/`statState`/`waitShell`；`shellProfile`/`resolveProfile`/`newProfile`/`probePrograms`；进程/信号平台文件；tty 能力常量后迁至 `ctty.Supported`（`docs/ctty.md`）。
 
 **新增**（已完成）：`shellTool`、`shellToolConfig`、`shellRequest`、`Options`、`WithTTYBridge`。
 

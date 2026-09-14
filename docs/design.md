@@ -10,7 +10,8 @@
 main.go            package main：入口、flag 子命令、ask 单发
 repl/              package repl：REPL 循环、斜杠命令、补全、工具视图渲染、等待动画
 agent/             package agent：全部核心逻辑（config / llm / agent / prompt / session / stats / shell / builtin）
-readline/          package readline：自研终端输入层（editor / keys / terminal）
+readline/          package readline：自研终端输入层（editor / keys / terminal），pty 桥接与终端状态自愈
+ctty/              package ctty：控制终端原语（前台组读写、/dev/tty、SIGTTIN/SIGTTOU），白名单 linux||darwin，零依赖叶子
 render/            package render：渲染管线（IR → ANSI：Renderer、提示符模板），可 import 其下子包
 render/style/      样式词汇与编码（SGR 唯一产地）
 render/term/       终端原语（ANSI 词法/清洗、宽度/截断、光标控制、能力档案；零依赖叶子）
@@ -32,7 +33,7 @@ render/markup/     内联标记解析
 
 - **进程事实**：`cwd`、家目录与工作区基准在 `agent.New` 读一次、注入 `shellTool` 构造期定格（旧六参形态与包级 shell 状态已删，见 `docs/shell-tool.md` §14/§16）
 - **`ctx` 属请求层**：只承担取消/超时，不承载进程事实（`repl.Run()` 不收 ctx；每回合由 `InterruptContext()` 现造，以 `context.Background()` 为根）
-- **tty 与颜色能力由消费方独占**：`term.Profile` 由 `term.DetectProfile` 计算、只有 `term` 保留进程级默认档案（终端能力是名副其实的进程事实）；语义色 `theme.Semantics` 为值传递（repl 持有当前方案、readline 经 `SetStyles` 注入，见 `docs/style-split.md`）；终端尺寸是实时值（`ToolWidth` 以函数传递）；启动前台状态与 `ISIG` 自愈归 readline（`InitTerminalGuard`/`SecureTerminal`）；`ttyStdinSupported()` 是编译期平台常量。`handoverForeground`（agent）与 `foregroundTTY`（readline）两处"当前前台组是否为本进程"的判定按各自问题分别采样，不构成重复，暂不合并
+- **tty 与颜色能力由消费方独占**：`term.Profile` 由 `term.DetectProfile` 计算、只有 `term` 保留进程级默认档案（终端能力是名副其实的进程事实）；语义色 `theme.Semantics` 为值传递（repl 持有当前方案、readline 经 `SetStyles` 注入，见 `docs/style-split.md`）；终端尺寸是实时值（`ToolWidth` 以函数传递）；启动前台状态与 `ISIG` 自愈归 readline（`InitTerminalGuard`/`SecureTerminal`）；`ctty.Supported` 是编译期平台常量；前台组读/写、`/dev/tty` 打开、`SIGTTIN/SIGTTOU` 忽略等**控制终端原语**统一在零依赖叶子包 `ctty`（`docs/ctty.md`），`agent`（是否移交前台）与 `readline`（是否夺回前台）各自持有策略，共享原语、不合并决策
 
 ## 运行模式
 
@@ -118,7 +119,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 输出捕获：stdout/stderr 各保留头 30000 字节 + 尾 30000 字节（`streamCapture` 滚动窗口），中间字节计数丢弃，模型仍可见首尾内容
 - 组件化（`docs/shell-tool.md`）：`shellTool` 是 shell 执行层唯一所有者，`profile`/`programs`/`workspace`/`home`/`bridge` 在构造期定格、之后只读，`run` 每调用状态全在栈上（可重入）；唯一可变字段是终端租约 `ttyMu`——真实终端进程内只有一份，桥接与前台移交两条路径都在锁内。组件内不读环境（无 `os.Getwd`/`os.UserHomeDir`/`exec.LookPath`/`runtime.GOOS`），`agent.New` 装配点各读一次注入。包级可变状态（`shellRuntime*`/`shellLookPath`/`ttyBridgeMu`+`ttyBridgeCur`）已删除；`envSection`/`runShellDesc`/`ToolDefs` 为纯函数，工具清单在 `NewClient` 构造期注入 client（请求组装不再伸手读包级清单）
 - 实测契约（sudo 两模式对照）：`sudo` 默认模式自开 `/dev/tty` 完成提示与密码输入——前台移交后提示实时可见、密码不回显，仅最终错误走 stderr 回流；`sudo -S` 强制从 stdin 读密码时提示改写 stderr（被捕获，等待期间不可见），交互命令应避免 `-S` 类强制 stdin 选项
-- 终端前台移交（unix，shell_tty_unix.go；illumos/ios 与 windows 等 !unix 平台无实现，降级 no-op，`ttyStdinSupported()` 为假）：执行前打开 `/dev/tty`，仅当自身进程组已是前台时 `TIOCSPGRP` 移交子进程组（`handoverForeground`），子进程结束后以 `handed` 门控归还（`restoreForeground`，避免从未交接时抢占 shell 的前台）；无控制终端 / 非前台（嵌套、后台运行）自动跳过，行为与旧版一致。移交前台的同时将 `cmd.Stdin` 接到 `/dev/tty`（tty 打开成功时），子进程 stdin 直通用户终端，可直接在终端应答 ssh/git/sudo 等密码与确认提示，不再静默挂死至超时；无 tty 时 stdin 保持原状（/dev/null）
+- 终端前台移交（原语在 `ctty`，见 `docs/ctty.md`；`ctty.Supported` 为假的平台降级 no-op）：执行前经 `ctty.Open` 打开 `/dev/tty`，仅当自身进程组已是前台（`ctty.IsForeground`）时 `ctty.SetForeground` 移交子进程组，子进程结束后以 `handed` 门控归还（避免从未交接时抢占 shell 的前台）；无控制终端 / 非前台（嵌套、后台运行）自动跳过，行为与旧版一致。移交前台的同时将 `cmd.Stdin` 接到 `/dev/tty`（tty 打开成功时），子进程 stdin 直通用户终端，可直接在终端应答 ssh/git/sudo 等密码与确认提示，不再静默挂死至超时；无 tty 时 stdin 保持原状（/dev/null）
 - 信号防护（`ProtectTerminalSignals`，main 启动时 `sync.Once` 一次性）：`Notify(SIGTSTP)` 吞没（命令间隙 Ctrl+Z 不挂起自身）、`Ignore(SIGTTIN/SIGTTOU)`（自身后台 tty 读写不停止）；SIGQUIT 保持 Go 默认（全栈转储）。忽略处置随 exec 被子进程继承，子进程后台读写 tty 得 EIO 而非停止
 - 挂起探测（`waitShell`）：200ms 轮询 `/proc/<pid>/stat`，连续 2 次 `T` 判定被终端挂起（Ctrl+Z 等停止信号），SIGKILL 进程组并置 `Stopped`，状态行显示 `挂起已终止`，避免静默挂到超时；`processStopped` 由 shell_proc_linux.go 提供 /proc 实现，非 linux（shell_proc_other.go）恒 false（探测失效，其余功能不受影响）
 - 字段集：`ShellResult` 为 Command/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Stopped/Duration
@@ -244,8 +245,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - keys：ESC 序列/控制键/UTF-8 状态机；width：`style` 薄包装（宽度表/ANSI 剥离/感知截断均由 `style` 提供，截断自动复位悬空 SGR 防串色）
 - 非 TTY 降级：`Degraded` 按行读取，无动画/菜单
 - tty 桥接（`bridge.go` 接口 + `bridge_linux.go` 实现 + `bridge_stub.go` 非 Linux 返回 `ErrUnsupported`）：为 `interactive: true` 的 run_shell 提供"命令在自己的 pty 中运行"的执行器（`TTYBridge.Prepare/Attach`），复用本包 termios 读写与 raw 语义；生产入口 `readline.NewTTYBridge()` 由 `main.go` 经 `agent.WithTTYBridge` 注入到 `agent.New`（构造期定格进 `shellTool.bridge`），测试可在 `shellToolConfig` 里直接给 fake bridge
-- 终端状态自愈（`secure.go` + `secure_stub.go`）：`InitTerminalGuard`（启动时记录"自己是否为终端前台作业"，并 `signal.Ignore(SIGTTIN/SIGTTOU)`——`tcsetpgrp` 在前台被抢时需忽略 `SIGTTOU` 才不被停住）+ `SecureTerminal`（恢复 `ISIG`、必要时夺回前台组）
-- 平台划分：termios 请求常量按平台族分文件（`termios_sysv.go` linux/android/aix/solaris 用 TCGETS/TCSETS/TCSETSF，`termios_bsd.go` darwin/freebsd/netbsd/openbsd/dragonfly 用 TIOCGETA/TIOCSETA/TIOCSETAF）；illumos/ios 在该版 x/sys 无 ioctl 支持，`terminal_unix_stub.go` 直接返回 ErrUnsupported 走 Degraded 降级，保证全 unix GOOS 可编译
+- 终端状态自愈（`secure.go` + `secure_stub.go`）：`InitTerminalGuard`（启动时记录"自己是否为终端前台作业"，并 `ctty.IgnoreJobSignals`——`tcsetpgrp` 在前台被抢时需忽略 `SIGTTOU` 才不被停住）+ `SecureTerminal`（恢复 `ISIG`、必要时 `ctty.SetForeground` 夺回前台组）；控制终端原语均走 `ctty`
+- 平台划分（白名单 `linux || darwin`）：`termios_linux.go` 用 TCGETS/TCSETS/TCSETSF、`termios_darwin.go` 用 TIOCGETA/TIOCSETA/TIOCSETAF；`terminal_posix.go` 为真实实现，`terminal_windows.go` 与 `terminal_stub.go`（其余非 windows 平台）返回 ErrUnsupported 走 Degraded 降级，保证所有 GOOS 可编译
 
 ## 配置
 
@@ -297,6 +298,6 @@ pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（�
   ```
 
 - 事实源单一：SHELL 行取 `shellProfile.Name`（与 `run_shell` 工具描述同源，只报 shell 名、不描述调用形态），TIMEOUT/OUTPUT 两行由 `shell.go` 常量程序化生成（`shellTimeoutSec`/`shellInteractiveTimeoutSec`/`shellTimeoutLimit`/`shellMaxOutput`），TTY 行固定契约文案，无第二份硬编码描述；各行恒定输出（shell 缺失时进程已在启动阶段退出）
-- 平台条件：`TTY:` 行仅在 `ttyStdinSupported()` 为真（unix 且非 illumos/ios）时输出，不宣称不存在的 /dev/tty 能力
+- 平台条件：`TTY:` 行仅在 `ctty.Supported`（linux/darwin）为真时输出，不宣称不存在的 /dev/tty 能力
 - 探测机制：`envSection` 为构造期纯函数，输入全为构造期事实——`runtime` 平台常量、`os.Getwd` 快照（进程全程不 `os.Chdir`）、`shellProfile.invocation()`（`shellTool` 构造期定格）、`shell.go` 执行契约常量；进程内零重复探测、零 exec
 - 可测性：分层测试——persistPrompt 只含规则 / envSection 直接断言渲染（全串 golden） / runtimePrompt 拼接 / 同参数两次渲染字节相等 / **会话期间冻结守卫**（构建后改动目录内容不得改变 `runtimePrompt`）

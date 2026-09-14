@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/LaoQi/tanyan/ctty"
 )
 
 func envSection(cwd string, profile *shellProfile) string {
@@ -14,7 +16,7 @@ func envSection(cwd string, profile *shellProfile) string {
 	fmt.Fprintf(&b, "OS: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Fprintf(&b, "CWD: %s\n", shortPath(cwd))
 	fmt.Fprintf(&b, "SHELL: %s\n", profile.Name)
-	if ttyStdinSupported() {
+	if ctty.Supported {
 		b.WriteString("TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）\n")
 	}
 	fmt.Fprintf(&b, "TIMEOUT: 默认 %ds（interactive 时 %ds），上限 %ds\n", shellTimeoutSec, shellInteractiveTimeoutSec, shellTimeoutLimit)

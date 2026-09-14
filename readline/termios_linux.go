@@ -1,4 +1,4 @@
-//go:build linux || android || aix || solaris
+//go:build linux
 
 package readline
 

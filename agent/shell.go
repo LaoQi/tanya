@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/LaoQi/tanyan/ctty"
 )
 
 const (
@@ -263,9 +265,17 @@ func statState(stat string) string {
 
 func runShellForeground(ctx context.Context, command string, timeoutSec int, profile *shellProfile, dir string) *ShellResult {
 	res := &ShellResult{Command: command, Cwd: dir}
-	tty := openForegroundTTY()
+	tty, _ := ctty.Open()
 	handed := false
-	defer func() { restoreForeground(tty, handed) }()
+	defer func() {
+		if tty == nil {
+			return
+		}
+		if handed {
+			ctty.SetForeground(int(tty.Fd()), ctty.OwnPgrp())
+		}
+		tty.Close()
+	}()
 	start := time.Now()
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
@@ -296,7 +306,9 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 		res.Duration = time.Since(start)
 		return res
 	}
-	handed = handoverForeground(tty, cmd.Process.Pid)
+	if tty != nil && ctty.IsForeground(int(tty.Fd())) {
+		handed = ctty.SetForeground(int(tty.Fd()), cmd.Process.Pid)
+	}
 	err := waitShell(cmd, &res.Stopped)
 	stdout.finish()
 	stderr.finish()

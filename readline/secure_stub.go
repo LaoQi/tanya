@@ -1,4 +1,4 @@
-//go:build !unix || illumos || ios
+//go:build !linux && !darwin
 
 package readline
 

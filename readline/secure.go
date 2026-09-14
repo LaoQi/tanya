@@ -1,33 +1,30 @@
-//go:build unix && !illumos && !ios
+//go:build linux || darwin
 
 package readline
 
 import (
-	"os"
-	"os/signal"
-	"syscall"
-
+	"github.com/LaoQi/tanyan/ctty"
 	"golang.org/x/sys/unix"
 )
 
 var terminalGuardOwns bool
 
 func InitTerminalGuard() {
-	signal.Ignore(syscall.SIGTTIN, syscall.SIGTTOU)
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	ctty.IgnoreJobSignals()
+	tty, err := ctty.Open()
 	if err != nil {
 		return
 	}
 	defer tty.Close()
-	cur, err := unix.IoctlGetInt(int(tty.Fd()), unix.TIOCGPGRP)
-	terminalGuardOwns = err == nil && cur == unix.Getpgrp()
+	pgrp, ok := ctty.ForegroundPgrp(int(tty.Fd()))
+	terminalGuardOwns = ok && pgrp == ctty.OwnPgrp()
 }
 
 func SecureTerminal() {
 	if !terminalGuardOwns {
 		return
 	}
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	tty, err := ctty.Open()
 	if err != nil {
 		return
 	}
@@ -43,7 +40,7 @@ func secureTerminalFd(fd int, owns bool) {
 		t.Lflag |= unix.ISIG
 		_ = setTermios(fd, t)
 	}
-	if cur, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP); err == nil && cur != unix.Getpgrp() {
-		_ = unix.IoctlSetPointerInt(fd, unix.TIOCSPGRP, unix.Getpgrp())
+	if pgrp, ok := ctty.ForegroundPgrp(fd); ok && pgrp != ctty.OwnPgrp() {
+		ctty.SetForeground(fd, ctty.OwnPgrp())
 	}
 }

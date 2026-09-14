@@ -9,6 +9,8 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+
+	"github.com/LaoQi/tanyan/ctty"
 )
 
 func configureProcessGroup(cmd *exec.Cmd) {
@@ -32,7 +34,7 @@ func ProtectTerminalSignals() {
 	protectOnce.Do(func() {
 		ch := make(chan os.Signal, 4)
 		signal.Notify(ch, syscall.SIGTSTP)
-		signal.Ignore(syscall.SIGTTIN, syscall.SIGTTOU)
+		ctty.IgnoreJobSignals()
 	})
 }
 
