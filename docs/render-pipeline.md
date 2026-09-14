@@ -326,7 +326,7 @@ func (b *MarkdownBuf) Close() []Block               // 收尾：未闭合块降�
 - 块级分组：代码围栏（闭合出块）、列表/引用（组断出块）、标题/分隔线（单行即时）；未闭合围栏在流结束 `Close()` 降级为 `RawText` 原样
 - 行内未闭合标记按行解析，行尾不闭合自然按原样文本输出（乐观降级，不重绘、不闪屏）
 - 工具调用时序：`OnToolStart`/`OnResponse` 回调链先**结算缓冲**再交原回调——结算走 `Close()`（不只刷完整行），把流式响应滞留的**无 `\n` 尾行**输出为段落并闭合未完结块。若仅按行 flush，末行会滞留到下次写入/`Close()`，状态行与工具块抢先在正文尾行前上屏，把渲染内容从中间劈开；结算保证整条正文先于工具块/状态行输出
-- `/md` 开关（默认开）+ 非 TTY 路径走旁路：模型输出原样直出；`/history n|all` 回放的 assistant 正文走同一管线渲染（`mdEnabled` 判断 + 整段 `Write`/`Close` → `Renderer.Block`），消息头 `#N 角色` 因 `#` 与序号连写不构成 markdown 标题语法，单独构造 `Heading{Level:1}` IR 按标题渲染；user/tool 消息与工具参数永远原样（工具输出红线）
+- markdown 渲染默认开启，非 TTY 与 plain 输出走旁路（原 `/md` 开关已移除）：模型输出原样直出；`/history n|all` 回放的 assistant 正文走同一管线渲染（`mdEnabled` 判断 + 整段 `Write`/`Close` → `Renderer.Block`），消息头 `#N 角色` 因 `#` 与序号连写不构成 markdown 标题语法，单独构造 `Heading{Level:1}` IR 按标题渲染；user/tool 消息与工具参数永远原样（工具输出红线）
 
 ### 范围
 

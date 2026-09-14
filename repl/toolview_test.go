@@ -313,6 +313,46 @@ func TestToolViewNonInteractive(t *testing.T) {
 	}
 }
 
+func TestRenderToolEndAppendNoTitle(t *testing.T) {
+	old := term.GetProfile()
+	term.SetProfile(term.Profile{TTY: true, Colors: term.Level16})
+	t.Cleanup(func() { term.SetProfile(old) })
+	res := agent.ToolResult{Shell: &agent.ShellResult{
+		Stdout:   []agent.ShellChunk{{Data: "hi\n"}},
+		Duration: 2 * time.Millisecond,
+	}}
+	got := RenderToolEndAppend(testSem(), res, 80, 20)
+	if strings.Contains(got, "▸") {
+		t.Errorf("追加式 ToolEnd 不应重复标题: %q", got)
+	}
+	plain := term.Strip(got)
+	if !strings.HasPrefix(plain, "  hi\n") {
+		t.Errorf("正文块应紧跟 ToolStart 输出（无前导空行）: %q", plain)
+	}
+	if !strings.Contains(plain, "↳ exit 0 · 2ms · 1 行") {
+		t.Errorf("状态行应保留: %q", plain)
+	}
+	if got == "" {
+		t.Fatal("输出为空则负向断言会静默通过")
+	}
+}
+
+func TestRenderToolEndAppendKeepsCwdTitleOnlyOnce(t *testing.T) {
+	old := term.GetProfile()
+	term.SetProfile(term.Profile{TTY: true, Colors: term.Level16})
+	t.Cleanup(func() { term.SetProfile(old) })
+	args := `{"command":"ls -la","cwd":"/tmp/abc"}`
+	res := agent.ToolResult{Text: "ok"}
+	start := RenderToolStart("run_shell", args, 80)
+	end := RenderToolEndAppend(testSem(), res, 80, 20)
+	if n := strings.Count(start+end, "cwd: /tmp/abc"); n != 1 {
+		t.Errorf("cwd 行应只在 ToolStart 出现一次，实际 %d 次: %q", n, start+end)
+	}
+	if strings.Contains(end, "▸") {
+		t.Errorf("追加式 ToolEnd 不应含标题行: %q", end)
+	}
+}
+
 func TestRenderToolEndANSIDirectView(t *testing.T) {
 	oldProf := term.GetProfile()
 	term.SetProfile(term.Profile{TTY: true, Colors: term.Level16})

@@ -9,7 +9,7 @@
 - 内置轻量工具：`get_time` / `get_env` / `calc`
 - 会话持久化与恢复（JSONL，记录完整历史，system 快照随会话冻结）
 - token 用量实时显示在提示符（API 实报优先，本地估算兜底），支持显示缓存命中
-- AI 输出 Markdown 渲染（`/md` 切换）与内置配色主题（`/theme` 切换）
+- AI 输出 Markdown 渲染（默认开启，非 TTY 与 plain 输出自动旁路）与内置配色主题（`/theme` 切换）
 - AGENTS.md 项目说明自动注入系统提示（全局 + 工作区双层，会话级快照保证 prompt cache 友好）
 - 依赖仅 2 个，核心逻辑测试覆盖率 90%+
 
@@ -54,7 +54,7 @@ model: deepseek-v4-flash
 
 ```bash
 tanyan                 # 交互 REPL
-tanyan ask "问题"      # 单发模式
+tanyan ask "问题"      # 单发模式（默认纯文本+verbose：无动画/无光标控制，保留工具块与状态行）
 tanyan -n              # 只读会话：可载入历史，不写入
 tanyan -n ask "问题"   # 单发且不写入会话历史
 tanyan -c x.yaml       # 指定配置文件
@@ -74,7 +74,9 @@ tanyan -v              # 显示版本号
 
 只读会话（`-n` / `--no-save`，只由命令行开启，配置文件与 env 均无法设置）：`ask` 单发与 REPL 通用。历史会话照常列出与载入，之后的对话只存在于内存、不写入会话文件，也不创建会话目录（REPL 启动时在欢迎屏下方显示黄色警告，`ask` 保持静默）。
 
-纯文本输出（`-p` / `--plain`，只由命令行开启，配置文件与 env 均无法设置）：`ask` 单发与 REPL 通用，供本程序作为子 agent 被调用时拿到可解析的输出——stdout 只承载 assistant 正文与命令反馈（无颜色、无 spinner、无光标控制、无 markdown 装饰、无工具块与状态行），stderr 承载错误与诊断；`ask` 结束时若正文已以换行结尾则不再补空行，stdout 严格等于答案。`--verbose` 必须与 `--plain` 同用，作用是在该模式下恢复工具块与状态行的**纯文本**形态（仍不启用颜色与光标控制）。默认（不带 `-p`）行为完全不变。
+纯文本输出（`-p` / `--plain`，只由命令行开启，配置文件与 env 均无法设置）：`ask` 单发与 REPL 通用，供本程序作为子 agent 被调用时拿到可解析的输出——stdout 只承载 assistant 正文与命令反馈（无颜色、无 spinner、无光标控制、无 markdown 装饰、无工具块与状态行），stderr 承载错误与诊断；`ask` 结束时若正文已以换行结尾则不再补空行，stdout 严格等于答案。`--verbose` 必须与 `--plain` 同用，作用是在该模式下恢复工具块与状态行的**纯文本**形态（仍不启用颜色与光标控制；工具块为追加式，标题只在开始行出现一次）。
+
+`ask` 单发默认即 plain+verbose 档（`repl.SingleShot` 把 rich 降到该档）：无 spinner 与光标重绘，工具块以追加式纯文本呈现（标题只在开始行出现一次），正文原样直出（不渲染 markdown），颜色仍按终端能力保留；显式 `-p` 可进一步压成纯答案（stdout 严格等于答案），REPL 默认档位不受影响。
 
 REPL 输入按前缀分发：
 
@@ -98,7 +100,6 @@ REPL 斜杠命令：
 | `/model [name]` | 查看/切换模型 |
 | `/think [level]` | 查看/设置思考等级（`off` 关闭） |
 | `/theme [name]` | 查看/切换配色主题 |
-| `/md` | 切换 Markdown 渲染（默认开，非 TTY 自动旁路） |
 | `/exit`（`/quit`、`exit`、`quit`） | 退出 |
 
 会话按启动目录划分工作区（global 模式），`/load` 的会话选择菜单只显示当前项目的会话。

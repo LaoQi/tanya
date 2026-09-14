@@ -31,7 +31,6 @@ type REPL struct {
 	promptTpl string
 	prompt    render.Template
 	view      *toolView
-	mdLive    bool
 	rend      render.Renderer
 }
 
@@ -108,7 +107,6 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 		return nil, err
 	}
 	r := &REPL{agent: a, ed: ed, term: dev, raw: raw, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
-	r.mdLive = true
 	r.prof = term.GetProfile()
 	r.rend = render.NewThemedRenderer(r.prof, sch.MD)
 	ed.SetStyles(sem.Dim, sem.Accent)
@@ -125,7 +123,7 @@ func (r *REPL) print(text string, kind Kind) {
 }
 
 func (r *REPL) mdEnabled() bool {
-	return r.mdLive && r.prof.TTY && r.st.decor()
+	return r.prof.TTY && r.st.decor()
 }
 
 func turnSep(prof term.Profile, sem theme.Semantics, d time.Duration) string {
@@ -305,13 +303,6 @@ func (r *REPL) handleCommand(line string) bool {
 		r.agent.SetModel(parts[1])
 	case "/think":
 		r.handleThink(parts[1:])
-	case "/md":
-		r.mdLive = !r.mdLive
-		if r.mdLive {
-			r.st.out.emit(KindNotice, MsgMdOn)
-		} else {
-			r.st.out.emit(KindNotice, MsgMdOff)
-		}
 	case "/theme":
 		r.handleTheme(parts[1:])
 	}
@@ -509,7 +500,7 @@ func (r *REPL) printHistoryHead(n int, m agent.Message) {
 	r.print(r.rend.Block(ir.Heading{Level: 1, Inlines: []ir.Inline{ir.Span{Style: st, Text: head}}}), KindNotice)
 }
 
-// printRendered 把整段文本按与 AI 输出一致的管线渲染（/md 开关 + TTY 旁路），供历史回放等一次性展示使用。
+// printRendered 把整段文本按与 AI 输出一致的管线渲染（TTY + rich 走渲染，其余旁路），供历史回放等一次性展示使用。
 func (r *REPL) printRendered(text string) {
 	if !r.mdEnabled() {
 		r.st.out.emit(KindContent, text+"\n")

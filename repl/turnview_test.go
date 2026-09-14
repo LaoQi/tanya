@@ -123,21 +123,16 @@ func TestTurnNoGapOnZeroEventTurn(t *testing.T) {
 func TestFlowContextCarriers(t *testing.T) {
 	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	r, _, _ := newTestREPL(t, newFakeTerm())
-	r.mdLive = false
 	t1 := r.beginTurn(nil)
-	if !t1.f.prof.TTY || t1.f.live || t1.f.md == nil || t1.f.st != r.st {
-		t.Errorf("flow 应携带 prof/live/md/st: %+v", t1.f)
+	if !t1.f.prof.TTY || t1.f.md == nil || t1.f.st != r.st {
+		t.Errorf("flow 应携带 prof/md/st: %+v", t1.f)
 	}
-	r.mdLive = true
 	t2 := r.beginTurn(nil)
-	if !t2.f.live {
-		t.Error("新回合应读到最新的 /md 开关")
-	}
 	if t1.f.md == t2.f.md {
 		t.Error("每回合应派发独立的 markdown 缓冲")
 	}
-	if t2.f.mdEnabled() != t2.f.live && t2.f.prof.TTY {
-		t.Error("mdEnabled 应同时受开关与 TTY 约束")
+	if !t2.f.mdEnabled() {
+		t.Error("TTY + rich 下 mdEnabled 应为真")
 	}
 	s, ok := theme.Lookup("vivid")
 	if !ok {

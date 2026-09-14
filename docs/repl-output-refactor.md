@@ -628,3 +628,13 @@ script -qec "./tanyan -p --verbose -n ask '跑一条命令并总结'" /dev/null 
 - TTY/宽度探测：`readline/terminal_unix.go:17-23,50-56`；`repl/toolview.go:307-323`；`main.go:43`
 - `ask` 路径（不经 flow）：`main.go:67,76`
 - 相关文档：`docs/design.md`《工具视图渲染》《测试》；`docs/render-pipeline.md`《ANSI 过滤器》；`docs/interactive-tty.md`（bridge 与写权边界）；`README.md`（TTY 行为契约）
+
+## 附录 C 后续修订（超出阶段 0-4）
+
+| 时间 | 变更 | 落点 |
+|---|---|---|
+| 2026-09 | `/md` 命令移除：markdown 渲染恒开（非 TTY 与 plain 旁路），`mdLive` 字段与 `MsgMdOn`/`MsgMdOff` 删除 | `repl/repl.go`、`repl/flow.go`、`repl/messages.go`、`repl/completer.go` |
+| 2026-09 | `ask` 单发默认走 plain+verbose 档：`repl.SingleShot(outMode)` 把 CLI 的 rich 降到 `modePlainVerbose`（显式 `-p` 更窄时不动）；单发不再有 spinner 与光标上移重绘，工具块追加式输出，颜色保留 | `repl/streams.go`、`main.go` |
+| 2026-09 | 追加式工具块（非 TTY、plain+verbose）不再重复标题：新增 `RenderToolEndAppend`（正文块 + 状态行），`ToolEnd` 分支按 inline / 交互式 / 追加式三分派发 | `repl/toolview.go` |
+
+本附录之前的章节保留历史方案与当时的 `mdLive`/ask 走 rich 的描述，不再随代码同步。
