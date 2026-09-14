@@ -178,12 +178,12 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 规则与事实分离：persistPrompt（上述规则）在 `/new`/`/load` 时组装并冻结进会话首行；每次请求的 system = persistPrompt + 空行 + `Agent.env`（环境事实在 `agent.New` 构造期算一次、冻结进内存，既不持久化也不再重算）
 - 快照机制：`/new` 与 `/load` 时刻读取 AGENTS.md 组装快照；会话进行中零文件 IO，快照冻结；旧格式会话（system 首行含历史环境段）原样保留并标记，`/load` 时提示 `/new`
 - 缓存收益：history 全程 append-only，system 两段（规则快照 + 环境段）在本进程内逐字节恒定，同一会话内请求前缀不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中。env 段自 2026-09-14 起在构造期定格（此前的 `WORKSPACE` 行是 system 内唯一会自行变化的输入，已随本次收口删除）
-- 缓存命中捕获（DeepSeek `prompt_cache_hit_tokens` / OpenAI `prompt_tokens_details.cached_tokens`）经 `PromptCache()`/`PromptCacheRate()` 供提示符占位符显示
+- 缓存命中捕获（DeepSeek `prompt_cache_hit_tokens` / OpenAI `prompt_tokens_details.cached_tokens`）经 `Agent.Stats()` 的累计字段供提示符占位符显示
 - 缓存机制的实测结论（64-token 块粒度、tools 段在序列化尾部的代价台阶、各后端写入延迟差异）见 `docs/cache-probe.md`
 
 ## REPL
 
-用户可见文案统一为常量：`repl/messages.go`（UI/命令输出/选择器/工具视图/spinner）与 `agent/messages.go`（错误/ToolResult 文本/ContextInfo），调用一律引用常量（经 `streams` 写出，见下），换行由调用处的格式串控制；`Bye`/`再见` 已统一为 `MsgBye`。工具描述与系统提示不在此列（模型侧文案，翻译需评估 prompt 影响）。
+用户可见文案统一为常量：`repl/messages.go`（UI/命令输出/选择器/工具视图/spinner）与 `agent/messages.go`（错误/ToolResult 文本），调用一律引用常量（经 `streams` 写出，见下），换行由调用处的格式串控制；`Bye`/`再见` 已统一为 `MsgBye`。工具描述与系统提示不在此列（模型侧文案，翻译需评估 prompt 影响）。
 
 欢迎屏由 `welcomLogo` + `welcomeText()` 组装：logo ASCII 图 + 一行 `输入 /help 查看命令   tanyan <版本>（构建于 <时间>）`；`repl.Version`/`repl.BuildTime` 由 `main` 注入（`make build` 经 ldflags 写 `main.version`（git describe）与 `main.buildTime`（date），直接 `go build` 为 `dev`/空，空时不渲染构建时间）。`-v` 与欢迎屏共用同一 version 源。
 
@@ -207,11 +207,12 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 斜杠命令
 
-`/help` `/new` `/sessions` `/load` `/context` `/history` `/model` `/exit`：
+`/help` `/new` `/sessions` `/load` `/stat` `/history` `/model` `/exit`：
 
 白名单（`slashCommands`，同时驱动 Tab 补全）即分发契约：`Run` 先用 `isSlashCommand` 过滤，未命中的 `/` 开头输入按对话内容处理，因此 `handleCommand` 的 switch 不再有 `default` 分支（原先的 `MsgUnknownCmd` 不可达，已删）。白名单与 case 必须一一对应，`TestSlashCommandsAllHandled` 覆盖该不变量（`/load` 走 stdin 交互路径，单独测试）。
 
 - `/history` 无参截断列表（`style.OneLine` 先剥离 ANSI 转义与控制字符、压成单行，再按 120 rune 截断，避免 `\r`/`\x1b[K` 覆盖已打印行与未闭合 SGR 泄漏）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染、并按角色着色（user 用 `Ok` 绿、其余用 `Warn` 黄；`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 TTY 与输出模式约束：非 TTY、plain 一并旁路），user/tool 消息与工具参数原样
+- `/stat` 显示会话统计：工作区（构造期定格的启动目录）、会话文件、消息条数、本次运行累计 token（prompt/completion）、当前上下文占用（最近一次实报 prompt tokens，无 usage 回落本地估算）、缓存命中量与命中率（累计 hit / 累计 prompt）；数据全部来自 `Agent.Stats()` 单一快照，渲染在 `repl/stats.go`，与提示符占位符同源同公式
 - `/model` 无参实时调接口列出可用模型（`*` 标注当前，失败仍显示当前模型），带参直接切换不校验；带尾随空格支持补全（接口列表在 REPL 内首次加载后缓存，失败不重试）
 - `/think` 无参显示当前思考等级（未设置显示"未设置"）；带参 `minimal/low/medium/high/max` 设置，`off` 关闭，非法值报错不变更；带尾随空格补全等级候选（含 off，静态列表）
 - `/load` 无参打开方向键选择菜单（`repl/picker.go`，非 TTY 降级为序号输入），候选 Display 带时间/条数/简介
@@ -220,8 +221,10 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 - 提示符模板内置固定不可配（`prompt` 配置项与 `TANYA_PROMPT` 已移除，yaml 残留键被忽略），模板走 `style` 管线：启动时 `ParseTemplate` 一次，每轮 `Bind` 占位符 + 渲染（解析仅一次，绑定微秒级）
 - 模板语法为 BBCode 风格标记：`[white]{cwd}[/] [blue]{model}[/]`，空格叠属性 `[red bold]`，支持语义名（dim/info/warn/ok/error/accent/think/run）；未知名/游离闭合/空标签降级原样，合法标签未闭合着色到行尾；旧裸 ANSI 模板自动 passthrough 兼容（无色环境 `Strip` 兜底）；不支持背景——markup 无 `bg:` 形式，`Style.Bg` 通道为预留（权威登记与启用条件见 `docs/style-split.md` §7.4）
-- 占位符：`{cwd}` 短路径 / `{model}` 模型 / `{effort}` 思考等级（未设置渲染为空）/ `{usage}` 上下文 token（API 实报或 `~` 估算）/ `{cache}` 缓存命中量 / `{cache_rate}` 缓存命中率（两位小数，无数据渲染为空）/ `{stat}` 组合用量——无缓存仅总量，有缓存为 `缓存/总量 命中率`；未知占位符原样保留，占位符值永不二次解析
-- 默认 `[white]{cwd}[/] [blue]{model}[/] [yellow]{effort}[/] [green]{stat}[/] [white]>[/] `（路径白 / 模型蓝 / 思考黄 / 用量绿 / 提示符白），渲染字节与旧 ANSI 版逐字节一致
+- 占位符口径规则：**加 `_total` 后缀即本次运行累计，无后缀即最近一次请求**。单次：`{usage}` 上下文用量（API 实报；无实报或实报为 0 时回落 `~` 估算）/ `{cache}` 本次命中量 / `{cache_rate}` 本次命中率。累计：`{usage_total}` 累计用量 / `{cache_total}` 累计命中量 / `{cache_rate_total}` 累计命中率。另有 `{cwd}` 短路径 / `{model}` 模型 / `{effort}` 思考等级（未设置渲染为空）/ `{usage_summary}` 组合显示——**混合口径**，前段取 `{usage}`（单次）、后段取 `{cache_rate_total}`（累计），有累计缓存数据时拼为 `12.3k 81.67%`，否则只显示用量。注意它与 `/stat` 命令既不同源也不同口径：`/stat` 是七行全量的纯累计视图，`{usage_summary}` 只是提示符上的一行组合；无数据一律渲染为空，未知占位符原样保留，占位符值永不二次解析
+- 缓存口径二分：**单次**取自最近一次响应（`Stats.ContextTokens`/`ContextHit`），**累计**取自本次运行加总（`Stats.PromptTokens`/`CacheHitTokens`/`TotalTokens`）；提示符变量以 `_total` 后缀区分两者，`/stat` 与响应回显行（`repl.RenderResponseInfo`）分别固定走累计与单次。所有比率经 `cacheRate`/`formatRate` 单一入口计算，「无数据」判定（`hit <= 0 || prompt <= 0`）全库只此一处
+- 统计职责分层：`agent` 只累加与出数——`usageStats` 仅 `record`/`reset`/`view`，对外唯一门面是 `Agent.Stats() Stats`（工作区、会话文件、消息数、估算值加 usage 各项计数，全为数值）；数字缩写（`12.3k`）、百分比、`/stat` 七行文案与全部统计文案常量归 `repl`（`repl/stats.go` + `repl/messages.go`），`agent` 内不含任何格式化代码
+- 默认 `[white]{cwd}[/] [blue]{model}[/] [yellow]{effort}[/] [green]{usage_summary}[/] [white]>[/] `（路径白 / 模型蓝 / 思考黄 / 用量绿 / 提示符白），渲染字节与旧 ANSI 版逐字节一致
 - `{cwd}` 取进程 cwd（恒为启动目录，`os.Chdir` 不参与），短路径规则与原 `shortCwd` 一致（`$HOME` 折叠为 `~`、中间路径段截断为首字符）
 
 ### 回合视觉分隔（回合末尾方案）

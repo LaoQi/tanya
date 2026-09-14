@@ -1,63 +1,48 @@
 package agent
 
-import "fmt"
-
-type usageStats struct{ last *Usage }
-
-func (s *usageStats) record(u *Usage) { s.last = u }
-
-func (s *usageStats) reset() { s.last = nil }
-
-func (s usageStats) contextInfo(est, msgs int, sessionPath string) string {
-	var tokenLine string
-	if s.last != nil {
-		tokenLine = fmt.Sprintf(MsgTokenAPI,
-			s.last.TotalTokens, s.last.PromptTokens, s.last.CompletionTokens)
-	} else {
-		tokenLine = fmt.Sprintf(MsgTokenEstimate, est)
-	}
-	return fmt.Sprintf(MsgContextInfo, tokenLine, msgs, sessionPath)
+type usageStats struct {
+	contextTokens int
+	contextHit    int
+	hasContext    bool
+	totals        Usage
 }
 
-func (s usageStats) promptUsage(est int) string {
-	if s.last != nil {
-		return formatTokens(s.last.PromptTokens)
-	}
-	return "~" + formatTokens(est)
+func (s *usageStats) record(u *Usage) {
+	s.contextTokens = u.PromptTokens
+	s.contextHit = u.CacheHit()
+	s.hasContext = true
+	s.totals.PromptTokens += u.PromptTokens
+	s.totals.CompletionTokens += u.CompletionTokens
+	s.totals.TotalTokens += u.TotalTokens
+	s.totals.CacheHitTokens += u.CacheHit()
 }
 
-func (s usageStats) promptCache() string {
-	if s.last == nil {
-		return ""
-	}
-	hit := s.last.CacheHit()
-	if hit <= 0 {
-		return ""
-	}
-	return formatTokens(hit)
+func (s *usageStats) reset() {
+	*s = usageStats{}
 }
 
-func (s usageStats) promptCacheRate() string {
-	if s.last == nil {
-		return ""
+func (s usageStats) view() Stats {
+	return Stats{
+		ContextTokens:    s.contextTokens,
+		ContextHit:       s.contextHit,
+		HasContext:       s.hasContext,
+		PromptTokens:     s.totals.PromptTokens,
+		CompletionTokens: s.totals.CompletionTokens,
+		TotalTokens:      s.totals.TotalTokens,
+		CacheHitTokens:   s.totals.CacheHitTokens,
 	}
-	hit := s.last.CacheHit()
-	if hit <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("%.2f%%", float64(hit)/float64(s.last.PromptTokens)*100)
 }
 
-func (s usageStats) summary(est int) string {
-	if s.last == nil || s.last.CacheHit() <= 0 {
-		return s.promptUsage(est)
-	}
-	return formatTokens(s.last.CacheHit()) + "/" + formatTokens(s.last.PromptTokens) + " " + s.promptCacheRate()
-}
-
-func formatTokens(n int) string {
-	if n < 1000 {
-		return fmt.Sprintf("%d", n)
-	}
-	return fmt.Sprintf("%.1fk", float64(n)/1000)
+type Stats struct {
+	Workspace        string
+	Session          string
+	Messages         int
+	Est              int
+	ContextTokens    int
+	ContextHit       int
+	HasContext       bool
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	CacheHitTokens   int
 }

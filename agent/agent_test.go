@@ -114,7 +114,7 @@ func TestNewSessionResetsUsage(t *testing.T) {
 	a := newTestAgent(t)
 	a.stats.record(&Usage{PromptTokens: 1200})
 	a.NewSession()
-	if a.stats.last != nil {
+	if a.stats.hasContext {
 		t.Error("/new 应清理上次用量")
 	}
 }
@@ -129,7 +129,7 @@ func TestLoadSessionResetsUsage(t *testing.T) {
 	if err := a.LoadSession("20260101-090000"); err != nil {
 		t.Fatal(err)
 	}
-	if a.stats.last != nil {
+	if a.stats.hasContext {
 		t.Error("/load 应清理上次用量")
 	}
 }
@@ -279,12 +279,24 @@ func TestNewLocalMode(t *testing.T) {
 	}
 }
 
-func TestContextInfo(t *testing.T) {
+func TestStatsSnapshot(t *testing.T) {
 	a := newTestAgent(t)
 	a.history = append(a.history, Message{Role: "user", Content: "hi"})
-	info := a.ContextInfo()
-	if !strings.Contains(info, "消息: 1 条") || !strings.Contains(info, "token") {
-		t.Errorf("got %q", info)
+	a.stats.record(&Usage{PromptTokens: 1200, CompletionTokens: 30, TotalTokens: 1230, CacheHitTokens: 900})
+	a.stats.record(&Usage{PromptTokens: 2000, CompletionTokens: 40, TotalTokens: 2040, CacheHitTokens: 1500})
+	st := a.Stats()
+	wd, _ := os.Getwd()
+	if st.Workspace != wd || st.Session != a.store.path() || st.Messages != 1 {
+		t.Errorf("会话元数据异常: %+v", st)
+	}
+	if !st.HasContext || st.ContextTokens != 2000 || st.ContextHit != 1500 {
+		t.Errorf("上下文与单次命中量应取最近一次实报: %+v", st)
+	}
+	if st.PromptTokens != 3200 || st.CompletionTokens != 70 || st.TotalTokens != 3270 || st.CacheHitTokens != 2400 {
+		t.Errorf("累计项应按全部请求求和: %+v", st)
+	}
+	if st.Est <= 0 {
+		t.Errorf("估算值应可用: %+v", st)
 	}
 }
 
@@ -521,60 +533,16 @@ func TestListSessionsSkipsSystemLine(t *testing.T) {
 	}
 }
 
-func TestPromptCache(t *testing.T) {
+func TestStatsFollowsLastRequestAndAccumulates(t *testing.T) {
 	a := newTestAgent(t)
-	if a.PromptCache() != "" {
-		t.Error("无 usage 应为空")
-	}
 	a.stats.record(&Usage{PromptTokens: 1200, CacheHitTokens: 980})
-	if got := a.PromptCache(); got != "980" {
-		t.Errorf("DeepSeek 风格: got %q", got)
+	a.stats.record(&Usage{PromptTokens: 2000, CacheHitTokens: 600})
+	st := a.Stats()
+	if st.ContextTokens != 2000 || st.ContextHit != 600 {
+		t.Errorf("上下文与单次命中量应取最近一次而非累计: %+v", st)
 	}
-	a.stats.record(&Usage{PromptTokens: 1200, PromptTokensDetails: &promptTokensDetails{CachedTokens: 600}})
-	if got := a.PromptCache(); got != "600" {
-		t.Errorf("OpenAI 风格: got %q", got)
-	}
-	a.stats.record(&Usage{PromptTokens: 1200})
-	if a.PromptCache() != "" {
-		t.Error("无缓存数据应为空")
-	}
-}
-
-func TestPromptCacheRate(t *testing.T) {
-	a := newTestAgent(t)
-	if a.PromptCacheRate() != "" {
-		t.Error("无 usage 应为空")
-	}
-	a.stats.record(&Usage{PromptTokens: 1200, CacheHitTokens: 980})
-	if got := a.PromptCacheRate(); got != "81.67%" {
-		t.Errorf("DeepSeek 风格: got %q", got)
-	}
-	a.stats.record(&Usage{PromptTokens: 1200, PromptTokensDetails: &promptTokensDetails{CachedTokens: 600}})
-	if got := a.PromptCacheRate(); got != "50.00%" {
-		t.Errorf("OpenAI 风格: got %q", got)
-	}
-	a.stats.record(&Usage{PromptTokens: 1200})
-	if a.PromptCacheRate() != "" {
-		t.Error("无缓存数据应为空")
-	}
-}
-
-func TestPromptSummary(t *testing.T) {
-	a := newTestAgent(t)
-	if got := a.PromptSummary(); got != a.PromptUsage() {
-		t.Errorf("无 usage 应仅显示估算总量: %q", got)
-	}
-	a.stats.record(&Usage{PromptTokens: 1200})
-	if got := a.PromptSummary(); got != "1.2k" {
-		t.Errorf("无缓存应仅显示总量: %q", got)
-	}
-	a.stats.record(&Usage{PromptTokens: 1200, CacheHitTokens: 980})
-	if got := a.PromptSummary(); got != "980/1.2k 81.67%" {
-		t.Errorf("有缓存应为 缓存/总量 命中率: %q", got)
-	}
-	a.stats.record(&Usage{PromptTokens: 1200, PromptTokensDetails: &promptTokensDetails{CachedTokens: 600}})
-	if got := a.PromptSummary(); got != "600/1.2k 50.00%" {
-		t.Errorf("OpenAI 风格: %q", got)
+	if st.CacheHitTokens != 1580 || st.PromptTokens != 3200 {
+		t.Errorf("缓存与 prompt 应为累计: %+v", st)
 	}
 }
 

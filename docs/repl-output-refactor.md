@@ -376,7 +376,7 @@ func (t *turn) End(err error)        // md 结算、done()、中断/错误文案
 | assistant 流式正文、`/history n` 的 assistant 正文 | `KindContent` |
 | 工具块标题/正文（`RenderToolStart`/`RenderToolEnd(Inline)`） | `KindToolBlock` |
 | 工具状态行（`RenderResponseInfo`、`↳ exit 0 · 0.3s · 12 行`） | `KindToolStatus` |
-| `/help`、`/new`、`/load` 结果、`/context`、`/model` 列表、`/theme`、`/think`、`/md`、`/history` 摘要行与非 assistant 正文 | `KindNotice` |
+| `/help`、`/new`、`/load` 结果、`/stat`、`/model` 列表、`/theme`、`/think`、`/md`、`/history` 摘要行与非 assistant 正文 | `KindNotice` |
 | 欢迎屏、回合分隔线、`turnSink` 首行空行 | `KindDecor` |
 | `MsgErrLineFmt` 类错误、`MsgUnknownCmd`、`MsgThemeBad`、中断提示 | `KindError` |
 | spinner 帧、清行序列 | `KindSpinner` |
@@ -610,7 +610,7 @@ script -qec "./tanyan -p --verbose -n ask '跑一条命令并总结'" /dev/null 
 | 区间 | 行号 | 类别 |
 |---|---|---|
 | 输入循环/回合 | 112、162、170、181、188、193、218、220、226 | 欢迎屏、退出、分隔线、中断/错误文案 |
-| 命令反馈 | 253、256、259、263、265、272、277、280、284、287、293、303、305、310 | `/help` `/new` `/load` `/context` `/model` `/md` 与未知命令 |
+| 命令反馈 | 253、256、259、263、265、272、277、280、284、287、293、303、305、310 | `/help` `/new` `/load` `/stat` `/model` `/md` 与未知命令 |
 | 主题 | 317、318、325、332、336、374 | `/theme` 与样本渲染 |
 | think | 387、389、394、398、400 | `/think` |
 | 历史回放 | 407、414、422、428、430、471、473、477、486、495 | `/history` 摘要、单条、tool 正文、消息头 |

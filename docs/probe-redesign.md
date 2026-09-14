@@ -142,6 +142,6 @@ WORKSPACE: go.mod
 
 - **prompt cache**：环境段从快照移出后，同一会话内前缀 = persistPrompt 仍逐字节不变；环境段放末尾，跨会话同 cwd 时全量命中。若模型厂商缓存按"system 整段"而非"前缀"计价，收益不变；若按前缀，收益略降但仍成立。
 - **旧会话文件**：见迁移步骤 5，不迁移、只兼容，避免破坏历史回放。
-- **`estimateTokens`/`totalTokens`**：需同步改为估算 runtimePrompt（含环境段），否则 `/context` 与提示符 `{usage}` 低估真实上下文。
+- **`estimateTokens`/`totalTokens`**：需同步改为估算 runtimePrompt（含环境段），否则 `/stat` 与提示符 `{usage}` 低估真实上下文。
 - **`ReasoningItems` 计入估算**：`totalTokens` 除正文与工具参数外，须同样累加 `ReasoningItems[].Content`——responses 协议的明文思维链在长会话里常占上下文一半以上（实测某 928KB 会话占 60%、本地估算因此低估 2.5 倍）。估算纯本地，不参与请求构造。
 - **`probe: false`**：退化路径须保证 `buildMessages` 不再调用 `envSection`，避免配置关闭仍产生开销。

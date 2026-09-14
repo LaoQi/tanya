@@ -1,6 +1,6 @@
 # Agent 拆分：接缝重组设计与实施
 
-状态：**S0–S4 已实施**（`agent/stats.go`、`agent/prompt.go`、`agent/session.go` 落地，`main.go`/`repl/` 零改动；`AGENTS.md`/`docs/design.md`/`docs/todos.md` 已同步）。落地偏差见 §10。**更正（2026-09-14）**：文中 `probe` 字段与 `Agent.runtimePrompt` 的 `probe != nil` 短路已随环境段收口删除（env 在 `agent.New` 构造期定格进 `Agent.env`；§99 的 `Agent.cwd` 字段一并删除——`runtimePrompt` 是它最后一个读取点），见 `docs/design.md`《环境段（envprobe）》。
+状态：**S0–S4 已实施**（`agent/stats.go`、`agent/prompt.go`、`agent/session.go` 落地，`main.go`/`repl/` 零改动；`AGENTS.md`/`docs/design.md`/`docs/todos.md` 已同步）。落地偏差见 §10。**更正（2026-09-14）**：§4.1 的 `usageStats` 形态与 §4.4 的「导出方法 18 个不变」已随后续重构调整——统计层不再承担格式化职责，`usageStats` 收敛为 `record`/`reset`/`view`（仅数值），`formatTokens` 迁出 `agent` 至 `repl/stats.go`，`Agent` 的 5 个字符串门面（`StatInfo`/`PromptUsage`/`PromptCache`/`PromptCacheRate`/`PromptSummary`）合并为 `Agent.Stats() Stats` 单一数据快照，全部统计文案与格式化随之归 `repl`，见 `docs/design.md`《提示符模板》。**更正（2026-09-14）**：文中 `probe` 字段与 `Agent.runtimePrompt` 的 `probe != nil` 短路已随环境段收口删除（env 在 `agent.New` 构造期定格进 `Agent.env`；§99 的 `Agent.cwd` 字段一并删除——`runtimePrompt` 是它最后一个读取点），见 `docs/design.md`《环境段（envprobe）》。
 相关：`docs/shell-tool.md`（已完成的接缝准备：工具簇已外移，方法数 30→26）。
 
 ## 1. 要解决的问题

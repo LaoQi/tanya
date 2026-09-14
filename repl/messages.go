@@ -58,9 +58,24 @@ const (
 )
 
 const (
+	MsgStatWorkspace  = "工作区: %s"
+	MsgStatSession    = "会话文件: %s"
+	MsgStatMessages   = "消息: %d 条"
+	MsgStatTotals     = "总用量: %s"
+	MsgStatTotalsFmt  = "%s（prompt %s / completion %s）"
+	MsgStatContext    = "上下文: %s"
+	MsgStatContextAPI = "%s（API 实报）"
+	MsgStatContextEst = "~%s（本地估算）"
+	MsgStatCache      = "缓存: %s"
+	MsgStatHitRate    = "命中率: %s"
+	MsgStatNoUsage    = "无（未收到 API usage）"
+	MsgStatNoCache    = "无数据"
+)
+
+const (
 	MsgLinesTotal = "共 %d 行"
 	MsgLines      = "%d 行"
-	MsgCachePct   = "缓存 %.2f%%"
+	MsgCachePct   = "缓存 %s"
 	MsgCtxTokens  = "上下文 ~%s"
 	MsgTruncNote  = "…中间省略 %d 字节…"
 	MsgInterrupt  = "已中断"
@@ -86,7 +101,7 @@ const helpText = `斜杠命令：
   /help            显示帮助
   /new             开启新会话（当前会话自动保存）
   /load [id]       无参打开会话选择菜单；带 id 直接载入
-  /context         显示上下文占用
+  /stat            显示会话统计（工作区/用量/缓存）
   /history [n|all] 无参截断列表；n 全量查看单条；all 全量显示
   /model [name]    无参显示当前模型；带名切换模型
   /think [level]   无参显示思考等级；设置 minimal/low/medium/high/max，off 关闭

@@ -32,7 +32,7 @@ func TestParseTemplateMarkup(t *testing.T) {
 }
 
 func TestTemplateDefaultPromptEquivalence(t *testing.T) {
-	src := "[white]{cwd}[/] [blue]{model}[/] [yellow]{effort}[/] [green]{stat}[/] [white]>[/] "
+	src := "[white]{cwd}[/] [blue]{model}[/] [yellow]{effort}[/] [green]{usage_summary}[/] [white]>[/] "
 	tpl, err := ParseTemplate(src, defSem())
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestTemplateDefaultPromptEquivalence(t *testing.T) {
 			return "m1", true
 		case "effort":
 			return "low", true
-		case "stat":
+		case "usage_summary":
 			return "ok", true
 		}
 		return "", false
@@ -100,7 +100,7 @@ func TestTemplateEmptyValueSpanSkipped(t *testing.T) {
 		if name == "effort" {
 			return "", true
 		}
-		if name == "stat" {
+		if name == "usage_summary" {
 			return "", true
 		}
 		return ">", name == "cwd"
