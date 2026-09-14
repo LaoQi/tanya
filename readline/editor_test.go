@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	rstyle "github.com/LaoQi/tanyan/render/style"
+	"github.com/LaoQi/tanyan/render/term"
 	"io"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ type fakeTerm struct {
 	raw      bool
 	rawCalls int
 	cols     int
+	rows     int
 }
 
 func (f *fakeTerm) Raw() error { f.raw = true; f.rawCalls++; return nil }
@@ -24,7 +26,11 @@ func (f *fakeTerm) Size() (Size, bool) {
 	if cols <= 0 {
 		cols = 80
 	}
-	return Size{Cols: cols, Rows: 24}, true
+	rows := f.rows
+	if rows <= 0 {
+		rows = 24
+	}
+	return Size{Cols: cols, Rows: rows}, true
 }
 func (f *fakeTerm) ReadKey() (KeyEvent, error) {
 	if len(f.events) == 0 {
@@ -220,8 +226,11 @@ func TestEditorCtrlBFAndCtrlL(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := out.String()
-	if !strings.Contains(o, strings.Repeat("\n", 48)) || !strings.Contains(o, "\x1b[23A") {
-		t.Errorf("Ctrl+L 应推屏保历史（48 换行+上移 23 行）: %q", o)
+	if !strings.Contains(o, strings.Repeat("\n", 24)) || !strings.Contains(o, "\x1b[23A") {
+		t.Errorf("Ctrl+L 应推屏保历史（24 换行+上移 23 行，恰好一屏高）: %q", o)
+	}
+	if strings.Contains(o, strings.Repeat("\n", 25)) {
+		t.Errorf("Ctrl+L 不应多推空行（出现 25 连续换行）: %q", o)
 	}
 	if strings.Contains(o, "\x1b[2J") {
 		t.Errorf("Ctrl+L 不应擦屏: %q", o)
@@ -280,5 +289,40 @@ func TestEditorRenderWideWrapCursor(t *testing.T) {
 	ed.render("")
 	if !strings.HasSuffix(ft.out.String(), "\r\x1b[2C") {
 		t.Errorf("宽字符跨界后光标列应为 2: %q", ft.out.String())
+	}
+}
+
+func TestEditorCtrlLScrollsOneScreen(t *testing.T) {
+	for _, rows := range []int{1, 5, 24, 50} {
+		f := &fakeTerm{rows: rows, out: &bytes.Buffer{}}
+		f.events = append(runes("hi"), KeyEvent{Code: KeyCtrlL}, KeyEvent{Code: KeyEnter})
+		ed := NewEditor(f, true)
+		ed.SetOutput(f.out)
+		if _, err := ed.Readline("> "); err != nil {
+			t.Fatal(err)
+		}
+		o := f.out.String()
+		if !strings.Contains(o, strings.Repeat("\n", rows)) {
+			t.Errorf("rows=%d: Ctrl+L 应推一屏高（%d 换行）: %q", rows, rows, o)
+		}
+		if strings.Contains(o, strings.Repeat("\n", rows+1)) {
+			t.Errorf("rows=%d: 不应多推空行（出现 %d 连续换行）: %q", rows, rows+1, o)
+		}
+	}
+}
+
+func TestEditorCtrlLSizeUnavailable(t *testing.T) {
+	ed, _, out := newFakeEditor(append(runes("hi"), KeyEvent{Code: KeyCtrlL}, KeyEvent{Code: KeyEnter})...)
+	ed.term = noSizeTerm{ed.term}
+	ed.SetOutput(out)
+	if _, err := ed.Readline("> "); err != nil {
+		t.Fatal(err)
+	}
+	o := out.String()
+	if !strings.Contains(o, term.ScreenHome()) {
+		t.Errorf("Size 不可用时 Ctrl+L 应擦屏: %q", o)
+	}
+	if strings.Contains(o, "\n\n") {
+		t.Errorf("Size 不可用时不应推空行: %q", o)
 	}
 }
