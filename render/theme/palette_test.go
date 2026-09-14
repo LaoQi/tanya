@@ -1,6 +1,10 @@
 package theme
 
-import "testing"
+import (
+	"testing"
+
+	rstyle "github.com/LaoQi/tanyan/render/style"
+)
 
 func TestApply(t *testing.T) {
 	base := baseSem(t)
@@ -46,4 +50,43 @@ func baseSem(t *testing.T) Semantics {
 		t.Fatal("default 方案应存在")
 	}
 	return s.Sem
+}
+
+func TestApplyRemainingKeys(t *testing.T) {
+	base := baseSem(t)
+	prev := base
+	got := Apply(base, map[string]string{
+		"dim":    "bright_white",
+		"warn":   "bright_yellow",
+		"ok":     "bright_green",
+		"accent": "magenta",
+	})
+	if got.Dim.Fg.V16 != 15 || got.Warn.Fg.V16 != 11 || got.Ok.Fg.V16 != 10 {
+		t.Errorf("dim/warn/ok palette 覆盖未生效: dim=%d warn=%d ok=%d",
+			got.Dim.Fg.V16, got.Warn.Fg.V16, got.Ok.Fg.V16)
+	}
+	if got.Accent.Fg.V16 != 5 || got.Accent.Attr&rstyle.AttrReverse == 0 {
+		t.Errorf("accent 覆盖应设为 magenta 并保留反显: %+v", got.Accent)
+	}
+	if base != prev {
+		t.Errorf("Apply 不应修改入参: %+v -> %+v", prev, base)
+	}
+
+	withFg := Semantics{Accent: rstyle.Style{Fg: rstyle.Color16(3), Attr: rstyle.AttrBold | rstyle.AttrReverse}}
+	over := Apply(withFg, map[string]string{"accent": "magenta"})
+	if over.Accent.Fg.V16 != 5 || over.Accent.Attr != rstyle.AttrReverse {
+		t.Errorf("accent 覆盖应重建样式、清除旧 Fg/Attr: %+v", over.Accent)
+	}
+}
+
+func TestApplyKeyMatching(t *testing.T) {
+	base := baseSem(t)
+	got := Apply(base, map[string]string{
+		"Dim": "bright_white",
+		"OK":  "bright_green",
+		"":    "bright_red",
+	})
+	if got != base {
+		t.Errorf("键名应大小写敏感且忽略空键: %+v", got)
+	}
 }
