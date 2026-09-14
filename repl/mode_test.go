@@ -11,6 +11,8 @@ import (
 
 var plainProf = term.Profile{TTY: true, Colors: term.LevelNone}
 
+var nonTTYProf = term.Profile{TTY: false, Colors: term.LevelNone}
+
 func TestParseMode(t *testing.T) {
 	if _, err := ParseMode(false, true); err == nil {
 		t.Error("--verbose 无 --plain 应报错")
@@ -27,6 +29,21 @@ func TestParseMode(t *testing.T) {
 		got, err := ParseMode(c.plain, c.verbose)
 		if err != nil || got != c.want {
 			t.Errorf("ParseMode(%v,%v) = %v,%v want %v", c.plain, c.verbose, got, err, c.want)
+		}
+	}
+}
+
+func TestSingleShot(t *testing.T) {
+	cases := []struct {
+		in, want outMode
+	}{
+		{modeRich, modePlainVerbose},
+		{modePlainVerbose, modePlainVerbose},
+		{modePlain, modePlain},
+	}
+	for _, c := range cases {
+		if got := SingleShot(c.in); got != c.want {
+			t.Errorf("SingleShot(%v) = %v, want %v", c.in, got, c.want)
 		}
 	}
 }
@@ -140,6 +157,23 @@ func TestPlainVerboseKeepsToolText(t *testing.T) {
 	if strings.Contains(got, "\x1b[1A") {
 		t.Errorf("plain+verbose 不应上移重绘: %q", got)
 	}
+	if n := strings.Count(got, "▸ run_shell echo hi"); n != 1 {
+		t.Errorf("追加式工具块标题不应重复（ToolStart 已打出），实际 %d 次: %q", n, got)
+	}
+}
+
+func TestPlainVerboseNoSpinnerEvenOnTTY(t *testing.T) {
+	view := NewToolView(NewStreams(&syncBuf{}, &syncBuf{}, modePlainVerbose), plainProf, testSem(), func() int { return 80 }, 20)
+	var out syncBuf
+	view.st.out.setWriter(&out)
+	view.Handle(agent.Event{Kind: agent.EventRequestStart})
+	view.Handle(agent.Event{Kind: agent.EventReasoning})
+	if got := out.String(); got != "" {
+		t.Errorf("plain+verbose 下 TTY 也不应输出动画: %q", got)
+	}
+	if view.animate() {
+		t.Error("plain+verbose 不应放行动画")
+	}
 }
 
 func TestPlainNoSpinnerEvenOnTTY(t *testing.T) {
@@ -220,7 +254,7 @@ func TestRichStreamsByteIdentical(t *testing.T) {
 		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
 	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{FirstEvent: 300e6, Duration: 1200e6}})
 	view.Handle(agent.Event{Kind: agent.EventContent, Text: "答案\n"})
-	want := "\n▸ run_shell echo hi ⋯\n\n▸ run_shell echo hi\n  hi\n  ↳ exit 0 · 0ms · 1 行\n  ↳ TTFT 300ms · 1.2s\n\n答案\n"
+	want := "\n▸ run_shell echo hi ⋯\n  hi\n  ↳ exit 0 · 0ms · 1 行\n  ↳ TTFT 300ms · 1.2s\n\n答案\n"
 	if got := out.String(); got != want {
 		t.Errorf("rich 非 TTY 输出应为基线字节\n got %q\nwant %q", got, want)
 	}

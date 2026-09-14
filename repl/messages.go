@@ -77,11 +77,6 @@ const (
 )
 
 const (
-	MsgMdOn  = "Markdown 渲染已开启\n"
-	MsgMdOff = "Markdown 渲染已关闭\n"
-)
-
-const (
 	SpinWaiting  = "%s 等待响应 %s"
 	SpinThinking = "%s 思考中 %s"
 	SpinRunning  = "  %s 执行中 %s"
@@ -96,7 +91,6 @@ const helpText = `斜杠命令：
   /model [name]    无参显示当前模型；带名切换模型
   /think [level]   无参显示思考等级；设置 minimal/low/medium/high/max，off 关闭
   /theme [name]    无参显示当前主题与可用列表；带名切换内置主题
-  /md              切换 AI 输出 Markdown 渲染（默认开启，非 TTY 自动旁路）
   /exit            退出
 输入分发：
   内容 / :内容     与 AI 对话（两种写法等价，全角 ： 亦可）

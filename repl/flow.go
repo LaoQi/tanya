@@ -32,14 +32,13 @@ type flow struct {
 	st   *streams
 	prof term.Profile
 	sem  theme.Semantics
-	live bool
 	md   *markdown.MarkdownBuf
 	rend render.Renderer
 }
 
 func (f *flow) emit(kind Kind, s string) { f.st.out.emit(kind, s) }
 
-func (f *flow) mdEnabled() bool { return f.live && f.prof.TTY && f.st.decor() }
+func (f *flow) mdEnabled() bool { return f.prof.TTY && f.st.decor() }
 
 // turn 承载一次对话回合：懒补首行空行、结算 markdown、收尾文案与分隔线。
 type turn struct {
@@ -59,7 +58,6 @@ func (r *REPL) beginTurn(done func()) *turn {
 			st:   r.st,
 			prof: r.prof,
 			sem:  r.sem,
-			live: r.mdLive,
 			md:   markdown.NewMarkdownBuf(),
 			rend: r.rend,
 		},

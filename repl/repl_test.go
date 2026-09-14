@@ -152,31 +152,20 @@ func TestWelcomeText(t *testing.T) {
 	}
 }
 
-func TestMdToggle(t *testing.T) {
+func TestMdDefaultOn(t *testing.T) {
 	r, _, _ := newTestREPL(t, newFakeTerm())
-	if !r.mdLive {
-		t.Error("md 默认应开启")
-	}
-	if r.handleCommand("/md") {
-		t.Error("/md 不应退出")
-	}
-	if r.mdLive {
-		t.Error("/md 后应关闭")
-	}
-	r.handleCommand("/md")
-	if !r.mdLive {
-		t.Error("再次 /md 应开启")
+	if !r.mdEnabled() {
+		t.Error("TTY + rich 下 markdown 渲染应默认开启")
 	}
 }
 
-func TestStreamContentBypassWhenOff(t *testing.T) {
-	r, buf, _ := newTestREPL(t, newFakeTerm())
-	r.mdLive = false
+func TestStreamContentBypassNonTTY(t *testing.T) {
+	r, buf, _ := newTestREPLMode(t, newFakeTerm(), modeRich, nonTTYProf)
 	turn := r.beginTurn(nil)
 	turn.writeContent("直接输出")
 	out := buf.String()
 	if out != "直接输出" {
-		t.Errorf("关闭渲染应直通输出: %q", out)
+		t.Errorf("非 TTY 应直通输出: %q", out)
 	}
 }
 
@@ -201,11 +190,10 @@ func TestPrintHistoryFullRenderedMarkdown(t *testing.T) {
 	}
 }
 
-func TestPrintHistoryFullBypassWhenMdOff(t *testing.T) {
-	r, buf, _ := newTestREPL(t, newFakeTerm())
-	r.mdLive = false
+func TestPrintHistoryFullBypassNonTTY(t *testing.T) {
+	r, buf, _ := newTestREPLMode(t, newFakeTerm(), modeRich, nonTTYProf)
 	if r.mdEnabled() {
-		t.Fatal("/md off 后应旁路")
+		t.Fatal("非 TTY 应旁路")
 	}
 	m := agent.Message{Role: "assistant", Content: "# 标题\n\n- a\n"}
 	r.printHistoryFull(1, m)
@@ -281,11 +269,10 @@ func TestPrintHistoryHeadRoleColor(t *testing.T) {
 	}
 }
 
-func TestPrintHistoryHeadPlainWhenMdOff(t *testing.T) {
-	r, buf, _ := newTestREPL(t, newFakeTerm())
-	r.mdLive = false
+func TestPrintHistoryHeadPlainNonTTY(t *testing.T) {
+	r, buf, _ := newTestREPLMode(t, newFakeTerm(), modeRich, nonTTYProf)
 	r.printHistoryHead(3, agent.Message{Role: "user", Content: "x"})
 	if out := buf.String(); out != "#3 user\n" {
-		t.Errorf("/md off 时消息头应原样无色: %q", out)
+		t.Errorf("非 TTY 时消息头应原样无色: %q", out)
 	}
 }

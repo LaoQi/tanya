@@ -28,10 +28,15 @@ func main() {
 	verbose := flag.Bool("verbose", false, repl.FlagVerbose)
 	flag.Parse()
 
+	args := flag.Args()
+	isAsk := len(args) > 0 && args[0] == "ask"
 	mode, err := repl.ParseMode(*plain, *verbose)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
+	}
+	if isAsk {
+		mode = repl.SingleShot(mode)
 	}
 	st := repl.NewStreams(os.Stdout, os.Stderr, mode)
 
@@ -69,8 +74,6 @@ func main() {
 	if *sessionMode != "" {
 		cfg.SessionMode = *sessionMode
 	}
-	args := flag.Args()
-	isAsk := len(args) > 0 && args[0] == "ask"
 	agent.ProtectTerminalSignals()
 	readline.InitTerminalGuard()
 	readline.SecureTerminal()

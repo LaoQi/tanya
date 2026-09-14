@@ -32,6 +32,15 @@ func ParseMode(plain, verbose bool) (outMode, error) {
 	}
 }
 
+// SingleShot 把 CLI 输出模式调整为单发（ask）默认档：rich 降到 plain+verbose，
+// 显式 plain/plain+verbose（更窄或等价）保持不动。
+func SingleShot(mode outMode) outMode {
+	if mode == modeRich {
+		return modePlainVerbose
+	}
+	return mode
+}
+
 func (m outMode) plain() bool  { return m != modeRich }
 func (m outMode) decor() bool  { return m == modeRich }
 func (m outMode) cursor() bool { return m == modeRich }

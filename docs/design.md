@@ -31,7 +31,7 @@ render/markup/     内联标记解析
 ## 运行模式
 
 - `tanyan`：交互 REPL，维护内存 messages 历史，SSE 逐 token 流式输出
-- `tanyan ask "问题"`：单发，输出后退出
+- `tanyan ask "问题"`：单发，输出后退出。单发默认走 plain+verbose 档（`repl.SingleShot` 在 CLI 模式为 rich 时降到 `modePlainVerbose`；显式 `-p` 更窄则保持不动）：无 spinner、无光标上移重绘（工具块追加式）、正文原样直出，颜色仍按终端能力保留，`End()` 按 plain 语义"缺行尾换行才补"
 - 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式、`-n` / `--no-save` 只读会话（见《会话与上下文》存储小节）
 - Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）：REPL 与 `ask` 单发统一走 `signal.Notify(SIGINT)`（`repl.InterruptContext`），要求终端 `ISIG` 开启——readline 侧每回合开始前做终端状态自愈保证该项成立（`docs/interactive-tty.md` §5.9）；命令执行期间子进程组持有终端前台，Ctrl+C 由内核直达子进程组（命令优雅退出），再次按下取消回合
 
@@ -124,7 +124,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - **捕获输出的 ANSI 治理**（`render/term` 清洗 + `Renderer.Frame/Passthrough`）：块组装内聚于 `renderToolBlock`，输出区无 SGR 时整块 `Dim.Frame`（全清洗 + 块级包裹，标题/输出单一包裹点）；检测到 SGR（`HasSGR`）时输出区改走直显——`Passthrough` 保色渲染（SGR 原样保留、布局序列/OSC/C0 仍清洗、脏状态结尾闭合），标题行独立 Frame，状态行 `Info` 显式后置（不依赖 SGR 时序巧合）。预览类彩色输出（如欢迎屏效果）在灰色块内原色可见，用户与模型双通道分离：**模型侧文本不做任何变换**（原始输出、信息保真、缓存与历史零影响），显示侧机制对模型完全不可见
 - `/history` 查看 tool 消息时正文走 `Dim.Frame`（纯显示侧，历史存储不动），顺带解决历史串裸序列漏进视图的问题
 - 显示行数上限 `tool_output_lines`（默认 20，范围 1-1000），超出保留头 3 行 + 尾 2 行并提示 `/history n` 查看完整输出
-- 执行开始即打印标题行（`⋯` 标记进行中，调用点 `Dim.Frame` 包裹，模型可控的 args 一并清洗）；结束在 TTY 下 `\x1b[1A\r\x1b[K` 上移重绘标题替换 `⋯`（光标控制序列在 Frame 之外），非 TTY 直接打印完整块
+- 执行开始即打印标题行（`⋯` 标记进行中，调用点 `Dim.Frame` 包裹，模型可控的 args 一并清洗）；结束分三种：TTY + 光标控制档 `\x1b[1A\r\x1b[K` 上移重绘标题替换 `⋯`（光标控制序列在 Frame 之外）→ `RenderToolEndInline`；交互式工具 → `RenderToolEnd`（前导空行 + 标题锚点，用户交互回显混在中间需要重新起头）；其余追加式场景（非 TTY、plain+verbose）→ `RenderToolEndAppend` 只补正文块与状态行——标题已由 ToolStart 打出且无法上移覆盖，重复标题会留下两行 `▸ 工具名`
 - 交互模式（`Event.Interactive`）例外：不启动 spinner（周期重绘会擦掉子进程写往 tty 的提示），标题行下打印引导行 `⏎ 等待终端输入，请在下方直接应答`，结束一律追加式渲染（上移重绘会擦掉用户刚输入的回显行）；桥接期间真实 tty 归 bridge 独占（repl 侧不写入：标题行在切 raw 前打印，结果块在 `stop()` 恢复 termios 后渲染）
 - 流式输出行尾无 `\n` 时（`lineDirty` 跟踪），状态行打印前自动补换行
 - 输出收敛（`output`/`streams` 双流）、`Kind` 门禁与输出模式（rich/plain）、回合封装（`turn`）的改造规划见 `docs/repl-output-refactor.md`
@@ -186,7 +186,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 `Kind` 不导出包外、不进 `agent.Event`；`main` 侧只用语义化出口 `streams.Print`/`Content`/`End`/`Fail`。
 
-输出模式三档由 `outMode` 决定（`repl.ParseMode(plain, verbose)`，仅 CLI `-p`/`--plain` 与 `--verbose` 可设，env 与 config 不参与）：**rich**（默认，全开）、**plain**（`out.vis` = Content/Notice，其余屏蔽；stderr 不参与屏蔽）、**plain+verbose**（再加 ToolBlock/ToolStatus）。plain 的六条语义：① `Colors=LevelNone`（main 在 profile 计算后强制）；② 不启动 spinner（`toolView.animate()` 同时查 TTY 与可见集，是查询不是快照）；③ 无光标控制（inline 上移重绘按 `streams.cursor()` 退化为追加式，spinner 帧与清行随 KindSpinner 一并屏蔽）；④ 关 markdown（`flow.mdEnabled` 并入 `st.decor()`）；⑤ 屏蔽 Decor（含首行空行与回合分隔线）与工具类；⑥ stdout 只留正文与命令反馈，错误与诊断走 stderr。工具块被屏蔽时**不得**置 `justEnded`，否则下一条正文前会留下孤立空行（`toolView.Handle` 的 ToolEnd 分支按 `allows(KindToolBlock)` 决定是否置位）。`streams.End()` 负责收尾换行：rich 沿用无条件补换行（零行为变更），plain 只在缺少行尾换行时补，保证 stdout 严格等于答案。
+输出模式三档由 `outMode` 决定（`repl.ParseMode(plain, verbose)`，仅 CLI `-p`/`--plain` 与 `--verbose` 可设，env 与 config 不参与；`ask` 单发分支再套 `repl.SingleShot` 把 rich 降到 plain+verbose，显式 `-p` 更窄时保持不动）：**rich**（默认，全开）、**plain**（`out.vis` = Content/Notice，其余屏蔽；stderr 不参与屏蔽）、**plain+verbose**（再加 ToolBlock/ToolStatus）。plain 的六条语义：① `Colors=LevelNone`（main 在 profile 计算后强制）；② 不启动 spinner（`toolView.animate()` 同时查 TTY 与可见集，是查询不是快照）；③ 无光标控制（inline 上移重绘按 `streams.cursor()` 退化为 `RenderToolEndAppend`：不重复标题，只补正文块与状态行；spinner 帧与清行随 KindSpinner 一并屏蔽）；④ 关 markdown（`flow.mdEnabled` 并入 `st.decor()`）；⑤ 屏蔽 Decor（含首行空行与回合分隔线）与工具类；⑥ stdout 只留正文与命令反馈，错误与诊断走 stderr。工具块被屏蔽时**不得**置 `justEnded`，否则下一条正文前会留下孤立空行（`toolView.Handle` 的 ToolEnd 分支按 `allows(KindToolBlock)` 决定是否置位）。`streams.End()` 负责收尾换行：rich 沿用无条件补换行（零行为变更），plain 只在缺少行尾换行时补，保证 stdout 严格等于答案。
 
 ### 输入分发
 
@@ -202,7 +202,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 白名单（`slashCommands`，同时驱动 Tab 补全）即分发契约：`Run` 先用 `isSlashCommand` 过滤，未命中的 `/` 开头输入按对话内容处理，因此 `handleCommand` 的 switch 不再有 `default` 分支（原先的 `MsgUnknownCmd` 不可达，已删）。白名单与 case 必须一一对应，`TestSlashCommandsAllHandled` 覆盖该不变量（`/load` 走 stdin 交互路径，单独测试）。
 
-- `/history` 无参截断列表（`style.OneLine` 先剥离 ANSI 转义与控制字符、压成单行，再按 120 rune 截断，避免 `\r`/`\x1b[K` 覆盖已打印行与未闭合 SGR 泄漏）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染、并按角色着色（user 用 `Ok` 绿、其余用 `Warn` 黄；`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 `/md` 开关与 TTY 旁路约束），user/tool 消息与工具参数原样
+- `/history` 无参截断列表（`style.OneLine` 先剥离 ANSI 转义与控制字符、压成单行，再按 120 rune 截断，避免 `\r`/`\x1b[K` 覆盖已打印行与未闭合 SGR 泄漏）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染、并按角色着色（user 用 `Ok` 绿、其余用 `Warn` 黄；`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 TTY 与输出模式约束：非 TTY、plain 一并旁路），user/tool 消息与工具参数原样
 - `/model` 无参实时调接口列出可用模型（`*` 标注当前，失败仍显示当前模型），带参直接切换不校验；带尾随空格支持补全（接口列表在 REPL 内首次加载后缓存，失败不重试）
 - `/think` 无参显示当前思考等级（未设置显示"未设置"）；带参 `minimal/low/medium/high/max` 设置，`off` 关闭，非法值报错不变更；带尾随空格补全等级候选（含 off，静态列表）
 - `/load` 无参打开方向键选择菜单（`repl/picker.go`，非 TTY 降级为序号输入），候选 Display 带时间/条数/简介

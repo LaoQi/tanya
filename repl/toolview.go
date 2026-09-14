@@ -94,25 +94,39 @@ func toolEndBody(res agent.ToolResult, width, maxLines int) (string, string) {
 	return b.String(), status
 }
 
-func renderToolBlock(sem theme.Semantics, lead, name, args string, res agent.ToolResult, width, maxLines int) string {
+func toolTitleText(name, args string, width int) string {
 	lines := toolTitleLines(name, args, "", width-3)
-	title := "▸ " + lines[0] + "\n"
+	var b strings.Builder
+	b.WriteString("▸ " + lines[0] + "\n")
 	for _, l := range lines[1:] {
-		title += l + "\n"
+		b.WriteString(l + "\n")
 	}
+	return b.String()
+}
+
+// renderToolBody 渲染工具正文块与状态行；title 为空表示标题已由 ToolStart 输出，此处不重复。
+func renderToolBody(sem theme.Semantics, title string, res agent.ToolResult, width, maxLines int) string {
 	out, status := toolEndBody(res, width, maxLines)
 	var b strings.Builder
-	b.WriteString(lead)
-	if term.HasSGR(out) {
-		b.WriteString(sem.Dim.Frame(title))
+	switch {
+	case term.HasSGR(out):
+		if title != "" {
+			b.WriteString(sem.Dim.Frame(title))
+		}
 		b.WriteString(term.Passthrough(out))
-	} else {
+	case title != "":
 		b.WriteString(sem.Dim.Frame(title + out))
+	default:
+		b.WriteString(sem.Dim.Frame(out))
 	}
 	if status != "" {
 		b.WriteString(sem.Info.Sprint("  ↳ "+status) + "\n")
 	}
 	return b.String()
+}
+
+func renderToolBlock(sem theme.Semantics, lead, name, args string, res agent.ToolResult, width, maxLines int) string {
+	return lead + renderToolBody(sem, toolTitleText(name, args, width), res, width, maxLines)
 }
 
 func RenderToolEnd(sem theme.Semantics, name, args string, res agent.ToolResult, width, maxLines int) string {
@@ -122,6 +136,12 @@ func RenderToolEnd(sem theme.Semantics, name, args string, res agent.ToolResult,
 func RenderToolEndInline(sem theme.Semantics, name, args string, res agent.ToolResult, width, maxLines int) string {
 	lead := strings.Repeat(term.CursorUp(1)+term.ClearLineHome(), toolTitleLineCount(name, args, width-3))
 	return renderToolBlock(sem, lead, name, args, res, width, maxLines)
+}
+
+// RenderToolEndAppend 供追加式输出（非 TTY / plain+verbose 等无光标控制场景）使用：
+// 标题已由 RenderToolStart 打出且无法上移覆盖，这里只补正文块与状态行，避免标题重复。
+func RenderToolEndAppend(sem theme.Semantics, res agent.ToolResult, width, maxLines int) string {
+	return renderToolBody(sem, "", res, width, maxLines)
 }
 
 func RenderResponseInfo(info agent.ResponseInfo, width int) string {
@@ -358,9 +378,14 @@ func (v *toolView) Handle(e agent.Event) {
 		v.sp.stop()
 		// 工具块被屏蔽时不置 justEnded：否则下一条正文前会留下孤立空行。
 		if v.st.out.allows(KindToolBlock) {
-			block := RenderToolEnd(v.sem, e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
-			if v.prof.TTY && v.st.cursor() && !e.Interactive {
+			var block string
+			switch {
+			case v.prof.TTY && v.st.cursor() && !e.Interactive:
 				block = RenderToolEndInline(v.sem, e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
+			case e.Interactive:
+				block = RenderToolEnd(v.sem, e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
+			default:
+				block = RenderToolEndAppend(v.sem, e.Result, v.width(), v.maxLines)
 			}
 			v.st.out.atomic(KindToolBlock, func(w io.Writer) {
 				io.WriteString(w, block)
