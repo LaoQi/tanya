@@ -1,6 +1,6 @@
 # Agent 拆分：接缝重组设计与实施
 
-状态：**S0–S4 已实施**（`agent/stats.go`、`agent/prompt.go`、`agent/session.go` 落地，`main.go`/`repl/` 零改动；`AGENTS.md`/`docs/design.md`/`docs/todos.md` 已同步）。落地偏差见 §10。
+状态：**S0–S4 已实施**（`agent/stats.go`、`agent/prompt.go`、`agent/session.go` 落地，`main.go`/`repl/` 零改动；`AGENTS.md`/`docs/design.md`/`docs/todos.md` 已同步）。落地偏差见 §10。**更正（2026-09-14）**：文中 `probe` 字段与 `Agent.runtimePrompt` 的 `probe != nil` 短路已随环境段收口删除（env 在 `agent.New` 构造期定格进 `Agent.env`；§99 的 `Agent.cwd` 字段一并删除——`runtimePrompt` 是它最后一个读取点），见 `docs/design.md`《环境段（envprobe）》。
 相关：`docs/shell-tool.md`（已完成的接缝准备：工具簇已外移，方法数 30→26）。
 
 ## 1. 要解决的问题

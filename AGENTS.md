@@ -32,7 +32,7 @@ agent/             核心逻辑
   prompt.go        系统提示组装（快照/旧版识别，AGENTS.md 经注入 reader 读取）
   session.go       会话存储（sessionStore：增量落盘、载入、列表缓存）
   stats.go         状态行统计（usageStats：token 与缓存命中格式化）
-  envprobe.go      环境探针（平台 + cwd + run_shell 契约 + 工作区标记，恒定注入）
+  envprobe.go      环境段（构造期定格的平台 + cwd + run_shell 契约）
   shelltool.go     run_shell 组件（profile/程序清单/工作区/家目录/bridge 构造期定格，cwd 解析与终端租约）
   shell.go         run_shell 叶子（shell 参数组装、头尾截断、超时与等待、结构化返回）
   tty_bridge.go    TTYBridge 接口（实现由 readline 提供，经 WithTTYBridge 注入）

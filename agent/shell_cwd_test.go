@@ -179,7 +179,7 @@ func TestAskShellToolRelativeCwdUsesWorkspace(t *testing.T) {
 		t.Fatalf("history: %d", len(a.history))
 	}
 	if content := a.history[2].Content; !strings.Contains(content, "cwd: "+cwd+"\n") {
-		t.Errorf("相对 cwd 应按工作区（a.cwd）解析: %q", content)
+		t.Errorf("相对 cwd 应按工作区（shellTool.workspace）解析: %q", content)
 	}
 }
 

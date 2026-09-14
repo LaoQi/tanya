@@ -584,18 +584,26 @@ func TestRuntimePromptAppendsEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.probe = fakeProbe("go.mod")
-	want := a.systemPrompt() + "\n\n" + envSection(cwd, a.probe, a.tool.profile)
+	want := a.systemPrompt() + "\n\n" + envSection(cwd, a.tool.profile)
 	if a.runtimePrompt() != want {
 		t.Errorf("runtimePrompt 拼接异常:\n got %q\nwant %q", a.runtimePrompt(), want)
 	}
 }
 
-func TestRuntimePromptNilProbe(t *testing.T) {
+func TestEnvStableInSession(t *testing.T) {
 	a := newTestAgent(t)
-	a.probe = nil
-	if a.runtimePrompt() != a.systemPrompt() {
-		t.Error("probe 为 nil 时 runtimePrompt 应退化为 persistPrompt")
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := a.runtimePrompt()
+	for _, f := range []string{"go.mod", "Makefile", "package.json"} {
+		if err := os.WriteFile(filepath.Join(cwd, f), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if a.runtimePrompt() != before {
+		t.Errorf("会话期间环境段不得变更:\n got %q\nwant %q", a.runtimePrompt(), before)
 	}
 }
 

@@ -1,6 +1,6 @@
 # prompt cache 机制探测（参考记录）
 
-tanyan 的 history 全程 append-only、system 前缀冻结、工具描述按请求组装，这些设计都建立在"对端有前缀缓存"这一假设上。本文记录该假设的实测验证结论，以及"改动 prompt 中的哪一部分会损失多少缓存"的量化台阶，供后续设计（动态工具描述、运行时改配置、会话注入）引用。
+tanyan 的 history 全程 append-only、system 前缀冻结、工具描述按请求组装，这些设计都建立在"对端有前缀缓存"这一假设上。其中"system 前缀冻结"是**需要代码维护的不变量**：规则快照在 `/new`/`/load` 冻结，环境段自 2026-09-14 起在 `agent.New` 构造期定格（此前 `WORKSPACE` 行每轮重探、是 system 内唯一会自行变化的内容，见《落实：env 段的动态源》）。本文记录该假设的实测验证结论，以及"改动 prompt 中的哪一部分会损失多少缓存"的量化台阶，供后续设计（动态工具描述、运行时改配置、会话注入）引用。
 
 探测脚本：`scripts/cache_probe.py`（标准库，无依赖），结论对应 golang 侧 `llm.go` / `llm_responses.go` 的请求构造。
 
@@ -59,8 +59,26 @@ python3 scripts/cache_probe.py --group all --model deepseek-flash
 
 - **动态工具描述成本可控**：仅在 DeepSeek 后端成立，且代价可量化（按 64 对齐、随改动位置递增）。GLM/Qwen 后端本就没有可依赖的前缀缓存，多轮对话第 1–2 轮零收益，动态工具描述不构成额外损失。
 - **工具顺序必须稳定**：交换工具顺序会在 tools 段开头断开（实测命中 5248 → 5120）。`ToolDefs()` 现有固定顺序满足；条件注册（如 `run_shell` 缺失时）会从变化点起失效，影响面限于 tools 段。
-- **不要把易变状态注入 system 前缀**：env 段变化会击穿 messages，代价是整个会话前缀。
+- **不要把易变状态注入 system 前缀**：env 段变化会击穿 messages，代价是整个会话前缀；tanyan 侧的落实方式是「只在构造期算一次」（见《落实：env 段的动态源》）。
 - **假设不可默认成立**：多后端并存时，缓存收益要按后端判定；`auto-flash` 这类"自动路由"模型的缓存行为不可预期。
+
+## 落实：env 段的动态源（2026-09-14）
+
+`envSection` 的 `WORKSPACE` 行曾每轮请求重算（`os.Stat` 8 个标记文件），是 system 段里唯一会自行变化的内容。用本文同一方法实测（deepseek-flash，system = `DefaultSystemPrompt` + env 段 ≈ 0.7 KB，history ≈ 3.9 k token 的构造文本，tools 段 1 个 `run_shell`）：
+
+| 请求 | prompt | hit | 命中率 |
+|---|---|---|---|
+| A 建立 | 3973 | 0 | 0% |
+| A 复测 | 3973 | 3839 | 96.63% |
+| B（`WORKSPACE` 多一行，+10 token） | 3983 | 128 | **3.21%** |
+| B 复测 | 3983 | 3840 | 96.41% |
+| A 回退 | 3973 | 3839 | 96.63% |
+
+结论与《tools 段位置台阶》同源：差异点只要落在 system 内部，代价就是「其后全部内容」——env 段虽在 system 最末尾，之后仍挂着整个 history 与 tools 段，「变化点靠后所以便宜」不成立。真实会话里同样会发生：目录内新建/删除 `go.mod`/`Makefile`/`package.json` 等任一标记文件（`go mod init`、`npm init`、`touch Makefile` 都是常见操作）即触发一次全量 miss，历史越长损失越大。
+
+落实：`envSection(cwd, profile)` 改为在 `agent.New` 调用一次、结果定格进 `Agent.env`，会话期间（含 `/new`、`/load`）不重算；`envProbeFunc` 注入机制删除；`WORKSPACE` 行随后**整行删除**（收益只有「省一次 `ls`」，却让 system 存在自行变化的输入，不划算）——上表数据保留为这次击穿的实测记录。守卫用例 `agent/agent_test.go` `TestEnvStableInSession`（构建后改动目录内容不得改变 `runtimePrompt`）。设计见 `docs/design.md`《环境段（envprobe）》。
+
+复现：沿用本文 `--group tools` 的思路，把 system 换成 `DefaultSystemPrompt + envSection(cwd, profile)`，在 env 段里增删任意一行即可。
 
 ## 未验证项
 

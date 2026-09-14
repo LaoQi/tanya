@@ -63,7 +63,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - **usage 映射**：`input_tokens`→PromptTokens、`output_tokens`→CompletionTokens、`input_tokens_details.cached_tokens`→`CacheHit()` 既有通道、`output_tokens_details.reasoning_tokens`→`Usage.ReasoningTokens`。
 - **404 提示**：第三方端点不支持时错误文案附带切换 `api_protocol: chat` 的指引。
 
-**思维链回传与缓存（实现红线）**：reasoning `content` 随会话 jsonl 明文持久化，后续请求**原样回传**（取 `response.completed` 终态、不做任何截断/改写/规范化），以维持 DeepSeek 前缀缓存命中——history 段逐字节稳定即可命中「用户输入结束/模型输出结束」位置的缓存前缀单元；会话经 `/load` 恢复后仅需同目录同环境（`envSection` 的 `CWD`/`SHELL`/`WORKSPACE` 实时探针不变）即可命中。jsonl 序列化 HTML 转义（`\u00xx`）只在磁盘表示，读回还原，不影响请求构造。
+**思维链回传与缓存（实现红线）**：reasoning `content` 随会话 jsonl 明文持久化，后续请求**原样回传**（取 `response.completed` 终态、不做任何截断/改写/规范化），以维持 DeepSeek 前缀缓存命中——history 段逐字节稳定即可命中「用户输入结束/模型输出结束」位置的缓存前缀单元；会话经 `/load` 恢复后仅需同目录同环境（env 段在 `agent.New` 构造期定格、进程内逐字节不变）即可命中。jsonl 序列化 HTML 转义（`\u00xx`）只在磁盘表示，读回还原，不影响请求构造。
 
 ### 协议无关约束
 
@@ -173,9 +173,9 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 ## 系统提示与缓存友好
 
 - 组装规则：`DefaultSystemPrompt`（内置，固定不可配，`system_prompt` 配置项已移除）+ 全局 `~/.config/tanyan/AGENTS.md`（存在时）+ 工作区 `./AGENTS.md`（存在时），各段以 `# 全局说明`/`# 项目说明` 标题分隔，文件缺失/空白跳过
-- 规则与事实分离：persistPrompt（上述规则）在 `/new`/`/load` 时组装并冻结进会话首行；每次请求的 system = persistPrompt + `envSection(cwd)`（环境事实实时拼在末尾，不持久化、不冻结）
+- 规则与事实分离：persistPrompt（上述规则）在 `/new`/`/load` 时组装并冻结进会话首行；每次请求的 system = persistPrompt + 空行 + `Agent.env`（环境事实在 `agent.New` 构造期算一次、冻结进内存，既不持久化也不再重算）
 - 快照机制：`/new` 与 `/load` 时刻读取 AGENTS.md 组装快照；会话进行中零文件 IO，快照冻结；旧格式会话（system 首行含历史环境段）原样保留并标记，`/load` 时提示 `/new`
-- 缓存收益：history 全程 append-only，同一会话内 messages 前缀逐字节不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中
+- 缓存收益：history 全程 append-only，system 两段（规则快照 + 环境段）在本进程内逐字节恒定，同一会话内请求前缀不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中。env 段自 2026-09-14 起在构造期定格（此前的 `WORKSPACE` 行是 system 内唯一会自行变化的输入，已随本次收口删除）
 - 缓存命中捕获（DeepSeek `prompt_cache_hit_tokens` / OpenAI `prompt_tokens_details.cached_tokens`）经 `PromptCache()`/`PromptCacheRate()` 供提示符占位符显示
 - 缓存机制的实测结论（64-token 块粒度、tools 段在序列化尾部的代价台阶、各后端写入延迟差异）见 `docs/cache-probe.md`
 
@@ -273,24 +273,25 @@ repl 输出侧测试方法（输出收敛方案阶段 0-4 建立）：① **注�
 
 pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（测试自身分配 pty 充当真实 tty，经 `newBridgeTTY` 注入）断言子进程 `/dev/tty` 可读、`tty` 输出为 pty slave、`GPG_TTY` 覆盖、初始尺寸复制、raw 设置与恢复、子进程退出后 master 收到 EIO（防忘关 slave）、Attach 前预置输入不丢、子进程存活时 `stop()` 及时返回；② `agent/shell_bridge_test.go` 用 fake bridge（os.Pipe 造流）断言桥接全流程、Prepare/Attach 失败回退现状路径、非交互不触桥接；③ 真实 tty E2E（gated，用 `script -qec` 驱动真实 /dev/tty，不参与默认 `go test`）：`TTY_BRIDGE_E2E=1`（readline 单命令）、`TTY_E2E=1`（agent 全链路）、`TTY_E2E_REUSE=1`（同进程连续两次交互命令，覆盖 `ownTTY` 打开/恢复/重开复用路径）。
 
-## 环境探针（envprobe）
+## 环境段（envprobe）
 
 - 定位：只注入模型无法廉价自探的最小事实集——平台事实与 run_shell 执行契约；工具清单不注入 prompt（function calling 已完整提供），工具版本/分支/目录列表等易变信息模型可按需自探，一律不预注入
-- 组装：`runtimePrompt()` = persistPrompt（规则，冻结）+ 空行 + `envSection(cwd, probe)`（实时拼在末尾）；环境注入恒定生效，无配置开关（曾有 `probe` 配置项，review 后移除）
-- 输出格式（约 7 行紧凑键值，全部源自 `runtime` 与 `shell.go` 常量，同 cwd 下字节级确定）：
+- 组装：`runtimePrompt()` = persistPrompt（规则，冻结）+ 空行 + `Agent.env`；`envSection(cwd, profile)` 在 `agent.New` 调用一次、结果定格进 `Agent.env`，会话期间（含 `/new`、`/load`）不重算；无注入点、无 `probe` 字段（曾有 `envProbeFunc` 注入与 `probe` 配置项，2026-09-14 收口删除）
+- 为何定格：system 位于序列化后的 messages/instructions 之前，其任何字节变化都击穿其后全部 history 与 tools 的缓存前缀（实测量化见 `docs/cache-probe.md`《落实：env 段的动态源》；历史案例 `WORKSPACE` 行增删一行：命中率 96.63% → 3.21%）。定格同时是新增字段的准入红线：只收构造期确定的事实，永不引入请求期/TTL 类输入
+- 取舍：环境事实定格在进程启动时刻（换目录/换机需重启进程；本进程 cwd 恒定，实际不构成限制）；目录内容、分支、工具版本等项目事实一律不注入，由模型按需自探（`ls`/`git rev-parse` 等）
+- 输出格式（7 行紧凑键值，全部源自构造期事实——`runtime` 平台常量、cwd 快照、`shellProfile`、`shell.go` 契约常量；同 cwd 下字节级确定）：
 
   ```
   # 环境
   OS: linux/amd64
   CWD: ~/Project/tanya
-  SHELL: /usr/bin/bash -c（非交互；有控制终端时 run_shell 子进程 stdin 直通 tty，可应答密码/确认）
+  SHELL: bash
   TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）
   TIMEOUT: 默认 60s（interactive 时 300s），上限 900s
   OUTPUT: stdout/stderr 头尾各 30KB，中间截断
-  WORKSPACE: go.mod, Makefile
   ```
 
-- 事实源单一：SHELL/TIMEOUT/OUTPUT 三行由解析后的 `shellProfile` 与 `shell.go` 常量程序化生成（`invocation()`/`shellTimeoutSec`/`shellInteractiveTimeoutSec`/`shellTimeoutLimit`/`shellMaxOutput`），TTY 行为固定契约文案，无第二份硬编码描述；四行恒定输出（shell 缺失时进程已在启动阶段退出）
-- 平台条件：`TTY:` 行与 SHELL 行的 tty 直通说明仅在 `ttyStdinSupported()` 为真（unix 且非 illumos/ios）时输出，其余平台 SHELL 行退化为 `（非交互）`，不宣称不存在的 /dev/tty 能力
-- 探测机制：`envSection` 为纯函数，WORKSPACE 标记文件（`os.Stat`，8 种标志文件固定顺序）经注入的 `envProbeFunc` 取得；shell 契约由入参 `*shellProfile` 注入（`shellTool.profile`，SHELL 行取 `profile.invocation()`），不再读包级状态；主路径零 exec、零易变信息
-- 可测性：分层测试——persistPrompt 只含规则 / envSection 注入 fake probe 断言渲染 / runtimePrompt 拼接（probe 为 nil 时退化） / 同参数两次渲染字节相等
+- 事实源单一：SHELL 行取 `shellProfile.Name`（与 `run_shell` 工具描述同源，只报 shell 名、不描述调用形态），TIMEOUT/OUTPUT 两行由 `shell.go` 常量程序化生成（`shellTimeoutSec`/`shellInteractiveTimeoutSec`/`shellTimeoutLimit`/`shellMaxOutput`），TTY 行固定契约文案，无第二份硬编码描述；各行恒定输出（shell 缺失时进程已在启动阶段退出）
+- 平台条件：`TTY:` 行仅在 `ttyStdinSupported()` 为真（unix 且非 illumos/ios）时输出，不宣称不存在的 /dev/tty 能力
+- 探测机制：`envSection` 为构造期纯函数，输入全为构造期事实——`runtime` 平台常量、`os.Getwd` 快照（进程全程不 `os.Chdir`）、`shellProfile.invocation()`（`shellTool` 构造期定格）、`shell.go` 执行契约常量；进程内零重复探测、零 exec
+- 可测性：分层测试——persistPrompt 只含规则 / envSection 直接断言渲染（全串 golden） / runtimePrompt 拼接 / 同参数两次渲染字节相等 / **会话期间冻结守卫**（构建后改动目录内容不得改变 `runtimePrompt`）

@@ -8,47 +8,18 @@ import (
 	"strings"
 )
 
-type envProbeData struct {
-	workspace string
-}
-
-type envProbeFunc func(cwd string) envProbeData
-
-func defaultEnvProbe(cwd string) envProbeData {
-	return envProbeData{workspace: workspaceMarker(cwd)}
-}
-
-func envSection(cwd string, probe envProbeFunc, profile *shellProfile) string {
-	data := probe(cwd)
+func envSection(cwd string, profile *shellProfile) string {
 	var b strings.Builder
 	b.WriteString("# 环境\n")
 	fmt.Fprintf(&b, "OS: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Fprintf(&b, "CWD: %s\n", shortPath(cwd))
-	ttyNote, ttyLine := "", ""
+	fmt.Fprintf(&b, "SHELL: %s\n", profile.Name)
 	if ttyStdinSupported() {
-		ttyNote = "；有控制终端时 run_shell 子进程 stdin 直通 tty，可应答密码/确认"
-		ttyLine = "TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）\n"
+		b.WriteString("TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）\n")
 	}
-	fmt.Fprintf(&b, "SHELL: %s（非交互%s）\n", profile.invocation(), ttyNote)
-	b.WriteString(ttyLine)
 	fmt.Fprintf(&b, "TIMEOUT: 默认 %ds（interactive 时 %ds），上限 %ds\n", shellTimeoutSec, shellInteractiveTimeoutSec, shellTimeoutLimit)
 	fmt.Fprintf(&b, "OUTPUT: stdout/stderr 头尾各 %dKB，中间截断\n", shellMaxOutput/1000)
-	if data.workspace != "" {
-		fmt.Fprintf(&b, "WORKSPACE: %s\n", data.workspace)
-	}
 	return b.String()
-}
-
-func workspaceMarker(cwd string) string {
-	files := []string{"go.mod", "package.json", "pyproject.toml", "requirements.txt",
-		"Cargo.toml", "pom.xml", "CMakeLists.txt", "Makefile"}
-	var found []string
-	for _, f := range files {
-		if _, err := os.Stat(filepath.Join(cwd, f)); err == nil {
-			found = append(found, f)
-		}
-	}
-	return strings.Join(found, ", ")
 }
 
 func shortPath(p string) string {
