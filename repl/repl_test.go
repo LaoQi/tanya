@@ -105,7 +105,7 @@ func TestPrintHistoryFullToolCalls(t *testing.T) {
 	r, buf, _ := newTestREPL(t, newFakeTerm())
 	r.printHistoryFull(2, m)
 	out := buf.String()
-	if !strings.Contains(out, "\x1b[97;1m#2 assistant\x1b[0m") {
+	if !strings.Contains(out, "\x1b[97;1m\x1b[33m#2 assistant\x1b[0m\x1b[0m") {
 		t.Errorf("消息头应按一级标题渲染: %q", out)
 	}
 	if !strings.Contains(out, "\n[调用 calc]\n") || !strings.Contains(out, "\n→ calc {\"expression\":\"1+1\"}\n") {
@@ -188,7 +188,7 @@ func TestPrintHistoryFullRenderedMarkdown(t *testing.T) {
 	m := agent.Message{Role: "assistant", Content: "# 标题\n\n- a\n- b\n\n正文 **粗** 结尾\n"}
 	r.printHistoryFull(1, m)
 	out := buf.String()
-	for _, want := range []string{"\x1b[97;1m#1 assistant\x1b[0m", "\x1b[97;1m标题\x1b[0m", "• a", "• b", "\x1b[1m粗\x1b[0m"} {
+	for _, want := range []string{"\x1b[97;1m\x1b[33m#1 assistant\x1b[0m\x1b[0m", "\x1b[97;1m标题\x1b[0m", "• a", "• b", "\x1b[1m粗\x1b[0m"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("assistant 正文应走 Markdown 渲染，缺 %q: %q", want, out)
 		}
@@ -254,5 +254,38 @@ func TestNoSaveWarnOnlyWhenEnabled(t *testing.T) {
 	got := r.noSaveWarn()
 	if !strings.Contains(got, MsgNoSaveWarn) || !strings.HasSuffix(got, "\n") {
 		t.Errorf("只读模式应输出一行警告: %q", got)
+	}
+}
+
+func TestPrintHistoryHeadRoleColor(t *testing.T) {
+	r, buf, _ := newTestREPL(t, newFakeTerm())
+	cases := []struct {
+		role string
+		name string
+		want string
+	}{
+		{"user", "", "\x1b[32m#1 user\x1b[0m"},
+		{"assistant", "", "\x1b[33m#1 assistant\x1b[0m"},
+		{"tool", "run_shell", "\x1b[33m#1 run_shell\x1b[0m"},
+	}
+	for _, tc := range cases {
+		buf.Reset()
+		r.printHistoryHead(1, agent.Message{Role: tc.role, Name: tc.name, Content: "x"})
+		out := buf.String()
+		if !strings.Contains(out, tc.want) {
+			t.Errorf("role=%s 消息头应着色为 %q: %q", tc.role, tc.want, out)
+		}
+		if !strings.Contains(out, "\x1b[97;1m") {
+			t.Errorf("role=%s 消息头应保留一级标题样式: %q", tc.role, out)
+		}
+	}
+}
+
+func TestPrintHistoryHeadPlainWhenMdOff(t *testing.T) {
+	r, buf, _ := newTestREPL(t, newFakeTerm())
+	r.mdLive = false
+	r.printHistoryHead(3, agent.Message{Role: "user", Content: "x"})
+	if out := buf.String(); out != "#3 user\n" {
+		t.Errorf("/md off 时消息头应原样无色: %q", out)
 	}
 }

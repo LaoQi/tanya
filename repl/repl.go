@@ -479,7 +479,7 @@ func historyLine(n int, m agent.Message) string {
 }
 
 func (r *REPL) printHistoryFull(n int, m agent.Message) {
-	r.printHistoryHead(n, historyLabel(m))
+	r.printHistoryHead(n, m)
 	if m.Role == "assistant" && m.Content != "" {
 		r.printRendered(m.Content)
 	} else if text := historyText(m); text != "" {
@@ -496,13 +496,17 @@ func (r *REPL) printHistoryFull(n int, m agent.Message) {
 
 // printHistoryHead 把消息头（#N 角色）按一级标题渲染——`#` 与序号连写不构成 markdown 标题语法，
 // 因此不走 markdown 解析，直接构造 ir.Heading IR。
-func (r *REPL) printHistoryHead(n int, label string) {
-	head := fmt.Sprintf("#%d %s", n, label)
+func (r *REPL) printHistoryHead(n int, m agent.Message) {
+	head := fmt.Sprintf("#%d %s", n, historyLabel(m))
 	if !r.mdEnabled() {
 		r.st.out.emit(KindNotice, head+"\n")
 		return
 	}
-	r.print(r.rend.Block(ir.Heading{Level: 1, Inlines: []ir.Inline{ir.Span{Text: head}}}), KindNotice)
+	st := r.sem.Warn
+	if m.Role == "user" {
+		st = r.sem.Ok
+	}
+	r.print(r.rend.Block(ir.Heading{Level: 1, Inlines: []ir.Inline{ir.Span{Style: st, Text: head}}}), KindNotice)
 }
 
 // printRendered 把整段文本按与 AI 输出一致的管线渲染（/md 开关 + TTY 旁路），供历史回放等一次性展示使用。
