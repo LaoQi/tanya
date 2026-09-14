@@ -20,14 +20,15 @@ const DefaultSystemPrompt = `你是 tanyan（兼容 Pi/opencode），运行在�
 坚持迭代直到任务完成：修改后主动验证（编译、测试、运行），确认无误再收尾。`
 
 type Agent struct {
-	cfg     *Config
-	client  *Client
-	tool    *shellTool
-	history []Message
-	env     string
-	prompt  *promptBuilder
-	store   *sessionStore
-	stats   usageStats
+	cfg       *Config
+	client    *Client
+	tool      *shellTool
+	workspace string
+	history   []Message
+	env       string
+	prompt    *promptBuilder
+	store     *sessionStore
+	stats     usageStats
 }
 
 type ResponseInfo struct {
@@ -77,12 +78,13 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 	}
 	sessionDir := resolveSessionDir(cfg, cwd)
 	a := &Agent{
-		cfg:    cfg,
-		client: NewClient(cfg, ToolDefs(tool)),
-		tool:   tool,
-		env:    envSection(cwd, tool.profile),
-		prompt: newPromptBuilder(cwd, globalAgentsPath(), readAgentsFile),
-		store:  newSessionStore(sessionDir, o.noSave),
+		cfg:       cfg,
+		client:    NewClient(cfg, ToolDefs(tool)),
+		tool:      tool,
+		workspace: cwd,
+		env:       envSection(cwd, tool.profile),
+		prompt:    newPromptBuilder(cwd, globalAgentsPath(), readAgentsFile),
+		store:     newSessionStore(sessionDir, o.noSave),
 	}
 	if !o.noSave {
 		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
@@ -302,24 +304,13 @@ func (a *Agent) totalTokens() int {
 	return t
 }
 
-func (a *Agent) ContextInfo() string {
-	return a.stats.contextInfo(a.totalTokens(), len(a.history), a.store.path())
-}
-
-func (a *Agent) PromptUsage() string {
-	return a.stats.promptUsage(a.totalTokens())
-}
-
-func (a *Agent) PromptCache() string {
-	return a.stats.promptCache()
-}
-
-func (a *Agent) PromptCacheRate() string {
-	return a.stats.promptCacheRate()
-}
-
-func (a *Agent) PromptSummary() string {
-	return a.stats.summary(a.totalTokens())
+func (a *Agent) Stats() Stats {
+	st := a.stats.view()
+	st.Workspace = a.workspace
+	st.Session = a.store.path()
+	st.Messages = len(a.history)
+	st.Est = a.totalTokens()
+	return st
 }
 
 func (a *Agent) Model() string { return a.cfg.Model }

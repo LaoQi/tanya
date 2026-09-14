@@ -55,9 +55,3 @@ const (
 	MsgCalcMissingRParen = "缺少右括号"
 	MsgCalcWantNumber    = "第 %d 个字符处应为数字"
 )
-
-const (
-	MsgTokenAPI      = "token: %d（prompt %d / completion %d，API 实报）"
-	MsgTokenEstimate = "token: ~%d（本地估算）"
-	MsgContextInfo   = "%s\n消息: %d 条\n会话文件: %s"
-)

@@ -150,6 +150,15 @@ func turnDuration(d time.Duration) string {
 }
 
 func (r *REPL) resolveVars() func(string) (string, bool) {
+	var st agent.Stats
+	var loaded bool
+	load := func() agent.Stats {
+		if !loaded {
+			st = r.agent.Stats()
+			loaded = true
+		}
+		return st
+	}
 	return func(name string) (string, bool) {
 		switch name {
 		case "cwd":
@@ -159,13 +168,19 @@ func (r *REPL) resolveVars() func(string) (string, bool) {
 		case "effort":
 			return r.agent.ReasoningEffort(), true
 		case "usage":
-			return r.agent.PromptUsage(), true
+			return usageText(load()), true
 		case "cache":
-			return r.agent.PromptCache(), true
+			return cacheText(load()), true
 		case "cache_rate":
-			return r.agent.PromptCacheRate(), true
-		case "stat":
-			return r.agent.PromptSummary(), true
+			return cacheRateText(load()), true
+		case "usage_total":
+			return usageTotalText(load()), true
+		case "cache_total":
+			return cacheTotalText(load()), true
+		case "cache_rate_total":
+			return cacheRateTotalText(load()), true
+		case "usage_summary":
+			return summaryText(load()), true
 		}
 		return "", false
 	}
@@ -272,8 +287,8 @@ func (r *REPL) handleCommand(line string) bool {
 			break
 		}
 		r.loadSessionInteractive()
-	case "/context":
-		r.st.out.emit(KindNotice, r.agent.ContextInfo()+"\n")
+	case "/stat":
+		r.st.out.emit(KindNotice, statInfo(r.agent.Stats())+"\n")
 	case "/history":
 		r.showHistory(parts[1:])
 	case "/model":
@@ -363,7 +378,7 @@ func (r *REPL) printThemeSample() {
 			return "model", true
 		case "effort":
 			return "high", true
-		case "stat":
+		case "usage_summary":
 			return "1.2k", true
 		}
 		return "", false

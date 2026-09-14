@@ -22,7 +22,7 @@
 
 ```
 main.go            入口、flag 子命令、ask 单发
-repl/              REPL 循环与输入分发（对话优先）、斜杠命令、提示符模板、ghost 补全、/load picker、工具块渲染、回合分隔线、spinner、UI 文案
+repl/              REPL 循环与输入分发（对话优先）、斜杠命令、提示符模板、ghost 补全、/load picker、工具块渲染、回合分隔线、spinner、统计渲染（stats.go）、UI 文案
 readline/          自研终端输入层：行编辑/历史/Tab 补全菜单、按键解析、raw mode 与 KeyWatcher、显示宽度、pty 桥接、终端状态自愈
 agent/             核心逻辑
   config.go        配置加载（默认值 < ~/.config/tanyan/config.yaml < env TANYA_*）
@@ -31,7 +31,7 @@ agent/             核心逻辑
   agent.go         对话 loop、上下文估算、消息组装与工具分发
   prompt.go        系统提示组装（快照/旧版识别，AGENTS.md 经注入 reader 读取）
   session.go       会话存储（sessionStore：增量落盘、载入、列表缓存）
-  stats.go         状态行统计（usageStats：token 与缓存命中格式化）
+  stats.go         统计快照（usageStats：record/reset/view，只出数值不做格式化）
   envprobe.go      环境段（构造期定格的平台 + cwd + run_shell 契约）
   shelltool.go     run_shell 组件（profile/程序清单/工作区/家目录/bridge 构造期定格，cwd 解析与终端租约）
   shell.go         run_shell 叶子（shell 参数组装、头尾截断、超时与等待、结构化返回）

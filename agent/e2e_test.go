@@ -107,17 +107,14 @@ func TestAskUsageFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(a.PromptUsage(), "~") {
-		t.Errorf("无 usage 时应为估算: %q", a.PromptUsage())
+	if st := a.Stats(); st.HasContext {
+		t.Errorf("无 usage 时不应标记实报: %+v", st)
 	}
 	if err := a.Ask(context.Background(), "问题", nil); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(a.PromptUsage(), "~") {
-		t.Errorf("对端未返回 usage 时仍为估算: %q", a.PromptUsage())
-	}
-	if !strings.Contains(a.ContextInfo(), "本地估算") {
-		t.Errorf("ContextInfo: %q", a.ContextInfo())
+	if st := a.Stats(); st.HasContext {
+		t.Errorf("对端未返回 usage 时仍不应标记实报: %+v", st)
 	}
 }
 
@@ -130,11 +127,8 @@ func TestAskUsageReal(t *testing.T) {
 	if err := a.Ask(context.Background(), "问题", nil); err != nil {
 		t.Fatal(err)
 	}
-	if a.PromptUsage() != "1.5k" {
-		t.Errorf("应显示实报 prompt tokens: %q", a.PromptUsage())
-	}
-	if !strings.Contains(a.ContextInfo(), "API 实报") {
-		t.Errorf("ContextInfo: %q", a.ContextInfo())
+	if st := a.Stats(); !st.HasContext || st.ContextTokens != 1500 {
+		t.Errorf("应记录实报 prompt tokens: %+v", st)
 	}
 }
 

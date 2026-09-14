@@ -237,7 +237,7 @@ LevelNone: 纯文本（去 ANSI）——重定向文件/管道自动干净，零
 采用 **BBCode 风格**（多方案对比后选定，过程见附录）：
 
 ```
-[white]{cwd}[/] [blue]{model}[/] [yellow]{effort}[/] [green]{stat}[/]
+[white]{cwd}[/] [blue]{model}[/] [yellow]{effort}[/] [green]{usage_summary}[/]
 [red bold]警告[/]
 ```
 
@@ -270,7 +270,7 @@ vars := func(name string) (string, bool) {          // REPL 循环里
     case "cwd": return shortCwd(), true
     case "model": return r.agent.Model(), true
     case "effort": return r.agent.ReasoningEffort(), true
-    case "stat": return r.agent.PromptSummary(), true
+    case "usage_summary": return summaryText(r.agent.Stats()), true
     }
     return "", false
 }

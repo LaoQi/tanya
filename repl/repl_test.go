@@ -22,18 +22,18 @@ func promptRender(t *testing.T, tpl string, vars map[string]string) string {
 }
 
 func TestRenderPrompt(t *testing.T) {
-	got := promptRender(t, "{cwd} {model} {effort} {usage} {cache} {cache_rate} {stat} →", map[string]string{
+	got := promptRender(t, "{cwd} {model} {effort} {usage} {cache} {cache_rate} {usage_summary} →", map[string]string{
 		"cwd": "~/p/t", "model": "m1", "effort": "high", "usage": "123",
-		"cache": "980", "cache_rate": "81.67%", "stat": "980/12.3k 81.67%",
+		"cache": "980", "cache_rate": "81.67%", "usage_summary": "12.3k 81.67%",
 	})
-	if got != "~/p/t m1 high 123 980 81.67% 980/12.3k 81.67% →" {
+	if got != "~/p/t m1 high 123 980 81.67% 12.3k 81.67% →" {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestRenderPromptCacheEmpty(t *testing.T) {
-	got := promptRender(t, "{usage}|{cache}|{cache_rate}|{stat}", map[string]string{
-		"usage": "1", "cache": "", "cache_rate": "", "stat": "",
+	got := promptRender(t, "{usage}|{cache}|{cache_rate}|{usage_summary}", map[string]string{
+		"usage": "1", "cache": "", "cache_rate": "", "usage_summary": "",
 	})
 	if got != "1|||" {
 		t.Errorf("无缓存数据 {cache} 应渲染为空: %q", got)
@@ -55,7 +55,7 @@ func TestRenderPromptEffortEmpty(t *testing.T) {
 }
 
 func TestRenderPromptMarkupColored(t *testing.T) {
-	got := promptRender(t, "[white]{cwd}[/] [green]{stat}[/]", map[string]string{"cwd": "/p", "stat": "ok"})
+	got := promptRender(t, "[white]{cwd}[/] [green]{usage_summary}[/]", map[string]string{"cwd": "/p", "usage_summary": "ok"})
 	if got != "\x1b[37m/p\x1b[0m \x1b[32mok\x1b[0m" {
 		t.Errorf("markup 模板上色: %q", got)
 	}

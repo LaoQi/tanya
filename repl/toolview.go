@@ -6,7 +6,6 @@ import (
 	"github.com/LaoQi/tanyan/render/term"
 	"github.com/LaoQi/tanyan/render/theme"
 	"io"
-	"strconv"
 	"strings"
 	"time"
 
@@ -157,15 +156,15 @@ func RenderResponseInfo(info agent.ResponseInfo, width int) string {
 	}
 	if info.Usage != nil {
 		u := info.Usage
-		parts = append(parts, "prompt "+shortTokens(u.PromptTokens))
+		parts = append(parts, "prompt "+formatTokens(u.PromptTokens))
 		if u.CompletionTokens > 0 {
-			parts = append(parts, "completion "+shortTokens(u.CompletionTokens))
+			parts = append(parts, "completion "+formatTokens(u.CompletionTokens))
 		}
-		if hit := u.CacheHit(); hit > 0 && u.PromptTokens > 0 {
-			parts = append(parts, fmt.Sprintf(MsgCachePct, float64(hit)/float64(u.PromptTokens)*100))
+		if rate := formatRate(u.CacheHit(), u.PromptTokens); rate != "" {
+			parts = append(parts, fmt.Sprintf(MsgCachePct, rate))
 		}
 	} else if info.ContextTokens > 0 {
-		parts = append(parts, fmt.Sprintf(MsgCtxTokens, shortTokens(info.ContextTokens)))
+		parts = append(parts, fmt.Sprintf(MsgCtxTokens, formatTokens(info.ContextTokens)))
 	}
 	if len(parts) == 0 {
 		return ""
@@ -178,13 +177,6 @@ func respDuration(d time.Duration) string {
 		return fmt.Sprintf("%.1fs", d.Seconds())
 	}
 	return fmt.Sprintf("%dms", d.Milliseconds())
-}
-
-func shortTokens(n int) string {
-	if n < 1000 {
-		return strconv.Itoa(n)
-	}
-	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
 
 func toolArgsDisplay(name, args string) (string, string) {

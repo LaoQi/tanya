@@ -47,7 +47,7 @@ func TestSchemeRegistry(t *testing.T) {
 }
 
 func TestDefaultPromptPlaceholders(t *testing.T) {
-	if !strings.Contains(DefaultPrompt, "{cwd}") || !strings.Contains(DefaultPrompt, "{stat}") {
+	if !strings.Contains(DefaultPrompt, "{cwd}") || !strings.Contains(DefaultPrompt, "{usage_summary}") {
 		t.Errorf("默认 prompt 模板异常: %q", DefaultPrompt)
 	}
 }
