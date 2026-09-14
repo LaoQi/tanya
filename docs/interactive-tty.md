@@ -6,7 +6,7 @@
 
 ## 1. 背景与根因
 
-`run_shell` 在 `interactive: true` 下需让命令在真实终端应答（sudo 密码、ssh 密码 / passphrase、gpg（pinentry）口令）。现状机制（`agent/shell_tty_unix.go`）为 `open("/dev/tty")` → `cmd.Stdin = tty` → `TIOCSPGRP` 前台移交，实际使用中交互程序**无法取得输入**。根因两条叠加：
+`run_shell` 在 `interactive: true` 下需让命令在真实终端应答（sudo 密码、ssh 密码 / passphrase、gpg（pinentry）口令）。现状机制（原 `agent/shell_tty_unix.go`，该组原语现迁至 `ctty`）为 `open("/dev/tty")` → `cmd.Stdin = tty` → `TIOCSPGRP` 前台移交，实际使用中交互程序**无法取得输入**。根因两条叠加：
 
 1. **终端名推导异常**：子进程 stdin 绑 `/dev/tty` 的 fd，`ttyname(0)` 退化为 `/dev/tty`（`/dev/tty` 的 inode `st_rdev` 为 5:0，非真实 pts 设备号），凡自行推导终端路径者（gpg 推导 `GPG_TTY`、部分 ssh/sudo 分支）落到不可用路径
 2. **无控制终端**：pinentry 等由守护进程拉起的程序无 ctty，只能按路径打开 tty，路径为 `/dev/tty` 时 `open` 必然 `ENXIO`
@@ -74,7 +74,7 @@
 
 `open("/dev/ptmx", O_RDWR|O_NOCTTY)` → `ioctl(TIOCSPTLCK, 0)` 解锁 → `ioctl(TIOCGPTN)` 取编号 N → `open("/dev/pts/N", O_RDWR|O_NOCTTY)` 得 slave。BSD/macOS 无 `TIOCGPTN`，阶段 1 仅 Linux，其余 unix 走 `bridge_stub.go` 返回 `ErrUnsupported` 回退。
 
-真实 tty 由 bridge 自行 `open("/dev/tty", O_RDWR)` 获取（与现状 `openForegroundTTY` 同源），不依赖 `os.Stdin`。跨平台统一入口 `readline.NewTTYBridge()`：Linux 返本实现，其余 unix 返 stub。
+真实 tty 由 bridge 自行 `open("/dev/tty", O_RDWR)` 获取（原 `openForegroundTTY`，现 `ctty.Open`），不依赖 `os.Stdin`。跨平台统一入口 `readline.NewTTYBridge()`：Linux 返本实现，其余 unix 返 stub。
 
 ### 5.2 ctty 建立
 
@@ -128,14 +128,14 @@
 | 观测 | 起因 | 后果 |
 |---|---|---|
 | `lflag` 变成"cooked 减 `ISIG`"（`0x8a3a`） | 历史会话残留（termios 跨进程存活） | 任何 `^C` 都不产生信号，请求无法中断 |
-| 终端前台 pgrp 变为 shell 的 pgrp、termios 变为 shell 提示符模式（实测持续 28s） | 非桥接时段按 `^Z`：`SIGTSTP` 投给 tanyan 所在进程组，tanyan 因 `ProtectTerminalSignals` 免疫，但 **`go run` wrapper 被停止** → shell 判定前台作业已停并抢回终端 | 之后 `^C` 全给 shell，tanyan 收不到；且桥接因 `foregroundTTY` 判负而静默回退（表现为"按键无反应"） |
+| 终端前台 pgrp 变为 shell 的 pgrp、termios 变为 shell 提示符模式（实测持续 28s） | 非桥接时段按 `^Z`：`SIGTSTP` 投给 tanyan 所在进程组，tanyan 因 `ProtectTerminalSignals` 免疫，但 **`go run` wrapper 被停止** → shell 判定前台作业已停并抢回终端 | 之后 `^C` 全给 shell，tanyan 收不到；且桥接因 `ctty.IsForeground` 判负而静默回退（表现为"按键无反应"） |
 
 处置：
 
 - `InitTerminalGuard`（启动时一次）：记录"启动瞬间自己就是终端前台组"（`TIOCGPGRP == getpgrp()`），并 `signal.Ignore(SIGTTIN, SIGTTOU)`——后者是夺回前台的前提（前台已被抢走时调用 `tcsetpgrp` 会触发 `SIGTTOU`，未忽略则把自己停住）
 - `SecureTerminal`：① `ISIG` 被清则置回 ② 若启动时是前台组而当前不是，`TIOCSPGRP` 夺回
 - **门控**：仅"启动时即为前台作业"才自愈——后台启动（`&`）、无控制终端（`setsid`）等场景语义不变（仍走回退），不会去抢用户 shell 的终端
-- **调用点**：`main.go`（启动）、`repl/repl.go`（每回合开始前，即编辑器已还原 termios、尚未进入回合）、`bridge_linux.go` 的 `Prepare`（`foregroundTTY` 判定**之前**）。放在前台判定之前的意义：被抢终端的场景会自愈并**照常走桥接**，而不是静默降级到回退路径
+- **调用点**：`main.go`（启动）、`repl/repl.go`（每回合开始前，即编辑器已还原 termios、尚未进入回合）、`bridge_linux.go` 的 `Prepare`（`ctty.IsForeground` 判定**之前**）。放在前台判定之前的意义：被抢终端的场景会自愈并**照常走桥接**，而不是静默降级到回退路径
 - 实测：启动前人为清掉 `ISIG` → 启动后 0.00s 恢复为 `0x8a3b`；前台被抢后 `tcsetpgrp` 夺回（单测覆盖）
 
 ## 6. 地基契约
@@ -234,7 +234,7 @@ func WithTTYBridge(b TTYBridge) Option // 未注入或 Prepare 失败 → 回退
 | `docs/design.md` | 交互模式契约更新（落地后） |
 | `AGENTS.md` | 结构树补 `readline/bridge_*`、`agent/tty_bridge.go` |
 | 测试 | `readline/bridge_*_test.go`、`agent/shell` 交互路径回归 |
-| `readline/secure.go` / `secure_stub.go`（新） | 终端状态自愈：`InitTerminalGuard`（记录启动前台组归属 + 忽略 `SIGTTIN/SIGTTOU`）、`SecureTerminal`（恢复 `ISIG`、夺回前台组） |
+| `readline/secure.go` / `secure_stub.go`（新） | 终端状态自愈：`InitTerminalGuard`（记录启动前台组归属 + 忽略 `SIGTTIN/SIGTTOU`）、`SecureTerminal`（恢复 `ISIG`、夺回前台组）；原语走 `ctty`（`docs/ctty.md`）|
 | `readline/bridge_linux.go` | `Prepare` 的前台检查前调用 `SecureTerminal()` |
 | `repl/repl.go` / `main.go` | 每回合开始前 / 启动时调用自愈 |
 | `agent/shell_unix.go` / `shell_other.go` | `shellExitCode`：信号终止记 `128 + signum` |

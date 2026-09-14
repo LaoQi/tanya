@@ -5,10 +5,11 @@
 ## 设计约束
 
 - 极简优先：依赖仅 `gopkg.in/yaml.v3` 与 `golang.org/x/sys/unix`，新增依赖需先讨论
-- package 划分：`main`（仅入口）、`repl`（REPL/补全/picker/渲染）、`agent`（核心逻辑）、`readline`（自研终端输入层）、`render`（表现层树：样式词汇/终端原语/配色/IR/渲染/解析）；根目录仅 main.go 与顶级包
+- package 划分：`main`（仅入口）、`repl`（REPL/补全/picker/渲染）、`agent`（核心逻辑）、`readline`（自研终端输入层）、`render`（表现层树：样式词汇/终端原语/配色/IR/渲染/解析）、`ctty`（控制终端原语，零依赖叶子）；根目录仅 main.go 与顶级包
 - 终端输入层自研（raw mode + ANSI 渲染），fish 风格 ghost 置灰建议，不引入 TUI 框架；Windows 仅支持 Windows Terminal（VT 模式，`terminal_windows.go` 占位未实现），不支持 cmd/老 conhost
-- 中断依赖两项终端不变量：`ISIG` 开启、终端前台组是 tanyan；启动时记录"自己是否为前台作业"，每回合开始前与桥接前台检查前自愈（恢复 `ISIG`、必要时夺回前台组），后台启动/无控制终端不抢；信号终止的子进程记 `128 + signum`（`^C` → `130`）
+- 中断依赖两项终端不变量：`ISIG` 开启、终端前台组是 tanyan；启动时记录"自己是否为前台作业"，每回合开始前与桥接前台检查前自愈（恢复 `ISIG`、必要时夺回前台组），后台启动/无控制终端不抢；信号终止的子进程记 `128 + signum`（`^C` → `130`）。前台组/`/dev/tty`/`SIGTTIN` 等原语统一在 `ctty`，`agent` 与 `readline` 各自持有策略（是否移交、是否夺回），不再各写一份 ioctl
 - `interactive: true` 的 run_shell 走全 pty 桥接（命令在独立 pty 中运行，真实 tty 由 bridge 切 raw 双向泵转）；仅 Linux 实现，失败场景回退 `/dev/tty` + `TIOCSPGRP` 路径；细节见 `docs/interactive-tty.md`
+- 目标平台：**Linux 与 Windows 为主**（Windows 交互能力待实现，现为降级 stub），**macOS 尽力**（原语齐备但未经真机验证），其余 unix/plan9/js 等仅保证可编译（走 stub）；平台分片一律白名单 `linux || darwin` + 其余 stub，不再枚举边缘平台（见 `docs/ctty.md`）
 - 不做工具注册表：工具硬编码在 `ToolDefs()` 与 `Agent.dispatch` 的 switch 中
 - 启动即要求可用 shell：`agent.New` 解析 shell（配置覆盖 > 平台探测），全落空直接报错退出，无 noshell 降级路径（`run_shell` 恒定注册、env 段恒定输出 shell 契约、system prompt 恒为 `DefaultSystemPrompt`）
 - REPL 输入分发（`repl/dispatch.go`）：`/` 白名单斜杠命令（控制面）、`exit`/`quit` 内建退出、其余直接与 LLM 对话（`:`/`：` 为等价显式前缀，单独一行提示用法）；直通 shell 执行面与 cd 拦截切面已归档（末态 commit 60bc02e，恢复步骤见 design.md），进程 cwd 恒为启动目录（全程不 `os.Chdir`）；agent 侧 `run_shell` 默认在此执行，并可用 `cwd` 参数为单次命令指定目录（设 `cmd.Dir`，不改进程 cwd）
@@ -22,8 +23,9 @@
 
 ```
 main.go            入口、flag 子命令、ask 单发
+ctty/              控制终端原语：前台组读/写（TIOCGPGRP/TIOCSPGRP）、/dev/tty 打开、SIGTTIN/SIGTTOU 忽略、平台能力常量 Supported；白名单 linux||darwin，其余 stub，零内部依赖
 repl/              REPL 循环与输入分发（对话优先）、斜杠命令、提示符模板、ghost 补全、/load picker、工具块渲染、回合分隔线、spinner、统计渲染（stats.go）、UI 文案
-readline/          自研终端输入层：行编辑/历史/Tab 补全菜单、按键解析、raw mode 与 KeyWatcher、显示宽度、pty 桥接、终端状态自愈
+readline/          自研终端输入层：行编辑/历史/Tab 补全菜单、按键解析、raw mode 与 KeyWatcher、显示宽度、pty 桥接（linux）、终端状态自愈（ISIG 恢复/前台夺回，原语走 ctty）
 agent/             核心逻辑
   config.go        配置加载（默认值 < ~/.config/tanyan/config.yaml < env TANYA_*）
   llm.go           chat 协议 client（SSE 流式 + tool_calls 增量合并 + reasoning_content 捕获/回传 + usage 捕获）
@@ -63,6 +65,7 @@ render/            表现层树根：渲染管线（IR → ANSI 的 Renderer、�
 - `docs/cache-probe.md` prompt cache 机制探测结论（脚本 `scripts/cache_probe.py`）
 - `docs/probe-redesign.md` 环境探针重构方案（已实施，归档）
 - `docs/shell-tool.md` run_shell 组件化（shellTool）设计与实施（S1–S4 已实施，含落地偏差记录）
+- `docs/ctty.md` 控制终端统一抽象与平台收敛（Linux/Windows 为主、macOS 尽力）设计与实施记录
 - `docs/todos.md` 待办清单
 
 ## 构建与测试

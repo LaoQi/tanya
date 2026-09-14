@@ -12,6 +12,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/LaoQi/tanyan/ctty"
 	"golang.org/x/sys/unix"
 )
 
@@ -56,12 +57,12 @@ func (b *bridgeTTY) Prepare(cmd *exec.Cmd) (*os.File, error) {
 	b.relOnce = sync.Once{}
 	if b.tty == nil {
 		SecureTerminal()
-		tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+		tty, err := ctty.Open()
 		if err != nil {
 			b.release()
 			return nil, err
 		}
-		if !foregroundTTY(int(tty.Fd())) {
+		if !ctty.IsForeground(int(tty.Fd())) {
 			tty.Close()
 			b.release()
 			return nil, ErrUnsupported
@@ -354,14 +355,6 @@ func openPTY() (*os.File, *os.File, error) {
 		return nil, nil, err
 	}
 	return master, slave, nil
-}
-
-func foregroundTTY(fd int) bool {
-	cur, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP)
-	if err != nil {
-		return false
-	}
-	return cur == unix.Getpgrp()
 }
 
 func ttyEnv(env []string, dev string) []string {

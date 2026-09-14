@@ -1,4 +1,4 @@
-//go:build illumos || ios
+//go:build !linux && !darwin && !windows
 
 package readline
 

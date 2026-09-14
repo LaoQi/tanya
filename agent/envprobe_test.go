@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/LaoQi/tanyan/ctty"
 )
 
 func TestEnvSectionGolden(t *testing.T) {
@@ -14,7 +16,7 @@ func TestEnvSectionGolden(t *testing.T) {
 		"OS: " + runtime.GOOS + "/" + runtime.GOARCH + "\n" +
 		"CWD: " + dir + "\n" +
 		"SHELL: bash\n"
-	if ttyStdinSupported() {
+	if ctty.Supported {
 		want += "TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）\n"
 	}
 	want += "TIMEOUT: 默认 60s（interactive 时 300s），上限 900s\n" +
