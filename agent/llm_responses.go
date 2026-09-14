@@ -62,13 +62,16 @@ func buildResponsesInput(messages []Message) (string, []any) {
 				if r.Content == "" {
 					continue
 				}
-				items = append(items, map[string]any{
+				item := map[string]any{
 					"type": "reasoning",
-					"id":   r.ID,
 					"content": []responsesContentPart{
 						{Type: "reasoning_text", Text: r.Content},
 					},
-				})
+				}
+				if r.ID != "" {
+					item["id"] = r.ID
+				}
+				items = append(items, item)
 			}
 			if m.Content != "" {
 				items = append(items, map[string]any{

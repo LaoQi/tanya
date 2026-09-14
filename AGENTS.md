@@ -13,7 +13,7 @@
 - 启动即要求可用 shell：`agent.New` 解析 shell（配置覆盖 > 平台探测），全落空直接报错退出，无 noshell 降级路径（`run_shell` 恒定注册、env 段恒定输出 shell 契约、system prompt 恒为 `DefaultSystemPrompt`）
 - REPL 输入分发（`repl/dispatch.go`）：`/` 白名单斜杠命令（控制面）、`exit`/`quit` 内建退出、其余直接与 LLM 对话（`:`/`：` 为等价显式前缀，单独一行提示用法）；直通 shell 执行面与 cd 拦截切面已归档（末态 commit 60bc02e，恢复步骤见 design.md），进程 cwd 恒为启动目录（全程不 `os.Chdir`）；agent 侧 `run_shell` 默认在此执行，并可用 `cwd` 参数为单次命令指定目录（设 `cmd.Dir`，不改进程 cwd）
 - 工具策略：以 `run_shell` 为核心，新能力优先用 shell 命令组合实现；小型纯计算/查询工具放 `builtin.go`
-- LLM 协议双通道，`api_protocol` 配置（yaml/env `TANYA_API_PROTOCOL`，默认 `responses`，非法值启动报错）：`responses` 走 `/responses`，以 DeepSeek 标准为参照（OpenAI 兼容但非完整遵守），reasoning 明文捕获/原样回传、不依赖 `include`/`encrypted_content`、固定 `store: false`；`chat` 走 `/chat/completions`。思维链为 responses 独有，chat 构造时剥离 `ReasoningItems`；思考等级仅用标准字段 `reasoning_effort`（minimal/low/medium/high/max，yaml/env `/think` 三处可配），不支持厂商私有参数，设置后两协议均不发 `temperature`
+- LLM 协议双通道，`api_protocol` 配置（yaml/env `TANYA_API_PROTOCOL`，默认 `responses`，非法值启动报错）：`responses` 走 `/responses`，以 DeepSeek 标准为参照（OpenAI 兼容但非完整遵守），reasoning 明文捕获/原样回传、不依赖 `include`/`encrypted_content`、固定 `store: false`；`chat` 走 `/chat/completions`，思维链经 `delta.reasoning_content` 捕获为 `ReasoningItems`（`ID` 空），请求构造时折叠为 assistant 消息顶层 `reasoning_content` 回传（DeepSeek 思考模式带 `tools` 时的硬要求），wire 上不出现 `reasoning_items`；思考等级仅用标准字段 `reasoning_effort`（minimal/low/medium/high/max，yaml/env `/think` 三处可配），不支持厂商私有参数，设置后两协议均不发 `temperature`
 - 出站请求 UA 伪装（避免厂商风控），默认 `pi/0.85.0 (linux; node/v22.14.0; x64)`，yaml `user_agent` / env `TANYA_USER_AGENT` 可配
 - 代码不添加注释，除非用户明确要求
 - 颜色一律使用终端 16 色基本 SGR 码（30-37/90-97），不用 256 色/truecolor
@@ -26,7 +26,7 @@ repl/              REPL 循环与输入分发（对话优先）、斜杠命令�
 readline/          自研终端输入层：行编辑/历史/Tab 补全菜单、按键解析、raw mode 与 KeyWatcher、显示宽度、pty 桥接、终端状态自愈
 agent/             核心逻辑
   config.go        配置加载（默认值 < ~/.config/tanyan/config.yaml < env TANYA_*）
-  llm.go           chat 协议 client（SSE 流式 + tool_calls 增量合并 + usage 捕获）
+  llm.go           chat 协议 client（SSE 流式 + tool_calls 增量合并 + reasoning_content 捕获/回传 + usage 捕获）
   llm_responses.go responses 协议 client（input items 映射、reasoning 明文捕获/回传、usage 映射）
   agent.go         对话 loop、上下文估算、消息组装与工具分发
   prompt.go        系统提示组装（快照/旧版识别，AGENTS.md 经注入 reader 读取）

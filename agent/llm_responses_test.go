@@ -542,3 +542,27 @@ func TestResponsesErrorKeepsPartialTurn(t *testing.T) {
 		t.Fatalf("续接请求 input 应含错误提示: %+v", input)
 	}
 }
+
+func TestResponsesOmitsEmptyReasoningID(t *testing.T) {
+	m, cfg := responsesLLM(t, mockStep{content: "ok"})
+	history := []Message{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "ok", ReasoningItems: []ReasoningItem{{Content: "chat 来的推理"}}},
+	}
+	if _, err := NewClient(cfg, nil).ChatStream(context.Background(), history, nil); err != nil {
+		t.Fatal(err)
+	}
+	input, _ := m.rawReqs[0]["input"].([]any)
+	var reasoning map[string]any
+	for _, it := range input {
+		if item, ok := it.(map[string]any); ok && item["type"] == "reasoning" {
+			reasoning = item
+		}
+	}
+	if reasoning == nil {
+		t.Fatal("应回传 reasoning item")
+	}
+	if _, ok := reasoning["id"]; ok {
+		t.Errorf("空 id 不应出现在请求里: %v", reasoning)
+	}
+}

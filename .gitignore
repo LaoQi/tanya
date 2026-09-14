@@ -6,3 +6,4 @@
 config.yaml
 todos.md
 /refs/
+__pycache__/
