@@ -118,3 +118,33 @@ func TestNewThemesDistinct(t *testing.T) {
 		t.Errorf("dusk 应含紫灰 h3: h3=%d", dusk.MD.Headings[2].Fg.V16)
 	}
 }
+
+func TestHeadingLevels(t *testing.T) {
+	synth := Theme{Headings: [6]rstyle.Style{
+		{Fg: rstyle.Color16(1)},
+		{Fg: rstyle.Color16(2)},
+		{Fg: rstyle.Color16(3)},
+		{Fg: rstyle.Color16(4)},
+		{Fg: rstyle.Color16(5)},
+		{Fg: rstyle.Color16(6)},
+	}}
+	for lv := 1; lv <= 6; lv++ {
+		want := rstyle.Style{Fg: rstyle.Color16(uint8(lv))}
+		if got := synth.Heading(lv); got != want {
+			t.Errorf("Heading(%d) = %+v, want %+v", lv, got, want)
+		}
+	}
+	for _, lv := range []int{-1, 0, 7, 100} {
+		if got := synth.Heading(lv); got != (rstyle.Style{}) {
+			t.Errorf("Heading(%d) 越界应返回空样式: %+v", lv, got)
+		}
+	}
+	for _, name := range Names() {
+		s := mustLookup(t, name)
+		for lv := 1; lv <= 6; lv++ {
+			if got := s.MD.Heading(lv); got == (rstyle.Style{}) {
+				t.Errorf("主题 %s 的 Heading(%d) 不应为空", name, lv)
+			}
+		}
+	}
+}
