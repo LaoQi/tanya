@@ -107,7 +107,7 @@ Go 不能跨包定义方法，若坚持 style 零依赖就得把 `Sprint/Frame` 
 | P6 | 去全局：theme 的 8 个语义色 + `curScheme`/`userPalette` 改为值传递；`repl` 持 `theme.Semantics`；`readline` 注入样式；删 `repl.toolTerm` 单例 | 全量 `-race -shuffle=on` + 新增并存用例 |
 | P7 | 摘 agent 表现层依赖（主题校验移 repl）；readline 裸 CSI 改用 `term.Cursor*` | `go list -deps ./agent` 无 render 树 |
 | P8 | 原语修正：`Strip/Width/Truncate` 统一走 `scanSequence`（删 `isTerminator`）+ OSC 用例；删死能力（`Level256`/`LevelTrue`/`Unicode`/`KindRGB`/`RGB`） | 全量 + OSC 新用例 |
-| P9 | 文档同步：`AGENTS.md`/`design.md`/`render-pipeline.md`/`open-questions.md` | — |
+| P9 | 文档同步：`AGENTS.md`/`design.md`/`render-pipeline.md`/`open-questions.md`（后者后经清理删除，内容归各文档） | — |
 
 ## 6. 行为零变更的保障
 
@@ -120,7 +120,7 @@ Go 不能跨包定义方法，若坚持 style 零依赖就得把 `Sprint/Frame` 
 1. **阶段顺序调整（自底向上）**：原计划 P1 建 render/style + term，实际按 `term → style → ir/theme → markdown/markup/render` 顺序推进。原因是 Go 的方法接收者规则（`Style.Sprint/Frame` 必须与 `Style` 同包）与父/子包环禁令，只有自底向上建包才能每阶段全绿、无中间环。
 2. **`style → term`（非零依赖）**：`Style.Sprint/Frame` 需要颜色档位与清洗，而 Go 不能跨包定义方法；若坚持 style 零依赖须把约 130 处 `theme.X.Sprint(...)` 改为 `Renderer` 方法。落地取"style 依赖 term、方法留在 style"，**官方不变量改为：`render/term` 是零依赖叶子**。
 3. **`markup → render` 的反向边**：`Template.Render` 需要 `render.Sprint`，最初形成子包 import 父包。修正为**把 Template 并入 `render`**（`render/template.go`），`render → markup` 成为正规父→子；最终所有边均为父→子或指向叶子。
-4. **`Style.Bg` 保留为预留**：编码路径（`bgSeq`，拆包后位于 `render/style/style.go`，原 `color.go` 已并入）与测试用例（`bright bg`）保留未删——markup 语法无背景入口、渲染侧无消费方，作为预留能力保留（决策见 `docs/open-questions.md` A5）。
+4. **`Style.Bg` 保留为预留**（该决策的唯一权威登记处）：编码路径（`bgSeq`，拆包后位于 `render/style/style.go`，原 `color.go` 已并入）与测试用例（`bright bg`）保留未删。现状：`Style{Bg: Color16(n)}.Sprint` 可产出 `40-47/100-107`，`empty`/`SGR`/`markup.mergeStyle` 均已支持该通道；缺的只有两处——markup 语法没有 `[bg:...]`（`ColorByName` 只解析前景）、渲染侧没有设置它的消费方。结论：**不删、也不补语法**，作为预留保留——删除无收益（一个字段 + 一个纯函数 + 一条用例），保留成本为零；将来若要做背景（如按来源高亮的块），补 markup 语法即可复用现有编码路径。启用条件（防误用）：先补 markup `[bg:...]` 语法并评审 16 色背景下语义色的可读性，再谈消费方；在此之前不新增 `Bg` 的写入点（`docs/render-pipeline.md` §4、`docs/design.md`《提示符模板》两处引用此处）。
 5. **`Document`/`Doc()`/`P()`/`Renderer.Doc` 删除**：仅被测试使用；`TestDocSkeleton` 改写为 `render/ir` 包的 `TestIRSkeleton`。
 6. **主题校验迁 `repl`**：`agent` 删掉 `DefaultPrompt`/`HasScheme`/`SchemeNames` 引用，校验由 `repl.ValidateTheme` 承担，`MsgBadTheme` 常量迁 `repl/messages.go`。落地后 `go list -deps ./agent` 无内部包。
 7. **`Profile.Unicode` 删除**：只写不读，确认为死能力。

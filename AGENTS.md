@@ -63,7 +63,6 @@ render/            表现层树根：渲染管线（IR → ANSI 的 Renderer、�
 - `docs/cache-probe.md` prompt cache 机制探测结论（脚本 `scripts/cache_probe.py`）
 - `docs/probe-redesign.md` 环境探针重构方案（已实施，归档）
 - `docs/shell-tool.md` run_shell 组件化（shellTool）设计与实施（S1–S4 已实施，含落地偏差记录）
-- `docs/open-questions.md` 会话遗留：已定结论（ctx/tty 事实归属）与待评估清单
 - `docs/todos.md` 待办清单
 
 ## 构建与测试

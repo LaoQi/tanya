@@ -16,7 +16,7 @@
 
 ## 2. 为什么不能直接复用（核心障碍）
 
-`agent.Message`（`agent/llm.go:21`）落盘的字段只有 `role` / `content` / `tool_calls` / `reasoning_items`；`Usage`、`Stat` 标 `json:"-"` 不落盘，`ToolResult`/`ShellResult` 更是从不落盘——工具消息的 `content` 是 `ToolResult.Content()` 即 `ShellResult.String()`（`agent/shell.go:168`）的**扁平文本**（`stdout:` / `stderr:` 分节 + `exit code: N`）。
+`agent.Message`（`agent/llm.go:21`）落盘的字段只有 `role` / `content` / `tool_calls` / `reasoning_items`；`Usage`、`Stat` 标 `json:"-"` 不落盘，`ToolResult`/`ShellResult` 更是从不落盘——工具消息的 `content` 是 `ToolResult.Content()` 即 `ShellResult.String()` 的**扁平文本**（`stdout:` / `stderr:` 分节 + `exit code: N`）。
 
 | 维度 | 实时数据 | 回放数据 | 后果 |
 |---|---|---|---|
@@ -92,7 +92,7 @@
 
 | 项 | 说明 | 建议 |
 |---|---|---|
-| `MsgUnknownCmd` 死分支 | `slashCommands` 白名单（`repl/completer.go:12`）与 `handleCommand` 的 switch 完全一致，`default` 不可达 | 可删（另立小提交） |
+| `MsgUnknownCmd` 死分支 | `slashCommands` 白名单（`repl/completer.go`）与 `handleCommand` 的 switch 完全一致，`default` 不可达 | **已删**（commit `00f934c`，白名单即分发契约） |
 | `output.guard` 无锁读取 | 仅测试在启动前置位，`-race` 干净 | 需要运行期改时加锁 |
 | `picker` 裸写不经 `vis` | raw 期自绘，已声明为模式屏蔽的例外 | 保持不变 |
 | 回放期间 `view.Content` 的副作用 | 回放经 `toolView.Content`，若上一回合留下 `justEnded` 会在回放首行前补空行 | 现状即如此，若做本方案可一并规整 |
