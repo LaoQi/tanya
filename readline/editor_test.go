@@ -226,11 +226,11 @@ func TestEditorCtrlBFAndCtrlL(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := out.String()
-	if !strings.Contains(o, strings.Repeat("\n", 24)) || !strings.Contains(o, "\x1b[23A") {
-		t.Errorf("Ctrl+L 应推屏保历史（24 换行+上移 23 行，恰好一屏高）: %q", o)
+	if !strings.Contains(o, strings.Repeat("\n", 23)+"\r"+term.CursorUp(23)) {
+		t.Errorf("Ctrl+L 应滚出一屏减一后回视口顶部（23 换行+上移 23 行，不多滚一行）: %q", o)
 	}
-	if strings.Contains(o, strings.Repeat("\n", 25)) {
-		t.Errorf("Ctrl+L 不应多推空行（出现 25 连续换行）: %q", o)
+	if strings.Contains(o, strings.Repeat("\n", 24)+"\r") {
+		t.Errorf("Ctrl+L 不应多滚一屏（出现 24 连续换行）: %q", o)
 	}
 	if strings.Contains(o, "\x1b[2J") {
 		t.Errorf("Ctrl+L 不应擦屏: %q", o)
@@ -295,18 +295,17 @@ func TestEditorRenderWideWrapCursor(t *testing.T) {
 func TestEditorCtrlLScrollsOneScreen(t *testing.T) {
 	for _, rows := range []int{1, 5, 24, 50} {
 		f := &fakeTerm{rows: rows, out: &bytes.Buffer{}}
-		f.events = append(runes("hi"), KeyEvent{Code: KeyCtrlL}, KeyEvent{Code: KeyEnter})
+		f.events = append(runes("hi"), KeyEvent{Code: KeyCtrlL})
 		ed := NewEditor(f, true)
 		ed.SetOutput(f.out)
-		if _, err := ed.Readline("> "); err != nil {
-			t.Fatal(err)
-		}
+		_, _ = ed.Readline("> ")
 		o := f.out.String()
-		if !strings.Contains(o, strings.Repeat("\n", rows)) {
-			t.Errorf("rows=%d: Ctrl+L 应推一屏高（%d 换行）: %q", rows, rows, o)
+		if got := strings.Count(o, "\n"); got != rows-1 {
+			t.Errorf("rows=%d: Ctrl+L 应输出 %d 个换行（一屏减一），实际 %d: %q", rows, rows-1, got, o)
 		}
-		if strings.Contains(o, strings.Repeat("\n", rows+1)) {
-			t.Errorf("rows=%d: 不应多推空行（出现 %d 连续换行）: %q", rows, rows+1, o)
+		want := strings.Repeat("\n", rows-1) + "\r" + term.CursorUp(rows-1)
+		if !strings.Contains(o, want) {
+			t.Errorf("rows=%d: Ctrl+L 序列应为 换行×%d + \\r + 上移 %d 行: %q", rows, rows-1, rows-1, o)
 		}
 	}
 }
