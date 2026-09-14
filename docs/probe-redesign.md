@@ -1,6 +1,6 @@
 # 环境探针重构方案
 
-> 状态：已按本文实施完毕（设计定稿归档）。目标态已并入 `docs/design.md`《系统提示与缓存友好》/《环境探针（envprobe）》。本文保留决策过程与对比，供回溯。实施后 review 决议：移除 `probe` 配置开关（本文 §8/§11 相关内容作废），环境注入恒定生效。
+> 状态：已按本文实施完毕（设计定稿归档）。目标态已并入 `docs/design.md`《系统提示与缓存友好》/《环境段（envprobe）》。本文保留决策过程与对比，供回溯。**更正（2026-09-14）**：§4「环境段固定放 system prompt 最末尾…前缀缓存不受损」已被实测推翻（序列化顺序为 messages/instructions → tools，system 的任何变化都击穿其后全部 history），`envSection` 已改为构造期定格、`WORKSPACE` 行已删除；目标态见 `docs/design.md`《环境段（envprobe）》，实测见 `docs/cache-probe.md`《落实：env 段的动态源》。实施后 review 决议：移除 `probe` 配置开关（本文 §8/§11 相关内容作废），环境注入恒定生效。
 
 ## 1. 背景
 
@@ -32,7 +32,7 @@ runtimePrompt = persistPrompt + envSection(cwd)                ← 每次 buildM
 
 - **持久化只存规则**。`/load` 还原的是 persistPrompt，环境段不复原、永不 stale。
 - **环境段实时重算**。`envSection(cwd)` 为纯函数，同 cwd 结果字节级相同 → 跨会话、跨轮次缓存仍全量命中；换目录/换机自动跟随。
-- **环境段固定放 system prompt 最末尾**，未来即便新增轻微字段，变化也只在尾部，前缀缓存不受损。
+- **环境段固定放 system prompt 最末尾**，未来即便新增轻微字段，变化也只在尾部，前缀缓存不受损。**（2026-09-14 更正：此判断错误——system 的变化点之后仍挂着整个 history 与 tools 段，「靠后所以便宜」不成立；该假设已由实测推翻）**
 
 数据流：
 

@@ -43,14 +43,6 @@ func (p *shellProfile) arg() string {
 	}
 }
 
-func (p *shellProfile) invocation() string {
-	parts := make([]string, 0, len(p.ExtraArgs)+2)
-	parts = append(parts, p.Path)
-	parts = append(parts, p.ExtraArgs...)
-	parts = append(parts, p.arg())
-	return strings.Join(parts, " ")
-}
-
 var shellPrograms = []string{
 	"ls", "cat", "head", "tail", "grep", "rg", "fd", "sed", "awk",
 	"find", "sort", "wc", "cut", "tr", "xargs",

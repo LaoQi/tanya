@@ -51,8 +51,8 @@ func TestNewShellToolResolvesProfileAndPrograms(t *testing.T) {
 	if strings.Join(tool.programs, ",") != "ls" {
 		t.Errorf("programs = %v", tool.programs)
 	}
-	if tool.profile.invocation() != "bash -c" {
-		t.Errorf("invocation = %q", tool.profile.invocation())
+	if tool.profile.arg() != "-c" || tool.profile.Path != "bash" {
+		t.Errorf("profile = %+v", tool.profile)
 	}
 }
 

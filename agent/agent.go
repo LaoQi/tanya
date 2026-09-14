@@ -24,8 +24,7 @@ type Agent struct {
 	client  *Client
 	tool    *shellTool
 	history []Message
-	cwd     string
-	probe   envProbeFunc
+	env     string
 	prompt  *promptBuilder
 	store   *sessionStore
 	stats   usageStats
@@ -81,8 +80,7 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 		cfg:    cfg,
 		client: NewClient(cfg, ToolDefs(tool)),
 		tool:   tool,
-		cwd:    cwd,
-		probe:  defaultEnvProbe,
+		env:    envSection(cwd, tool.profile),
 		prompt: newPromptBuilder(cwd, globalAgentsPath(), readAgentsFile),
 		store:  newSessionStore(sessionDir, o.noSave),
 	}
@@ -105,10 +103,7 @@ func (a *Agent) LegacyPrompt() bool {
 }
 
 func (a *Agent) runtimePrompt() string {
-	if a.probe == nil {
-		return a.prompt.runtime("")
-	}
-	return a.prompt.runtime(envSection(a.cwd, a.probe, a.tool.profile))
+	return a.prompt.runtime(a.env)
 }
 
 func (a *Agent) NewSession() {
