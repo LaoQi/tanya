@@ -22,9 +22,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Temperature != 0.7 {
 		t.Errorf("默认数值异常: %+v", cfg)
 	}
-	if !strings.Contains(DefaultPrompt, "{cwd}") || !strings.Contains(DefaultPrompt, "{stat}") {
-		t.Errorf("默认 prompt 模板异常: %q", DefaultPrompt)
-	}
 	if cfg.UserAgent != DefaultUserAgent || !strings.HasPrefix(cfg.UserAgent, "pi/") {
 		t.Errorf("默认 UA 异常: %q", cfg.UserAgent)
 	}
@@ -190,9 +187,6 @@ func TestLoadConfigPromptIgnored(t *testing.T) {
 	if _, err := LoadConfig(path); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(DefaultPrompt, "{stat}") {
-		t.Errorf("默认模板应为富版: %q", DefaultPrompt)
-	}
 }
 
 func TestUserAgentHeader(t *testing.T) {
@@ -312,12 +306,6 @@ func TestConfigTheme(t *testing.T) {
 		t.Errorf("env 应覆盖 yaml: %q", cfg.Theme)
 	}
 	t.Setenv("TANYA_THEME", "")
-	if err := os.WriteFile(path, []byte("theme: bogus\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "bogus") {
-		t.Errorf("非法 theme 应报错: %v", err)
-	}
 	if cfg := defaultConfig(); cfg.Theme != "nord" {
 		t.Errorf("默认主题应为 nord: %q", cfg.Theme)
 	}

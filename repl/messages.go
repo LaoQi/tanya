@@ -73,6 +73,10 @@ const (
 )
 
 const (
+	MsgBadTheme = "无效主题 %q（可用: %s）"
+)
+
+const (
 	MsgMdOn  = "Markdown 渲染已开启\n"
 	MsgMdOff = "Markdown 渲染已关闭\n"
 )

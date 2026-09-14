@@ -1,4 +1,4 @@
-package style
+package term
 
 import (
 	"os"
@@ -10,24 +10,21 @@ type ColorLevel uint8
 const (
 	LevelNone ColorLevel = iota
 	Level16
-	Level256
-	LevelTrue
 )
 
 type Profile struct {
-	TTY     bool
-	Colors  ColorLevel
-	Unicode bool
+	TTY    bool
+	Colors ColorLevel
 }
 
-var current = Profile{TTY: true, Colors: Level16, Unicode: true}
+var current = Profile{TTY: true, Colors: Level16}
 
 func SetProfile(p Profile) { current = p }
 
 func GetProfile() Profile { return current }
 
 func DetectProfile(isTTY bool) Profile {
-	p := Profile{TTY: isTTY, Colors: Level16, Unicode: true}
+	p := Profile{TTY: isTTY, Colors: Level16}
 	if !isTTY {
 		p.Colors = LevelNone
 	}
@@ -45,16 +42,6 @@ func DetectProfile(isTTY bool) Profile {
 			}
 		case "0", "off", "false":
 			p.Colors = LevelNone
-		}
-	}
-	switch {
-	case os.Getenv("COLORTERM") == "truecolor", os.Getenv("WT_SESSION") != "":
-		if p.Colors == Level16 {
-			p.Colors = LevelTrue
-		}
-	case strings.Contains(os.Getenv("TERM"), "256color"):
-		if p.Colors == Level16 {
-			p.Colors = Level256
 		}
 	}
 	return p

@@ -50,7 +50,7 @@ func TestPickerConfirmAndCancel(t *testing.T) {
 }
 
 func TestPickerRender(t *testing.T) {
-	p := &sessionPicker{items: testSessions(2), cursor: 1}
+	p := &sessionPicker{items: testSessions(2), cursor: 1, sem: testSem()}
 	var buf bytes.Buffer
 	p.render(&buf, true)
 	s := buf.String()
@@ -76,7 +76,7 @@ func TestPickerUsesWriter(t *testing.T) {
 	list := testSessions(2)
 	term := newFakeTerm(readline.KeyEvent{Code: readline.KeyDown}, readline.KeyEvent{Code: readline.KeyEnter})
 	var buf syncBuf
-	idx, ok := pickSession(term, list, &buf)
+	idx, ok := pickSession(term, list, &buf, testSem())
 	if !ok || idx != 1 {
 		t.Fatalf("应确认第 2 项: idx=%d ok=%v", idx, ok)
 	}

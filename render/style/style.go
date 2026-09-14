@@ -3,6 +3,8 @@ package style
 import (
 	"strconv"
 	"strings"
+
+	"github.com/LaoQi/tanyan/render/term"
 )
 
 type ColorKind uint8
@@ -10,13 +12,11 @@ type ColorKind uint8
 const (
 	KindNone ColorKind = iota
 	Kind16
-	KindRGB
 )
 
 type Color struct {
 	Kind ColorKind
 	V16  uint8
-	RGB  uint32
 }
 
 func Color16(v uint8) Color {
@@ -38,31 +38,20 @@ type Style struct {
 	Attr Attr
 }
 
-var (
-	Dim    = Style{Fg: Color16(8)}
-	Info   = Style{Fg: Color16(12)}
-	Warn   = Style{Fg: Color16(3)}
-	Ok     = Style{Fg: Color16(2)}
-	Error  = Style{Fg: Color16(9)}
-	Accent = Style{Attr: AttrReverse}
-	Think  = Style{Fg: Color16(5)}
-	Run    = Style{Fg: Color16(6)}
-)
-
-func (s Style) Text(t string) Span {
-	return Span{Style: s, Text: t}
-}
-
 func (s Style) Sprint(t string) string {
-	return Sprint(s.Text(t))
+	seq := s.SGR(term.GetProfile())
+	if seq == "" {
+		return t
+	}
+	return seq + t + term.Reset
 }
 
 func (s Style) empty() bool {
 	return s.Fg.Kind == KindNone && s.Bg.Kind == KindNone && s.Attr == 0
 }
 
-func (p Profile) sgr(s Style) string {
-	if p.Colors == LevelNone || s.empty() {
+func (s Style) SGR(p term.Profile) string {
+	if p.Colors == term.LevelNone || s.empty() {
 		return ""
 	}
 	var params []string

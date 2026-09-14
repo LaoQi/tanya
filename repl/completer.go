@@ -2,11 +2,11 @@ package repl
 
 import (
 	"fmt"
+	"github.com/LaoQi/tanyan/render/theme"
 	"strings"
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
-	"github.com/LaoQi/tanyan/style"
 )
 
 var slashCommands = []string{"/help", "/new", "/load", "/context", "/history", "/model", "/think", "/theme", "/md", "/exit", "/quit"}
@@ -104,7 +104,7 @@ func (c *completer) suggest(line string) string {
 		}
 	case c.isThemeContext(line):
 		prefix := strings.TrimPrefix(line, "/theme ")
-		for _, n := range style.SchemeNames() {
+		for _, n := range theme.Names() {
 			if strings.HasPrefix(n, prefix) && n != prefix {
 				return n[len(prefix):]
 			}
@@ -156,7 +156,7 @@ func (c *completer) complete(line string) []readline.Completion {
 	case c.isThemeContext(line):
 		prefix := strings.TrimPrefix(line, "/theme ")
 		var out []readline.Completion
-		for _, n := range style.SchemeNames() {
+		for _, n := range theme.Names() {
 			if strings.HasPrefix(n, prefix) {
 				out = append(out, readline.Completion{Insert: "/theme " + n, Display: n})
 			}

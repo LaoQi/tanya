@@ -3,6 +3,8 @@ package repl
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanyan/render/theme"
 	"io"
 	"strconv"
 	"strings"
@@ -10,7 +12,6 @@ import (
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
-	"github.com/LaoQi/tanyan/style"
 )
 
 const (
@@ -52,14 +53,14 @@ func toolTitleLines(name, args, mark string, width int) []string {
 		if mark != "" {
 			head += " " + mark
 		}
-		return []string{style.Truncate(head, width)}
+		return []string{term.Truncate(head, width)}
 	}
 	if mark != "" {
 		head += " " + mark
 	}
-	lines := []string{style.Truncate(head, width), style.Truncate("  cwd: "+cwd, width)}
+	lines := []string{term.Truncate(head, width), term.Truncate("  cwd: "+cwd, width)}
 	if cmd != "" {
-		lines = append(lines, style.Truncate("  "+cmd, width))
+		lines = append(lines, term.Truncate("  "+cmd, width))
 	}
 	return lines
 }
@@ -93,7 +94,7 @@ func toolEndBody(res agent.ToolResult, width, maxLines int) (string, string) {
 	return b.String(), status
 }
 
-func renderToolBlock(lead, name, args string, res agent.ToolResult, width, maxLines int) string {
+func renderToolBlock(sem theme.Semantics, lead, name, args string, res agent.ToolResult, width, maxLines int) string {
 	lines := toolTitleLines(name, args, "", width-3)
 	title := "▸ " + lines[0] + "\n"
 	for _, l := range lines[1:] {
@@ -102,25 +103,25 @@ func renderToolBlock(lead, name, args string, res agent.ToolResult, width, maxLi
 	out, status := toolEndBody(res, width, maxLines)
 	var b strings.Builder
 	b.WriteString(lead)
-	if style.HasSGR(out) {
-		b.WriteString(style.Dim.Frame(title))
-		b.WriteString(style.Passthrough(out))
+	if term.HasSGR(out) {
+		b.WriteString(sem.Dim.Frame(title))
+		b.WriteString(term.Passthrough(out))
 	} else {
-		b.WriteString(style.Dim.Frame(title + out))
+		b.WriteString(sem.Dim.Frame(title + out))
 	}
 	if status != "" {
-		b.WriteString(style.Info.Sprint("  ↳ "+status) + "\n")
+		b.WriteString(sem.Info.Sprint("  ↳ "+status) + "\n")
 	}
 	return b.String()
 }
 
-func RenderToolEnd(name, args string, res agent.ToolResult, width, maxLines int) string {
-	return renderToolBlock("\n", name, args, res, width, maxLines)
+func RenderToolEnd(sem theme.Semantics, name, args string, res agent.ToolResult, width, maxLines int) string {
+	return renderToolBlock(sem, "\n", name, args, res, width, maxLines)
 }
 
-func RenderToolEndInline(name, args string, res agent.ToolResult, width, maxLines int) string {
-	lead := strings.Repeat(style.CursorUp(1)+style.ClearLineHome(), toolTitleLineCount(name, args, width-3))
-	return renderToolBlock(lead, name, args, res, width, maxLines)
+func RenderToolEndInline(sem theme.Semantics, name, args string, res agent.ToolResult, width, maxLines int) string {
+	lead := strings.Repeat(term.CursorUp(1)+term.ClearLineHome(), toolTitleLineCount(name, args, width-3))
+	return renderToolBlock(sem, lead, name, args, res, width, maxLines)
 }
 
 func RenderResponseInfo(info agent.ResponseInfo, width int) string {
@@ -149,7 +150,7 @@ func RenderResponseInfo(info agent.ResponseInfo, width int) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return "  ↳ " + style.Truncate(strings.Join(parts, " · "), width-4) + "\n"
+	return "  ↳ " + term.Truncate(strings.Join(parts, " · "), width-4) + "\n"
 }
 
 func respDuration(d time.Duration) string {
@@ -217,7 +218,7 @@ func shellView(r *agent.ShellResult, width, maxLines int) ([]string, string, int
 		if t.stderr {
 			s = "2| " + s
 		}
-		lines = append(lines, style.Truncate(s, width-2))
+		lines = append(lines, term.Truncate(s, width-2))
 	}
 	return lines, shellStatus(r), total, trunc
 }
@@ -265,7 +266,7 @@ func textView(text string, width, maxLines int) ([]string, string) {
 	}
 	out := make([]string, len(view))
 	for i, l := range view {
-		out[i] = style.Truncate(l, width-2)
+		out[i] = term.Truncate(l, width-2)
 	}
 	if trunc {
 		return out, fmt.Sprintf(MsgLinesTotal, len(lines))
@@ -277,18 +278,20 @@ func textView(text string, width, maxLines int) ([]string, string) {
 type toolView struct {
 	st        *streams
 	sp        *spinner
-	prof      style.Profile
+	prof      term.Profile
+	sem       theme.Semantics
 	width     func() int
 	maxLines  int
 	justEnded bool
 	dirty     bool
 }
 
-func NewToolView(st *streams, prof style.Profile, width func() int, maxLines int) *toolView {
+func NewToolView(st *streams, prof term.Profile, sem theme.Semantics, width func() int, maxLines int) *toolView {
 	return &toolView{
 		st:       st,
-		sp:       newSpinner(st.out, prof.TTY),
+		sp:       newSpinner(st.out, prof.TTY, sem),
 		prof:     prof,
+		sem:      sem,
 		width:    width,
 		maxLines: maxLines,
 	}
@@ -296,6 +299,11 @@ func NewToolView(st *streams, prof style.Profile, width func() int, maxLines int
 
 // Content 输出正文（原 REPL.print 的语义）：停动画、若上一块是工具块先补空行、跟踪行尾状态。
 // animate 报告是否允许启动动画：设备是 TTY 且当前模式放行动画帧。
+func (v *toolView) setSemantics(sem theme.Semantics) {
+	v.sem = sem
+	v.sp.setSemantics(sem)
+}
+
 func (v *toolView) animate() bool { return v.prof.TTY && v.st.out.allows(KindSpinner) }
 
 func (v *toolView) Content(kind Kind, text string) {
@@ -331,15 +339,15 @@ func (v *toolView) Handle(e agent.Event) {
 			if dirty {
 				io.WriteString(w, "\n")
 			}
-			io.WriteString(w, style.Info.Sprint(RenderResponseInfo(e.Response, v.width())))
+			io.WriteString(w, v.sem.Info.Sprint(RenderResponseInfo(e.Response, v.width())))
 		})
 		v.dirty = false
 	case agent.EventToolStart:
 		v.sp.stop()
 		v.st.out.atomic(KindToolBlock, func(w io.Writer) {
-			io.WriteString(w, style.Dim.Frame(RenderToolStart(e.ToolName, e.ToolArgs, v.width())))
+			io.WriteString(w, v.sem.Dim.Frame(RenderToolStart(e.ToolName, e.ToolArgs, v.width())))
 			if e.Interactive {
-				io.WriteString(w, style.Info.Sprint(MsgInteractiveHint))
+				io.WriteString(w, v.sem.Info.Sprint(MsgInteractiveHint))
 			}
 		})
 		v.dirty = false
@@ -350,9 +358,9 @@ func (v *toolView) Handle(e agent.Event) {
 		v.sp.stop()
 		// 工具块被屏蔽时不置 justEnded：否则下一条正文前会留下孤立空行。
 		if v.st.out.allows(KindToolBlock) {
-			block := RenderToolEnd(e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
+			block := RenderToolEnd(v.sem, e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
 			if v.prof.TTY && v.st.cursor() && !e.Interactive {
-				block = RenderToolEndInline(e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
+				block = RenderToolEndInline(v.sem, e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
 			}
 			v.st.out.atomic(KindToolBlock, func(w io.Writer) {
 				io.WriteString(w, block)

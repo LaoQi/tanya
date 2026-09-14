@@ -2,26 +2,27 @@ package repl
 
 import (
 	"errors"
+	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanyan/render/theme"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/LaoQi/tanyan/agent"
-	"github.com/LaoQi/tanyan/style"
 )
 
-func ttyProfile(t *testing.T, p style.Profile) {
+func ttyProfile(t *testing.T, p term.Profile) {
 	t.Helper()
-	old := style.GetProfile()
-	style.SetProfile(p)
-	t.Cleanup(func() { style.SetProfile(old) })
+	old := term.GetProfile()
+	term.SetProfile(p)
+	t.Cleanup(func() { term.SetProfile(old) })
 }
 
 func TestTurnSepTimeOnly(t *testing.T) {
-	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
-	out := turnSep(style.Profile{TTY: true, Colors: style.Level16, Unicode: true}, 0)
-	plain := style.Strip(out)
+	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
+	out := turnSep(term.Profile{TTY: true, Colors: term.Level16}, testSem(), 0)
+	plain := term.Strip(out)
 	if !regexp.MustCompile(`^\n──── \d{2}:\d{2}:\d{2}\n$`).MatchString(plain) {
 		t.Errorf("回合分隔线格式不符: %q", plain)
 	}
@@ -34,16 +35,16 @@ func TestTurnSepTimeOnly(t *testing.T) {
 }
 
 func TestTurnSepWithDuration(t *testing.T) {
-	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
-	plain := style.Strip(turnSep(style.Profile{TTY: true, Colors: style.Level16, Unicode: true}, 12*time.Second+400*time.Millisecond))
+	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
+	plain := term.Strip(turnSep(term.Profile{TTY: true, Colors: term.Level16}, testSem(), 12*time.Second+400*time.Millisecond))
 	if !regexp.MustCompile(`^\n──── \d{2}:\d{2}:\d{2} · 回合 12\.4s\n$`).MatchString(plain) {
 		t.Errorf("带耗时分隔线格式不符: %q", plain)
 	}
 }
 
 func TestTurnSepNoColor(t *testing.T) {
-	ttyProfile(t, style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
-	out := turnSep(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true}, time.Second)
+	ttyProfile(t, term.Profile{TTY: true, Colors: term.LevelNone})
+	out := turnSep(term.Profile{TTY: true, Colors: term.LevelNone}, testSem(), time.Second)
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("无色环境不应出现 SGR: %q", out)
 	}
@@ -53,12 +54,12 @@ func TestTurnSepNoColor(t *testing.T) {
 }
 
 func TestTurnSepNonTTYBypass(t *testing.T) {
-	ttyProfile(t, style.Profile{TTY: false, Colors: style.LevelNone, Unicode: true})
-	nonTTY := style.Profile{TTY: false, Colors: style.LevelNone, Unicode: true}
-	if out := turnSep(nonTTY, 0); out != "" {
+	ttyProfile(t, term.Profile{TTY: false, Colors: term.LevelNone})
+	nonTTY := term.Profile{TTY: false, Colors: term.LevelNone}
+	if out := turnSep(nonTTY, testSem(), 0); out != "" {
 		t.Errorf("非 TTY 不应打印分隔线: %q", out)
 	}
-	if out := turnSep(nonTTY, 3*time.Second); out != "" {
+	if out := turnSep(nonTTY, testSem(), 3*time.Second); out != "" {
 		t.Errorf("非 TTY 不应打印带耗时分隔线: %q", out)
 	}
 }
@@ -84,7 +85,7 @@ func TestTurnDuration(t *testing.T) {
 }
 
 func TestTurnGapOnce(t *testing.T) {
-	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
+	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	r, buf, _ := newTestREPL(t, newFakeTerm())
 	turn := r.beginTurn(nil)
 	turn.Handle(agent.Event{Kind: agent.EventReasoning})
@@ -100,7 +101,7 @@ func TestTurnGapOnce(t *testing.T) {
 }
 
 func TestTurnNonTTYNoGap(t *testing.T) {
-	ttyProfile(t, style.Profile{TTY: false, Colors: style.LevelNone, Unicode: true})
+	ttyProfile(t, term.Profile{TTY: false, Colors: term.LevelNone})
 	r, buf, _ := newTestREPL(t, newFakeTerm())
 	turn := r.beginTurn(nil)
 	turn.Handle(agent.Event{Kind: agent.EventReasoning})
@@ -111,7 +112,7 @@ func TestTurnNonTTYNoGap(t *testing.T) {
 }
 
 func TestTurnNoGapOnZeroEventTurn(t *testing.T) {
-	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
+	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	r, buf, _ := newTestREPL(t, newFakeTerm())
 	r.beginTurn(nil).End(errors.New("立即失败"))
 	if n := strings.Count(buf.String(), "\n"); n != 2 {
@@ -120,7 +121,7 @@ func TestTurnNoGapOnZeroEventTurn(t *testing.T) {
 }
 
 func TestFlowContextCarriers(t *testing.T) {
-	ttyProfile(t, style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
+	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	r, _, _ := newTestREPL(t, newFakeTerm())
 	r.mdLive = false
 	t1 := r.beginTurn(nil)
@@ -138,7 +139,7 @@ func TestFlowContextCarriers(t *testing.T) {
 	if t2.f.mdEnabled() != t2.f.live && t2.f.prof.TTY {
 		t.Error("mdEnabled 应同时受开关与 TTY 约束")
 	}
-	s, ok := style.LookupScheme("vivid")
+	s, ok := theme.Lookup("vivid")
 	if !ok {
 		t.Fatal("缺少 vivid 主题")
 	}

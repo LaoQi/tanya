@@ -3,13 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/LaoQi/tanyan/render/term"
 	"os"
 	"strings"
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
 	"github.com/LaoQi/tanyan/repl"
-	"github.com/LaoQi/tanyan/style"
 )
 
 var (
@@ -48,21 +48,24 @@ func main() {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
-	style.ApplyScheme(cfg.Theme)
-	style.ApplyPalette(cfg.Palette)
-	prof := style.DetectProfile(repl.ToolTTY())
+	if err := repl.ValidateTheme(cfg.Theme); err != nil {
+		st.Fail(repl.MsgErrLineFmt+"\n", err)
+		os.Exit(1)
+	}
+	sem := repl.Semantics(cfg.Theme, cfg.Palette)
+	prof := term.DetectProfile(repl.ToolTTY())
 	switch cfg.Colors {
 	case "on":
-		if prof.Colors == style.LevelNone {
-			prof.Colors = style.Level16
+		if prof.Colors == term.LevelNone {
+			prof.Colors = term.Level16
 		}
 	case "off":
-		prof.Colors = style.LevelNone
+		prof.Colors = term.LevelNone
 	}
 	if *plain {
-		prof.Colors = style.LevelNone
+		prof.Colors = term.LevelNone
 	}
-	style.SetProfile(prof)
+	term.SetProfile(prof)
 	if *sessionMode != "" {
 		cfg.SessionMode = *sessionMode
 	}
@@ -78,7 +81,7 @@ func main() {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
-	sink := repl.NewToolView(st, prof, repl.ToolWidth, a.ToolOutputLines())
+	sink := repl.NewToolView(st, prof, sem, repl.ToolWidth, a.ToolOutputLines())
 
 	if isAsk {
 		q := strings.Join(args[1:], " ")
@@ -97,7 +100,7 @@ func main() {
 		return
 	}
 
-	r, err := repl.NewREPL(a, "", repl.WithStreams(st))
+	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTheme(cfg.Theme, cfg.Palette))
 	if err != nil {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)

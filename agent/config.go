@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/LaoQi/tanyan/style"
 	"gopkg.in/yaml.v3"
 )
 
@@ -51,8 +50,6 @@ func normalizeApiProtocol(v string) string {
 	}
 	return ""
 }
-
-var DefaultPrompt = style.DefaultPrompt
 
 const DefaultUserAgent = "pi/0.85.0 (linux; node/v22.14.0; x64)"
 
@@ -134,9 +131,6 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.ApiProtocol = normalizeApiProtocol(cfg.ApiProtocol)
 	if cfg.ApiProtocol == "" {
 		return nil, fmt.Errorf(MsgBadApiProtocol, rawProtocol)
-	}
-	if !style.HasScheme(cfg.Theme) {
-		return nil, fmt.Errorf(MsgBadTheme, cfg.Theme, strings.Join(style.SchemeNames(), "/"))
 	}
 	cfg.GlobalSession = expandHome(cfg.GlobalSession)
 	return cfg, nil

@@ -1,16 +1,17 @@
 package repl
 
 import (
+	"github.com/LaoQi/tanyan/render"
+	"github.com/LaoQi/tanyan/render/theme"
 	"strings"
 	"testing"
 
 	"github.com/LaoQi/tanyan/agent"
-	"github.com/LaoQi/tanyan/style"
 )
 
 func promptRender(t *testing.T, tpl string, vars map[string]string) string {
 	t.Helper()
-	tpl2, err := style.ParseTemplate(tpl)
+	tpl2, err := render.ParseTemplate(tpl, testSem())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,7 @@ func TestNewREPLEmptyTplFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.promptTpl != agent.DefaultPrompt {
+	if r.promptTpl != theme.DefaultPrompt {
 		t.Errorf("空模板应回退默认值: %q", r.promptTpl)
 	}
 }

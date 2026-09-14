@@ -5,7 +5,7 @@
 ## 设计约束
 
 - 极简优先：依赖仅 `gopkg.in/yaml.v3` 与 `golang.org/x/sys/unix`，新增依赖需先讨论
-- package 划分：`main`（仅入口）、`repl`（REPL/补全/picker/渲染）、`agent`（核心逻辑）、`readline`（自研终端输入层）、`style`（富文本管线）；根目录仅 main.go 与顶级包
+- package 划分：`main`（仅入口）、`repl`（REPL/补全/picker/渲染）、`agent`（核心逻辑）、`readline`（自研终端输入层）、`render`（表现层树：样式词汇/终端原语/配色/IR/渲染/解析）；根目录仅 main.go 与顶级包
 - 终端输入层自研（raw mode + ANSI 渲染），fish 风格 ghost 置灰建议，不引入 TUI 框架；Windows 仅支持 Windows Terminal（VT 模式，`terminal_windows.go` 占位未实现），不支持 cmd/老 conhost
 - 中断依赖两项终端不变量：`ISIG` 开启、终端前台组是 tanyan；启动时记录"自己是否为前台作业"，每回合开始前与桥接前台检查前自愈（恢复 `ISIG`、必要时夺回前台组），后台启动/无控制终端不抢；信号终止的子进程记 `128 + signum`（`^C` → `130`）
 - `interactive: true` 的 run_shell 走全 pty 桥接（命令在独立 pty 中运行，真实 tty 由 bridge 切 raw 双向泵转）；仅 Linux 实现，失败场景回退 `/dev/tty` + `TIOCSPGRP` 路径；细节见 `docs/interactive-tty.md`
@@ -39,7 +39,13 @@ agent/             核心逻辑
   event.go         Event 词汇表（统一协议增量与生命周期）
   builtin.go       内置小工具：get_time / get_env / calc
   messages.go      agent 侧文案常量
-style/             富文本管线（语义色/主题/markdown/模板/宽度/ANSI 过滤）
+render/            表现层树根：渲染管线（IR → ANSI 的 Renderer、提示符模板 Template）
+  style/           样式词汇与编码（Color/Attr/Style/ColorLevel/SGR/Sprint/Frame），依赖 term
+  term/            终端原语（ANSI 词法/清洗、宽度/截断/单行化、光标控制、能力档案 Profile），零依赖叶子
+  ir/              渲染 IR（Block/Inline 值类型），依赖 style
+  theme/           配色（语义色集合 Semantics、方案 Scheme、markdown 样式集、palette、内置主题表），依赖 style
+  markdown/        流式 markdown 解析（MarkdownBuf/ParseInline），依赖 ir/style/term
+  markup/          内联标记解析（ParseMarkup），依赖 ir/style/term/theme
 ```
 
 各模块行为细节见 `docs/design.md`。
@@ -50,6 +56,7 @@ style/             富文本管线（语义色/主题/markdown/模板/宽度/ANS
 - `docs/design.md` 核心设计与各模块行为细节
 - `docs/interactive-tty.md` 交互式 run_shell pty 桥接设计与落地差异
 - `docs/render-pipeline.md` 富文本渲染管线方案
+- `docs/style-split.md` 表现层拆包（style → render 树）设计与落地记录
 - `docs/render-refs-compare.md` 渲染参考项目对比（持续补录；`refs/` 不入库）
 - `docs/repl-output-refactor.md` repl 输出收敛与数据流封装方案（含输出模式与双流收敛；阶段 0-4 已实施）
 - `docs/repl-replay-rendering.md` `/history` 回放复用实时渲染评估（原阶段 5，未实施；结论：数据不等价，建议不做或只统一样式）

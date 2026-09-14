@@ -3,13 +3,12 @@ package readline
 import (
 	"errors"
 	"fmt"
+	rstyle "github.com/LaoQi/tanyan/render/style"
+	"github.com/LaoQi/tanyan/render/term"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 	"unicode"
-
-	"github.com/LaoQi/tanyan/style"
 )
 
 var ErrInterrupt = errors.New("interrupted")
@@ -43,6 +42,8 @@ type Editor struct {
 	cursorRow int
 	menu      []Completion
 	menuIdx   int
+	dim       rstyle.Style
+	accent    rstyle.Style
 }
 
 func NewEditor(term Terminal, raw bool) *Editor {
@@ -54,6 +55,10 @@ func (e *Editor) SetComplete(fn func(string) []Completion) { e.complete = fn }
 func (e *Editor) SetGhost(fn func(string) string) { e.ghostFn = fn }
 
 func (e *Editor) SetOutput(w io.Writer) { e.out = w }
+
+func (e *Editor) SetStyles(dim, accent rstyle.Style) {
+	e.dim, e.accent = dim, accent
+}
 
 func (e *Editor) History() []string { return e.history }
 
@@ -222,15 +227,15 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 func (e *Editor) clearKeepHistory() {
 	size, ok := e.term.Size()
 	if !ok || size.Rows < 1 {
-		fmt.Fprint(e.out, "\x1b[2J\x1b[H")
+		fmt.Fprint(e.out, term.ScreenHome())
 		e.cursorRow = 0
 		return
 	}
 	var b strings.Builder
 	b.WriteString(strings.Repeat("\n", size.Rows*2))
-	b.WriteString("\r")
+	b.WriteString(term.LineStart())
 	if size.Rows > 1 {
-		b.WriteString("\x1b[" + strconv.Itoa(size.Rows-1) + "A")
+		b.WriteString(term.CursorUp(size.Rows - 1))
 	}
 	fmt.Fprint(e.out, b.String())
 	e.cursorRow = 0
@@ -292,7 +297,7 @@ func (e *Editor) menuLines(cols int) []string {
 	for i := start; i < end; i++ {
 		item := "  " + e.menu[i].display()
 		if i == e.menuIdx {
-			item = "  " + style.Accent.Sprint(e.menu[i].display())
+			item = "  " + e.accent.Sprint(e.menu[i].display())
 		}
 		out = append(out, truncate(item, cols))
 	}
@@ -385,25 +390,25 @@ func (e *Editor) histNext() {
 func (e *Editor) render(extra string) {
 	line := e.prompt + string(e.buf)
 	if e.ghost != "" && e.pos == len(e.buf) {
-		line += style.Dim.Sprint(e.ghost)
+		line += e.dim.Sprint(e.ghost)
 	}
 	cur := stringWidth(stripANSI(e.prompt)) + stringWidth(string(e.buf[:e.pos]))
 	size, ok := e.term.Size()
 	if !ok || size.Cols <= 0 {
-		fmt.Fprint(e.out, "\r\x1b[K"+line)
+		fmt.Fprint(e.out, term.ClearLineHome()+line)
 		if cur > 0 {
-			fmt.Fprint(e.out, "\r\x1b["+strconv.Itoa(cur)+"C")
+			fmt.Fprint(e.out, term.CursorForward(cur))
 		}
 		return
 	}
 	cols := size.Cols
 	rows, curRow, curCol := layoutCursor([]rune(stripANSI(line)), cur, cols)
 	var b strings.Builder
-	b.WriteString("\r")
+	b.WriteString(term.LineStart())
 	if e.cursorRow > 0 {
-		b.WriteString("\x1b[" + strconv.Itoa(e.cursorRow) + "A")
+		b.WriteString(term.CursorUp(e.cursorRow))
 	}
-	b.WriteString("\x1b[J")
+	b.WriteString(term.ClearToEOL())
 	b.WriteString(line)
 	menu := e.menuLines(cols)
 	for _, ml := range menu {
@@ -411,14 +416,14 @@ func (e *Editor) render(extra string) {
 	}
 	up := rows - 1 + len(menu) - curRow
 	if up > 0 {
-		b.WriteString("\x1b[" + strconv.Itoa(up) + "A")
+		b.WriteString(term.CursorUp(up))
 	}
-	b.WriteString("\r")
+	b.WriteString(term.LineStart())
 	if curCol > 0 {
 		if curCol >= cols {
 			curCol = cols - 1
 		}
-		b.WriteString("\x1b[" + strconv.Itoa(curCol) + "C")
+		b.WriteString(term.CursorForward(curCol))
 	}
 	e.cursorRow = curRow
 	fmt.Fprint(e.out, b.String())

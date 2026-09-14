@@ -1,15 +1,20 @@
-package style
+package markdown
 
 import (
 	"strings"
 	"testing"
+
+	"github.com/LaoQi/tanyan/render"
+	"github.com/LaoQi/tanyan/render/ir"
+	rstyle "github.com/LaoQi/tanyan/render/style"
+	"github.com/LaoQi/tanyan/render/term"
 )
 
 func blocksText(t *testing.T, buf *MarkdownBuf, delta string) string {
 	t.Helper()
 	var b strings.Builder
 	for _, blk := range buf.Write(delta) {
-		b.WriteString(NewRenderer(GetProfile()).Block(blk))
+		b.WriteString(render.NewRenderer(term.GetProfile()).Block(blk))
 	}
 	return b.String()
 }
@@ -18,7 +23,7 @@ func closeText(t *testing.T, buf *MarkdownBuf) string {
 	t.Helper()
 	var b strings.Builder
 	for _, blk := range buf.Close() {
-		b.WriteString(NewRenderer(GetProfile()).Block(blk))
+		b.WriteString(render.NewRenderer(term.GetProfile()).Block(blk))
 	}
 	return b.String()
 }
@@ -160,7 +165,7 @@ func TestParseInline(t *testing.T) {
 		{"粗体含中文", "**你好**世界", "\x1b[1m你好\x1b[0m世界"},
 	}
 	for _, c := range cases {
-		got := Sprint(ParseInline(c.in)...)
+		got := render.Sprint(ParseInline(c.in)...)
 		if got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
@@ -172,20 +177,20 @@ func TestParseInlineSpanStructure(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("spans = %d", len(got))
 	}
-	b, ok := got[0].(Span)
-	if !ok || b.Style != (Style{Attr: AttrBold}) || b.Text != "b" {
+	b, ok := got[0].(ir.Span)
+	if !ok || b.Style != (rstyle.Style{Attr: rstyle.AttrBold}) || b.Text != "b" {
 		t.Errorf("span[0] = %+v", got[0])
 	}
-	if tail, ok := got[1].(Span); !ok || tail.Text != " tail" {
+	if tail, ok := got[1].(ir.Span); !ok || tail.Text != " tail" {
 		t.Errorf("span[1] = %+v", got[1])
 	}
 }
 
 func TestInlineMergeAcrossCodeSpan(t *testing.T) {
-	got := Sprint(
-		Span{Style: Style{Attr: AttrBold}, Text: "a"},
-		CodeSpan{Text: "c"},
-		Span{Style: Style{Attr: AttrBold}, Text: "b"},
+	got := render.Sprint(
+		ir.Span{Style: rstyle.Style{Attr: rstyle.AttrBold}, Text: "a"},
+		ir.CodeSpan{Text: "c"},
+		ir.Span{Style: rstyle.Style{Attr: rstyle.AttrBold}, Text: "b"},
 	)
 	want := "\x1b[1ma\x1b[0m\x1b[92mc\x1b[0m\x1b[1mb\x1b[0m"
 	if got != want {
@@ -203,11 +208,11 @@ func TestMarkdownClosePendingStripsANSI(t *testing.T) {
 }
 
 func TestInlineCodeBrightAndDistinct(t *testing.T) {
-	inline := Sprint(CodeSpan{Text: "x"})
+	inline := render.Sprint(ir.CodeSpan{Text: "x"})
 	if strings.Contains(inline, "\x1b[90m") {
 		t.Errorf("行内 code 不应使用暗色: %q", inline)
 	}
-	block := NewRenderer(GetProfile()).Block(CodeBlock{Lines: []string{"x"}})
+	block := render.NewRenderer(term.GetProfile()).Block(ir.CodeBlock{Lines: []string{"x"}})
 	if inline == block {
 		t.Errorf("行内 code 与代码块应有不同配色: %q", inline)
 	}

@@ -1,4 +1,4 @@
-package style
+package term
 
 import (
 	"strings"
@@ -121,5 +121,46 @@ func TestTruncateBalancesSGR(t *testing.T) {
 		if n := strings.Count(got, "\x1b["); strings.Count(got, "m") < n {
 			t.Errorf("unbalanced sequences at w=%d: %q", w, got)
 		}
+	}
+}
+
+func TestStripOSCAndNonCSISequences(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"\x1b]0;my-title\x07hello", "hello"},
+		{"\x1b]8;;http://x\x1b\\link", "link"},
+		{"a\x1b]2;t\x07b\x1b[2Kc", "abc"},
+		{"\x1b(Besc", "esc"},
+	}
+	for _, c := range cases {
+		if got := Strip(c.in); got != c.want {
+			t.Errorf("Strip(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestWidthOSC(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"\x1b]0;my-title\x07hello", 5},
+		{"\x1b]8;;http://x\x1b\\link", 4},
+		{"\x1b[2Jhello", 5},
+	}
+	for _, c := range cases {
+		if got := Width(c.in); got != c.want {
+			t.Errorf("Width(%q) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+func TestTruncateOSC(t *testing.T) {
+	in := "\x1b]0;my-title\x07hello"
+	if got := Truncate(in, 8); got != in {
+		t.Errorf("宽度足够时不应截断: %q", got)
+	}
+	got := Truncate(in, 4)
+	if !strings.HasSuffix(got, "~") || strings.Contains(got, "hello") {
+		t.Errorf("超宽时应按可见宽度截断: %q", got)
 	}
 }

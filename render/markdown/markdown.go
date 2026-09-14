@@ -1,8 +1,12 @@
-package style
+package markdown
 
 import (
+	"github.com/LaoQi/tanyan/render/ir"
+	rstyle "github.com/LaoQi/tanyan/render/style"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/LaoQi/tanyan/render/term"
 )
 
 type groupKind uint8
@@ -20,14 +24,14 @@ type MarkdownBuf struct {
 	kind        groupKind
 	fenceLang   string
 	listOrdered bool
-	closed      []Block
+	closed      []ir.Block
 }
 
 func NewMarkdownBuf() *MarkdownBuf { return &MarkdownBuf{} }
 
 func (b *MarkdownBuf) Reset() { *b = MarkdownBuf{} }
 
-func (b *MarkdownBuf) Write(delta string) []Block {
+func (b *MarkdownBuf) Write(delta string) []ir.Block {
 	b.pending.WriteString(delta)
 	b.drain()
 	out := b.closed
@@ -35,7 +39,7 @@ func (b *MarkdownBuf) Write(delta string) []Block {
 	return out
 }
 
-func (b *MarkdownBuf) Close() []Block {
+func (b *MarkdownBuf) Close() []ir.Block {
 	b.drain()
 	switch b.kind {
 	case groupFence:
@@ -43,7 +47,7 @@ func (b *MarkdownBuf) Close() []Block {
 		for _, l := range b.lines {
 			raw += "\n" + l
 		}
-		b.closed = append(b.closed, RawText{Text: raw})
+		b.closed = append(b.closed, ir.RawText{Text: raw})
 	case groupList:
 		b.closed = append(b.closed, b.buildList())
 	case groupQuote:
@@ -55,7 +59,7 @@ func (b *MarkdownBuf) Close() []Block {
 		p := cleanLine(b.pending.String())
 		b.pending.Reset()
 		if p != "" {
-			b.closed = append(b.closed, Paragraph{Inlines: ParseInline(p)})
+			b.closed = append(b.closed, ir.Paragraph{Inlines: ParseInline(p)})
 		}
 	}
 	out := b.closed
@@ -82,7 +86,7 @@ func (b *MarkdownBuf) feedLine(line string) {
 	trimmed := strings.TrimSpace(line)
 	if b.kind == groupFence {
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
-			b.closed = append(b.closed, CodeBlock{Lang: b.fenceLang, Lines: b.lines})
+			b.closed = append(b.closed, ir.CodeBlock{Lang: b.fenceLang, Lines: b.lines})
 			b.lines = nil
 			b.kind = groupNone
 			b.fenceLang = ""
@@ -93,7 +97,7 @@ func (b *MarkdownBuf) feedLine(line string) {
 	}
 	if trimmed == "" {
 		b.closeGroup()
-		b.closed = append(b.closed, Paragraph{})
+		b.closed = append(b.closed, ir.Paragraph{})
 		return
 	}
 	if strings.HasPrefix(line, "```") {
@@ -104,12 +108,12 @@ func (b *MarkdownBuf) feedLine(line string) {
 	}
 	if lvl := headingLevel(line); lvl > 0 {
 		b.closeGroup()
-		b.closed = append(b.closed, Heading{Level: lvl, Inlines: ParseInline(strings.TrimSpace(line[lvl+1:]))})
+		b.closed = append(b.closed, ir.Heading{Level: lvl, Inlines: ParseInline(strings.TrimSpace(line[lvl+1:]))})
 		return
 	}
 	if isRule(trimmed) {
 		b.closeGroup()
-		b.closed = append(b.closed, Rule{})
+		b.closed = append(b.closed, ir.Rule{})
 		return
 	}
 	if item, ordered, ok := listItem(line); ok {
@@ -132,7 +136,7 @@ func (b *MarkdownBuf) feedLine(line string) {
 		return
 	}
 	b.closeGroup()
-	b.closed = append(b.closed, Paragraph{Inlines: ParseInline(line)})
+	b.closed = append(b.closed, ir.Paragraph{Inlines: ParseInline(line)})
 }
 
 func (b *MarkdownBuf) closeGroup() {
@@ -146,24 +150,24 @@ func (b *MarkdownBuf) closeGroup() {
 	b.lines = nil
 }
 
-func (b *MarkdownBuf) buildList() Block {
-	items := make([]ListItem, len(b.lines))
+func (b *MarkdownBuf) buildList() ir.Block {
+	items := make([]ir.ListItem, len(b.lines))
 	for i, l := range b.lines {
-		items[i] = ListItem{Blocks: []Block{Paragraph{Inlines: ParseInline(l)}}}
+		items[i] = ir.ListItem{Blocks: []ir.Block{ir.Paragraph{Inlines: ParseInline(l)}}}
 	}
-	return List{Ordered: b.listOrdered, Start: 1, Items: items}
+	return ir.List{Ordered: b.listOrdered, Start: 1, Items: items}
 }
 
-func (b *MarkdownBuf) buildQuote() Block {
-	blocks := make([]Block, len(b.lines))
+func (b *MarkdownBuf) buildQuote() ir.Block {
+	blocks := make([]ir.Block, len(b.lines))
 	for i, l := range b.lines {
-		blocks[i] = Paragraph{Inlines: ParseInline(l)}
+		blocks[i] = ir.Paragraph{Inlines: ParseInline(l)}
 	}
-	return Quote{Blocks: blocks}
+	return ir.Quote{Blocks: blocks}
 }
 
 func cleanLine(s string) string {
-	s = Strip(s)
+	s = term.Strip(s)
 	var b strings.Builder
 	for _, r := range s {
 		if r == '\r' || (r < 0x20 && r != '\t') || r == 0x7f {
@@ -226,12 +230,12 @@ func quoteLine(line string) (string, bool) {
 	return "", false
 }
 
-func ParseInline(s string) []Inline {
-	var out []Inline
+func ParseInline(s string) []ir.Inline {
+	var out []ir.Inline
 	var buf strings.Builder
 	flush := func() {
 		if buf.Len() > 0 {
-			out = append(out, Span{Text: buf.String()})
+			out = append(out, ir.Span{Text: buf.String()})
 			buf.Reset()
 		}
 	}
@@ -242,7 +246,7 @@ func ParseInline(s string) []Inline {
 			end := strings.IndexByte(s[i+1:], '`')
 			if end > 0 {
 				flush()
-				out = append(out, CodeSpan{Text: s[i+1 : i+1+end]})
+				out = append(out, ir.CodeSpan{Text: s[i+1 : i+1+end]})
 				i += end + 2
 				continue
 			}
@@ -252,7 +256,7 @@ func ParseInline(s string) []Inline {
 			end := strings.Index(s[i+2:], "**")
 			if end > 0 {
 				flush()
-				out = append(out, Span{Style: Style{Attr: AttrBold}, Text: s[i+2 : i+2+end]})
+				out = append(out, ir.Span{Style: rstyle.Style{Attr: rstyle.AttrBold}, Text: s[i+2 : i+2+end]})
 				i += end + 4
 				continue
 			}
@@ -262,7 +266,7 @@ func ParseInline(s string) []Inline {
 			end := strings.IndexByte(s[i+1:], '*')
 			if end > 0 && s[i+1] != ' ' && s[i+end] != ' ' {
 				flush()
-				out = append(out, Span{Style: Style{Attr: AttrItalic}, Text: s[i+1 : i+1+end]})
+				out = append(out, ir.Span{Style: rstyle.Style{Attr: rstyle.AttrItalic}, Text: s[i+1 : i+1+end]})
 				i += end + 2
 				continue
 			}

@@ -1,15 +1,15 @@
 package repl
 
 import (
+	rstyle "github.com/LaoQi/tanyan/render/style"
+	"github.com/LaoQi/tanyan/render/term"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/LaoQi/tanyan/style"
 )
 
 func TestSpinnerNonTTYNoop(t *testing.T) {
-	sp := newSpinner(NewStreams(&syncBuf{}, &syncBuf{}, modeRich).out, false)
+	sp := newSpinner(NewStreams(&syncBuf{}, &syncBuf{}, modeRich).out, false, testSem())
 	sp.start(spinWaiting)
 	time.Sleep(250 * time.Millisecond)
 	sp.stop()
@@ -42,7 +42,7 @@ func (w *blockedWriter) Write(p []byte) (int, error) {
 }
 
 func TestSpinnerStopTimeout(t *testing.T) {
-	sp := newSpinner(newOutput(&syncBuf{}, allVisible()), true)
+	sp := newSpinner(newOutput(&syncBuf{}, allVisible()), true, testSem())
 	bw := &blockedWriter{entered: make(chan struct{}), release: make(chan struct{})}
 	sp.out = newOutput(bw, allVisible())
 	sp.start(spinWaiting)
@@ -69,36 +69,28 @@ func TestSpinnerStopTimeout(t *testing.T) {
 }
 
 func TestSpinLine(t *testing.T) {
-	if got := spinLine(spinWaiting, 2*time.Second, "⠋"); !strings.Contains(got, "等待响应") || !strings.Contains(got, "2s") {
+	if got := spinLine(spinWaiting, testSem(), 2*time.Second, "⠋"); !strings.Contains(got, "等待响应") || !strings.Contains(got, "2s") {
 		t.Errorf("等待文案: %q", got)
 	}
-	if got := spinLine(spinThinking, 3*time.Second, "⠙"); !strings.Contains(got, "思考中") || !strings.Contains(got, "3s") {
+	if got := spinLine(spinThinking, testSem(), 3*time.Second, "⠙"); !strings.Contains(got, "思考中") || !strings.Contains(got, "3s") {
 		t.Errorf("思考文案: %q", got)
 	}
-	if got := spinLine(spinRunning, time.Second, "⠹"); !strings.Contains(got, "执行中") {
+	if got := spinLine(spinRunning, testSem(), time.Second, "⠹"); !strings.Contains(got, "执行中") {
 		t.Errorf("执行文案: %q", got)
 	}
 }
 
 func TestSpinLineStateColors(t *testing.T) {
-	old := style.GetProfile()
-	style.SetProfile(style.Profile{TTY: true, Colors: style.Level16, Unicode: true})
-	defer style.SetProfile(old)
-	prev := style.CurrentSchemeName()
-	style.ApplyScheme("default")
-	style.ApplyPalette(nil)
-	defer func() {
-		style.ApplyScheme(prev)
-		style.ApplyPalette(nil)
-	}()
-
-	sgr := func(st style.Style) string {
+	old := term.GetProfile()
+	term.SetProfile(term.Profile{TTY: true, Colors: term.Level16})
+	defer term.SetProfile(old)
+	sgr := func(st rstyle.Style) string {
 		out := st.Sprint("x")
 		return out[:strings.Index(out, "m")+1]
 	}
 	colors := map[spinKind]string{}
 	for _, k := range []spinKind{spinWaiting, spinThinking, spinRunning} {
-		line := spinLine(k, time.Second, "⠋")
+		line := spinLine(k, testSem(), time.Second, "⠋")
 		i := strings.Index(line, "\x1b[")
 		if i < 0 {
 			t.Fatalf("%d 缺少颜色码: %q", k, line)
@@ -110,9 +102,9 @@ func TestSpinLineStateColors(t *testing.T) {
 		t.Errorf("三态颜色应互不相同: %v", colors)
 	}
 	want := map[spinKind]string{
-		spinWaiting:  sgr(style.Warn),
-		spinThinking: sgr(style.Think),
-		spinRunning:  sgr(style.Run),
+		spinWaiting:  sgr(testSem().Warn),
+		spinThinking: sgr(testSem().Think),
+		spinRunning:  sgr(testSem().Run),
 	}
 	for k, code := range want {
 		if colors[k] != code {
@@ -122,11 +114,11 @@ func TestSpinLineStateColors(t *testing.T) {
 }
 
 func TestSpinnerFramesViaOutput(t *testing.T) {
-	old := style.GetProfile()
-	style.SetProfile(style.Profile{TTY: true, Colors: style.LevelNone, Unicode: true})
-	t.Cleanup(func() { style.SetProfile(old) })
+	old := term.GetProfile()
+	term.SetProfile(term.Profile{TTY: true, Colors: term.LevelNone})
+	t.Cleanup(func() { term.SetProfile(old) })
 	var buf syncBuf
-	sp := newSpinner(NewStreams(&buf, &syncBuf{}, modeRich).out, true)
+	sp := newSpinner(NewStreams(&buf, &syncBuf{}, modeRich).out, true, testSem())
 	sp.start(spinWaiting)
 	time.Sleep(160 * time.Millisecond)
 	sp.stop()
@@ -134,10 +126,10 @@ func TestSpinnerFramesViaOutput(t *testing.T) {
 	if !strings.Contains(got, "等待响应") {
 		t.Errorf("帧应经注入 writer 输出: %q", got)
 	}
-	if !strings.HasPrefix(got, style.ClearLineHome()) {
+	if !strings.HasPrefix(got, term.ClearLineHome()) {
 		t.Errorf("每帧应带清行序列: %q", got)
 	}
-	if !strings.HasSuffix(got, style.ClearLineHome()) {
+	if !strings.HasSuffix(got, term.ClearLineHome()) {
 		t.Errorf("stop 应补一次清行: %q", got)
 	}
 }

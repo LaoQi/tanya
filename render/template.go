@@ -1,32 +1,37 @@
-package style
+package render
 
 import (
+	"github.com/LaoQi/tanyan/render/ir"
+	"github.com/LaoQi/tanyan/render/markup"
+	"github.com/LaoQi/tanyan/render/theme"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/LaoQi/tanyan/render/term"
 )
 
 type Template struct {
 	passthrough bool
 	raw         string
-	inlines     []Inline
+	inlines     []ir.Inline
 }
 
-func ParseTemplate(src string) (Template, error) {
+func ParseTemplate(src string, sem theme.Semantics) (Template, error) {
 	if strings.Contains(src, "\x1b") {
 		return Template{passthrough: true, raw: src}, nil
 	}
-	return Template{inlines: ParseMarkup(src)}, nil
+	return Template{inlines: markup.ParseMarkup(src, sem)}, nil
 }
 
-func (t Template) Bind(resolve func(string) (string, bool)) []Inline {
+func (t Template) Bind(resolve func(string) (string, bool)) []ir.Inline {
 	return bindInlines(t.inlines, resolve)
 }
 
 func (t Template) Render(resolve func(string) (string, bool)) string {
 	if t.passthrough {
 		out := replacePlaceholders(t.raw, resolve)
-		if GetProfile().Colors == LevelNone {
-			return Strip(out)
+		if term.GetProfile().Colors == term.LevelNone {
+			return term.Strip(out)
 		}
 		return out
 	}
@@ -103,10 +108,10 @@ func replacePlaceholders(s string, resolve func(string) (string, bool)) string {
 	return b.String()
 }
 
-func bindInlines(in []Inline, resolve func(string) (string, bool)) []Inline {
-	var out []Inline
+func bindInlines(in []ir.Inline, resolve func(string) (string, bool)) []ir.Inline {
+	var out []ir.Inline
 	for _, i := range in {
-		sp, ok := i.(Span)
+		sp, ok := i.(ir.Span)
 		if !ok {
 			out = append(out, i)
 			continue
@@ -116,13 +121,13 @@ func bindInlines(in []Inline, resolve func(string) (string, bool)) []Inline {
 				v, ok := resolve(seg.text)
 				switch {
 				case ok && v != "":
-					out = append(out, Span{Style: sp.Style, Text: v})
+					out = append(out, ir.Span{Style: sp.Style, Text: v})
 				case !ok:
-					out = append(out, Span{Style: sp.Style, Text: "{" + seg.text + "}"})
+					out = append(out, ir.Span{Style: sp.Style, Text: "{" + seg.text + "}"})
 				}
 				continue
 			}
-			out = append(out, Span{Style: sp.Style, Text: seg.text})
+			out = append(out, ir.Span{Style: sp.Style, Text: seg.text})
 		}
 	}
 	return out

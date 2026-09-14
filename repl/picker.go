@@ -2,13 +2,14 @@ package repl
 
 import (
 	"fmt"
+	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanyan/render/theme"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
-	"github.com/LaoQi/tanyan/style"
 )
 
 type sessionPicker struct {
@@ -16,6 +17,7 @@ type sessionPicker struct {
 	cursor int
 	done   bool
 	cancel bool
+	sem    theme.Semantics
 }
 
 func (p *sessionPicker) handle(ev readline.KeyEvent) {
@@ -43,31 +45,31 @@ func (p *sessionPicker) handle(ev readline.KeyEvent) {
 
 func (p *sessionPicker) render(out io.Writer, first bool) {
 	if !first && len(p.items) > 0 {
-		fmt.Fprint(out, style.CursorUp(len(p.items)+1))
+		fmt.Fprint(out, term.CursorUp(len(p.items)+1))
 	}
-	fmt.Fprint(out, style.ClearLineHome()+PickTitle)
+	fmt.Fprint(out, term.ClearLineHome()+PickTitle)
 	for i, s := range p.items {
 		mark := MsgMarkPlain
 		if i == p.cursor {
-			mark = style.Ok.Sprint("> ")
+			mark = p.sem.Ok.Sprint("> ")
 		}
-		fmt.Fprintf(out, style.ClearLineHome()+SessRow+style.ClearLine()+"\r\n",
+		fmt.Fprintf(out, term.ClearLineHome()+SessRow+term.ClearLine()+"\r\n",
 			mark, s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary)
 	}
 }
 
-func pickSession(term readline.Terminal, list []agent.SessionInfo, out io.Writer) (int, bool) {
+func pickSession(dev readline.Terminal, list []agent.SessionInfo, out io.Writer, sem theme.Semantics) (int, bool) {
 	if len(list) == 0 {
 		return -1, false
 	}
-	if err := term.Raw(); err != nil {
+	if err := dev.Raw(); err != nil {
 		return -1, false
 	}
-	defer term.Restore()
-	p := &sessionPicker{items: list}
+	defer dev.Restore()
+	p := &sessionPicker{items: list, sem: sem}
 	p.render(out, true)
 	for {
-		ev, err := term.ReadKey()
+		ev, err := dev.ReadKey()
 		if err != nil {
 			return -1, false
 		}

@@ -1,17 +1,19 @@
 package readline
 
-import "github.com/LaoQi/tanyan/style"
+import (
+	"github.com/LaoQi/tanyan/render/term"
+)
 
 func stringWidth(s string) int {
-	return style.Width(s)
+	return term.Width(s)
 }
 
 func stripANSI(s string) string {
-	return style.Strip(s)
+	return term.Strip(s)
 }
 
 func truncate(s string, w int) string {
-	return style.Truncate(s, w)
+	return term.Truncate(s, w)
 }
 
 func layoutCursor(visible []rune, curWidth, cols int) (rows, curRow, curCol int) {

@@ -2,10 +2,10 @@ package repl
 
 import (
 	"fmt"
+	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanyan/render/theme"
 	"sync"
 	"time"
-
-	"github.com/LaoQi/tanyan/style"
 )
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -22,20 +22,21 @@ const (
 	spinRunning
 )
 
-func spinLine(kind spinKind, elapsed time.Duration, frame string) string {
+func spinLine(kind spinKind, sem theme.Semantics, elapsed time.Duration, frame string) string {
 	switch kind {
 	case spinThinking:
-		return style.Think.Sprint(fmt.Sprintf(SpinThinking, frame, spinElapsed(elapsed)))
+		return sem.Think.Sprint(fmt.Sprintf(SpinThinking, frame, spinElapsed(elapsed)))
 	case spinRunning:
-		return style.Run.Sprint(fmt.Sprintf(SpinRunning, frame, spinElapsed(elapsed)))
+		return sem.Run.Sprint(fmt.Sprintf(SpinRunning, frame, spinElapsed(elapsed)))
 	default:
-		return style.Warn.Sprint(fmt.Sprintf(SpinWaiting, frame, spinElapsed(elapsed)))
+		return sem.Warn.Sprint(fmt.Sprintf(SpinWaiting, frame, spinElapsed(elapsed)))
 	}
 }
 
 type spinner struct {
 	mu      sync.Mutex
 	tty     bool
+	sem     theme.Semantics
 	out     *output
 	stopCh  chan struct{}
 	stopped chan struct{}
@@ -43,8 +44,14 @@ type spinner struct {
 	kind    spinKind
 }
 
-func newSpinner(out *output, tty bool) *spinner {
-	return &spinner{out: out, tty: tty}
+func newSpinner(out *output, tty bool, sem theme.Semantics) *spinner {
+	return &spinner{out: out, tty: tty, sem: sem}
+}
+
+func (s *spinner) setSemantics(sem theme.Semantics) {
+	s.mu.Lock()
+	s.sem = sem
+	s.mu.Unlock()
 }
 
 func (s *spinner) start(kind spinKind) {
@@ -75,7 +82,7 @@ func (s *spinner) loop(start time.Time) {
 	frame := 0
 	for {
 		s.mu.Lock()
-		line := style.ClearLineHome() + spinLine(s.kind, time.Since(start), spinnerFrames[frame%len(spinnerFrames)])
+		line := term.ClearLineHome() + spinLine(s.kind, s.sem, time.Since(start), spinnerFrames[frame%len(spinnerFrames)])
 		s.mu.Unlock()
 		s.out.emit(KindSpinner, line)
 		frame++
@@ -100,7 +107,7 @@ func (s *spinner) stop() {
 	}
 	s.active = false
 	if clean {
-		s.out.emit(KindSpinner, style.ClearLineHome())
+		s.out.emit(KindSpinner, term.ClearLineHome())
 	}
 }
 
