@@ -178,6 +178,7 @@ type Style struct {
 - **色深约束（落地修订）**：原决议拟放宽为"IR 支持 Color16 与 RGB 两档、渲染按 profile 降级"，实际**未采纳 RGB 一档**——`KindRGB`/`Color.RGB` 已删除，IR 只保留 `Kind16`；`term.ColorLevel` 也收敛为 `None`/`Level16`（`Level256`/`LevelTrue` 删除，`SGR` 本就只产 16 色）
 - **无降级链**：不做 `RGB →(256) →(16) →None` 量化，`Style.SGR` 直接产出 16 色 SGR，profile 为 `LevelNone` 时整段退化为纯文本；"256 色是量化产物，不进 IR"的原判断保留
 - 颜色一律 16 色基本 SGR（30-37/90-97/40-47/100-107），与 `AGENTS.md` 铁律一致
+- **`Style.Bg` 通道为预留**：结构（`Style.Bg`）与编码（40-47/100-107）保留可用（`empty`/`SGR`/`markup.mergeStyle` 均已支持），但 markup 无 `[bg:...]` 语法入口、渲染侧无写入方；启用条件与理由见 `docs/open-questions.md` A5
 
 ## 5. 语义色与 palette
 

@@ -120,7 +120,7 @@ Go 不能跨包定义方法，若坚持 style 零依赖就得把 `Sprint/Frame` 
 1. **阶段顺序调整（自底向上）**：原计划 P1 建 render/style + term，实际按 `term → style → ir/theme → markdown/markup/render` 顺序推进。原因是 Go 的方法接收者规则（`Style.Sprint/Frame` 必须与 `Style` 同包）与父/子包环禁令，只有自底向上建包才能每阶段全绿、无中间环。
 2. **`style → term`（非零依赖）**：`Style.Sprint/Frame` 需要颜色档位与清洗，而 Go 不能跨包定义方法；若坚持 style 零依赖须把约 130 处 `theme.X.Sprint(...)` 改为 `Renderer` 方法。落地取"style 依赖 term、方法留在 style"，**官方不变量改为：`render/term` 是零依赖叶子**。
 3. **`markup → render` 的反向边**：`Template.Render` 需要 `render.Sprint`，最初形成子包 import 父包。修正为**把 Template 并入 `render`**（`render/template.go`），`render → markup` 成为正规父→子；最终所有边均为父→子或指向叶子。
-4. **`Style.Bg` 保留**：编码路径（`color.go` 的 `bgSeq`）与测试用例（`bright bg`）保留未删——markup 语法暂无法表达背景，登记为待决（要么补 `[bg:...]` 语法，要么后续删除）。
+4. **`Style.Bg` 保留为预留**：编码路径（`bgSeq`，拆包后位于 `render/style/style.go`，原 `color.go` 已并入）与测试用例（`bright bg`）保留未删——markup 语法无背景入口、渲染侧无消费方，作为预留能力保留（决策见 `docs/open-questions.md` A5）。
 5. **`Document`/`Doc()`/`P()`/`Renderer.Doc` 删除**：仅被测试使用；`TestDocSkeleton` 改写为 `render/ir` 包的 `TestIRSkeleton`。
 6. **主题校验迁 `repl`**：`agent` 删掉 `DefaultPrompt`/`HasScheme`/`SchemeNames` 引用，校验由 `repl.ValidateTheme` 承担，`MsgBadTheme` 常量迁 `repl/messages.go`。落地后 `go list -deps ./agent` 无内部包。
 7. **`Profile.Unicode` 删除**：只写不读，确认为死能力。

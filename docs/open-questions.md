@@ -31,6 +31,13 @@
 
 原 `RunShellResult(ctx, cmd, timeout, interactive, cwd, base)` 六参形态（`base` 由 `dispatch` 传 `a.cwd`）**已删除**：`docs/shell-tool.md` 的组件化落地后，请求形态为 `shellRequest{Command, TimeoutSec, Interactive, Cwd}`，工作区基准由 `shellTool.workspace`（`agent.New` 构造期注入）承担，`RunShell`/`RunShellResult`/`resolveShellCwd` 均不存在。
 
+### A5 `Style.Bg`（背景色编码路径）：作为预留保留
+
+- 现状：`Style.Bg` 与 `bgSeq` 编码可用（`Style{Bg: Color16(n)}.Sprint` 出 `40-47/100-107`），`Style.empty`/`SGR`/`markup.mergeStyle` 均已支持该通道；缺的只有两处——markup 语法没有 `[bg:...]`（`ColorByName` 只解析前景）、渲染侧没有设置它的消费方。
+- 结论：**不删、也不补语法**，作为预留保留。删除无收益（一个字段 + 一个纯函数 + 一条用例），保留成本为零；将来若要做背景（如按来源高亮的块），补 markup 语法即可复用现有编码路径。
+- 启用条件（防误用）：先补 markup `[bg:...]` 语法并评审 16 色背景下语义色的可读性，再谈消费方；在此之前不新增 `Bg` 的写入点。
+- 登记处：`docs/style-split.md` §7.4、`docs/todos.md`；markup 语法边界见 `docs/design.md`《提示符模板》。
+
 ## B. 待决 / 待评估
 
 ### B1 `Agent` 是否拆分（god struct 诊断）——已实施
