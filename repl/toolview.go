@@ -16,6 +16,14 @@ import (
 const (
 	toolHeadLines = 3
 	toolTailLines = 2
+
+	toolCommandMaxLines  = 8
+	toolCommandHeadLines = 6
+	toolCommandTailLines = 1
+
+	toolCommandPrefix = "  $ "
+	toolCwdPrefix     = "  cwd: "
+	toolTabWidth      = 4
 )
 
 type tagLine struct {
@@ -33,7 +41,7 @@ func toolWidth(term readline.Terminal) int {
 }
 
 func RenderToolStart(name, args string, width int) string {
-	lines := toolTitleLines(name, args, width-3)
+	lines := toolTitleLines(name, args, width)
 	var b strings.Builder
 	b.WriteString("\n▸ " + lines[0] + "\n")
 	for _, l := range lines[1:] {
@@ -42,20 +50,41 @@ func RenderToolStart(name, args string, width int) string {
 	return b.String()
 }
 
+// toolTitleLines 组装标题区：命令短到能与工具名同行时内联单行（`▸ run_shell ls -la`，与旧版逐字节一致），
+// 否则转块形态——首行工具名，其后是 cwd 行（显式指定时）与折行的命令区（`  $ ` 前缀，与输出区区分）。
+// 命令行数超上限时省略中段并提示 /history，见 commandLines。width 是终端总列数，各前缀宽度在此扣除。
 func toolTitleLines(name, args string, width int) []string {
 	cwd, cmd := toolArgsDisplay(name, args)
-	head := name
-	if cwd == "" {
-		if cmd != "" {
-			head += " " + cmd
+	if cwd == "" && cmd != "" {
+		if inner := width - 3 - term.Width(name) - 1; inner > 0 && !strings.Contains(cmd, "\n") && term.Width(cmd) <= inner {
+			return []string{term.Truncate(name+" "+cmd, width-3)}
 		}
-		return []string{term.Truncate(head, width)}
 	}
-	lines := []string{term.Truncate(head, width), term.Truncate("  cwd: "+cwd, width)}
-	if cmd != "" {
-		lines = append(lines, term.Truncate("  "+cmd, width))
+	lines := []string{term.Truncate(name, width-3)}
+	if cwd != "" {
+		lines = append(lines, term.Truncate(toolCwdPrefix+cwd, width-2))
+	}
+	for _, l := range commandLines(cmd, width-len(toolCommandPrefix)) {
+		lines = append(lines, toolCommandPrefix+l)
 	}
 	return lines
+}
+
+// commandLines 把命令折成显示行（制表符已摊平、保留原换行结构）；超过上限时保留头尾，
+// 中段换成省略提示——命令是有序脚本，省略中段比省略尾部更不易误读收尾的 done/EOF。
+func commandLines(cmd string, width int) []string {
+	if cmd == "" {
+		return nil
+	}
+	lines := term.Wrap(cmd, width)
+	if len(lines) <= toolCommandMaxLines {
+		return lines
+	}
+	omitted := len(lines) - toolCommandHeadLines - toolCommandTailLines
+	out := make([]string, 0, toolCommandMaxLines)
+	out = append(out, lines[:toolCommandHeadLines]...)
+	out = append(out, term.Truncate(fmt.Sprintf(MsgCmdOmittedFmt, omitted), width))
+	return append(out, lines[len(lines)-toolCommandTailLines:]...)
 }
 
 func toolEndBody(res agent.ToolResult, width, maxLines int) (string, string) {
@@ -143,19 +172,20 @@ func toolArgsDisplay(name, args string) (string, string) {
 		Cwd     string `json:"cwd"`
 	}
 	if err := json.Unmarshal([]byte(args), &a); err != nil || strings.TrimSpace(a.Command) == "" {
-		return "", collapseCommand(args)
+		return "", trimBlankEdges(args)
 	}
-	return strings.TrimSpace(a.Cwd), collapseCommand(a.Command)
+	return strings.TrimSpace(a.Cwd), expandTabs(trimBlankEdges(a.Command))
 }
 
-func collapseCommand(s string) string {
-	var parts []string
-	for _, line := range strings.Split(s, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			parts = append(parts, line)
-		}
+// trimBlankEdges 去掉首尾空行但保留行首缩进——heredoc/多行脚本的缩进是命令结构的一部分。
+func trimBlankEdges(s string) string { return strings.Trim(s, "\n\r") }
+
+// expandTabs 展开制表符：宽度表把 \t 当单列，与终端制表位不符，折行前必须先摊平，否则折行位置与显示不符。
+func expandTabs(s string) string {
+	if !strings.Contains(s, "\t") {
+		return s
 	}
-	return strings.Join(parts, "; ")
+	return strings.ReplaceAll(s, "\t", strings.Repeat(" ", toolTabWidth))
 }
 
 func shellView(r *agent.ShellResult, width, maxLines int) ([]string, string, int, bool) {

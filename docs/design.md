@@ -144,10 +144,13 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 工具视图渲染（repl/toolview.go）
 
-- `NewToolView` 构造渲染器（`repl/repl.go` 与 `main.go` 各接一处；`Handle(e agent.Event)` 即事件入口，`toolView` 自身即 `agent.EventSink`），块状视图：`▸ 工具名 命令` 标题行 + 缩进输出行（stderr 加 `2|` 前缀）+ 亮蓝状态行；`run_shell` **显式指定** `cwd` 时标题区改为三行——首行仅工具名，其后 `cwd: <原样值>`（不缩写）与折叠后的命令各占一行（逐行按宽度截断），未指定时保持单行
+- `NewToolView` 构造渲染器（`repl/repl.go` 与 `main.go` 各接一处；`Handle(e agent.Event)` 即事件入口，`toolView` 自身即 `agent.EventSink`），块状视图：标题行 + 缩进输出行（stderr 加 `2|` 前缀）+ 亮蓝状态行
+- **标题区两形态（2026-09-16 命令可读性改造）**：`run_shell` 的 `command` 短到能与工具名同行时**内联单行**（`▸ run_shell ls -la`，与旧版逐字节一致）；放不下（超宽）或原本多行时转**块形态**——首行只有工具名（`▸ run_shell`），其后是显式 `cwd` 行（`  cwd: <原样值>`，不缩写；未指定则无此行）与折行的命令区（每行 `  $ ` 前缀，与输出区的 `  ` / `  2| ` 缩进区分）。内联判据是「无 cwd && 命令无 `\n` && 宽度 ≤ width−3−len(name)−1」，两种形态的首行宽度都不超终端列数。非 `run_shell` 工具、JSON 解析失败或 `command` 为空一律只显示工具名（`toolArgsDisplay` 返回空）
+- **命令区折行（`commandLines` + `render/term.Wrap`）**：保留命令原有的换行结构与行首缩进（不再用 `; ` 压成单行——旧实现会把 `for …; do` / `if …; then` 拼成语法上不存在的 `do; if`，且丢空行与缩进）；制表符先按 4 空格摊平（`runeWidth` 把 `\t` 当单列、与终端制表位不符，不摊平则折行位置与显示不符）；`Wrap` 按显示宽度切分（宽字符整字换行、遇 `\n` 硬断行、`\r` 丢弃），只切分不改写内容、**不做词级折行**（超长 token 一样硬切），每行宽度 ≤ 终端列数 − 4。行数上限 `toolCommandMaxLines = 8`：超出保留头 6 行 + 省略行 + 尾 1 行，省略行 `… 省略 N 行（完整命令见 /history）`——命令是有序脚本，省略中段比省略尾部更不易误读收尾的 `done`/`EOF`；完整参数始终在 `/history n` 的工具消息里（显示侧改造不影响模型通道与会话存储）
+- 命令文本里的 ANSI 由调用点的 `Dim.Frame` 清洗（`Wrap` 遇到序列原样保留、不计宽度），折行发生在清洗之前，故宽度计算不会被模型可控的转义序列干扰
 - 状态行总是输出（语义色 `Info`，无色环境纯文本）：`↳ exit 0 · 0.3s · 12 行`；异常时首段为 `exit 2`/`执行超时`/`已中断`/`挂起已终止`/`错误: ...`；输出被截断时行数段显示 `共 N 行`；builtin 工具无状态行（截断时仅显示 `共 N 行`）
 - 颜色走 `theme.Semantics` 语义色 + `term.Profile` 驱动（`colors` 配置 / `NO_COLOR` / 非 TTY → 纯文本）：工具块 `Dim`、状态行心跳 等待 `Warn`/思考 `Think`/执行 `Run`、状态行 `Info`，可用 `palette` 配置覆盖
-- **捕获输出的 ANSI 治理**（`render/term` 清洗 + `Renderer.Frame/Passthrough`）：块组装内聚于 `renderToolBlock`，输出区无 SGR 时整块 `Dim.Frame`（全清洗 + 块级包裹，标题/输出单一包裹点）；检测到 SGR（`HasSGR`）时输出区改走直显——`Passthrough` 保色渲染（SGR 原样保留、布局序列/OSC/C0 仍清洗、脏状态结尾闭合），标题行独立 Frame，状态行 `Info` 显式后置（不依赖 SGR 时序巧合）。预览类彩色输出（如欢迎屏效果）在灰色块内原色可见，用户与模型双通道分离：**模型侧文本不做任何变换**（原始输出、信息保真、缓存与历史零影响），显示侧机制对模型完全不可见
+- **捕获输出的 ANSI 治理**（`render/term` 清洗 + `Renderer.Frame/Passthrough`）：块组装内聚于 `RenderToolStart`/`RenderToolEndAppend`，输出区无 SGR 时整块 `Dim.Frame`（全清洗 + 块级包裹，标题/输出单一包裹点）；检测到 SGR（`HasSGR`）时输出区改走直显——`Passthrough` 保色渲染（SGR 原样保留、布局序列/OSC/C0 仍清洗、脏状态结尾闭合），标题行独立 Frame，状态行 `Info` 显式后置（不依赖 SGR 时序巧合）。预览类彩色输出（如欢迎屏效果）在灰色块内原色可见，用户与模型双通道分离：**模型侧文本不做任何变换**（原始输出、信息保真、缓存与历史零影响），显示侧机制对模型完全不可见
 - `/history` 查看 tool 消息时正文走 `Dim.Frame`（纯显示侧，历史存储不动），顺带解决历史串裸序列漏进视图的问题
 - 显示行数上限 `tool_output_lines`（默认 20，范围 1-1000），超出保留头 3 行 + 尾 2 行并提示 `/history n` 查看完整输出
 - 执行开始即打印标题行（调用点 `Dim.Frame` 包裹，模型可控的 args 一并清洗），**无进行中标记**；结束一律 `RenderToolEndAppend` 追加正文块与状态行——标题只由 ToolStart 打出一次，重复标题会留下两行 `▸ 工具名`。2026-09-15 追加化：删掉 TTY + 光标控制档的 `\x1b[1A\r\x1b[K` 上移重绘（`RenderToolEndInline`）与交互式的标题重打（`RenderToolEnd`），三条收尾路径合一；交互式仅保留前导 `\n`（用户交互回显混在中间需要重新起头）

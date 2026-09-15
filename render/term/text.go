@@ -144,3 +144,47 @@ func Truncate(s string, w int) string {
 	}
 	return b.String()
 }
+
+// Wrap 把文本折成不超过 w 列的若干行：按显示宽度折行（宽字符不劈开），
+// 遇 \n 硬断行（换行符本身不写出）、\r 丢弃，ANSI 序列原样保留且不计宽度。
+// 不做词级折行——超长 token 一样按宽度硬切。w <= 0 时返回单行原文。
+func Wrap(s string, w int) []string {
+	if w <= 0 {
+		return []string{s}
+	}
+	var lines []string
+	var b strings.Builder
+	cur := 0
+	i := 0
+	for i < len(s) {
+		if s[i] == byte(ansiMarker) {
+			seq, _, next := scanSequence(s, i)
+			if next <= i {
+				break
+			}
+			b.WriteString(seq)
+			i = next
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+		switch r {
+		case '\n':
+			lines = append(lines, b.String())
+			b.Reset()
+			cur = 0
+			continue
+		case '\r':
+			continue
+		}
+		rw := runeWidth(r)
+		if cur > 0 && cur+rw > w {
+			lines = append(lines, b.String())
+			b.Reset()
+			cur = 0
+		}
+		b.WriteRune(r)
+		cur += rw
+	}
+	return append(lines, b.String())
+}
