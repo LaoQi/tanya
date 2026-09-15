@@ -233,4 +233,4 @@ reasoning_effort: (未设置) → high
 | mock | 仅补 `/models` 分支 | 另加 `models []string` 字段（默认两条乱序 id） | 截断与空列表用例需要可控数据 |
 | 命中率精度 | 一位小数 | 两位小数 | 与 `repl.formatRate` 的单次命中率一致 |
 
-实施顺序与 §10 一致；`agent/control.go`、`agent/messages.go`（16 条常量）、`agent/tools.go`、`agent/agent.go`、`repl/repl.go` 各一处改动，`agent/control_test.go` 14 个用例，全量测试与 `-race` 均绿。
+实施顺序与 §10 一致；`agent/control.go`、`agent/messages.go`（16 条常量）、`agent/tools.go`、`agent/agent.go`、`repl/repl.go` 各一处改动，`agent/control_test.go` 13 个用例，全量测试与 `-race` 均绿。
