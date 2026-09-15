@@ -9,7 +9,7 @@
 ```
 main.go            package main：入口、flag 子命令、ask 单发
 repl/              package repl：REPL 循环、斜杠命令、补全、工具视图渲染、等待动画
-agent/             package agent：全部核心逻辑（config / llm / agent / prompt / session / stats / shell / builtin）
+agent/             package agent：全部核心逻辑（config / llm / agent / tools / prompt / session / stats / shell / builtin）
 readline/          package readline：自研终端输入层（editor / keys / terminal），pty 桥接与终端状态自愈
 ctty/              package ctty：控制终端原语（前台组读写、/dev/tty、SIGTTIN/SIGTTOU），白名单 linux||darwin，零依赖叶子
 render/            package render：渲染管线（IR → ANSI：Renderer、提示符模板），可 import 其下子包
@@ -25,7 +25,7 @@ render/markup/     内联标记解析
 设计取舍：
 
 - **不做细粒度拆包**：代码总量小，按包分职责即可
-- **不做工具注册表**：工具硬编码于 `ToolDefs()` 和 `Agent.dispatch` 的 switch，存量小且预计长期以 shell 为主
+- **不做动态工具注册**：工具经 `Tool` 接口（`agent/tools.go`）自述名/描述/参数并提供执行，`allTools()` 编译期显式列清单（`run_shell` + `builtinTools()`），`toolRegistry.lookup` 线性扫描（N=4 实测快于 map），无插件/运行时注册，存量小且预计长期以 shell 为主
 - **依赖仅 2 个**：`gopkg.in/yaml.v3`（配置）、`golang.org/x/sys/unix`（raw mode）；终端输入层与富文本管线自研
 - **颜色铁律**：SGR 与 CSI 仅 `render/style`、`render/term` 产生（业务代码不得出现裸 `\x1b`，readline 的光标操作也走 `term.Cursor*`）；同一 IR 按终端能力档案（`term.Profile`）降级，无色终端自动纯文本
 
@@ -93,6 +93,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## 工具
 
+工具统一经 `Tool` 接口（`agent/tools.go`）声明：`Name()` 给名字、`Definition()` 给描述与参数 schema（即 wire 上的 function 定义）、`Invoke()` 给执行——**描述、参数与执行同处一个实现**，不再有独立清单文件。`allTools(shell)` 编译期显式列出全集（`run_shell` 在前、`builtinTools()` 在后），顺序即请求体 `tools` 段顺序（prompt cache 依赖，见 `docs/cache-probe.md`）；`newToolRegistry` 持有该 slice，`defs()` 供 `NewClient` 构造期注入，`lookup` 线性扫描（N=4 实测快于 map，不做索引）。`Agent.dispatch` 退化为查表，未命中回 `MsgUnknownTool`。需要终端直通的工具可额外实现窄接口 `interactiveTool`（当前仅 `run_shell`），供 `runTurn` 在 `EventToolStart/End` 上提前标记 `Interactive`。代价是 `run_shell` 的参数被解析两次——`interactiveOf`（`runTurn` 取 `Interactive`）与 `Invoke` 各一次；这是「参数对通用 `Tool` 接口不透明」与「`EventToolStart` 必须在执行前携带参数派生字段」两条约束相交的**有意保留**结果（实测单次 678ns，对比一次 `bash -c true` 1.26ms 可忽略），不是待办。
+
 ### run_shell（`agent/shelltool.go` 组件 + `agent/shell.go` 叶子）
 
 - 参数：`command`（必填）、`cwd`（可选，命令执行目录，默认会话启动目录）、`timeout`（默认 60s，上限 900s）、`interactive`（布尔，默认 false）
@@ -117,7 +119,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
   - 全部落空（含配置的 shell 不存在）：解析返回错误（`MsgNoShellFmt`/`MsgShellOverrideFmt`，含候选清单与配置提示），`agent.New` 立即透传，`main.go` 打印后以 1 退出——无降级路径，`shellTool.profile` 在其后恒非 nil，profile 的非空成为不变量（`run_shell` 恒定注册、env 段恒定输出 SHELL/TIMEOUT/OUTPUT 行、system prompt 恒为 `DefaultSystemPrompt`）
 - 程序探测：profile 就绪后对固定清单（ls/cat/head/tail/grep/rg/fd/sed/awk/find/sort/wc/cut/tr/xargs/git/curl/wget/go/node/python）逐个 LookPath，存在的拼入 run_shell 工具描述 `可用程序: ...`，仅在工具描述出现，不重复注入 env 段
 - 输出捕获：stdout/stderr 各保留头 30000 字节 + 尾 30000 字节（`streamCapture` 滚动窗口），中间字节计数丢弃，模型仍可见首尾内容
-- 组件化（`docs/shell-tool.md`）：`shellTool` 是 shell 执行层唯一所有者，`profile`/`programs`/`workspace`/`home`/`bridge` 在构造期定格、之后只读，`run` 每调用状态全在栈上（可重入）；唯一可变字段是终端租约 `ttyMu`——真实终端进程内只有一份，桥接与前台移交两条路径都在锁内。组件内不读环境（无 `os.Getwd`/`os.UserHomeDir`/`exec.LookPath`/`runtime.GOOS`），`agent.New` 装配点各读一次注入。包级可变状态（`shellRuntime*`/`shellLookPath`/`ttyBridgeMu`+`ttyBridgeCur`）已删除；`envSection`/`runShellDesc`/`ToolDefs` 为纯函数，工具清单在 `NewClient` 构造期注入 client（请求组装不再伸手读包级清单）
+- 组件化（`docs/shell-tool.md`）：`shellTool` 是 shell 执行层唯一所有者，`profile`/`programs`/`workspace`/`home`/`bridge` 在构造期定格、之后只读，`run` 每调用状态全在栈上（可重入）；唯一可变字段是终端租约 `ttyMu`——真实终端进程内只有一份，桥接与前台移交两条路径都在锁内。组件内不读环境（无 `os.Getwd`/`os.UserHomeDir`/`exec.LookPath`/`runtime.GOOS`），`agent.New` 装配点各读一次注入。包级可变状态（`shellRuntime*`/`shellLookPath`/`ttyBridgeMu`+`ttyBridgeCur`）已删除；`envSection`/`runShellDesc`/`runShellParams` 为纯函数；工具清单由 `allTools()` 显式组装、经 `toolRegistry.defs()` 在 `NewClient` 构造期注入 client（请求组装不再伸手读包级清单）
 - 实测契约（sudo 两模式对照）：`sudo` 默认模式自开 `/dev/tty` 完成提示与密码输入——前台移交后提示实时可见、密码不回显，仅最终错误走 stderr 回流；`sudo -S` 强制从 stdin 读密码时提示改写 stderr（被捕获，等待期间不可见），交互命令应避免 `-S` 类强制 stdin 选项
 - 终端前台移交（原语在 `ctty`，见 `docs/ctty.md`；`ctty.Supported` 为假的平台降级 no-op）：执行前经 `ctty.Open` 打开 `/dev/tty`，仅当自身进程组已是前台（`ctty.IsForeground`）时 `ctty.SetForeground` 移交子进程组，子进程结束后以 `handed` 门控归还（避免从未交接时抢占 shell 的前台）；无控制终端 / 非前台（嵌套、后台运行）自动跳过，行为与旧版一致。移交前台的同时将 `cmd.Stdin` 接到 `/dev/tty`（tty 打开成功时），子进程 stdin 直通用户终端，可直接在终端应答 ssh/git/sudo 等密码与确认提示，不再静默挂死至超时；无 tty 时 stdin 保持原状（/dev/null）
 - 信号防护（`ProtectTerminalSignals`，main 启动时 `sync.Once` 一次性）：`Notify(SIGTSTP)` 吞没（命令间隙 Ctrl+Z 不挂起自身）、`Ignore(SIGTTIN/SIGTTOU)`（自身后台 tty 读写不停止）；SIGQUIT 保持 Go 默认（全栈转储）。忽略处置随 exec 被子进程继承，子进程后台读写 tty 得 EIO 而非停止
@@ -147,7 +149,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### builtin（builtin.go）
 
-免确认轻量工具，硬编码 switch 分发：
+免确认轻量工具，`builtinTools()` 表驱动返回 `[]Tool`（`builtinTool` 结构体携带 name/desc/params/run，描述与参数随实现同处）：
 
 - `get_time`：当前时间（含时区）
 - `get_env`：查询环境变量，名称含 KEY/TOKEN/SECRET/PASS 的拒绝返回

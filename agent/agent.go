@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -22,7 +21,7 @@ const DefaultSystemPrompt = `你是 tanyan（兼容 Pi/opencode），运行在�
 type Agent struct {
 	cfg       *Config
 	client    *Client
-	tool      *shellTool
+	tools     *toolRegistry
 	workspace string
 	history   []Message
 	env       string
@@ -76,11 +75,12 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	tools := newToolRegistry(allTools(tool)...)
 	sessionDir := resolveSessionDir(cfg, cwd)
 	a := &Agent{
 		cfg:       cfg,
-		client:    NewClient(cfg, ToolDefs(tool)),
-		tool:      tool,
+		client:    NewClient(cfg, tools.defs()),
+		tools:     tools,
 		workspace: cwd,
 		env:       envSection(cwd, tool.profile),
 		prompt:    newPromptBuilder(cwd, globalAgentsPath(), readAgentsFile),
@@ -209,14 +209,13 @@ func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
 			break
 		}
 		for _, tc := range resp.ToolCalls {
-			var args runShellArgs
-			var argErr error
-			if tc.Function.Name == "run_shell" {
-				args, argErr = parseRunShellArgs(tc.Function.Arguments)
+			interactive := false
+			if tool, ok := a.tools.lookup(tc.Function.Name); ok {
+				interactive = interactiveOf(tool, tc.Function.Arguments)
 			}
-			sink.Emit(Event{Kind: EventToolStart, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, Interactive: args.Interactive})
-			res := a.dispatch(ctx, tc, args, argErr)
-			sink.Emit(Event{Kind: EventToolEnd, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, Result: res, Interactive: args.Interactive})
+			sink.Emit(Event{Kind: EventToolStart, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, Interactive: interactive})
+			res := a.dispatch(ctx, tc.Function.Name, tc.Function.Arguments)
+			sink.Emit(Event{Kind: EventToolEnd, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, Result: res, Interactive: interactive})
 			a.history = append(a.history, Message{
 				Role:       "tool",
 				ToolCallID: tc.ID,
@@ -226,19 +225,6 @@ func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
 		}
 	}
 	return nil
-}
-
-type runShellArgs struct {
-	Command     string `json:"command"`
-	Timeout     int    `json:"timeout"`
-	Cwd         string `json:"cwd"`
-	Interactive bool   `json:"interactive"`
-}
-
-func parseRunShellArgs(raw string) (runShellArgs, error) {
-	var args runShellArgs
-	err := json.Unmarshal([]byte(raw), &args)
-	return args, err
 }
 
 type ToolResult struct {
@@ -253,22 +239,12 @@ func (r ToolResult) Content() string {
 	return r.Text
 }
 
-func (a *Agent) dispatch(ctx context.Context, tc ToolCall, args runShellArgs, argErr error) ToolResult {
-	if tc.Function.Name == "run_shell" {
-		if argErr != nil {
-			return ToolResult{Text: fmt.Sprintf(MsgParseArgs, argErr)}
-		}
-		return ToolResult{Shell: a.tool.run(ctx, shellRequest{
-			Command:     args.Command,
-			TimeoutSec:  args.Timeout,
-			Interactive: args.Interactive,
-			Cwd:         args.Cwd,
-		})}
+func (a *Agent) dispatch(ctx context.Context, name, args string) ToolResult {
+	tool, ok := a.tools.lookup(name)
+	if !ok {
+		return ToolResult{Text: fmt.Sprintf(MsgUnknownTool, name)}
 	}
-	if text, ok := DispatchBuiltin(tc.Function.Name, tc.Function.Arguments); ok {
-		return ToolResult{Text: text}
-	}
-	return ToolResult{Text: fmt.Sprintf(MsgUnknownTool, tc.Function.Name)}
+	return tool.Invoke(ctx, args)
 }
 
 func (a *Agent) buildMessages() []Message {
@@ -338,52 +314,6 @@ func (a *Agent) History() []Message { return a.history }
 func (a *Agent) NoSave() bool { return a.store.disabled }
 
 func (a *Agent) ListModels() ([]string, error) { return a.client.ListModels() }
-
-func ToolDefs(tool *shellTool) []ToolDef {
-	def := func(name, desc, params string) ToolDef {
-		var t ToolDef
-		t.Type = "function"
-		t.Function.Name = name
-		t.Function.Description = desc
-		t.Function.Parameters = json.RawMessage(params)
-		return t
-	}
-	defs := []ToolDef{def("run_shell", tool.toolDesc(), runShellParams())}
-	return append(defs,
-		def("get_time",
-			"获取当前日期时间（含时区）",
-			`{"type":"object","properties":{}}`),
-		def("get_env",
-			"获取指定环境变量的值（疑似敏感的变量会被拒绝）",
-			`{"type":"object","properties":{"names":{"type":"array","items":{"type":"string"},"description":"环境变量名列表"}},"required":["names"]}`),
-		def("calc",
-			"计算四则运算表达式，支持 + - * / % 与括号",
-			`{"type":"object","properties":{"expression":{"type":"string","description":"算数表达式，如 (1+2)*3/4"}},"required":["expression"]}`),
-	)
-}
-
-func runShellDesc(profile *shellProfile, programs []string) string {
-	var b strings.Builder
-	switch profile.Kind {
-	case KindPowerShell:
-		fmt.Fprintf(&b, "在 %s pwsh 中执行命令（PowerShell 语法）", runtime.GOOS)
-	case KindCmd:
-		fmt.Fprintf(&b, "在 %s cmd 中执行命令（cmd 语法）", runtime.GOOS)
-	default:
-		fmt.Fprintf(&b, "在 %s %s 中执行 shell 命令", runtime.GOOS, profile.Name)
-	}
-	b.WriteString("，返回 stdout/stderr/退出码。读文件、搜索、文本处理等系统操作都用它。")
-	b.WriteString("默认在会话启动目录（进程 cwd）下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。")
-	if len(programs) > 0 {
-		b.WriteString("可用程序: " + strings.Join(programs, ", "))
-	}
-	return b.String()
-}
-
-func runShellParams() string {
-	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"cwd":{"type":"string","description":"命令执行目录，默认会话启动目录"},"timeout":{"type":"integer","description":"超时秒数，默认 %d（interactive 时 %d），最大 %d"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令在独立 pty 中运行、终端直通应答，停用等待动画，默认超时放宽"}},"required":["command"]}`,
-		shellTimeoutSec, shellInteractiveTimeoutSec, shellTimeoutLimit)
-}
 
 func (a *Agent) ToolOutputLines() int {
 	if a.cfg == nil || a.cfg.ToolOutputLines < 1 {

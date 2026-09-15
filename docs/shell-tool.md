@@ -1,6 +1,6 @@
 # run_shell 组件化：shellTool 设计与实施
 
-状态：**S1–S4 已实施**（组件落在 `agent/shelltool.go`，包级可变状态清零；`AGENTS.md`/`docs/design.md`/`docs/interactive-tty.md` 已同步）。本文保留设计意图与决策，落地偏差见 §15。**更正（2026-09-14）**：§12 表中的 `envSection(profile)` 签名已变为 `envSection(cwd, profile)`（构造期调用一次、`envProbeFunc` 注入删除），见 `docs/design.md`《环境段（envprobe）》。
+状态：**S1–S4 已实施**（组件落在 `agent/shelltool.go`，包级可变状态清零；`AGENTS.md`/`docs/design.md`/`docs/interactive-tty.md` 已同步）。本文保留设计意图与决策，落地偏差见 §15。**更正（2026-09-14）**：§12 表中的 `envSection(profile)` 签名已变为 `envSection(cwd, profile)`（构造期调用一次、`envProbeFunc` 注入删除），见 `docs/design.md`《环境段（envprobe）》。**更正（2026-09-15）**：§7 表中的 `ToolDefs(tool *shellTool)` 已被 `Tool` 接口 + `toolRegistry`（`agent/tools.go`）取代——清单改由 `allTools()` 编译期显式组装、`defs()` 注入 client；`run_shell` 的描述/参数 schema/args 解析随之下沉进 `agent/shelltool.go`，内置三件套进 `agent/builtin.go`。本文其余部分保留当时的实施记录。
 相关的诊断与评估过程见 `docs/agent-split.md`（该文档承接了原 `docs/open-questions.md` B1）。
 
 ## 1. 要解决的问题

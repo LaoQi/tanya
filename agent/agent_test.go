@@ -552,7 +552,7 @@ func TestRuntimePromptAppendsEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := a.systemPrompt() + "\n\n" + envSection(cwd, a.tool.profile)
+	want := a.systemPrompt() + "\n\n" + envSection(cwd, shellOf(t, a).profile)
 	if a.runtimePrompt() != want {
 		t.Errorf("runtimePrompt 拼接异常:\n got %q\nwant %q", a.runtimePrompt(), want)
 	}
@@ -650,14 +650,14 @@ func TestNewWiresTTYBridge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.tool == nil || a.tool.bridge != TTYBridge(f) {
-		t.Errorf("WithTTYBridge 未接入组件: %+v", a.tool)
+	if got := shellOf(t, a); got.bridge != TTYBridge(f) {
+		t.Errorf("WithTTYBridge 未接入组件: %+v", got)
 	}
 	b, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.tool.bridge != nil {
-		t.Errorf("未注入时 bridge 应为 nil: %#v", b.tool.bridge)
+	if got := shellOf(t, b); got.bridge != nil {
+		t.Errorf("未注入时 bridge 应为 nil: %#v", got.bridge)
 	}
 }

@@ -10,7 +10,7 @@
 - 中断依赖两项终端不变量：`ISIG` 开启、终端前台组是 tanyan；启动时记录"自己是否为前台作业"，每回合开始前与桥接前台检查前自愈（恢复 `ISIG`、必要时夺回前台组），后台启动/无控制终端不抢；信号终止的子进程记 `128 + signum`（`^C` → `130`）。前台组/`/dev/tty`/`SIGTTIN` 等原语统一在 `ctty`，`agent` 与 `readline` 各自持有策略（是否移交、是否夺回），不再各写一份 ioctl
 - `interactive: true` 的 run_shell 走全 pty 桥接（命令在独立 pty 中运行，真实 tty 由 bridge 切 raw 双向泵转）；仅 Linux 实现，失败场景回退 `/dev/tty` + `TIOCSPGRP` 路径；细节见 `docs/interactive-tty.md`
 - 目标平台：**Linux 与 Windows 为主**（Windows 交互能力待实现，现为降级 stub），**macOS 尽力**（原语齐备但未经真机验证），其余 unix/plan9/js 等仅保证可编译（走 stub）；平台分片一律白名单 `linux || darwin` + 其余 stub，不再枚举边缘平台（见 `docs/ctty.md`）
-- 不做工具注册表：工具硬编码在 `ToolDefs()` 与 `Agent.dispatch` 的 switch 中
+- 不做动态工具注册：工具经 `Tool` 接口（`agent/tools.go`）自述名/描述/参数并提供执行，`allTools()` 编译期显式列清单（`run_shell` + `builtinTools()`），无插件/运行时注册；清单顺序即请求顺序，改动会破坏 prompt cache
 - 启动即要求可用 shell：`agent.New` 解析 shell（配置覆盖 > 平台探测），全落空直接报错退出，无 noshell 降级路径（`run_shell` 恒定注册、env 段恒定输出 shell 契约、system prompt 恒为 `DefaultSystemPrompt`）
 - REPL 输入分发（`repl/dispatch.go`）：`/` 白名单斜杠命令（控制面）、`exit`/`quit` 内建退出、其余直接与 LLM 对话（`:`/`：` 为等价显式前缀，单独一行提示用法）；直通 shell 执行面与 cd 拦截切面已归档（末态 commit 60bc02e，恢复步骤见 design.md），进程 cwd 恒为启动目录（全程不 `os.Chdir`）；agent 侧 `run_shell` 默认在此执行，并可用 `cwd` 参数为单次命令指定目录（设 `cmd.Dir`，不改进程 cwd）
 - 工具策略：以 `run_shell` 为核心，新能力优先用 shell 命令组合实现；小型纯计算/查询工具放 `builtin.go`
@@ -35,11 +35,12 @@ agent/             核心逻辑
   session.go       会话存储（sessionStore：增量落盘、载入、列表缓存）
   stats.go         统计快照（usageStats：record/reset/view，只出数值不做格式化）
   envprobe.go      环境段（构造期定格的平台 + cwd + run_shell 契约）
-  shelltool.go     run_shell 组件（profile/程序清单/工作区/家目录/bridge 构造期定格，cwd 解析与终端租约）
+  tools.go         工具接口与注册表（Tool 自述描述/参数并提供执行，allTools 编译期显式列清单，线性 lookup）
+  shelltool.go     run_shell 组件与 Tool 实现（描述/参数 schema/args 解析在此；profile/程序清单/工作区/家目录/bridge 构造期定格，cwd 解析与终端租约）
   shell.go         run_shell 叶子（shell 参数组装、头尾截断、超时与等待、结构化返回）
   tty_bridge.go    TTYBridge 接口（实现由 readline 提供，经 WithTTYBridge 注入）
   event.go         Event 词汇表（统一协议增量与生命周期）
-  builtin.go       内置小工具：get_time / get_env / calc
+  builtin.go       内置小工具（builtinTools 表驱动，各自带描述与参数）：get_time / get_env / calc
   messages.go      agent 侧文案常量
 render/            表现层树根：渲染管线（IR → ANSI 的 Renderer、提示符模板 Template）
   style/           样式词汇与编码（Color/Attr/Style/ColorLevel/SGR/Sprint/Frame），依赖 term

@@ -93,7 +93,7 @@ func TestProbePrograms(t *testing.T) {
 }
 
 func TestToolDefsHasRunShell(t *testing.T) {
-	defs := ToolDefs(&shellTool{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}})
+	defs := newToolRegistry(&shellTool{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}}).defs()
 	if len(defs) == 0 || defs[0].Function.Name != "run_shell" {
 		t.Errorf("run_shell 应恒定注册在首位: %+v", defs)
 	}
@@ -104,7 +104,7 @@ func TestToolDefsRunShellDesc(t *testing.T) {
 		profile:  &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix},
 		programs: []string{"ls", "grep"},
 	}
-	defs := ToolDefs(tool)
+	defs := newToolRegistry(tool).defs()
 	if len(defs) == 0 || defs[0].Function.Name != "run_shell" {
 		t.Fatalf("run_shell 应注册在首位: %+v", defs)
 	}
