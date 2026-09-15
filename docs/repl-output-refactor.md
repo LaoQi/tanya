@@ -638,6 +638,7 @@ script -qec "./tanyan -p --verbose -n ask '跑一条命令并总结'" /dev/null 
 | 2026-09 | `ask` 单发默认走 plain+verbose 档：`repl.SingleShot(outMode)` 把 CLI 的 rich 降到 `modePlainVerbose`（显式 `-p` 更窄时不动）；单发不再有 spinner 与光标上移重绘，工具块追加式输出，颜色保留 | `repl/streams.go`、`main.go` |
 | 2026-09 | 追加式工具块（非 TTY、plain+verbose）不再重复标题：新增 `RenderToolEndAppend`（正文块 + 状态行），`ToolEnd` 分支按 inline / 交互式 / 追加式三分派发 | `repl/toolview.go` |
 | 2026-09-15 | 工具状态行清洗：`renderToolBody` 的 `↳` 状态行文本走 `term.Strip`——该行此前由 `sem.Info.Sprint` 原样直出，`cwd`（模型可控）与 exec 错误文本里的 `\x1b` 序列可直接驱动终端 | `repl/toolview.go`、`repl/toolview_test.go` |
+| 2026-09-15 | 上条修复的回归修复：`ctty.resetModes` 去掉 `CSI r`（DECSTBM 会把光标移到滚动区首行），且常规 `run_shell` 路径不再调 `ResetModes`——`handed` 在 REPL 中恒真，等于每次命令后都写整串，工具块重绘的 `CSI 1A`/`CR CSI K` 落到屏幕顶部（工具块画到顶上、覆盖欢迎屏、残留 spinner） | `ctty/ctty_posix.go`、`agent/shell.go`、`ctty/ctty_linux_test.go` |
 
 ### 已知缺口：动态文本的转义清洗（2026-09-15 登记，未做）
 
