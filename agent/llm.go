@@ -1,12 +1,9 @@
 package agent
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -138,24 +135,17 @@ func (c *Client) ListModels() ([]string, error) {
 	if c.cfg.APIKey == "" {
 		return nil, fmt.Errorf(MsgAPIKey)
 	}
-	url := strings.TrimSuffix(c.cfg.BaseURL, "/") + "/models"
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := c.newRequest(ctx, http.MethodGet, "/models", nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
-	req.Header.Set("User-Agent", c.cfg.UserAgent)
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf(MsgAPIStatus, resp.StatusCode, strings.TrimSpace(string(b)))
-	}
 	var out struct {
 		Data []struct {
 			ID string `json:"id"`
@@ -217,39 +207,6 @@ func joinReasoning(items []ReasoningItem) string {
 
 func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventSink) (*Message, error) {
 	wire := chatWireMessages(messages)
-	body, err := json.Marshal(chatRequest{
-		Model:           c.cfg.Model,
-		Messages:        wire,
-		Temperature:     temperatureParam(c.cfg),
-		ReasoningEffort: c.cfg.ReasoningEffort,
-		Tools:           c.tools,
-		Stream:          true,
-		StreamOptions:   &streamOptions{IncludeUsage: true},
-	})
-	if err != nil {
-		return nil, err
-	}
-	url := strings.TrimSuffix(c.cfg.BaseURL, "/") + "/chat/completions"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("User-Agent", c.cfg.UserAgent)
-
-	start := time.Now()
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf(MsgAPIStatus, resp.StatusCode, strings.TrimSpace(string(b)))
-	}
-
 	msg := &Message{Role: "assistant"}
 	var firstEvent, firstReasoning, firstContent time.Duration
 	var usage *Usage
@@ -258,24 +215,20 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventS
 		id, typ, name, args string
 	}
 	accs := map[int]*toolAcc{}
+	start := time.Now()
 
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(line[len("data:"):])
-		if data == "[DONE]" {
-			break
-		}
+	err := c.streamSSE(ctx, "/chat/completions", chatRequest{
+		Model:           c.cfg.Model,
+		Messages:        wire,
+		Temperature:     temperatureParam(c.cfg),
+		ReasoningEffort: c.cfg.ReasoningEffort,
+		Tools:           c.tools,
+		Stream:          true,
+		StreamOptions:   &streamOptions{IncludeUsage: true},
+	}, func(data string) error {
 		var chunk streamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue
+			return nil
 		}
 		if firstEvent == 0 && (len(chunk.Choices) > 0 || chunk.Usage != nil) {
 			firstEvent = time.Since(start)
@@ -319,16 +272,16 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventS
 				sink.Emit(Event{Kind: EventToolCall, ToolIndex: tc.Index, ToolID: tc.ID, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments})
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf(MsgReadStream, err)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	if reasoning.Len() > 0 {
 		msg.ReasoningItems = append(msg.ReasoningItems, ReasoningItem{Content: reasoning.String()})
 	}
 	msg.Usage = usage
 	msg.Stat = &RequestStat{Duration: time.Since(start), FirstEvent: firstEvent, FirstReasoning: firstReasoning, FirstContent: firstContent}
-
 	if len(accs) > 0 {
 		idxs := make([]int, 0, len(accs))
 		for i := range accs {

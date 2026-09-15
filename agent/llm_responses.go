@@ -1,12 +1,10 @@
 package agent
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -166,7 +164,13 @@ type responsesError struct {
 
 func (c *Client) responsesStream(ctx context.Context, messages []Message, sink EventSink) (*Message, error) {
 	instructions, input := buildResponsesInput(messages)
-	body, err := json.Marshal(responsesRequest{
+	msg := &Message{Role: "assistant"}
+	var firstEvent, firstReasoning, firstContent time.Duration
+	var usage *Usage
+	var hasDelta bool
+	start := time.Now()
+
+	err := c.streamSSE(ctx, "/responses", responsesRequest{
 		Model:        c.cfg.Model,
 		Instructions: instructions,
 		Input:        input,
@@ -174,57 +178,10 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 		Reasoning:    reasoningParam(c.cfg.ReasoningEffort),
 		Tools:        responsesTools(c.tools),
 		Stream:       true,
-	})
-	if err != nil {
-		return nil, err
-	}
-	url := strings.TrimSuffix(c.cfg.BaseURL, "/") + "/responses"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("User-Agent", c.cfg.UserAgent)
-
-	start := time.Now()
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		text := strings.TrimSpace(string(b))
-		if resp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf(MsgAPIStatus+"（%s）", resp.StatusCode, text, MsgRespHint404)
-		}
-		return nil, fmt.Errorf(MsgAPIStatus, resp.StatusCode, text)
-	}
-
-	msg := &Message{Role: "assistant"}
-	var firstEvent, firstReasoning, firstContent time.Duration
-	var usage *Usage
-	var hasDelta bool
-
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(line[len("data:"):])
-		if data == "[DONE]" {
-			break
-		}
+	}, func(data string) error {
 		var ev responsesEvent
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
-			continue
+			return nil
 		}
 		if firstEvent == 0 {
 			firstEvent = time.Since(start)
@@ -233,7 +190,7 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 		case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
 			var d responsesTextDelta
 			if json.Unmarshal([]byte(data), &d) != nil || d.Delta == "" {
-				continue
+				return nil
 			}
 			if firstReasoning == 0 {
 				firstReasoning = time.Since(start)
@@ -245,13 +202,13 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 				Delta  string `json:"delta"`
 			}
 			if json.Unmarshal([]byte(data), &d) != nil || d.Delta == "" {
-				continue
+				return nil
 			}
 			sink.Emit(Event{Kind: EventToolCall, ToolID: d.ItemID, ToolArgs: d.Delta})
 		case "response.output_text.delta":
 			var d responsesTextDelta
 			if json.Unmarshal([]byte(data), &d) != nil || d.Delta == "" {
-				continue
+				return nil
 			}
 			if firstContent == 0 {
 				firstContent = time.Since(start)
@@ -262,7 +219,7 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 		case "response.completed", "response.incomplete":
 			var cc responsesCompleted
 			if json.Unmarshal([]byte(data), &cc) != nil {
-				continue
+				return nil
 			}
 			applyCompletedOutput(msg, &cc.Response.Output, hasDelta)
 			if cc.Response.Usage != nil {
@@ -270,25 +227,30 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 				sink.Emit(Event{Kind: EventUsage, Usage: usage})
 			}
 			if ev.Type == "response.completed" && cc.Response.Error != nil {
-				return nil, fmt.Errorf(MsgRespFailed, cc.Response.Error.Message)
+				return fmt.Errorf(MsgRespFailed, cc.Response.Error.Message)
 			}
 		case "response.failed":
 			var cc responsesCompleted
 			if json.Unmarshal([]byte(data), &cc) == nil && cc.Response.Error != nil {
-				return nil, fmt.Errorf(MsgRespFailed, cc.Response.Error.Message)
+				return fmt.Errorf(MsgRespFailed, cc.Response.Error.Message)
 			}
-			return nil, fmt.Errorf(MsgRespFailed, "response.failed")
+			return fmt.Errorf(MsgRespFailed, "response.failed")
 		case "error":
 			var ee struct {
 				Error *responsesError `json:"error"`
 			}
 			if json.Unmarshal([]byte(data), &ee) == nil && ee.Error != nil {
-				return nil, fmt.Errorf(MsgRespFailed, ee.Error.Message)
+				return fmt.Errorf(MsgRespFailed, ee.Error.Message)
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf(MsgReadStream, err)
+		return nil
+	})
+	if err != nil {
+		var he *httpError
+		if errors.As(err, &he) && he.Status == http.StatusNotFound {
+			return nil, fmt.Errorf(MsgAPIStatus+"（%s）", he.Status, he.Body, MsgRespHint404)
+		}
+		return nil, err
 	}
 	msg.Usage = usage
 	msg.Stat = &RequestStat{Duration: time.Since(start), FirstEvent: firstEvent, FirstReasoning: firstReasoning, FirstContent: firstContent}
