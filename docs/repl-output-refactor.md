@@ -637,5 +637,16 @@ script -qec "./tanyan -p --verbose -n ask '跑一条命令并总结'" /dev/null 
 | 2026-09 | `/md` 命令移除：markdown 渲染恒开（非 TTY 与 plain 旁路），`mdLive` 字段与 `MsgMdOn`/`MsgMdOff` 删除 | `repl/repl.go`、`repl/flow.go`、`repl/messages.go`、`repl/completer.go` |
 | 2026-09 | `ask` 单发默认走 plain+verbose 档：`repl.SingleShot(outMode)` 把 CLI 的 rich 降到 `modePlainVerbose`（显式 `-p` 更窄时不动）；单发不再有 spinner 与光标上移重绘，工具块追加式输出，颜色保留 | `repl/streams.go`、`main.go` |
 | 2026-09 | 追加式工具块（非 TTY、plain+verbose）不再重复标题：新增 `RenderToolEndAppend`（正文块 + 状态行），`ToolEnd` 分支按 inline / 交互式 / 追加式三分派发 | `repl/toolview.go` |
+| 2026-09-15 | 工具状态行清洗：`renderToolBody` 的 `↳` 状态行文本走 `term.Strip`——该行此前由 `sem.Info.Sprint` 原样直出，`cwd`（模型可控）与 exec 错误文本里的 `\x1b` 序列可直接驱动终端 | `repl/toolview.go`、`repl/toolview_test.go` |
+
+### 已知缺口：动态文本的转义清洗（2026-09-15 登记，未做）
+
+工具块正文与标题早已收敛（正文 `Dim.Frame` / `Passthrough`，标题 `Dim.Frame`），状态行已在上表条目内补齐；**仍未清洗**的是其余经 `output.emit` 直出的动态文本：
+
+- `repl/picker.go` `sessionPicker.render` 的 `SessRow` 摘要（会话首条 user 消息，用户可粘贴任意含 `\x1b` 的内容）
+- `repl/repl.go` `printHistoryFull`：非 markdown 模式的 user/assistant 正文，以及 `→ <tool> <args>` 工具调用行（`historyLine` 摘要行走 `term.OneLine`，已安全）
+- `/model` 列表：服务端 `/models` 返回的模型名（`/theme` 与其余列表为内置常量，安全）
+
+方向：**在内容插入点清洗**，或给 `output` 增设"内容通道"（只放行自生成的控制序列）；**不要**在 `emit` 施加全局 `Strip`——工具块 inline 重绘（`\x1b[1A\r\x1b[K`）与 spinner 帧同走 `emit`，全局清洗会废掉上移重绘。
 
 本附录之前的章节保留历史方案与当时的 `mdLive`/ask 走 rich 的描述，不再随代码同步。
