@@ -123,6 +123,9 @@ func TestSessionStoreListCache(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].Summary != "标题" {
 		t.Fatalf("list: %+v %v", list, err)
 	}
+	if list[0].Path != path {
+		t.Errorf("Path 未填充: %q, 期望 %q", list[0].Path, path)
+	}
 	s.cache[list[0].ID] = SessionInfo{ID: list[0].ID, Summary: "缓存值"}
 	list, err = s.list()
 	if err != nil || list[0].Summary != "缓存值" {

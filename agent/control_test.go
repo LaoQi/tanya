@@ -5,22 +5,27 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 type stubConfigTarget struct {
-	model  string
-	effort string
-	models []string
-	stats  Stats
-	err    error
+	model    string
+	effort   string
+	models   []string
+	sessions []SessionInfo
+	stats    Stats
+	noSave   bool
+	err      error
 }
 
-func (s *stubConfigTarget) Model() string                     { return s.model }
-func (s *stubConfigTarget) SetModel(m string) error           { s.model = m; return nil }
-func (s *stubConfigTarget) ReasoningEffort() string           { return s.effort }
-func (s *stubConfigTarget) SetReasoningEffort(v string) error { s.effort = v; return nil }
-func (s *stubConfigTarget) ListModels() ([]string, error)     { return s.models, s.err }
-func (s *stubConfigTarget) Stats() Stats                      { return s.stats }
+func (s *stubConfigTarget) Model() string                        { return s.model }
+func (s *stubConfigTarget) SetModel(m string) error              { s.model = m; return nil }
+func (s *stubConfigTarget) ReasoningEffort() string              { return s.effort }
+func (s *stubConfigTarget) SetReasoningEffort(v string) error    { s.effort = v; return nil }
+func (s *stubConfigTarget) ListModels() ([]string, error)        { return s.models, s.err }
+func (s *stubConfigTarget) ListSessions() ([]SessionInfo, error) { return s.sessions, s.err }
+func (s *stubConfigTarget) NoSave() bool                         { return s.noSave }
+func (s *stubConfigTarget) Stats() Stats                         { return s.stats }
 
 func newControlAgent(t *testing.T, m *mockLLM, protocol string) *Agent {
 	t.Helper()
@@ -57,11 +62,21 @@ func lastToolResult(t *testing.T, a *Agent) string {
 	return ""
 }
 
+func hasString(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestAgentToolDescGolden(t *testing.T) {
-	want := "读取或修改当前 agent 的模型与思考等级，并查询运行态统计与可用模型。" +
+	want := "读取或修改当前 agent 的模型与思考等级，并查询运行态统计、可用模型与会话列表。" +
 		"改动仅本次会话有效（不写入配置文件，进程退出即恢复），对下一次请求生效。" +
 		"切换模型后 prompt cache 不复用，需重新预热。" +
-		"action=get 读取现状；set 修改（至少指定 model 或 reasoning_effort 之一）；list_models 查询服务端可用模型（网络请求，最长 10s）。"
+		"action=get 按 key 读取；action=set 按 key 写入可写 key（需同时给 value）。" +
+		"key 可用: model、reasoning_effort、models、usage、stat、sessions；可写 key: model、reasoning_effort。"
 	tool := newAgentTool(&stubConfigTarget{})
 	if got := tool.Definition().Function.Description; got != want {
 		t.Errorf("描述全串不匹配:\n got %q\nwant %q", got, want)
@@ -73,38 +88,177 @@ func TestAgentToolDescGolden(t *testing.T) {
 
 func TestAgentToolParamsGolden(t *testing.T) {
 	want := `{"type":"object","properties":{` +
-		`"action":{"type":"string","enum":["get","set","list_models"],"description":"get 读取当前可调项与运行态；set 修改；list_models 查询服务端可用模型（网络请求，最长 10s，需 api_key）"},` +
-		`"model":{"type":"string","description":"set 时指定新模型名，缺省表示不改此项"},` +
-		`"reasoning_effort":{"type":"string","enum":["minimal","low","medium","high","max","off"],"description":"set 时指定思考等级，off 表示不发送该字段"}},` +
-		`"required":["action"]}`
+		`"action":{"type":"string","enum":["get","set"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）"},` +
+		`"key":{"type":"string","enum":["model","reasoning_effort","models","usage","stat","sessions"],"description":"可写键 model、reasoning_effort；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）"},` +
+		`"value":{"type":"string","description":"set 的新值（get 时忽略）。reasoning_effort 取 minimal/low/medium/high/max/off，off 表示清空该字段"}},` +
+		`"required":["action","key"]}`
 	got := string(newAgentTool(&stubConfigTarget{}).Definition().Function.Parameters)
 	if got != want {
 		t.Errorf("参数全串不匹配:\n got %q\nwant %q", got, want)
 	}
 }
 
-func TestAgentToolGet(t *testing.T) {
-	a := newTestAgent(t)
-	a.cfg.Model = "model-x"
-	a.cfg.ReasoningEffort = "high"
-	a.stats.record(&Usage{PromptTokens: 1000, CompletionTokens: 10, TotalTokens: 1010, CacheHitTokens: 750})
-	want := "model: model-x\nreasoning_effort: high\n上下文: 1000 tokens（缓存命中 750，75.00%）\n消息数: 0"
-	if got := invokeAgentTool(t, a, `{"action":"get"}`); got != want {
-		t.Errorf("get 输出不匹配:\n got %q\nwant %q", got, want)
+func TestAgentToolKeyTableConsistent(t *testing.T) {
+	specs := newAgentTool(&stubConfigTarget{}).keys()
+	if len(specs) != len(agentKeyNames) {
+		t.Fatalf("key 表 %d 项, agentKeyNames %d 项", len(specs), len(agentKeyNames))
+	}
+	for _, name := range agentKeyNames {
+		spec, ok := specs[name]
+		if !ok {
+			t.Errorf("key 表缺少 %q", name)
+			continue
+		}
+		if spec.read == nil {
+			t.Errorf("%q 缺少 read", name)
+		}
+		writable := spec.writable != ""
+		if writable != hasString(agentWritableKeys, name) {
+			t.Errorf("%q 可写性不一致 (writable=%q)", name, spec.writable)
+		}
+		if writable && spec.write == nil {
+			t.Errorf("%q 可写但缺少 write", name)
+		}
 	}
 }
 
-func TestAgentToolGetFresh(t *testing.T) {
-	a := newTestAgent(t)
-	want := "model: deepseek-v4-flash\nreasoning_effort: (未设置)\n上下文: 未知（本轮尚无请求）\n消息数: 0"
-	if got := invokeAgentTool(t, a, `{"action":"get"}`); got != want {
-		t.Errorf("首轮 get 输出不匹配:\n got %q\nwant %q", got, want)
+func TestAgentToolGetScalars(t *testing.T) {
+	cases := []struct {
+		name string
+		stub *stubConfigTarget
+		key  string
+		want string
+	}{
+		{"model", &stubConfigTarget{model: "model-x"}, "model", "model: model-x"},
+		{"effort 已设置", &stubConfigTarget{effort: "high"}, "reasoning_effort", "reasoning_effort: high"},
+		{"effort 未设置", &stubConfigTarget{}, "reasoning_effort", "reasoning_effort: (未设置)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := invokeAgentTool(t, c.stub, fmt.Sprintf(`{"action":"get","key":%q}`, c.key))
+			if got != c.want {
+				t.Errorf("get %s = %q, 期望 %q", c.key, got, c.want)
+			}
+		})
+	}
+}
+
+func TestAgentToolGetUsage(t *testing.T) {
+	st := &stubConfigTarget{stats: Stats{HasContext: true, ContextTokens: 1000, ContextHit: 750}}
+	want := "上下文: 1000 tokens（最近一次请求）\n缓存命中: 750（75.00%）"
+	if got := invokeAgentTool(t, st, `{"action":"get","key":"usage"}`); got != want {
+		t.Errorf("usage 输出不匹配:\n got %q\nwant %q", got, want)
+	}
+	fresh := &stubConfigTarget{}
+	if got := invokeAgentTool(t, fresh, `{"action":"get","key":"usage"}`); got != MsgControlContextUnknown {
+		t.Errorf("首轮 usage 输出 = %q", got)
+	}
+}
+
+func TestAgentToolGetStat(t *testing.T) {
+	st := &stubConfigTarget{stats: Stats{
+		Session:          "/tmp/s/20260915-145844.jsonl",
+		Messages:         18,
+		PromptTokens:     45678,
+		CompletionTokens: 1234,
+		TotalTokens:      46912,
+	}}
+	want := "会话: 20260915-145844\n消息数: 18\n累计: prompt 45678 / completion 1234 / total 46912"
+	if got := invokeAgentTool(t, st, `{"action":"get","key":"stat"}`); got != want {
+		t.Errorf("stat 输出不匹配:\n got %q\nwant %q", got, want)
+	}
+	noSave := &stubConfigTarget{noSave: true, stats: Stats{Session: "/tmp/s/20260915-145844.jsonl"}}
+	wantNoSave := fmt.Sprintf(MsgControlStatSession, MsgControlStatNoSave)
+	if got := invokeAgentTool(t, noSave, `{"action":"get","key":"stat"}`); !strings.HasPrefix(got, wantNoSave) {
+		t.Errorf("不落盘时 stat 输出异常: %q", got)
+	}
+}
+
+func TestAgentToolGetStatNoSave(t *testing.T) {
+	isolatePromptEnv(t)
+	cfg := defaultConfig()
+	cfg.GlobalSession = t.TempDir()
+	cfg.Model = "old-model"
+	a, err := New(cfg, NoSave(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.NoSave() {
+		t.Fatal("Agent 未进入不落盘模式")
+	}
+	got := invokeAgentTool(t, a, `{"action":"get","key":"stat"}`)
+	if !strings.HasPrefix(got, fmt.Sprintf(MsgControlStatSession, MsgControlStatNoSave)) {
+		t.Errorf("不落盘时 stat 输出异常: %q", got)
+	}
+}
+
+func TestAgentToolGetModels(t *testing.T) {
+	m := newMockLLM(t)
+	a := newControlAgent(t, m, "chat")
+	want := "可用模型（2）:\n  model-a\n  model-b"
+	if got := invokeAgentTool(t, a, `{"action":"get","key":"models"}`); got != want {
+		t.Errorf("模型列表不匹配:\n got %q\nwant %q", got, want)
+	}
+
+	m.models = make([]string, 60)
+	for i := range m.models {
+		m.models[i] = fmt.Sprintf("model-%02d", i)
+	}
+	got := invokeAgentTool(t, a, `{"action":"get","key":"models"}`)
+	lines := strings.Split(got, "\n")
+	if lines[0] != "可用模型（60）:" || len(lines) != 52 {
+		t.Errorf("截断输出异常（共 %d 行）: %q", len(lines), got)
+	}
+	if lines[len(lines)-1] != "（仅列出前 50 项，共 60 项）" {
+		t.Errorf("截断提示异常: %q", lines[len(lines)-1])
+	}
+
+	m.models = []string{}
+	if got := invokeAgentTool(t, a, `{"action":"get","key":"models"}`); got != MsgControlModelsEmpty {
+		t.Errorf("空列表输出 = %q", got)
+	}
+
+	b := newTestAgent(t)
+	if got := invokeAgentTool(t, b, `{"action":"get","key":"models"}`); !strings.HasPrefix(got, MsgErrPrefix) {
+		t.Errorf("无 api_key 应报错: %q", got)
+	}
+}
+
+func TestAgentToolGetSessions(t *testing.T) {
+	mt := time.Date(2026, 9, 15, 14, 58, 0, 0, time.UTC)
+	st := &stubConfigTarget{sessions: []SessionInfo{
+		{ID: "20260915-145844", ModTime: mt, Msgs: 18, Path: "/tmp/s/20260915-145844.jsonl"},
+	}}
+	want := "会话（1，最新在前）:\n  20260915-145844  18 条  2026-09-15 14:58  /tmp/s/20260915-145844.jsonl"
+	if got := invokeAgentTool(t, st, `{"action":"get","key":"sessions"}`); got != want {
+		t.Errorf("sessions 输出不匹配:\n got %q\nwant %q", got, want)
+	}
+
+	empty := &stubConfigTarget{}
+	if got := invokeAgentTool(t, empty, `{"action":"get","key":"sessions"}`); got != MsgControlSessionsEmpty {
+		t.Errorf("空会列表输出 = %q", got)
+	}
+
+	many := &stubConfigTarget{}
+	for i := 0; i < 25; i++ {
+		many.sessions = append(many.sessions, SessionInfo{
+			ID: fmt.Sprintf("20260915-14%02d00", i), ModTime: mt, Msgs: i,
+			Path: fmt.Sprintf("/tmp/s/%02d.jsonl", i),
+		})
+	}
+	got := invokeAgentTool(t, many, `{"action":"get","key":"sessions"}`)
+	lines := strings.Split(got, "\n")
+	if lines[0] != "会话（25，最新在前）:" || len(lines) != 22 {
+		t.Errorf("截断输出异常（共 %d 行）: %q", len(lines), got)
+	}
+	if lines[len(lines)-1] != "（共 25 个，仅列前 20 个）" {
+		t.Errorf("截断提示异常: %q", lines[len(lines)-1])
 	}
 }
 
 func TestAgentToolSetModelAppliesNextRequest(t *testing.T) {
 	m := newMockLLM(t,
-		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "agent_custom", args: `{"action":"set","model":"new-model"}`}}},
+		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "agent_custom", args: `{"action":"set","key":"model","value":"new-model"}`}}},
 		mockStep{content: "done"},
 	)
 	a := newControlAgent(t, m, "chat")
@@ -125,7 +279,7 @@ func TestAgentToolSetModelAppliesNextRequest(t *testing.T) {
 
 func TestAgentToolSetModelResponses(t *testing.T) {
 	m := newMockLLM(t,
-		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "agent_custom", args: `{"action":"set","model":"new-model","reasoning_effort":"low"}`}}},
+		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "agent_custom", args: `{"action":"set","key":"model","value":"new-model"}`}}},
 		mockStep{content: "done"},
 	)
 	a := newControlAgent(t, m, "responses")
@@ -138,6 +292,31 @@ func TestAgentToolSetModelResponses(t *testing.T) {
 	if m.rawReqs[0]["model"] != "old-model" || m.rawReqs[1]["model"] != "new-model" {
 		t.Errorf("模型未在下一请求生效: %v → %v", m.rawReqs[0]["model"], m.rawReqs[1]["model"])
 	}
+}
+
+func TestAgentToolSetModelTrim(t *testing.T) {
+	a := newTestAgent(t)
+	got := invokeAgentTool(t, a, `{"action":"set","key":"model","value":"  spaced  "}`)
+	if a.Model() != "spaced" {
+		t.Errorf("模型未 trim: %q", a.Model())
+	}
+	if !strings.Contains(got, "→ spaced") {
+		t.Errorf("返回文本未使用 trim 后的值: %q", got)
+	}
+}
+
+func TestAgentToolSetEffortResponses(t *testing.T) {
+	m := newMockLLM(t,
+		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "agent_custom", args: `{"action":"set","key":"reasoning_effort","value":"low"}`}}},
+		mockStep{content: "done"},
+	)
+	a := newControlAgent(t, m, "responses")
+	if err := a.Ask(context.Background(), "q", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.rawReqs) != 2 {
+		t.Fatalf("请求数 = %d, 期望 2", len(m.rawReqs))
+	}
 	reasoning, ok := m.rawReqs[1]["reasoning"].(map[string]any)
 	if !ok || reasoning["effort"] != "low" {
 		t.Errorf("reasoning.effort 未生效: %v", m.rawReqs[1]["reasoning"])
@@ -147,29 +326,24 @@ func TestAgentToolSetModelResponses(t *testing.T) {
 	}
 }
 
-func TestAgentToolSetEffortAppliesNextRequest(t *testing.T) {
-	m := newMockLLM(t,
-		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "agent_custom", args: `{"action":"set","reasoning_effort":"high"}`}}},
-		mockStep{content: "done"},
-	)
-	a := newControlAgent(t, m, "chat")
-	if err := a.Ask(context.Background(), "q", nil); err != nil {
-		t.Fatal(err)
+func TestAgentToolSetEffortNormalize(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"HIGH", "high"},
+		{"  low  ", "low"},
+		{"max", "max"},
 	}
-	if len(m.reqs) != 2 {
-		t.Fatalf("请求数 = %d, 期望 2", len(m.reqs))
-	}
-	if m.reqs[0].ReasoningEffort != "" || m.reqs[0].Temperature == nil {
-		t.Errorf("设置前应发送 temperature 且无 effort: %+v", m.reqs[0])
-	}
-	if m.reqs[1].ReasoningEffort != "high" || m.reqs[1].Temperature != nil {
-		t.Errorf("effort 未生效或 temperature 未停发: %+v", m.reqs[1])
+	for _, c := range cases {
+		a := newTestAgent(t)
+		invokeAgentTool(t, a, fmt.Sprintf(`{"action":"set","key":"reasoning_effort","value":%q}`, c.in))
+		if a.ReasoningEffort() != c.want {
+			t.Errorf("effort %q 归一为 %q, 期望 %q", c.in, a.ReasoningEffort(), c.want)
+		}
 	}
 }
 
 func TestAgentToolSetEffortOff(t *testing.T) {
 	m := newMockLLM(t,
-		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "agent_custom", args: `{"action":"set","reasoning_effort":"off"}`}}},
+		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "agent_custom", args: `{"action":"set","key":"reasoning_effort","value":"off"}`}}},
 		mockStep{content: "done"},
 	)
 	a := newControlAgent(t, m, "chat")
@@ -188,29 +362,37 @@ func TestAgentToolSetEffortOff(t *testing.T) {
 	}
 }
 
-func TestAgentToolSetAtomic(t *testing.T) {
-	a := newTestAgent(t)
-	orig := a.Model()
-	got := invokeAgentTool(t, a, `{"action":"set","model":"new-model","reasoning_effort":"bogus"}`)
-	if a.Model() != orig {
-		t.Errorf("非法 effort 不应使 model 生效: %q", a.Model())
-	}
-	if !strings.HasPrefix(got, MsgErrPrefix) || !strings.Contains(got, "无效思考等级") {
-		t.Errorf("错误文本异常: %q", got)
+func TestAgentToolSetRejectsReadOnlyKeys(t *testing.T) {
+	for _, key := range []string{"models", "usage", "stat", "sessions"} {
+		t.Run(key, func(t *testing.T) {
+			a := newTestAgent(t)
+			orig := a.Model()
+			got := invokeAgentTool(t, a, fmt.Sprintf(`{"action":"set","key":%q,"value":"x"}`, key))
+			want := fmt.Sprintf(MsgErrPrefix+MsgControlReadOnlyKey, key, agentWritableLabel())
+			if got != want {
+				t.Errorf("只读 key 错误文本 = %q, 期望 %q", got, want)
+			}
+			if a.Model() != orig {
+				t.Errorf("只读 key 分支不应改动状态: %q", a.Model())
+			}
+		})
 	}
 }
 
-func TestAgentToolSetErrors(t *testing.T) {
+func TestAgentToolErrors(t *testing.T) {
 	a := newTestAgent(t)
 	cases := []struct {
 		name string
 		args string
 		want string
 	}{
-		{"无改动", `{"action":"set"}`, MsgControlNoChange},
-		{"空模型", `{"action":"set","model":"   "}`, MsgErrPrefix + MsgEmptyModel},
-		{"未知 action", `{"action":"bogus"}`, fmt.Sprintf(MsgErrPrefix+MsgControlBadAction, "bogus")},
-		{"缺 action", `{}`, fmt.Sprintf(MsgErrPrefix+MsgControlBadAction, "")},
+		{"未知 action", `{"action":"bogus","key":"model"}`, fmt.Sprintf(MsgErrPrefix+MsgControlBadAction, "bogus")},
+		{"缺 action", `{"key":"model"}`, fmt.Sprintf(MsgErrPrefix+MsgControlBadAction, "")},
+		{"缺 key", `{"action":"get"}`, fmt.Sprintf(MsgErrPrefix+MsgControlMissingKey, agentKeysLabel())},
+		{"未知 key", `{"action":"get","key":"bogus"}`, fmt.Sprintf(MsgErrPrefix+MsgControlBadKey, "bogus", agentKeysLabel())},
+		{"缺 value", `{"action":"set","key":"model"}`, fmt.Sprintf(MsgErrPrefix+MsgControlNeedValue, MsgControlModelSpec)},
+		{"空模型", `{"action":"set","key":"model","value":"   "}`, MsgErrPrefix + MsgEmptyModel},
+		{"非法 effort", `{"action":"set","key":"reasoning_effort","value":"bogus"}`, MsgErrPrefix},
 		{"坏 JSON", `{`, MsgErrPrefix},
 	}
 	for _, c := range cases {
@@ -223,44 +405,5 @@ func TestAgentToolSetErrors(t *testing.T) {
 	}
 	if a.Model() != "deepseek-v4-flash" {
 		t.Errorf("错误分支不应改动模型: %q", a.Model())
-	}
-}
-
-func TestAgentToolListModels(t *testing.T) {
-	m := newMockLLM(t)
-	a := newControlAgent(t, m, "chat")
-	want := "可用模型（2）:\n  model-a\n  model-b"
-	if got := invokeAgentTool(t, a, `{"action":"list_models"}`); got != want {
-		t.Errorf("模型列表不匹配:\n got %q\nwant %q", got, want)
-	}
-}
-
-func TestAgentToolListModelsTrim(t *testing.T) {
-	m := newMockLLM(t)
-	m.models = make([]string, 60)
-	for i := range m.models {
-		m.models[i] = fmt.Sprintf("model-%02d", i)
-	}
-	a := newControlAgent(t, m, "chat")
-	got := invokeAgentTool(t, a, `{"action":"list_models"}`)
-	lines := strings.Split(got, "\n")
-	if lines[0] != "可用模型（60）:" || len(lines) != 52 {
-		t.Errorf("截断输出异常（共 %d 行）: %q", len(lines), got)
-	}
-	if lines[len(lines)-1] != "（仅列出前 50 项，共 60 项）" {
-		t.Errorf("截断提示异常: %q", lines[len(lines)-1])
-	}
-}
-
-func TestAgentToolListModelsEmptyAndNoKey(t *testing.T) {
-	m := newMockLLM(t)
-	m.models = []string{}
-	a := newControlAgent(t, m, "chat")
-	if got := invokeAgentTool(t, a, `{"action":"list_models"}`); got != MsgControlModelsEmpty {
-		t.Errorf("空列表输出 = %q", got)
-	}
-	b := newTestAgent(t)
-	if got := invokeAgentTool(t, b, `{"action":"list_models"}`); !strings.HasPrefix(got, MsgErrPrefix) {
-		t.Errorf("无 api_key 应报错: %q", got)
 	}
 }
