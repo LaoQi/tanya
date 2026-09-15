@@ -57,6 +57,7 @@ model: deepseek-v4-flash
 ```bash
 tanyan                 # 交互 REPL
 tanyan ask "问题"      # 单发模式（默认纯文本+verbose：无动画/无光标控制，保留工具块与状态行）
+tanyan init            # 新工作区脚手架：建 .tanya/ 与 AGENTS.md 骨架，随后进入 REPL
 tanyan -n              # 只读会话：可载入历史，不写入
 tanyan -n ask "问题"   # 单发且不写入会话历史
 tanyan -c x.yaml       # 指定配置文件
@@ -70,11 +71,13 @@ tanyan -v              # 显示版本号
 
 | 模式 | 会话目录 |
 |---|---|
-| `auto`（默认） | 当前目录存在 `.tanya/` 则用 `<cwd>/.tanya/sessions/`，否则用全局 |
+| `auto`（默认） | 当前目录存在 `.tanya/` 则用 `<cwd>/.tanya/sessions/`，否则用全局（`tanyan init` 建出 `.tanya/` 后即落本地） |
 | `local` | `<启动目录>/.tanya/sessions/` |
 | `global` | `~/.local/share/tanyan/sessions/<workspace-id>/` |
 
 只读会话（`-n` / `--no-save`，只由命令行开启，配置文件与 env 均无法设置）：`ask` 单发与 REPL 通用。历史会话照常列出与载入，之后的对话只存在于内存、不写入会话文件，也不创建会话目录（REPL 启动时在欢迎屏下方显示黄色警告，`ask` 保持静默）。
+
+新工作区初始化（`tanyan init`，无参数）：为空白目录搭好工作区骨架后进入普通 REPL——建 `<cwd>/.tanya/sessions/`（使 `session_mode: auto` 落到本地工作区，首个会话即写入此处）、建 `<cwd>/AGENTS.md` 骨架（已存在则不动），并询问是否为 `.tanya/` 建立忽略文件（内容 `*`，避免会话与历史入库；非交互场合不询问也不创建，输出里给出手动命令）。不做项目探测、不调用模型；每一项幂等、不覆盖既有文件，任一项失败即以 1 退出。生成的 `AGENTS.md` 会进入本次会话的 system prompt，可随后让 AI 读完目录补全。
 
 纯文本输出（`-p` / `--plain`，只由命令行开启，配置文件与 env 均无法设置）：`ask` 单发与 REPL 通用，供本程序作为子 agent 被调用时拿到可解析的输出——stdout 只承载 assistant 正文与命令反馈（无颜色、无 spinner、无光标控制、无 markdown 装饰、无工具块与状态行），stderr 承载错误与诊断；`ask` 结束时若正文已以换行结尾则不再补空行，stdout 严格等于答案。`--verbose` 必须与 `--plain` 同用，作用是在该模式下恢复工具块与状态行的**纯文本**形态（仍不启用颜色与光标控制；工具块为追加式，标题只在开始行出现一次）。
 

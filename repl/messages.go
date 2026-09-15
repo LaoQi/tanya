@@ -12,6 +12,18 @@ const (
 )
 
 const (
+	MsgInitHead       = "初始化工作区 %s\n"
+	MsgInitAskIgnore  = "是否为 .tanya/ 建立忽略文件（内容 *，避免会话入库）？[y/N] "
+	MsgInitTagNew     = "新建"
+	MsgInitTagOld     = "已有"
+	MsgInitTagSkip    = "跳过"
+	MsgInitEntryFmt   = "  %s  %s  %s\n"
+	MsgInitSessionFmt = "  会话目录 %s\n"
+	MsgInitHint       = "提示: 直接描述需求即可开工，可让 AI 读完目录后补全 AGENTS.md\n"
+	MsgInitUsage      = "用法: tanyan init\n"
+)
+
+const (
 	MsgInterruptKept = "已中断，本回合已完成步骤已保留，继续输入可续接\n"
 	MsgInterruptBare = "已中断\n"
 )

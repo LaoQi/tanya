@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/LaoQi/tanyan/render/term"
 	"os"
-	"strings"
 
 	"github.com/LaoQi/tanyan/agent"
 	"github.com/LaoQi/tanyan/readline"
@@ -28,14 +27,13 @@ func main() {
 	verbose := flag.Bool("verbose", false, repl.FlagVerbose)
 	flag.Parse()
 
-	args := flag.Args()
-	isAsk := len(args) > 0 && args[0] == "ask"
+	cmd, rest := repl.ParseCommand(flag.Args())
 	mode, err := repl.ParseMode(*plain, *verbose)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
-	if isAsk {
+	if cmd == repl.CmdAsk {
 		mode = repl.SingleShot(mode)
 	}
 	st := repl.NewStreams(os.Stdout, os.Stderr, mode)
@@ -43,6 +41,14 @@ func main() {
 	if *showVersion {
 		st.Print(fmt.Sprintf("tanyan %s\n", version))
 		return
+	}
+	if cmd == repl.CmdAsk && rest == "" {
+		st.Fail(repl.MsgAskUsage)
+		os.Exit(1)
+	}
+	if cmd == repl.CmdInit && rest != "" {
+		st.Fail(repl.MsgInitUsage)
+		os.Exit(1)
 	}
 
 	repl.Version = version
@@ -74,6 +80,12 @@ func main() {
 	if *sessionMode != "" {
 		cfg.SessionMode = *sessionMode
 	}
+	if cmd == repl.CmdInit {
+		if err := repl.RunInit(st, sem, cfg); err != nil {
+			st.Fail(repl.MsgErrLineFmt+"\n", err)
+			os.Exit(1)
+		}
+	}
 	agent.ProtectTerminalSignals()
 	readline.InitTerminalGuard()
 	readline.SecureTerminal()
@@ -86,14 +98,9 @@ func main() {
 	}
 	sink := repl.NewToolView(st, prof, sem, repl.ToolWidth, a.ToolOutputLines())
 
-	if isAsk {
-		q := strings.Join(args[1:], " ")
-		if q == "" {
-			st.Fail(repl.MsgAskUsage)
-			os.Exit(1)
-		}
+	if cmd == repl.CmdAsk {
 		ctx, done := repl.InterruptContext()
-		err := a.Ask(ctx, q, sink.Handle)
+		err := a.Ask(ctx, rest, sink.Handle)
 		done()
 		if err != nil {
 			st.Fail("\n"+repl.MsgErrLineFmt+"\n", err)
