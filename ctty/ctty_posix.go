@@ -43,3 +43,13 @@ func IsForeground(fd int) bool {
 func IgnoreJobSignals() {
 	signal.Ignore(unix.SIGTTIN, unix.SIGTTOU)
 }
+
+const resetModes = "\x1b[0m\x1b[?25h\x1b[?7h\x1b[r\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l"
+
+func ResetModes(tty *os.File) bool {
+	if tty == nil {
+		return false
+	}
+	_, err := tty.WriteString(resetModes)
+	return err == nil
+}

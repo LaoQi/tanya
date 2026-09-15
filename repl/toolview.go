@@ -119,7 +119,7 @@ func renderToolBody(sem theme.Semantics, title string, res agent.ToolResult, wid
 		b.WriteString(sem.Dim.Frame(out))
 	}
 	if status != "" {
-		b.WriteString(sem.Info.Sprint("  ↳ "+status) + "\n")
+		b.WriteString(sem.Info.Sprint("  ↳ "+term.Strip(status)) + "\n")
 	}
 	return b.String()
 }

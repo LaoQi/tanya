@@ -36,9 +36,14 @@ func secureTerminalFd(fd int, owns bool) {
 	if !owns {
 		return
 	}
-	if t, err := getTermios(fd); err == nil && t.Lflag&unix.ISIG == 0 {
-		t.Lflag |= unix.ISIG
-		_ = setTermios(fd, t)
+	if t, err := ctty.GetTermios(fd); err == nil {
+		sane := t
+		sane.Iflag |= unix.ICRNL | unix.IXON
+		sane.Lflag |= unix.ISIG | unix.ICANON | unix.ECHO | unix.IEXTEN
+		sane.Oflag |= unix.OPOST | unix.ONLCR
+		if sane != t {
+			_ = ctty.SetTermios(fd, sane)
+		}
 	}
 	if pgrp, ok := ctty.ForegroundPgrp(fd); ok && pgrp != ctty.OwnPgrp() {
 		ctty.SetForeground(fd, ctty.OwnPgrp())

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LaoQi/tanyan/ctty"
 	"golang.org/x/sys/unix"
 )
 
@@ -125,4 +126,78 @@ func TestRunShellStopDetection(t *testing.T) {
 	if res.Duration >= 3*time.Second {
 		t.Fatalf("挂起探测过慢: %v", res.Duration)
 	}
+}
+
+func requireForegroundTTY(t *testing.T) (*os.File, int, ctty.Termios) {
+	t.Helper()
+	ProtectTerminalSignals()
+	tty, err := ctty.Open()
+	if err != nil {
+		t.Skip("无控制终端")
+	}
+	fd := int(tty.Fd())
+	if pgrp, ok := ctty.ForegroundPgrp(fd); !ok || pgrp != ctty.OwnPgrp() {
+		tty.Close()
+		t.Skip("当前进程组非前台（嵌套/后台环境）")
+	}
+	before, err := ctty.GetTermios(fd)
+	if err != nil {
+		tty.Close()
+		t.Skipf("GetTermios: %v", err)
+	}
+	return tty, fd, before
+}
+
+func shellOut(res *ShellResult) string {
+	var out strings.Builder
+	for _, c := range res.Stdout {
+		out.WriteString(c.Data)
+	}
+	for _, c := range res.Stderr {
+		out.WriteString(c.Data)
+	}
+	return out.String()
+}
+
+const rawTTYCmd = `stty -opost -icanon -echo < /dev/tty; stty -a < /dev/tty | tr ';' '\n' | grep -E 'opost|icanon'`
+
+func assertRawThenRestored(t *testing.T, res *ShellResult, fd int, before ctty.Termios) {
+	t.Helper()
+	out := shellOut(res)
+	if !strings.Contains(out, "-opost") || !strings.Contains(out, "-icanon") {
+		t.Fatalf("子进程未改坏终端（用例前提不成立）: %+v", res)
+	}
+	after, err := ctty.GetTermios(fd)
+	if err != nil {
+		t.Fatalf("GetTermios: %v", err)
+	}
+	if after != before {
+		t.Fatalf("termios 未恢复:\n before=%+v\n after =%+v", before, after)
+	}
+}
+
+func TestRunShellRestoresTermios(t *testing.T) {
+	tty, fd, before := requireForegroundTTY(t)
+	defer func() {
+		_ = ctty.SetTermios(fd, before)
+		tty.Close()
+	}()
+	res := testShellTool(t).run(context.Background(), shellRequest{Command: rawTTYCmd, TimeoutSec: 10})
+	assertRawThenRestored(t, res, fd, before)
+}
+
+func TestRunShellRestoresTermiosOnTimeout(t *testing.T) {
+	tty, fd, before := requireForegroundTTY(t)
+	defer func() {
+		_ = ctty.SetTermios(fd, before)
+		tty.Close()
+	}()
+	res := testShellTool(t).run(context.Background(), shellRequest{
+		Command:    `stty -opost -icanon -echo < /dev/tty; stty -a < /dev/tty | tr ';' '\n' | grep -E 'opost|icanon'; sleep 30`,
+		TimeoutSec: 1,
+	})
+	if !res.TimedOut {
+		t.Fatalf("应超时: %+v", res)
+	}
+	assertRawThenRestored(t, res, fd, before)
 }

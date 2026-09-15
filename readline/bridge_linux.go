@@ -26,7 +26,7 @@ type bridgeTTY struct {
 	ttyFd    int
 	masterFd int
 
-	saved  unix.Termios
+	saved  ctty.Termios
 	rawSet bool
 
 	wakeR int
@@ -90,23 +90,23 @@ func (b *bridgeTTY) Attach(capture io.Writer) (func(), error) {
 	}
 	b.ttyFd = int(b.tty.Fd())
 	b.masterFd = int(b.master.Fd())
-	saved, err := getTermios(b.ttyFd)
+	saved, err := ctty.GetTermios(b.ttyFd)
 	if err != nil {
 		b.release()
 		return nil, err
 	}
-	raw := *saved
+	raw := saved
 	raw.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP |
 		unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON
 	raw.Lflag &^= unix.ECHO | unix.ICANON | unix.ISIG | unix.IEXTEN
 	raw.Oflag &^= unix.OPOST
 	raw.Cc[unix.VMIN] = 1
 	raw.Cc[unix.VTIME] = 0
-	if err := setTermios(b.ttyFd, &raw); err != nil {
+	if err := ctty.SetTermios(b.ttyFd, raw); err != nil {
 		b.release()
 		return nil, err
 	}
-	b.saved = *saved
+	b.saved = saved
 	b.rawSet = true
 	var pipe [2]int
 	if err := unix.Pipe2(pipe[:], unix.O_CLOEXEC|unix.O_NONBLOCK); err != nil {
@@ -183,7 +183,10 @@ func (b *bridgeTTY) release() {
 	b.relOnce.Do(func() {
 		defer b.releaseBusy()
 		if b.rawSet {
-			_ = setTermios(b.ttyFd, &b.saved)
+			_ = ctty.SetTermios(b.ttyFd, b.saved)
+			if b.tty != nil {
+				ctty.ResetModes(b.tty)
+			}
 			b.rawSet = false
 		}
 		if b.master != nil {

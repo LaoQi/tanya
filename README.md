@@ -5,7 +5,7 @@
 ## 特性
 
 - OpenAI 兼容接口（OpenAI / DeepSeek / GLM / Ollama / vLLM 等），SSE 流式输出
-- 以 shell 为核心的工具体系：模型可直接执行 shell 命令（自动适配平台：Linux/macOS bash/sh/ash，Windows pwsh；`shell` 配置可指定任意 shell）
+- 以 shell 为核心的工具体系：模型可直接执行 shell 命令（自动适配平台：Linux/macOS bash/sh/ash，Windows pwsh；`shell` 配置可指定任意 shell）；命令前后保存/复原控制终端状态（termios 与备用屏/鼠标等模式），被超时强杀的交互程序不会留下坏终端
 - 内置轻量工具：`get_time` / `get_env` / `calc`
 - 模型可运行时自调与自省：`agent_custom` 按 `key` 读写（可写 `model`、`reasoning_effort`；只读 `models`、`usage`、`stat`、`sessions`），`get sessions` 给出会话列表与 jsonl 文件路径（仅本次会话有效，不写配置文件）
 - 会话持久化与恢复（JSONL，记录完整历史，system 快照随会话冻结）

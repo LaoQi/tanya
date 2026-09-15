@@ -267,12 +267,23 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 	res := &ShellResult{Command: command, Cwd: dir}
 	tty, _ := ctty.Open()
 	handed := false
+	var saved ctty.Termios
+	hasSaved := false
+	if tty != nil {
+		if t, err := ctty.GetTermios(int(tty.Fd())); err == nil {
+			saved, hasSaved = t, true
+		}
+	}
 	defer func() {
 		if tty == nil {
 			return
 		}
+		if hasSaved {
+			_ = ctty.SetTermios(int(tty.Fd()), saved)
+		}
 		if handed {
 			ctty.SetForeground(int(tty.Fd()), ctty.OwnPgrp())
+			ctty.ResetModes(tty)
 		}
 		tty.Close()
 	}()

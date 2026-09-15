@@ -152,3 +152,75 @@ func openTestPTY(t *testing.T) (*os.File, *os.File, error) {
 	}
 	return master, slave, nil
 }
+
+func TestTermiosRoundtrip(t *testing.T) {
+	master, slave, err := openTestPTY(t)
+	if err != nil {
+		t.Skipf("分配 pty: %v", err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	fd := int(slave.Fd())
+	saved, err := GetTermios(fd)
+	if err != nil {
+		t.Fatalf("GetTermios: %v", err)
+	}
+	raw := saved
+	raw.Lflag &^= unix.ICANON | unix.ECHO
+	raw.Oflag &^= unix.OPOST
+	if err := SetTermios(fd, raw); err != nil {
+		t.Fatalf("SetTermios: %v", err)
+	}
+	got, err := GetTermios(fd)
+	if err != nil {
+		t.Fatalf("GetTermios: %v", err)
+	}
+	if got.Lflag&unix.ICANON != 0 || got.Lflag&unix.ECHO != 0 || got.Oflag&unix.OPOST != 0 {
+		t.Fatalf("raw 未生效: %+v", got)
+	}
+	if err := SetTermiosFlush(fd, saved); err != nil {
+		t.Fatalf("SetTermiosFlush: %v", err)
+	}
+	back, err := GetTermios(fd)
+	if err != nil {
+		t.Fatalf("GetTermios: %v", err)
+	}
+	if back != saved {
+		t.Fatalf("未还原:\n saved=%+v\n back =%+v", saved, back)
+	}
+}
+
+func TestTermiosInvalidFd(t *testing.T) {
+	if _, err := GetTermios(-1); err == nil {
+		t.Error("非法 fd 应报错")
+	}
+	if err := SetTermios(-1, Termios{}); err == nil {
+		t.Error("非法 fd 应报错")
+	}
+}
+
+func TestResetModesWritesEscapeState(t *testing.T) {
+	master, slave, err := openTestPTY(t)
+	if err != nil {
+		t.Skipf("分配 pty: %v", err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	if !ResetModes(slave) {
+		t.Fatal("ResetModes 应写入成功")
+	}
+	buf := make([]byte, 128)
+	n, err := master.Read(buf)
+	if err != nil {
+		t.Fatalf("读 pty: %v", err)
+	}
+	got := string(buf[:n])
+	for _, want := range []string{"\x1b[0m", "\x1b[?25h", "\x1b[?7h", "\x1b[r", "\x1b[?1049l", "\x1b[?1000l", "\x1b[?1006l"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("模式复位缺 %q: %q", want, got)
+		}
+	}
+	if ResetModes(nil) {
+		t.Error("nil tty 应返回 false")
+	}
+}
