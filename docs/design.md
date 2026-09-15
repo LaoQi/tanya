@@ -9,7 +9,7 @@
 ```
 main.go            package main：入口、flag 子命令、ask 单发
 repl/              package repl：REPL 循环、斜杠命令、补全、工具视图渲染、等待动画
-agent/             package agent：全部核心逻辑（config / llm / agent / tools / prompt / session / stats / shell / builtin）
+agent/             package agent：全部核心逻辑（config / llm / llm_http / agent / tools / prompt / session / stats / shell / builtin）
 readline/          package readline：自研终端输入层（editor / keys / terminal），pty 桥接与终端状态自愈
 ctty/              package ctty：控制终端原语（前台组读写、/dev/tty、SIGTTIN/SIGTTOU），白名单 linux||darwin，零依赖叶子
 render/            package render：渲染管线（IR → ANSI：Renderer、提示符模板），可 import 其下子包
@@ -73,6 +73,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - `Message` 为内部规范格式（含 `ReasoningItems`），会话 jsonl 直接持久化，旧会话（无 reasoning 字段）双协议均可回放
 - `ReasoningItems` 为两协议共用的内部思维链表示：responses 回传为独立 reasoning item（`ID` 空时省略 `id` 字段，兼容 chat 侧落盘的思维链），chat 回传为 assistant 消息的 `reasoning_content` 字符串（多 item 顺序拼接）
 - `/models` 列表（GET `/models`）与协议无关，按 id 排序返回，供 `/model` 命令与补全
+- HTTP/SSE 公共骨架（`llm_http.go`）：`endpoint`/`newRequest`/`do`/`streamSSE`/`scanSSE` 为两协议共用——POST + 四 header、状态码非 200 时读 4096 字节 body 包成类型化 `httpError`（`Error()` 即 `MsgAPIStatus` 格式）、`data:` 前缀与 `[DONE]` 终止、scanner 错误包 `MsgReadStream`。协议差异只剩 URL 路径、请求体结构、事件分派与 404 hint（responses 独有，在 `responsesStream` 里以 `errors.As` 判定后转换）
 
 ## Agent Loop
 

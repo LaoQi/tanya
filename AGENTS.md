@@ -30,6 +30,7 @@ agent/             核心逻辑
   config.go        配置加载（默认值 < ~/.config/tanyan/config.yaml < env TANYA_*）
   llm.go           chat 协议 client（SSE 流式 + tool_calls 增量合并 + reasoning_content 捕获/回传 + usage 捕获）
   llm_responses.go responses 协议 client（input items 映射、reasoning 明文捕获/回传、usage 映射）
+  llm_http.go      llm.go / llm_responses.go 共用 HTTP/SSE 骨架（endpoint/newRequest/do/streamSSE/scanSSE，类型化 httpError）
   agent.go         对话 loop、上下文估算、消息组装与工具分发
   prompt.go        系统提示组装（快照/旧版识别，AGENTS.md 经注入 reader 读取）
   session.go       会话存储（sessionStore：增量落盘、载入、列表缓存）
