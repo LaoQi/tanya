@@ -215,12 +215,18 @@ func TestResetModesWritesEscapeState(t *testing.T) {
 		t.Fatalf("读 pty: %v", err)
 	}
 	got := string(buf[:n])
-	for _, want := range []string{"\x1b[0m", "\x1b[?25h", "\x1b[?7h", "\x1b[r", "\x1b[?1049l", "\x1b[?1000l", "\x1b[?1006l"} {
+	for _, want := range []string{"\x1b[0m", "\x1b[?25h", "\x1b[?7h", "\x1b[?1049l", "\x1b[?1000l", "\x1b[?1006l"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("模式复位缺 %q: %q", want, got)
 		}
 	}
 	if ResetModes(nil) {
 		t.Error("nil tty 应返回 false")
+	}
+}
+
+func TestResetModesKeepsCursor(t *testing.T) {
+	if strings.Contains(resetModes, "\x1b[r") {
+		t.Errorf("模式复位不得含 DECSTBM：光标会被移到滚动区首行，后续相对重绘（CSI 1A + CR CSI K）落到屏幕顶部: %q", resetModes)
 	}
 }
