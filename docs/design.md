@@ -25,7 +25,7 @@ render/markup/     内联标记解析
 设计取舍：
 
 - **不做细粒度拆包**：代码总量小，按包分职责即可
-- **不做动态工具注册**：工具经 `Tool` 接口（`agent/tools.go`）自述名/描述/参数并提供执行，`allTools()` 编译期显式列清单（`run_shell` + `builtinTools()`），`toolRegistry.lookup` 线性扫描（N=4 实测快于 map），无插件/运行时注册，存量小且预计长期以 shell 为主
+- **不做动态工具注册**：工具经 `Tool` 接口（`agent/tools.go`）自述名/描述/参数并提供执行，`allTools()` 编译期显式列清单（`run_shell` + `builtinTools()` + `agent_custom`），`toolRegistry.lookup` 线性扫描（N=4 实测快于 map，现 N=5，不做索引），无插件/运行时注册，存量小且预计长期以 shell 为主
 - **依赖仅 2 个**：`gopkg.in/yaml.v3`（配置）、`golang.org/x/sys/unix`（raw mode）；终端输入层与富文本管线自研
 - **颜色铁律**：SGR 与 CSI 仅 `render/style`、`render/term` 产生（业务代码不得出现裸 `\x1b`，readline 的光标操作也走 `term.Cursor*`）；同一 IR 按终端能力档案（`term.Profile`）降级，无色终端自动纯文本
 
@@ -94,7 +94,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## 工具
 
-工具统一经 `Tool` 接口（`agent/tools.go`）声明：`Name()` 给名字、`Definition()` 给描述与参数 schema（即 wire 上的 function 定义）、`Invoke()` 给执行——**描述、参数与执行同处一个实现**，不再有独立清单文件。`allTools(shell)` 编译期显式列出全集（`run_shell` 在前、`builtinTools()` 在后），顺序即请求体 `tools` 段顺序（prompt cache 依赖，见 `docs/cache-probe.md`）；`newToolRegistry` 持有该 slice，`defs()` 供 `NewClient` 构造期注入，`lookup` 线性扫描（N=4 实测快于 map，不做索引）。`Agent.dispatch` 退化为查表，未命中回 `MsgUnknownTool`。需要终端直通的工具可额外实现窄接口 `interactiveTool`（当前仅 `run_shell`），供 `runTurn` 在 `EventToolStart/End` 上提前标记 `Interactive`。代价是 `run_shell` 的参数被解析两次——`interactiveOf`（`runTurn` 取 `Interactive`）与 `Invoke` 各一次；这是「参数对通用 `Tool` 接口不透明」与「`EventToolStart` 必须在执行前携带参数派生字段」两条约束相交的**有意保留**结果（实测单次 678ns，对比一次 `bash -c true` 1.26ms 可忽略），不是待办。
+工具统一经 `Tool` 接口（`agent/tools.go`）声明：`Name()` 给名字、`Definition()` 给描述与参数 schema（即 wire 上的 function 定义）、`Invoke()` 给执行——**描述、参数与执行同处一个实现**，不再有独立清单文件。`allTools(shell, ctl)` 编译期显式列出全集（`run_shell` 在前、`builtinTools()` 居中、`agent_custom` 在末尾），顺序即请求体 `tools` 段顺序（prompt cache 依赖，见 `docs/cache-probe.md`）；`newToolRegistry` 持有该 slice，`defs()` 供 `NewClient` 构造期注入，`lookup` 线性扫描（N=4 实测快于 map，现 N=5，不做索引）。`Agent.dispatch` 退化为查表，未命中回 `MsgUnknownTool`。需要终端直通的工具可额外实现窄接口 `interactiveTool`（当前仅 `run_shell`），供 `runTurn` 在 `EventToolStart/End` 上提前标记 `Interactive`。代价是 `run_shell` 的参数被解析两次——`interactiveOf`（`runTurn` 取 `Interactive`）与 `Invoke` 各一次；这是「参数对通用 `Tool` 接口不透明」与「`EventToolStart` 必须在执行前携带参数派生字段」两条约束相交的**有意保留**结果（实测单次 678ns，对比一次 `bash -c true` 1.26ms 可忽略），不是待办。
 
 ### run_shell（`agent/shelltool.go` 组件 + `agent/shell.go` 叶子）
 
@@ -155,6 +155,16 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - `get_time`：当前时间（含时区）
 - `get_env`：查询环境变量，名称含 KEY/TOKEN/SECRET/PASS 的拒绝返回
 - `calc`：四则运算表达式求值（自实现递归下降解析，支持 `+ - * / %`、括号、负数）
+
+### agent 自调（control.go）
+
+`agent_custom` 是唯一带状态的工具，让模型运行时调整自身参数，`action` 三态：
+
+- `get`：读当前 `model`/`reasoning_effort` 与运行态统计（上下文 tokens、缓存命中率、消息数；无请求时标注未知）
+- `set`：改 `model`/`reasoning_effort`，**先全量校验后应用**（任一非法则整体不生效），对下一次请求生效
+- `list_models`：向服务端查询可用模型（唯一网络 action，最长 10s，超 50 项截断并标注总数）
+
+依赖经窄接口 `configTarget`（`*Agent` 满足，测试可注入替身）注入，与 `shellTool` 的构造期注入同一风格。改动只写内存 `Config`：不落盘、不入会话文件，`/load` 或重启后回落配置文件值；`repl` 的 `{model}`/`{effort}` 占位符每轮现读 `Agent`，自动跟上，无需事件通知。`SetModel` 带空值校验（`/model` 命令共用同一路径）。方案与四项决策见 `docs/agent-control-tool.md`。
 
 ## 上下文管理
 
@@ -259,9 +269,9 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 |---|---|---|
 | `base_url` | `https://api.openai.com/v1` | API 地址 |
 | `api_key` | 空 | 密钥（建议用 env 注入） |
-| `model` | `deepseek-v4-flash` | 模型名 |
+| `model` | `deepseek-v4-flash` | 模型名（运行时可被 `agent_custom` 工具改写，仅本次会话） |
 | `temperature` | 0.7 | |
-| `reasoning_effort` | 空 | 思考等级 minimal/low/medium/high/max，非法值忽略；空则请求不带 `reasoning_effort` 字段 |
+| `reasoning_effort` | 空 | 思考等级 minimal/low/medium/high/max，非法值忽略；空则请求不带 `reasoning_effort` 字段（运行时可被 `agent_custom` 工具改写，仅本次会话） |
 | `colors` | `auto` | 终端配色 auto（跟随终端能力与 `NO_COLOR`）/ on（强制开色）/ off（强制纯文本） |
 | `theme` | `nord` | 内置配色主题（语义色/提示符/markdown 标题与代码整体切换）：default/minimal/solar/vivid/nord/gruv/dusk，非法值启动报错 |
 | `palette` | 空 | 语义色覆盖（info/warn/ok/error/dim/accent/think/run → 色名），叠加在当前主题之上（切换主题后自动重放） |
