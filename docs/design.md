@@ -158,13 +158,13 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### agent 自调（control.go）
 
-`agent_custom` 是唯一带状态的工具，让模型运行时调整自身参数，`action` 三态：
+`agent_custom` 是唯一带状态的工具，形态为**键值化三参数**：`action`（`get`/`set`）+ `key`（能力名，enum）+ `value`（仅 `set` 且 key 可写时使用）。顶层参数形态恒定，能力面由 `key` 展开；实现走 key 表（`keySpec{writable, read, write}`）驱动，新增能力 = 表加一行 + `key` enum 加一值：
 
-- `get`：读当前 `model`/`reasoning_effort` 与运行态统计（上下文 tokens、缓存命中率、消息数；无请求时标注未知）
-- `set`：改 `model`/`reasoning_effort`，**先全量校验后应用**（任一非法则整体不生效），对下一次请求生效
-- `list_models`：向服务端查询可用模型（唯一网络 action，最长 10s，超 50 项截断并标注总数）
+- 可写 key：`model`（非空字符串）、`reasoning_effort`（minimal/low/medium/high/max/off）——`set` 校验失败不改动状态，对下一次请求生效
+- 只读 key：`models`（服务端可用模型列表，超 50 项截断并标注总数）、`usage`（最近一次请求的上下文 tokens、缓存命中、命中率）、`stat`（会话 id、消息数、累计 token；`--no-save` 时会话显示 `(不落盘)`）、`sessions`（本工作区会话列表 + 每个会话 `.jsonl` 的绝对路径，id 倒序列前 20）
+- 只读 key 出现在 `set` 里**明确报错**（不静默忽略）；未知 `action`/`key`、缺 `value`、值非法均返回带可修建议的错误文本 (`MsgErrPrefix` 前缀)
 
-依赖经窄接口 `configTarget`（`*Agent` 满足，测试可注入替身）注入，与 `shellTool` 的构造期注入同一风格。改动只写内存 `Config`：不落盘、不入会话文件，`/load` 或重启后回落配置文件值；`repl` 的 `{model}`/`{effort}` 占位符每轮现读 `Agent`，自动跟上，无需事件通知。`SetModel` 带空值校验（`/model` 命令共用同一路径）。方案与四项决策见 `docs/agent-control-tool.md`。
+`get sessions` 只给列表与文件位置，**不读内容**——读内容交回 `run_shell`（符合「新能力优先用 shell 命令组合实现」）。依赖经窄接口 `configTarget`（`*Agent` 满足，测试可注入替身）注入，与 `shellTool` 的构造期注入同一风格。改动只写内存 `Config`：不落盘、不入会话文件，`/load` 或重启后回落配置文件值；`repl` 的 `{model}`/`{effort}` 占位符每轮现读 `Agent`，自动跟上，无需事件通知。`SetModel` 带空值校验（`/model` 命令共用同一路径）。形态选型与偏差记录见 `docs/agent-control-tool.md`。
 
 ## 上下文管理
 
