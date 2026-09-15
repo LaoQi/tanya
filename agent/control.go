@@ -4,8 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
+
+const agentModelListLimit = 50
+
+const agentSessionListLimit = 20
+
+var agentKeyNames = []string{"model", "reasoning_effort", "models", "usage", "stat", "sessions"}
+
+var agentWritableKeys = []string{"model", "reasoning_effort"}
+
+func agentKeysLabel() string { return strings.Join(agentKeyNames, "、") }
+
+func agentWritableLabel() string { return strings.Join(agentWritableKeys, "、") }
+
+var agentDesc = "读取或修改当前 agent 的模型与思考等级，并查询运行态统计、可用模型与会话列表。" +
+	"改动仅本次会话有效（不写入配置文件，进程退出即恢复），对下一次请求生效。" +
+	"切换模型后 prompt cache 不复用，需重新预热。" +
+	"action=get 按 key 读取；action=set 按 key 写入可写 key（需同时给 value）。" +
+	"key 可用: " + agentKeysLabel() + "；可写 key: " + agentWritableLabel() + "。"
 
 type configTarget interface {
 	Model() string
@@ -13,6 +32,8 @@ type configTarget interface {
 	ReasoningEffort() string
 	SetReasoningEffort(string) error
 	ListModels() ([]string, error)
+	ListSessions() ([]SessionInfo, error)
+	NoSave() bool
 	Stats() Stats
 }
 
@@ -27,9 +48,34 @@ func (t *agentTool) Definition() ToolDef {
 }
 
 type agentArgs struct {
-	Action          string `json:"action"`
-	Model           string `json:"model"`
-	ReasoningEffort string `json:"reasoning_effort"`
+	Action string  `json:"action"`
+	Key    string  `json:"key"`
+	Value  *string `json:"value"`
+}
+
+type keySpec struct {
+	writable string
+	read     func() string
+	write    func(v string) (string, error)
+}
+
+func (t *agentTool) keys() map[string]keySpec {
+	return map[string]keySpec{
+		"model": {
+			writable: MsgControlModelSpec,
+			read:     func() string { return fmt.Sprintf(MsgControlModel, t.target.Model()) },
+			write:    t.writeModel,
+		},
+		"reasoning_effort": {
+			writable: MsgControlEffortSpec,
+			read:     func() string { return fmt.Sprintf(MsgControlEffort, effortLabel(t.target.ReasoningEffort())) },
+			write:    t.writeEffort,
+		},
+		"models":   {read: t.readModels},
+		"usage":    {read: t.readUsage},
+		"stat":     {read: t.readStat},
+		"sessions": {read: t.readSessions},
+	}
 }
 
 func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
@@ -37,70 +83,51 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return ToolResult{Text: fmt.Sprintf(MsgParseArgs, err)}
 	}
-	switch strings.ToLower(strings.TrimSpace(args.Action)) {
-	case "get":
-		return ToolResult{Text: t.getText()}
-	case "set":
-		return ToolResult{Text: t.setText(args)}
-	case "list_models":
-		return ToolResult{Text: t.listModelsText()}
-	default:
+	action := strings.ToLower(strings.TrimSpace(args.Action))
+	if action != "get" && action != "set" {
 		return ToolResult{Text: fmt.Sprintf(MsgErrPrefix+MsgControlBadAction, args.Action)}
 	}
+	key := strings.ToLower(strings.TrimSpace(args.Key))
+	if key == "" {
+		return ToolResult{Text: fmt.Sprintf(MsgErrPrefix+MsgControlMissingKey, agentKeysLabel())}
+	}
+	spec, ok := t.keys()[key]
+	if !ok {
+		return ToolResult{Text: fmt.Sprintf(MsgErrPrefix+MsgControlBadKey, args.Key, agentKeysLabel())}
+	}
+	if action == "get" {
+		return ToolResult{Text: spec.read()}
+	}
+	if spec.writable == "" {
+		return ToolResult{Text: fmt.Sprintf(MsgErrPrefix+MsgControlReadOnlyKey, key, agentWritableLabel())}
+	}
+	if args.Value == nil {
+		return ToolResult{Text: fmt.Sprintf(MsgErrPrefix+MsgControlNeedValue, spec.writable)}
+	}
+	out, err := spec.write(*args.Value)
+	if err != nil {
+		return ToolResult{Text: MsgErrPrefix + err.Error()}
+	}
+	return ToolResult{Text: out}
 }
 
-func (t *agentTool) getText() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, MsgControlModel+"\n", t.target.Model())
-	fmt.Fprintf(&b, MsgControlEffort+"\n", effortLabel(t.target.ReasoningEffort()))
-	st := t.target.Stats()
-	if st.HasContext && st.ContextTokens > 0 {
-		fmt.Fprintf(&b, MsgControlContext+"\n", st.ContextTokens, st.ContextHit, cacheRateLabel(st))
-	} else {
-		b.WriteString(MsgControlContextUnknown + "\n")
+func (t *agentTool) writeModel(v string) (string, error) {
+	old := t.target.Model()
+	if err := t.target.SetModel(v); err != nil {
+		return "", err
 	}
-	fmt.Fprintf(&b, MsgControlMessages, st.Messages)
-	return b.String()
+	return fmt.Sprintf(MsgControlModelSwitch, old, t.target.Model()) + "\n" + MsgControlCacheHint, nil
 }
 
-func (t *agentTool) setText(args agentArgs) string {
-	provided := args.Model != ""
-	model := strings.TrimSpace(args.Model)
-	raw := strings.TrimSpace(args.ReasoningEffort)
-	if !provided && raw == "" {
-		return MsgControlNoChange
+func (t *agentTool) writeEffort(v string) (string, error) {
+	old := effortLabel(t.target.ReasoningEffort())
+	if err := t.target.SetReasoningEffort(v); err != nil {
+		return "", err
 	}
-	if provided && model == "" {
-		return MsgErrPrefix + MsgEmptyModel
-	}
-	setEffort := raw != ""
-	if setEffort && !strings.EqualFold(raw, "off") && normalizeEffort(raw) == "" {
-		return fmt.Sprintf(MsgErrPrefix+MsgBadEffort, raw)
-	}
-	var lines []string
-	if model != "" {
-		old := t.target.Model()
-		if err := t.target.SetModel(model); err != nil {
-			return MsgErrPrefix + err.Error()
-		}
-		lines = append(lines, fmt.Sprintf(MsgControlModelSwitch, old, model))
-	}
-	if setEffort {
-		old := effortLabel(t.target.ReasoningEffort())
-		if err := t.target.SetReasoningEffort(raw); err != nil {
-			return MsgErrPrefix + err.Error()
-		}
-		lines = append(lines, fmt.Sprintf(MsgControlEffortSwitch, old, effortLabel(effortValue(raw))))
-	}
-	if model != "" {
-		lines = append(lines, MsgControlCacheHint)
-	}
-	return strings.Join(lines, "\n")
+	return fmt.Sprintf(MsgControlEffortSwitch, old, effortLabel(t.target.ReasoningEffort())), nil
 }
 
-const agentModelListLimit = 50
-
-func (t *agentTool) listModelsText() string {
+func (t *agentTool) readModels() string {
 	models, err := t.target.ListModels()
 	if err != nil {
 		return MsgErrPrefix + err.Error()
@@ -119,6 +146,49 @@ func (t *agentTool) listModelsText() string {
 	return b.String()
 }
 
+func (t *agentTool) readUsage() string {
+	st := t.target.Stats()
+	if !st.HasContext {
+		return MsgControlContextUnknown
+	}
+	out := fmt.Sprintf(MsgControlUsageContext, st.ContextTokens)
+	if st.ContextTokens > 0 {
+		rate := float64(st.ContextHit) / float64(st.ContextTokens) * 100
+		out += "\n" + fmt.Sprintf(MsgControlUsageHit, st.ContextHit, fmt.Sprintf("%.2f%%", rate))
+	}
+	return out
+}
+
+func (t *agentTool) readStat() string {
+	st := t.target.Stats()
+	id := strings.TrimSuffix(filepath.Base(st.Session), ".jsonl")
+	if t.target.NoSave() {
+		id = MsgControlStatNoSave
+	}
+	return fmt.Sprintf(MsgControlStatSession, id) + "\n" +
+		fmt.Sprintf(MsgControlMessages, st.Messages) + "\n" +
+		fmt.Sprintf(MsgControlTotals, st.PromptTokens, st.CompletionTokens, st.TotalTokens)
+}
+
+func (t *agentTool) readSessions() string {
+	list, err := t.target.ListSessions()
+	if err != nil {
+		return MsgErrPrefix + err.Error()
+	}
+	if len(list) == 0 {
+		return MsgControlSessionsEmpty
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, MsgControlSessionsHead, len(list))
+	for _, si := range list[:min(len(list), agentSessionListLimit)] {
+		fmt.Fprintf(&b, "\n"+MsgControlSessionsLine, si.ID, si.Msgs, si.ModTime.Format("2006-01-02 15:04"), si.Path)
+	}
+	if len(list) > agentSessionListLimit {
+		fmt.Fprintf(&b, "\n"+MsgControlSessionsTrim, len(list), agentSessionListLimit)
+	}
+	return b.String()
+}
+
 func effortLabel(v string) string {
 	if v == "" {
 		return MsgControlUnset
@@ -126,30 +196,11 @@ func effortLabel(v string) string {
 	return v
 }
 
-func effortValue(raw string) string {
-	if strings.EqualFold(raw, "off") {
-		return ""
-	}
-	return raw
-}
-
-func cacheRateLabel(st Stats) string {
-	if st.ContextTokens <= 0 {
-		return MsgControlNoCache
-	}
-	return fmt.Sprintf("%.2f%%", float64(st.ContextHit)/float64(st.ContextTokens)*100)
-}
-
-const agentDesc = "读取或修改当前 agent 的模型与思考等级，并查询运行态统计与可用模型。" +
-	"改动仅本次会话有效（不写入配置文件，进程退出即恢复），对下一次请求生效。" +
-	"切换模型后 prompt cache 不复用，需重新预热。" +
-	"action=get 读取现状；set 修改（至少指定 model 或 reasoning_effort 之一）；list_models 查询服务端可用模型（网络请求，最长 10s）。"
-
 func agentParams() string {
-	levels, _ := json.Marshal(append(append([]string{}, EffortLevels...), "off"))
+	keys, _ := json.Marshal(agentKeyNames)
 	return fmt.Sprintf(`{"type":"object","properties":{`+
-		`"action":{"type":"string","enum":["get","set","list_models"],"description":"get 读取当前可调项与运行态；set 修改；list_models 查询服务端可用模型（网络请求，最长 10s，需 api_key）"},`+
-		`"model":{"type":"string","description":"set 时指定新模型名，缺省表示不改此项"},`+
-		`"reasoning_effort":{"type":"string","enum":%s,"description":"set 时指定思考等级，off 表示不发送该字段"}},`+
-		`"required":["action"]}`, levels)
+		`"action":{"type":"string","enum":["get","set"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）"},`+
+		`"key":{"type":"string","enum":%s,"description":"可写键 %s；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）"},`+
+		`"value":{"type":"string","description":"set 的新值（get 时忽略）。reasoning_effort 取 minimal/low/medium/high/max/off，off 表示清空该字段"}},`+
+		`"required":["action","key"]}`, keys, agentWritableLabel())
 }

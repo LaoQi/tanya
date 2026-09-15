@@ -26,6 +26,7 @@ type SessionInfo struct {
 	ModTime time.Time
 	Msgs    int
 	Summary string
+	Path    string
 }
 
 type sessionStore struct {
@@ -175,7 +176,7 @@ func (s *sessionStore) refresh() error {
 }
 
 func scanSession(path, id string, modTime time.Time) SessionInfo {
-	si := SessionInfo{ID: id, ModTime: modTime}
+	si := SessionInfo{ID: id, ModTime: modTime, Path: path}
 	f, err := os.Open(path)
 	if err != nil {
 		return si
