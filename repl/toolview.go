@@ -33,7 +33,7 @@ func toolWidth(term readline.Terminal) int {
 }
 
 func RenderToolStart(name, args string, width int) string {
-	lines := toolTitleLines(name, args, "⋯", width-3)
+	lines := toolTitleLines(name, args, width-3)
 	var b strings.Builder
 	b.WriteString("\n▸ " + lines[0] + "\n")
 	for _, l := range lines[1:] {
@@ -42,30 +42,20 @@ func RenderToolStart(name, args string, width int) string {
 	return b.String()
 }
 
-func toolTitleLines(name, args, mark string, width int) []string {
+func toolTitleLines(name, args string, width int) []string {
 	cwd, cmd := toolArgsDisplay(name, args)
 	head := name
 	if cwd == "" {
 		if cmd != "" {
 			head += " " + cmd
 		}
-		if mark != "" {
-			head += " " + mark
-		}
 		return []string{term.Truncate(head, width)}
-	}
-	if mark != "" {
-		head += " " + mark
 	}
 	lines := []string{term.Truncate(head, width), term.Truncate("  cwd: "+cwd, width)}
 	if cmd != "" {
 		lines = append(lines, term.Truncate("  "+cmd, width))
 	}
 	return lines
-}
-
-func toolTitleLineCount(name, args string, width int) int {
-	return len(toolTitleLines(name, args, "⋯", width))
 }
 
 func toolEndBody(res agent.ToolResult, width, maxLines int) (string, string) {
@@ -93,54 +83,19 @@ func toolEndBody(res agent.ToolResult, width, maxLines int) (string, string) {
 	return b.String(), status
 }
 
-func toolTitleText(name, args string, width int) string {
-	lines := toolTitleLines(name, args, "", width-3)
-	var b strings.Builder
-	b.WriteString("▸ " + lines[0] + "\n")
-	for _, l := range lines[1:] {
-		b.WriteString(l + "\n")
-	}
-	return b.String()
-}
-
-// renderToolBody 渲染工具正文块与状态行；title 为空表示标题已由 ToolStart 输出，此处不重复。
-func renderToolBody(sem theme.Semantics, title string, res agent.ToolResult, width, maxLines int) string {
+// RenderToolEndAppend 追加工具正文块与状态行：标题已由 RenderToolStart 打出一次，此处不重复。
+func RenderToolEndAppend(sem theme.Semantics, res agent.ToolResult, width, maxLines int) string {
 	out, status := toolEndBody(res, width, maxLines)
 	var b strings.Builder
-	switch {
-	case term.HasSGR(out):
-		if title != "" {
-			b.WriteString(sem.Dim.Frame(title))
-		}
+	if term.HasSGR(out) {
 		b.WriteString(term.Passthrough(out))
-	case title != "":
-		b.WriteString(sem.Dim.Frame(title + out))
-	default:
+	} else {
 		b.WriteString(sem.Dim.Frame(out))
 	}
 	if status != "" {
 		b.WriteString(sem.Info.Sprint("  ↳ "+term.Strip(status)) + "\n")
 	}
 	return b.String()
-}
-
-func renderToolBlock(sem theme.Semantics, lead, name, args string, res agent.ToolResult, width, maxLines int) string {
-	return lead + renderToolBody(sem, toolTitleText(name, args, width), res, width, maxLines)
-}
-
-func RenderToolEnd(sem theme.Semantics, name, args string, res agent.ToolResult, width, maxLines int) string {
-	return renderToolBlock(sem, "\n", name, args, res, width, maxLines)
-}
-
-func RenderToolEndInline(sem theme.Semantics, name, args string, res agent.ToolResult, width, maxLines int) string {
-	lead := strings.Repeat(term.CursorUp(1)+term.ClearLineHome(), toolTitleLineCount(name, args, width-3))
-	return renderToolBlock(sem, lead, name, args, res, width, maxLines)
-}
-
-// RenderToolEndAppend 供追加式输出（非 TTY / plain+verbose 等无光标控制场景）使用：
-// 标题已由 RenderToolStart 打出且无法上移覆盖，这里只补正文块与状态行，避免标题重复。
-func RenderToolEndAppend(sem theme.Semantics, res agent.ToolResult, width, maxLines int) string {
-	return renderToolBody(sem, "", res, width, maxLines)
 }
 
 func RenderResponseInfo(info agent.ResponseInfo, width int) string {
@@ -289,7 +244,7 @@ func textView(text string, width, maxLines int) ([]string, string) {
 // toolView 是工具区渲染器：闭包状态提为字段，仍是 agent.EventSink（Handle 即签名匹配）。
 type toolView struct {
 	st        *streams
-	sp        *spinner
+	heart     *heartbeat
 	prof      term.Profile
 	sem       theme.Semantics
 	width     func() int
@@ -301,7 +256,7 @@ type toolView struct {
 func NewToolView(st *streams, prof term.Profile, sem theme.Semantics, width func() int, maxLines int) *toolView {
 	return &toolView{
 		st:       st,
-		sp:       newSpinner(st.out, prof.TTY, sem),
+		heart:    newHeartbeat(st.out, sem),
 		prof:     prof,
 		sem:      sem,
 		width:    width,
@@ -309,20 +264,23 @@ func NewToolView(st *streams, prof term.Profile, sem theme.Semantics, width func
 	}
 }
 
-// Content 输出正文（原 REPL.print 的语义）：停动画、若上一块是工具块先补空行、跟踪行尾状态。
-// animate 报告是否允许启动动画：设备是 TTY 且当前模式放行动画帧。
 func (v *toolView) setSemantics(sem theme.Semantics) {
 	v.sem = sem
-	v.sp.setSemantics(sem)
+	v.heart.setSemantics(sem)
 }
 
-func (v *toolView) animate() bool { return v.prof.TTY && v.st.out.allows(KindSpinner) }
+// statusOn 报告是否展示过程状态行：TTY 且当前模式放行 KindStatus（仅 rich 档）。
+func (v *toolView) statusOn() bool { return v.prof.TTY && v.st.out.allows(KindStatus) }
 
+// Stop 收尾进行中的心跳（幂等）：无进行中的心跳时不写任何字节。
+func (v *toolView) Stop() { v.heart.stop() }
+
+// Content 输出正文（原 REPL.print 的语义）：停心跳、若上一块是工具块先补空行、跟踪行尾状态。
 func (v *toolView) Content(kind Kind, text string) {
 	if text == "" {
 		return
 	}
-	v.sp.stop()
+	v.heart.stop()
 	justEnded := v.justEnded
 	v.st.out.atomic(kind, func(w io.Writer) {
 		if justEnded {
@@ -337,15 +295,13 @@ func (v *toolView) Content(kind Kind, text string) {
 func (v *toolView) Handle(e agent.Event) {
 	switch e.Kind {
 	case agent.EventRequestStart:
-		if v.animate() {
-			v.sp.start(spinWaiting)
-		}
+		v.heart.start(statusWaiting, v.statusOn())
 	case agent.EventReasoning:
-		v.sp.setKind(spinThinking)
+		v.heart.setPhase(statusThinking)
 	case agent.EventContent:
 		v.Content(KindContent, e.Text)
 	case agent.EventResponse:
-		v.sp.stop()
+		v.heart.stop()
 		dirty := v.dirty
 		v.st.out.atomic(KindToolStatus, func(w io.Writer) {
 			if dirty {
@@ -355,7 +311,7 @@ func (v *toolView) Handle(e agent.Event) {
 		})
 		v.dirty = false
 	case agent.EventToolStart:
-		v.sp.stop()
+		v.heart.stop()
 		v.st.out.atomic(KindToolBlock, func(w io.Writer) {
 			io.WriteString(w, v.sem.Dim.Frame(RenderToolStart(e.ToolName, e.ToolArgs, v.width())))
 			if e.Interactive {
@@ -363,21 +319,16 @@ func (v *toolView) Handle(e agent.Event) {
 			}
 		})
 		v.dirty = false
-		if !e.Interactive && v.animate() {
-			v.sp.start(spinRunning)
+		if !e.Interactive {
+			v.heart.start(statusToolRunning, v.statusOn())
 		}
 	case agent.EventToolEnd:
-		v.sp.stop()
+		v.heart.stop()
 		// 工具块被屏蔽时不置 justEnded：否则下一条正文前会留下孤立空行。
 		if v.st.out.allows(KindToolBlock) {
-			var block string
-			switch {
-			case v.prof.TTY && v.st.cursor() && !e.Interactive:
-				block = RenderToolEndInline(v.sem, e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
-			case e.Interactive:
-				block = RenderToolEnd(v.sem, e.ToolName, e.ToolArgs, e.Result, v.width(), v.maxLines)
-			default:
-				block = RenderToolEndAppend(v.sem, e.Result, v.width(), v.maxLines)
+			block := RenderToolEndAppend(v.sem, e.Result, v.width(), v.maxLines)
+			if e.Interactive {
+				block = "\n" + block
 			}
 			v.st.out.atomic(KindToolBlock, func(w io.Writer) {
 				io.WriteString(w, block)

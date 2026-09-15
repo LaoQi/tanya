@@ -61,7 +61,7 @@ func TestVisSetMatrix(t *testing.T) {
 		{modeRich, KindNotice, true},
 		{modeRich, KindDecor, true},
 		{modeRich, KindError, true},
-		{modeRich, KindSpinner, true},
+		{modeRich, KindStatus, true},
 
 		{modePlain, KindContent, true},
 		{modePlain, KindNotice, true},
@@ -70,7 +70,7 @@ func TestVisSetMatrix(t *testing.T) {
 		{modePlain, KindToolStatus, false},
 		{modePlain, KindDecor, false},
 		{modePlain, KindError, false},
-		{modePlain, KindSpinner, false},
+		{modePlain, KindStatus, false},
 
 		{modePlainVerbose, KindContent, true},
 		{modePlainVerbose, KindNotice, true},
@@ -79,7 +79,7 @@ func TestVisSetMatrix(t *testing.T) {
 		{modePlainVerbose, KindReasoning, false},
 		{modePlainVerbose, KindDecor, false},
 		{modePlainVerbose, KindError, false},
-		{modePlainVerbose, KindSpinner, false},
+		{modePlainVerbose, KindStatus, false},
 	}
 	for _, c := range cases {
 		st := NewStreams(&syncBuf{}, &syncBuf{}, c.mode)
@@ -162,27 +162,27 @@ func TestPlainVerboseKeepsToolText(t *testing.T) {
 	}
 }
 
-func TestPlainVerboseNoSpinnerEvenOnTTY(t *testing.T) {
+func TestPlainVerboseNoStatusEvenOnTTY(t *testing.T) {
 	view := NewToolView(NewStreams(&syncBuf{}, &syncBuf{}, modePlainVerbose), plainProf, testSem(), func() int { return 80 }, 20)
 	var out syncBuf
 	view.st.out.setWriter(&out)
 	view.Handle(agent.Event{Kind: agent.EventRequestStart})
 	view.Handle(agent.Event{Kind: agent.EventReasoning})
 	if got := out.String(); got != "" {
-		t.Errorf("plain+verbose 下 TTY 也不应输出动画: %q", got)
+		t.Errorf("plain+verbose 下 TTY 也不应输出状态行: %q", got)
 	}
-	if view.animate() {
-		t.Error("plain+verbose 不应放行动画")
+	if view.statusOn() {
+		t.Error("plain+verbose 不应放行状态行")
 	}
 }
 
-func TestPlainNoSpinnerEvenOnTTY(t *testing.T) {
+func TestPlainNoStatusEvenOnTTY(t *testing.T) {
 	r, out, _ := newTestREPLMode(t, newFakeTerm(), modePlain, plainProf)
 	turn := r.beginTurn(nil)
 	turn.Handle(agent.Event{Kind: agent.EventRequestStart})
 	turn.Handle(agent.Event{Kind: agent.EventReasoning})
 	if got := out.String(); got != "" {
-		t.Errorf("plain 下 TTY 也不应输出动画或空行: %q", got)
+		t.Errorf("plain 下 TTY 也不应输出状态行或空行: %q", got)
 	}
 }
 
@@ -254,7 +254,7 @@ func TestRichStreamsByteIdentical(t *testing.T) {
 		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
 	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{FirstEvent: 300e6, Duration: 1200e6}})
 	view.Handle(agent.Event{Kind: agent.EventContent, Text: "答案\n"})
-	want := "\n▸ run_shell echo hi ⋯\n  hi\n  ↳ exit 0 · 0ms · 1 行\n  ↳ TTFT 300ms · 1.2s\n\n答案\n"
+	want := "\n▸ run_shell echo hi\n  hi\n  ↳ exit 0 · 0ms · 1 行\n  ↳ TTFT 300ms · 1.2s\n\n答案\n"
 	if got := out.String(); got != want {
 		t.Errorf("rich 非 TTY 输出应为基线字节\n got %q\nwant %q", got, want)
 	}
@@ -266,8 +266,8 @@ func TestRichStreamsByteIdentical(t *testing.T) {
 	view2 := NewToolView(st2, tty, testSem(), func() int { return 80 }, 20)
 	view2.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
 		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
-	want2 := "\x1b[1A\r\x1b[K▸ run_shell echo hi\n  hi\n  ↳ exit 0 · 0ms · 1 行\n"
+	want2 := "  hi\n  ↳ exit 0 · 0ms · 1 行\n"
 	if got := out2.String(); got != want2 {
-		t.Errorf("rich TTY 内联重绘应为基线字节\n got %q\nwant %q", got, want2)
+		t.Errorf("rich TTY 收尾应为追加式基线字节（无上移重绘）\n got %q\nwant %q", got, want2)
 	}
 }

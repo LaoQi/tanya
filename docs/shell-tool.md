@@ -94,7 +94,7 @@ func (t *shellTool) invocation() string   // env 段 SHELL 行用
 - **需求侧：无**。当前唯一主工具是 `run_shell`（`builtin` 三个为小型纯计算），模型一次返回多个 `tool_calls` 时顺序执行是正确行为——顺序确定、事件不交错、history 顺序稳定；并行只省墙钟时间，而同一回合的多条命令常有数据依赖。协议层支持多 `tool_calls`（chat 按 `tc.Index` 合并增量、responses 按 item）
 - **组件侧已就绪**：字段构造后只读 + 每调用状态全在栈上 = `run` 可并发调用；`shellRequest` 是纯请求值对象、组件不回连调度层 → 并行调度落地时组件内部无需改动
 - **真正的约束（落地时的核心决策）**：并行与"stdin 直通可应答密码"互斥——`runShellForeground` 无条件 `openForegroundTTY()` + 交接前台组 + stdin 接 tty，而同一时刻只有一个进程组能拥有终端前台。并行化必须选一种降级契约：并行批次中最多一个 interactive、其余降级为无 tty stdin（牺牲应答能力）；或仅对显式声明不需终端的命令并行
-- **届时改动清单**（全在调度侧）：① 把"是否需要终端"变成显式输入（`shellRequest` 加字段，或按批次约定判定——§13 第 4 条已预留该决策），使不碰终端的调用不拿 `ttyMu`；② `EventToolStart/End` 填 `ToolIndex`/`ToolID`（字段已在 `agent/event.go`，当前只有流式 `EventToolCall` 填）；③ history 按 index 收敛（并行执行、**顺序 append**，协议要求 tool 消息与 `tool_calls` 一一对应且同序）；④ `toolView` 支持多块（现为单块状态机：`dirty`/`justEnded`/spinner/`RenderToolEndInline` 的"上移 N 行"）并定义中断时部分结果的收敛语义
+- **届时改动清单**（全在调度侧）：① 把"是否需要终端"变成显式输入（`shellRequest` 加字段，或按批次约定判定——§13 第 4 条已预留该决策），使不碰终端的调用不拿 `ttyMu`；② `EventToolStart/End` 填 `ToolIndex`/`ToolID`（字段已在 `agent/event.go`，当前只有流式 `EventToolCall` 填）；③ history 按 index 收敛（并行执行、**顺序 append**，协议要求 tool 消息与 `tool_calls` 一一对应且同序）；④ `toolView` 支持多块（现为单块状态机：`dirty`/`justEnded` + 单条 `heartbeat`；渲染已追加化，无"上移 N 行"）并定义中断时部分结果的收敛语义
 - **不变量**：不得现在加死字段（无写入方、无判定方的 `NeedsTTY` 之类，与已清掉的 `Profile.Unicode`/`Level256`/`RGB` 同类）
 
 ## 6. 装配点（`agent.New`）

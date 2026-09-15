@@ -104,9 +104,9 @@ const (
 )
 
 const (
-	SpinWaiting  = "%s 等待响应 %s"
-	SpinThinking = "%s 思考中 %s"
-	SpinRunning  = "  %s 执行中 %s"
+	MsgStatusWaiting  = "» 等待响应"
+	MsgStatusThinking = "» 思考中"
+	MsgStatusRunning  = "  » 执行中"
 )
 
 const helpText = `斜杠命令：

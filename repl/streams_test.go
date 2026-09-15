@@ -3,13 +3,14 @@ package repl
 import (
 	"bytes"
 	"errors"
-	"github.com/LaoQi/tanyan/render/term"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanyan/render/term"
 )
 
 func TestStreamsInjectWriter(t *testing.T) {
@@ -94,6 +95,22 @@ func TestOutputAtomicNoInterleave(t *testing.T) {
 	view := NewToolView(st, term.GetProfile(), testSem(), func() int { return 80 }, 20)
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sleep 1"}`})
 
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				st.out.emit(KindStatus, statusLine(statusWaiting, testSem(), 0)+".\n")
+				time.Sleep(100 * time.Microsecond)
+			}
+		}
+	}()
+
 	pairs := 0
 	deadline := time.Now().Add(300 * time.Millisecond)
 	for time.Now().Before(deadline) {
@@ -103,6 +120,8 @@ func TestOutputAtomicNoInterleave(t *testing.T) {
 		})
 		pairs++
 	}
+	close(stop)
+	wg.Wait()
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"sleep 1"}`,
 		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "sleep 1", ExitCode: 0}}})
 
@@ -110,11 +129,11 @@ func TestOutputAtomicNoInterleave(t *testing.T) {
 	if pairs == 0 {
 		t.Fatal("未产生写入")
 	}
-	if !strings.Contains(got, term.ClearLineHome()) {
-		t.Error("并发场景下未出现 spinner 帧，断言无意义")
+	if !strings.Contains(got, MsgStatusWaiting) {
+		t.Error("并发场景下未出现状态行，断言无意义")
 	}
 	if n := strings.Count(got, "<<A>><<B>>"); n != pairs {
-		t.Errorf("原子块被 spinner 帧插入: %d/%d", n, pairs)
+		t.Errorf("原子块被状态行插入: %d/%d", n, pairs)
 	}
 }
 
