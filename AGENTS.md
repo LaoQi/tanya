@@ -10,7 +10,8 @@
 - 平台分片一律白名单 `linux || darwin` + 其余 stub，不枚举边缘平台；目标平台 Linux/Windows 为主（Windows 交互待实现）、macOS 尽力、其余仅保证可编译
 - 中断依赖两项终端不变量（`ISIG` 开启、前台组是 tanyan），自愈时机与信号退出码口径（`128 + signum`）见 `docs/ctty.md`；`/dev/tty`、前台组等原语一律走 `ctty`，是否移交/夺回由 `agent`、`readline` 各自决定
 - `interactive: true` 的 run_shell 走全 pty 桥接（命令在独立 pty 中运行，真实 tty 由 bridge 切 raw 双向泵转）；仅 Linux 实现，失败回退 `/dev/tty` + `TIOCSPGRP`，见 `docs/interactive-tty.md`
-- 工具只有编译期显式清单 `allTools()`（`run_shell` + `builtinTools()`），不做动态注册/插件；清单顺序即请求顺序，改动会破坏 prompt cache
+- 工具只有编译期显式清单 `allTools()`（`run_shell` + `builtinTools()` + `agent_custom`），不做动态注册/插件；清单顺序即请求顺序，改动会破坏 prompt cache
+- 模型可经 `agent_custom` 工具运行时自调 `model`/`reasoning_effort` 并读运行态（`action` = get/set/list_models）：只写内存、不落盘不入会话，`/load` 或重启后回落配置文件值
 - 工具策略：以 `run_shell` 为核心，新能力优先用 shell 命令组合实现；小型纯计算/查询工具放 `builtin.go`
 - 启动即要求可用 shell：`agent.New` 解析（配置覆盖 > 平台探测）全落空直接报错退出，无降级路径
 - REPL 输入分发（`repl/dispatch.go`）：`/` 白名单斜杠命令（控制面）、`exit`/`quit` 内建退出、`:`/`：` 等价显式对话前缀、其余直接与 LLM 对话；进程 cwd 恒为启动目录（全程不 `os.Chdir`），`run_shell` 默认在此执行并可用 `cwd` 参数为单次命令指定目录
@@ -28,7 +29,7 @@ ctty/              控制终端原语：前台组读/写、/dev/tty、SIGTTIN/SI
 repl/              REPL 循环与输入分发（对话优先）、斜杠命令、提示符模板、ghost 补全、/load picker、工具块渲染、spinner、统计渲染、UI 文案
 readline/          自研终端输入层：行编辑/历史/Tab 补全菜单、按键解析、raw mode、显示宽度、pty 桥接（linux）、终端状态自愈
 agent/             核心逻辑：config（配置加载）/ llm + llm_http + llm_responses（双协议 client）/ agent（对话 loop）/ prompt / session / stats / envprobe / event
-                   工具与终端：tools（Tool 接口 + allTools 清单）/ shelltool（run_shell 组件）/ shell + shell_unix + shell_other + shell_proc_*（叶子与平台分片）/ builtin（内置小工具）/ tty_bridge
+                   工具与终端：tools（Tool 接口 + allTools 清单）/ shelltool（run_shell 组件）/ shell + shell_unix + shell_other + shell_proc_*（叶子与平台分片）/ builtin（内置小工具）/ control（agent_custom 自调工具）/ tty_bridge
 render/            表现层树根：渲染管线（IR → ANSI 的 Renderer、提示符模板 Template）
   style/           样式词汇与编码（Color/Attr/Style/ColorLevel/SGR/Sprint/Frame），依赖 term
   term/            终端原语（ANSI 词法/清洗、宽度/截断/单行化、光标控制、能力档案 Profile），零依赖叶子
@@ -46,7 +47,7 @@ render/            表现层树根：渲染管线（IR → ANSI 的 Renderer、�
 - `README.md` 使用说明与配置项
 - `docs/ctty.md` 控制终端抽象与平台收敛；`docs/interactive-tty.md` pty 桥接
 - `docs/style-split.md` 表现层拆包；`docs/render-pipeline.md` 渲染管线；`docs/render-refs-compare.md` 参考项目对比
-- `docs/shell-tool.md` run_shell 组件化；`docs/agent-split.md` agent 接缝重组
+- `docs/shell-tool.md` run_shell 组件化；`docs/agent-split.md` agent 接缝重组；`docs/agent-control-tool.md` agent_custom 自调工具
 - `docs/repl-output-refactor.md` 输出收敛；`docs/repl-replay-rendering.md` `/history` 回放评估（未实施，结论建议不做）
 - `docs/cache-probe.md` prompt cache 探测；`docs/probe-redesign.md` 环境探针（已归档）
 

@@ -1,6 +1,6 @@
 # LLM 动态控制 agent：`agent_custom` 工具方案
 
-状态：**已定稿**（2026-09-15 确认 §11 三项决定；未实施）。
+状态：**已实施**（2026-09-15 完成 S1–S4；S5 人工验证待做）。落地偏差见 §13。
 
 范围：A 档三项——`model` 切换、`reasoning_effort` 调整、只读自省（当前可调项 + 运行态统计）。
 明确不在本次范围：`temperature`（不做）、上下文历史裁剪（另案设计，见 §12）。
@@ -110,12 +110,12 @@ func (a *Agent) SetModel(m string) error
 ```
 model: deepseek-v4-flash
 reasoning_effort: high
-上下文: 12345 tokens（缓存命中 9000，72.9%）
+上下文: 12345 tokens（缓存命中 9000，72.90%）
 消息数: 18
 ```
 
 - `reasoning_effort` 未设置时输出 `(未设置)`（新常量）。
-- 第三、四行读 `Stats()`：`HasContext == false` 时第三行改为 `上下文: 未知（本轮尚无请求）`。
+- 第三、四行读 `Stats()`：`HasContext == false` 时第三行改为 `上下文: 未知（本轮尚无请求）`；命中率两位小数（与 `repl` 的单次命中率口径一致）。
 - 不向模型暴露 `temperature`/`api_key`/`base_url` 等不可调项，避免诱导无效尝试。
 
 ### set
@@ -223,3 +223,14 @@ reasoning_effort: (未设置) → high
 
 - **上下文历史裁剪**：独立方案。需要新的 history 预算策略（按轮次/按 token 保留尾部、早期工具输出降级为摘要）、裁剪点选择（请求前 vs 工具返回后）、以及"裁剪不写入会话文件"的落盘口径——不宜与本次搭车。
 - **B 档项目**：工具输出截断下沉到 history（现状 `tool_output_lines` 只作用于终端显示）、`run_shell` 默认 cwd/timeout、会话只读列表、单向收紧权限。均待本次落地后按需评估。
+
+## 13. 落地偏差（2026-09-15）
+
+| 项 | 方案 | 落地 | 原因 |
+|---|---|---|---|
+| `set` 空模型 | 统一报 `model 不能为空` | 显式传 `model`（含全空白）报 `model 不能为空`；完全未传且无 effort 才报 `set 需要至少指定…` | 两种输入语义不同：前者是写错值，后者是没提要求 |
+| 工具数断言 | 未涉及 | `llm_test.go` / `llm_responses_test.go` 的硬编码 `!= 4` 改为 `!= len(testToolDefs())` | 清单长度已变，且后续新增工具不应再改两处 |
+| mock | 仅补 `/models` 分支 | 另加 `models []string` 字段（默认两条乱序 id） | 截断与空列表用例需要可控数据 |
+| 命中率精度 | 一位小数 | 两位小数 | 与 `repl.formatRate` 的单次命中率一致 |
+
+实施顺序与 §10 一致；`agent/control.go`、`agent/messages.go`（16 条常量）、`agent/tools.go`、`agent/agent.go`、`repl/repl.go` 各一处改动，`agent/control_test.go` 14 个用例，全量测试与 `-race` 均绿。

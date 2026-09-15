@@ -7,6 +7,7 @@
 - OpenAI 兼容接口（OpenAI / DeepSeek / GLM / Ollama / vLLM 等），SSE 流式输出
 - 以 shell 为核心的工具体系：模型可直接执行 shell 命令（自动适配平台：Linux/macOS bash/sh/ash，Windows pwsh；`shell` 配置可指定任意 shell）
 - 内置轻量工具：`get_time` / `get_env` / `calc`
+- 模型可运行时自调：`agent_custom` 工具读取/修改模型与思考等级、查询可用模型与运行态统计（仅本次会话有效，不写配置文件）
 - 会话持久化与恢复（JSONL，记录完整历史，system 快照随会话冻结）
 - token 用量实时显示在提示符（API 实报优先，本地估算兜底），支持显示缓存命中
 - AI 输出 Markdown 渲染（默认开启，非 TTY 与 plain 输出自动旁路）与内置配色主题（`/theme` 切换）
@@ -133,6 +134,7 @@ TTY 下带等待动画：LLM 请求等待期间显示 `⠋ 等待响应 3s`（�
 | `get_time` | 当前时间 |
 | `get_env` | 环境变量查询（敏感变量名拒绝） |
 | `calc` | 四则运算求值 |
+| `agent_custom` | 读取/修改当前 agent 的模型与思考等级，查询运行态统计与可用模型；改动对下一次请求生效，仅本次会话有效 |
 
 ### 终端与信号行为
 
