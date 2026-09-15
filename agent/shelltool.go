@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -24,6 +26,19 @@ type shellRequest struct {
 	TimeoutSec  int
 	Interactive bool
 	Cwd         string
+}
+
+type runShellArgs struct {
+	Command     string `json:"command"`
+	Timeout     int    `json:"timeout"`
+	Cwd         string `json:"cwd"`
+	Interactive bool   `json:"interactive"`
+}
+
+func parseRunShellArgs(raw string) (runShellArgs, error) {
+	var args runShellArgs
+	err := json.Unmarshal([]byte(raw), &args)
+	return args, err
 }
 
 type shellTool struct {
@@ -51,6 +66,30 @@ func newShellTool(cfg shellToolConfig) (*shellTool, error) {
 		home:      cfg.Home,
 		bridge:    cfg.Bridge,
 	}, nil
+}
+
+func (t *shellTool) Name() string { return "run_shell" }
+
+func (t *shellTool) Definition() ToolDef {
+	return newToolDef(t.Name(), t.toolDesc(), runShellParams())
+}
+
+func (t *shellTool) Interactive(argsJSON string) bool {
+	args, err := parseRunShellArgs(argsJSON)
+	return err == nil && args.Interactive
+}
+
+func (t *shellTool) Invoke(ctx context.Context, argsJSON string) ToolResult {
+	args, err := parseRunShellArgs(argsJSON)
+	if err != nil {
+		return ToolResult{Text: fmt.Sprintf(MsgParseArgs, err)}
+	}
+	return ToolResult{Shell: t.run(ctx, shellRequest{
+		Command:     args.Command,
+		TimeoutSec:  args.Timeout,
+		Interactive: args.Interactive,
+		Cwd:         args.Cwd,
+	})}
 }
 
 func (t *shellTool) run(ctx context.Context, req shellRequest) *ShellResult {
@@ -100,4 +139,27 @@ func (t *shellTool) resolveCwd(cwd string) (string, error) {
 
 func (t *shellTool) toolDesc() string {
 	return runShellDesc(t.profile, t.programs)
+}
+
+func runShellDesc(profile *shellProfile, programs []string) string {
+	var b strings.Builder
+	switch profile.Kind {
+	case KindPowerShell:
+		fmt.Fprintf(&b, "在 %s pwsh 中执行命令（PowerShell 语法）", runtime.GOOS)
+	case KindCmd:
+		fmt.Fprintf(&b, "在 %s cmd 中执行命令（cmd 语法）", runtime.GOOS)
+	default:
+		fmt.Fprintf(&b, "在 %s %s 中执行 shell 命令", runtime.GOOS, profile.Name)
+	}
+	b.WriteString("，返回 stdout/stderr/退出码。读文件、搜索、文本处理等系统操作都用它。")
+	b.WriteString("默认在会话启动目录（进程 cwd）下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。")
+	if len(programs) > 0 {
+		b.WriteString("可用程序: " + strings.Join(programs, ", "))
+	}
+	return b.String()
+}
+
+func runShellParams() string {
+	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"cwd":{"type":"string","description":"命令执行目录，默认会话启动目录"},"timeout":{"type":"integer","description":"超时秒数，默认 %d（interactive 时 %d），最大 %d"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令在独立 pty 中运行、终端直通应答，停用等待动画，默认超时放宽"}},"required":["command"]}`,
+		shellTimeoutSec, shellInteractiveTimeoutSec, shellTimeoutLimit)
 }

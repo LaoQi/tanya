@@ -1,9 +1,19 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
+
+func invokeBuiltin(t *testing.T, name, args string) (string, bool) {
+	t.Helper()
+	tool, ok := newToolRegistry(builtinTools()...).lookup(name)
+	if !ok {
+		return "", false
+	}
+	return tool.Invoke(context.Background(), args).Text, true
+}
 
 func TestCalcEval(t *testing.T) {
 	cases := []struct {
@@ -41,21 +51,21 @@ func TestCalcEvalError(t *testing.T) {
 }
 
 func TestDispatchCalc(t *testing.T) {
-	got, ok := DispatchBuiltin("calc", `{"expression":"(1+2)*3"}`)
+	got, ok := invokeBuiltin(t, "calc", `{"expression":"(1+2)*3"}`)
 	if !ok {
 		t.Fatal("calc 未命中")
 	}
 	if got != "9" {
 		t.Errorf("got %q, 期望 9", got)
 	}
-	if _, ok := DispatchBuiltin("calc", `{"expression":"1/0"}`); !ok {
+	if _, ok := invokeBuiltin(t, "calc", `{"expression":"1/0"}`); !ok {
 		t.Fatal("calc 错误也应命中")
 	}
 }
 
 func TestDispatchGetEnv(t *testing.T) {
 	t.Setenv("TANYAN_TEST_VAR", "xyz")
-	got, ok := DispatchBuiltin("get_env", `{"names":["TANYAN_TEST_VAR","TANYAN_NO_SUCH_XXX","MY_SECRET_KEY"]}`)
+	got, ok := invokeBuiltin(t, "get_env", `{"names":["TANYAN_TEST_VAR","TANYAN_NO_SUCH_XXX","MY_SECRET_KEY"]}`)
 	if !ok {
 		t.Fatal("get_env 未命中")
 	}
@@ -74,7 +84,7 @@ func TestDispatchGetEnv(t *testing.T) {
 }
 
 func TestDispatchGetTime(t *testing.T) {
-	got, ok := DispatchBuiltin("get_time", `{}`)
+	got, ok := invokeBuiltin(t, "get_time", `{}`)
 	if !ok {
 		t.Fatal("get_time 未命中")
 	}
@@ -84,7 +94,7 @@ func TestDispatchGetTime(t *testing.T) {
 }
 
 func TestDispatchUnknown(t *testing.T) {
-	if _, ok := DispatchBuiltin("no_such_tool", `{}`); ok {
+	if _, ok := invokeBuiltin(t, "no_such_tool", `{}`); ok {
 		t.Error("未知工具不应命中")
 	}
 }
