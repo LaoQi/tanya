@@ -39,8 +39,20 @@ render/markup/     内联标记解析
 
 - `tanyan`：交互 REPL，维护内存 messages 历史，SSE 逐 token 流式输出
 - `tanyan ask "问题"`：单发，输出后退出。单发默认走 plain+verbose 档（`repl.SingleShot` 在 CLI 模式为 rich 时降到 `modePlainVerbose`；显式 `-p` 更窄则保持不动）：无 spinner、无光标上移重绘（工具块追加式）、正文原样直出，颜色仍按终端能力保留，`End()` 按 plain 语义"缺行尾换行才补"
+- `tanyan init`：新工作区脚手架，建 `<cwd>/.tanya/sessions/`、询问后建 `<cwd>/.tanya/.gitignore`（内容 `*`）、缺口时建 `<cwd>/AGENTS.md` 骨架，随后与普通模式无异地进入 REPL（见下节）
 - 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式、`-n` / `--no-save` 只读会话（见《会话与上下文》存储小节）
 - Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）：REPL 与 `ask` 单发统一走 `signal.Notify(SIGINT)`（`repl.InterruptContext`），要求终端 `ISIG` 开启——readline 侧每回合开始前做终端状态自愈保证该项成立（`docs/interactive-tty.md` §5.9）；命令执行期间子进程组持有终端前台，Ctrl+C 由内核直达子进程组（命令优雅退出），再次按下取消回合
+
+### init 模式（`agent/init.go` + `repl/initflow.go`）
+
+新工作区（通常既无 `.tanya/` 也无 `AGENTS.md`）的一次性脚手架，之后与普通 REPL **完全无二**：不改提示符、不加斜杠命令、不改运行期行为。只作用于启动目录，不做项目探测、不调模型、不碰 `~/.config/tanyan/*`。
+
+- 三项动作，逐项幂等、永不覆盖既有文件：建 `<cwd>/.tanya/sessions/`（0755）→ 询问后建 `<cwd>/.tanya/.gitignore`（`*\n`，0644）→ 缺 `AGENTS.md` 时建骨架（`# <目录名>` + `## 项目说明` + `## 构建与测试` 两小节 + 生成标记注释，0644）
+- **顺序不变量**：`main` 在配置与 `-m` 覆盖之后、`agent.New` 之前调用 `repl.RunInit`。`.tanya/` 既是会话落点、也是 `session_mode: auto` 的判定依据（`resolveSessionDir` 的 `isDir(cwd/.tanya)`），先建后 New 才知道本次启动要落本地工作区，首个会话即写入 `<cwd>/.tanya/sessions/`；同一次构造里 `promptBuilder` 也随即读到新生成的 AGENTS.md（进入本次会话 system 快照，`/new` 时重读）
+- 忽略文件走交互确认：`ctty.Open()` 打开 `/dev/tty` 成功才提问（`是否…？[y/N]`，仅 `y`/`yes` 为真），失败即非交互（管道调用、无控制终端、Windows stub）不提问也不创建，报告里以 `MsgInitSkipNoTTY` 说明并给出手动命令；用户拒绝为 `MsgInitSkipDeclined`。既有 `.gitignore` 时不再提问
+- 报告：`repl.RunInit` 编排（头行 → 询问 → `agent.InitWorkspace` → 条目与会话目录行 + 一行提示），走 `st.Print`（KindNotice，plain 下仍可见），标记着色只用 `sem.Ok`/`sem.Dim`；条目路径相对工作区显示，头行与会话目录经 `initPath` 做 `~` 归约（不用提示符的 `shortPath` 缩写，避免报错路径被压缩）；`SessionDir` 取自 `resolveSessionDir(cfg, cwd)`，与 `agent.New` 同函数同输入，显式 `-m global` 时如实报告 global 落点（`.tanya/` 标记照建）
+- 失败即中止：任一项创建失败（`AGENTS.md` 是目录、`sessions` 是文件、写入出错）返回 `MsgInitFailFmt` 错误，`main` 打印后以 1 退出、不进 REPL；幂等使重试安全
+- CLI：`tanyan init` 无参数（带多余参数报 `MsgInitUsage`），`-n` 只读会话与 init 不冲突（骨架照建，会话不写盘）；`repl.ParseCommand` 统一解析 `ask`/`init`，未知首 token 保持旧行为（忽略并进 REPL）
 
 ## LLM 接入
 

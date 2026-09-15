@@ -38,6 +38,17 @@ const (
 )
 
 const (
+	MsgInitFailFmt      = "初始化失败 %s: %w"
+	MsgInitNotDir       = "已存在但不是目录"
+	MsgInitNotFile      = "已存在但不是普通文件"
+	MsgInitNoteSessions = "会话与历史"
+	MsgInitNoteIgnore   = "忽略 .tanya/ 全部内容"
+	MsgInitNoteAgents   = "项目说明骨架"
+	MsgInitSkipNoTTY    = "非交互未询问；如需：echo '*' > .tanya/.gitignore"
+	MsgInitSkipDeclined = "已选择不创建；如需：echo '*' > .tanya/.gitignore"
+)
+
+const (
 	MsgEmptyModel            = "model 不能为空"
 	MsgControlBadAction      = "未知 action %q（可选: get/set）"
 	MsgControlUnset          = "(未设置)"
