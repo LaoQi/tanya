@@ -3,6 +3,7 @@
 package readline
 
 import (
+	"github.com/LaoQi/tanyan/ctty"
 	"os"
 	"os/exec"
 	"strings"
@@ -28,16 +29,16 @@ func newTestPTY(t *testing.T) (*os.File, *os.File) {
 func TestSecureTerminalEnablesISIG(t *testing.T) {
 	_, slave := newTestPTY(t)
 	fd := int(slave.Fd())
-	term, err := getTermios(fd)
+	term, err := ctty.GetTermios(fd)
 	if err != nil {
 		t.Fatalf("getTermios: %v", err)
 	}
 	term.Lflag &^= unix.ISIG
-	if err := setTermios(fd, term); err != nil {
+	if err := ctty.SetTermios(fd, term); err != nil {
 		t.Fatalf("setTermios: %v", err)
 	}
 	secureTerminalFd(fd, true)
-	got, err := getTermios(fd)
+	got, err := ctty.GetTermios(fd)
 	if err != nil {
 		t.Fatalf("getTermios: %v", err)
 	}
@@ -52,16 +53,16 @@ func TestSecureTerminalEnablesISIG(t *testing.T) {
 func TestSecureTerminalAlreadyEnabled(t *testing.T) {
 	_, slave := newTestPTY(t)
 	fd := int(slave.Fd())
-	before, err := getTermios(fd)
+	before, err := ctty.GetTermios(fd)
 	if err != nil {
 		t.Fatalf("getTermios: %v", err)
 	}
 	before.Lflag |= unix.ISIG
-	if err := setTermios(fd, before); err != nil {
+	if err := ctty.SetTermios(fd, before); err != nil {
 		t.Fatalf("setTermios: %v", err)
 	}
 	secureTerminalFd(fd, true)
-	got, err := getTermios(fd)
+	got, err := ctty.GetTermios(fd)
 	if err != nil {
 		t.Fatalf("getTermios: %v", err)
 	}
@@ -73,16 +74,16 @@ func TestSecureTerminalAlreadyEnabled(t *testing.T) {
 func TestSecureTerminalSkipsWhenNotOwner(t *testing.T) {
 	_, slave := newTestPTY(t)
 	fd := int(slave.Fd())
-	term, err := getTermios(fd)
+	term, err := ctty.GetTermios(fd)
 	if err != nil {
 		t.Fatalf("getTermios: %v", err)
 	}
 	term.Lflag &^= unix.ISIG
-	if err := setTermios(fd, term); err != nil {
+	if err := ctty.SetTermios(fd, term); err != nil {
 		t.Fatalf("setTermios: %v", err)
 	}
 	secureTerminalFd(fd, false)
-	got, err := getTermios(fd)
+	got, err := ctty.GetTermios(fd)
 	if err != nil {
 		t.Fatalf("getTermios: %v", err)
 	}
@@ -156,4 +157,43 @@ func secureTerminalHelper() {
 	}
 	os.Stdout.WriteString("RECLAIMED\n")
 	os.Exit(0)
+}
+
+func TestSecureTerminalRestoresRawFlags(t *testing.T) {
+	_, slave := newTestPTY(t)
+	fd := int(slave.Fd())
+	before, err := ctty.GetTermios(fd)
+	if err != nil {
+		t.Fatalf("GetTermios: %v", err)
+	}
+	raw := before
+	raw.Iflag &^= unix.ICRNL | unix.IXON
+	raw.Lflag &^= unix.ISIG | unix.ICANON | unix.ECHO | unix.IEXTEN
+	raw.Oflag &^= unix.OPOST | unix.ONLCR
+	if err := ctty.SetTermios(fd, raw); err != nil {
+		t.Fatalf("SetTermios: %v", err)
+	}
+	secureTerminalFd(fd, true)
+	got, err := ctty.GetTermios(fd)
+	if err != nil {
+		t.Fatalf("GetTermios: %v", err)
+	}
+	for _, f := range []struct {
+		name string
+		got  uint32
+		want uint32
+	}{
+		{"ICRNL", got.Iflag, unix.ICRNL},
+		{"IXON", got.Iflag, unix.IXON},
+		{"ISIG", got.Lflag, unix.ISIG},
+		{"ICANON", got.Lflag, unix.ICANON},
+		{"ECHO", got.Lflag, unix.ECHO},
+		{"IEXTEN", got.Lflag, unix.IEXTEN},
+		{"OPOST", got.Oflag, unix.OPOST},
+		{"ONLCR", got.Oflag, unix.ONLCR},
+	} {
+		if f.got&f.want == 0 {
+			t.Errorf("%s 未恢复: iflag=0x%x lflag=0x%x oflag=0x%x", f.name, got.Iflag, got.Lflag, got.Oflag)
+		}
+	}
 }

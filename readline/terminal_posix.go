@@ -5,37 +5,38 @@ package readline
 import (
 	"os"
 
+	"github.com/LaoQi/tanyan/ctty"
 	"golang.org/x/sys/unix"
 )
 
 type unixTerminal struct {
-	saved  unix.Termios
+	saved  ctty.Termios
 	parser keyParser
 	queue  []KeyEvent
 }
 
 func newUnixTerminal() (Terminal, error) {
 	t := &unixTerminal{}
-	if _, err := getTermios(int(os.Stdin.Fd())); err != nil {
+	if _, err := ctty.GetTermios(int(os.Stdin.Fd())); err != nil {
 		return nil, err
 	}
 	return t, nil
 }
 
 func (t *unixTerminal) Raw() error {
-	saved, err := getTermios(int(os.Stdin.Fd()))
+	saved, err := ctty.GetTermios(int(os.Stdin.Fd()))
 	if err != nil {
 		return err
 	}
-	t.saved = *saved
-	raw := *saved
+	t.saved = saved
+	raw := saved
 	raw.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP |
 		unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON
 	raw.Lflag &^= unix.ECHO | unix.ICANON | unix.ISIG | unix.IEXTEN
 	raw.Oflag &^= unix.OPOST
 	raw.Cc[unix.VMIN] = 0
 	raw.Cc[unix.VTIME] = 1
-	if err := setTermiosFlush(int(os.Stdin.Fd()), &raw); err != nil {
+	if err := ctty.SetTermiosFlush(int(os.Stdin.Fd()), raw); err != nil {
 		return err
 	}
 	t.queue = nil
@@ -44,7 +45,7 @@ func (t *unixTerminal) Raw() error {
 }
 
 func (t *unixTerminal) Restore() {
-	_ = setTermios(int(os.Stdin.Fd()), &t.saved)
+	_ = ctty.SetTermios(int(os.Stdin.Fd()), t.saved)
 }
 
 func (t *unixTerminal) Size() (Size, bool) {

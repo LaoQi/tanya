@@ -595,3 +595,19 @@ func TestToolViewContentSemantics(t *testing.T) {
 		t.Errorf("无 justEnded 时不应补空行: %q", buf.String())
 	}
 }
+
+func TestToolStatusLineSanitized(t *testing.T) {
+	ttyProfile(t, plainProf)
+	var out syncBuf
+	st := NewStreams(&out, &syncBuf{}, modePlainVerbose)
+	view := NewToolView(st, plainProf, testSem(), func() int { return 80 }, 20)
+	res := agent.ToolResult{Shell: &agent.ShellResult{Cwd: "/tmp/\x1b[2Kx", Err: "cwd 不存在或不是目录: /tmp/\x1b[2Kx"}}
+	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{}`, Result: res})
+	got := out.String()
+	if strings.Contains(got, "\x1b[2K") {
+		t.Errorf("状态行泄露捕获序列: %q", got)
+	}
+	if !strings.Contains(got, "↳ 错误: cwd 不存在或不是目录: /tmp/x") {
+		t.Errorf("状态行缺错误文本: %q", got)
+	}
+}

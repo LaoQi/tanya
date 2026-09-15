@@ -40,12 +40,17 @@
 | `SetForeground(fd, pgrp int) bool` | 写前台组 |
 | `IsForeground(fd int) bool` | `ForegroundPgrp(fd) == OwnPgrp()` |
 | `IgnoreJobSignals()` | `signal.Ignore(SIGTTIN, SIGTTOU)` |
+| `type Termios` | 平台 termios（posix 为 `= unix.Termios`，其余平台空结构）|
+| `GetTermios(fd) (Termios, error)` | 读 termios |
+| `SetTermios(fd, Termios) error` | 写 termios |
+| `SetTermiosFlush(fd, Termios) error` | 写 termios 并丢弃未读输入（raw 前用）|
+| `ResetModes(tty *os.File) bool` | 复位终端模式：SGR、显示光标、自动换行、滚动区、退出备用屏、关鼠标上报 |
 
 设计原则：
 
 - **以 `fd int` 为原语参数**：readline 的 `secureTerminalFd` 需作用于任意 fd（其单测即作用在 pty slave fd 上），`Open()` 只是便捷入口。
 - **只下沉原语，不下沉策略**：不提供 `Handover/Restore` 组合函数，避免固化"仅前台才移交"这类决策。`agent` 保留三行组合；`readline` 保留启动前台归属与自愈门控。这与 `docs/design.md`《事实归属》"两处前台判定分别采样"的结论一致——共享原语，不合并决策。
-- **termios / raw mode 不进 `ctty`**：仅 readline 使用，无跨包重复；纳入只会扩大职责。
+- **termios 原语进 `ctty`（2026-09-15 修订，原结论为"不进"）**：原判断"仅 readline 使用"在 `run_shell` 需要**快照并在子进程结束后复原**控制终端时失效——`agent` 侧持有策略（何时移交、何时复原），原语与 readline 私有实现重复。现由 `ctty` 独占 termios 读写(`Get/Set/SetTermiosFlush`)与模式复位（`ResetModes`），`readline` 删私有 helper 改用 `ctty`，raw mode 的**构造**（flag 组合）仍留各消费方：那是策略，不是原语。
 - **统一用 `Getpgid(0)`**：全平台返回 `(int, error)`，消除 `Getpgrp()` 的平台签名差异。
 
 ## 分片
@@ -54,12 +59,17 @@
 |---|---|---|
 | `ctty/ctty_posix.go` | `linux \|\| darwin` | ioctl 实现 + `Supported=true` |
 | `ctty/ctty_stub.go` | `!linux && !darwin` | no-op + `Supported=false`（覆盖 windows 及其它）|
+| `ctty/termios_linux.go` | `linux` | `Termios` 别名 + `TCGETS/TCSETS/TCSETSF` |
+| `ctty/termios_darwin.go` | `darwin` | `Termios` 别名 + `TIOCGETA/TIOCSETA/TIOCSETAF` |
+| `ctty/termios_stub.go` | `!linux && !darwin` | 空 `Termios` + 恒错实现 |
 
 ## 迁移
 
 **agent**：删 `shell_tty_unix.go`、`shell_tty_stub_unix.go`；`shell_other.go` 去掉 4 个 tty 函数（保留进程组/信号）；`shell.go` 的 `openForegroundTTY/handoverForeground/restoreForeground` 改为 `ctty.Open/IsForeground/SetForeground` 组合，`handed` 门控不变；`envprobe.go` 的 `ttyStdinSupported()` → `ctty.Supported`。
 
-**readline**：`secure.go` 的开 tty/Ignore/前台判定改走 `ctty`，`terminalGuardOwns` 与 `ISIG` 恢复策略保留；`bridge_linux.go` 删 `foregroundTTY`，`Prepare` 改 `ctty.IsForeground`；`secure_stub.go` tag 收敛为 `!linux && !darwin`。
+**readline**：`secure.go` 的开 tty/Ignore/前台判定改走 `ctty`，`terminalGuardOwns` 与自愈策略保留；`bridge_linux.go` 删 `foregroundTTY`，`Prepare` 改 `ctty.IsForeground`；`secure_stub.go` tag 收敛为 `!linux && !darwin`。删私有 `termios_linux.go`/`termios_darwin.go`，`terminal_posix.go`/`bridge_linux.go`/测试改调 `ctty.GetTermios`/`ctty.SetTermios`/`ctty.SetTermiosFlush`；桥接 `release` 在复原 termios 后追加 `ctty.ResetModes`。
+
+**agent**（2026-09-15 增补）：`runShellForeground` 在移交前快照 termios、在 defer 中复原（覆盖正常退出、超时 SIGKILL、中断三条路径），`handed` 时追加 `ctty.ResetModes`；自愈范围从 ISIG 扩到 canonical/输出后处理，见 `docs/design.md`《run_shell》。
 
 **分片收敛**：`terminal_unix.go`→`terminal_posix.go`（`linux||darwin`）、`termios_bsd.go`→`termios_darwin.go`（`darwin`）、`termios_sysv.go`→`termios_linux.go`（`linux`）；删 `terminal_unix_stub.go`，新增 `terminal_stub.go`（`!linux && !darwin && !windows`）补齐非目标平台的 `newUnixTerminal`。
 

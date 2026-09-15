@@ -22,3 +22,5 @@ func SetForeground(fd, pgrp int) bool { return false }
 func IsForeground(fd int) bool { return false }
 
 func IgnoreJobSignals() {}
+
+func ResetModes(tty *os.File) bool { return false }

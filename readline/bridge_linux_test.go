@@ -4,6 +4,7 @@ package readline
 
 import (
 	"bytes"
+	"github.com/LaoQi/tanyan/ctty"
 	"os"
 	"os/exec"
 	"strings"
@@ -113,7 +114,7 @@ func TestBridgeInteractiveTTY(t *testing.T) {
 	if err := unix.IoctlSetWinsize(int(slave.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 100}); err != nil {
 		t.Fatalf("设置外层尺寸: %v", err)
 	}
-	before, err := getTermios(int(slave.Fd()))
+	before, err := ctty.GetTermios(int(slave.Fd()))
 	if err != nil {
 		t.Fatalf("getTermios: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestBridgeInteractiveTTY(t *testing.T) {
 	}
 	defer stop()
 
-	if raw, err := getTermios(int(slave.Fd())); err != nil {
+	if raw, err := ctty.GetTermios(int(slave.Fd())); err != nil {
 		t.Fatalf("raw getTermios: %v", err)
 	} else if raw.Lflag&unix.ICANON != 0 || raw.Lflag&unix.ECHO != 0 || raw.Iflag&unix.ICRNL != 0 {
 		t.Errorf("真实 tty 未切 raw: %+v", raw)
@@ -171,12 +172,12 @@ func TestBridgeInteractiveTTY(t *testing.T) {
 	if !strings.Contains(capture.String(), "got:hello") {
 		t.Errorf("捕获流缺输出: %q", capture.String())
 	}
-	after, err := getTermios(int(slave.Fd()))
+	after, err := ctty.GetTermios(int(slave.Fd()))
 	if err != nil {
 		t.Fatalf("恢复后 getTermios: %v", err)
 	}
-	if *after != *before {
-		t.Errorf("termios 未恢复:\n before=%+v\n after =%+v", *before, *after)
+	if after != before {
+		t.Errorf("termios 未恢复:\n before=%+v\n after =%+v", before, after)
 	}
 }
 
@@ -327,7 +328,7 @@ func TestBridgeReusable(t *testing.T) {
 		if !strings.Contains(out, name) {
 			t.Fatalf("第 %d 次 tty 输出异常: %q want %q", i+1, out, name)
 		}
-		if raw, err := getTermios(int(slave.Fd())); err != nil {
+		if raw, err := ctty.GetTermios(int(slave.Fd())); err != nil {
 			t.Fatal(err)
 		} else if raw.Lflag&unix.ICANON == 0 {
 			t.Fatalf("第 %d 次 stop 后 termios 未恢复: %+v", i+1, raw)
