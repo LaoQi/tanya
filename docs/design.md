@@ -204,9 +204,9 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 只读会话（`-n` / `--no-save`）：由 CLI 经 `agent.New(cfg, agent.NoSave(true))` 传入，`Config` 无对应字段，配置文件与 env 均无法开启；`ask` 单发与 REPL 通用。读路径全部保留（启动预扫描、`ListSessions`、`LoadSession` 照常，既有会话不会被截断或改写），写路径在 `sessionStore.append` 首行（`disabled`）返回 nil 被整体关闭（覆盖成功/中断/错误三条路径）；`MkdirAll(store.dir)` 在只读模式下跳过，目录缺失时 `store.refresh` 按空列表处理不报错。内存 history 照常维护（中断保留语义不变），进程退出即丢。REPL 启动时在欢迎屏下方以语义色 `Warn` 打一行 `MsgNoSaveWarn`（`REPL.noSaveWarn`，agent 为 nil 或可写时不输出），`ask` 静默
 - 落盘：`<timestamp>.jsonl`，每轮结束追加写入新消息（一行一条 Message JSON），记录完整历史（回放/审计用）；回合因中断/错误保留产出时同样落盘（含终止提示行）
 - 落盘原子性：本批消息先编码进内存缓冲再单次追加写入，写入报错或短写时 `Truncate` 回滚到写入前大小，`saved` 游标与文件内容始终一致（重试不会产生重复行/半行）
-- 首行持久化 system prompt 快照（`systemSaved` 标志防重复），`/load` 还原后前缀与当初逐字节一致；旧格式文件（无 system 首行）回退为载入时快照当前 AGENTS.md，且保持不补写；system 行不计入 `/sessions` 条数与标题
+- 首行持久化 system prompt 快照（`systemSaved` 标志防重复），`/load` 还原后前缀与当初逐字节一致；旧格式文件（无 system 首行）回退为载入时快照当前 AGENTS.md，且保持不补写；system 行不计入会话条数与摘要
 - 会话列表扫描：`agent.New` 启动时预扫描填充缓存（只读模式不建目录，目录缺失按空处理）；`ListSessions` 按 (mtime,size) 增量刷新，仅重扫变化的文件；每文件 `bufio` 逐行计数条数、仅解码至首条 user 消息取摘要
-- `/sessions` 列出（id、时间、消息数、首条用户消息摘要），`/load <id>` 恢复继续对话；id 校验拒绝路径穿越
+- 会话浏览经 `/load` 无参菜单（`repl/picker.go`，非 TTY 降级为序号输入），候选带 id、时间、条数、首条 user 摘要；`/load <id>` 直接恢复继续对话；id 校验拒绝路径穿越（`/sessions` 命令已移除，浏览职责由 picker 承接）
 
 ## 系统提示与缓存友好
 
@@ -243,19 +243,20 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 斜杠命令
 
-`/help` `/new` `/sessions` `/load` `/stat` `/history` `/model` `/exit`：
+`/help` `/new` `/load` `/stat` `/history` `/model` `/think` `/theme` `/exit`（`/quit` 等价）：
 
 白名单（`slashCommands`，同时驱动 Tab 补全）即分发契约：`Run` 先用 `isSlashCommand` 过滤，未命中的 `/` 开头输入按对话内容处理，因此 `handleCommand` 的 switch 不再有 `default` 分支（原先的 `MsgUnknownCmd` 不可达，已删）。白名单与 case 必须一一对应，`TestSlashCommandsAllHandled` 覆盖该不变量（`/load` 走 stdin 交互路径，单独测试）。
 
-- `/history` 无参截断列表（`style.OneLine` 先剥离 ANSI 转义与控制字符、压成单行，再按 120 rune 截断，避免 `\r`/`\x1b[K` 覆盖已打印行与未闭合 SGR 泄漏）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染、并按角色着色（user 用 `Ok` 绿、其余用 `Warn` 黄；`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 TTY 与输出模式约束：非 TTY、plain 一并旁路），user/tool 消息与工具参数原样
+- `/history` 无参截断列表（`term.OneLine` 先剥离 ANSI 转义与控制字符、压成单行，再按 120 rune 截断，避免 `\r`/`\x1b[K` 覆盖已打印行与未闭合 SGR 泄漏）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染、并按角色着色（user 用 `Ok` 绿、其余用 `Warn` 黄；`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 TTY 与输出模式约束：非 TTY、plain 一并旁路），user/tool 消息与工具参数原样
 - `/stat` 显示会话统计：工作区（构造期定格的启动目录）、会话文件、消息条数、本次运行累计 token（prompt/completion）、当前上下文占用（最近一次实报 prompt tokens，无 usage 回落本地估算）、缓存命中量与命中率（累计 hit / 累计 prompt）；数据全部来自 `Agent.Stats()` 单一快照，渲染在 `repl/stats.go`，与提示符占位符同源同公式
 - `/model` 无参实时调接口列出可用模型（`*` 标注当前，失败仍显示当前模型），带参直接切换不校验；带尾随空格支持补全（接口列表在 REPL 内首次加载后缓存，失败不重试）
 - `/think` 无参显示当前思考等级（未设置显示"未设置"）；带参 `minimal/low/medium/high/max` 设置，`off` 关闭，非法值报错不变更；带尾随空格补全等级候选（含 off，静态列表）
 - `/load` 无参打开方向键选择菜单（`repl/picker.go`，非 TTY 降级为序号输入），候选 Display 带时间/条数/简介
+- `/theme` 无参显示当前主题与可用主题列表（含描述，`*` 标注当前），带参切换内置主题（非法值报错、主题不变）；带尾随空格补全主题名（内置静态列表）
 
 ### 提示符模板
 
-- 提示符模板内置固定不可配（`prompt` 配置项与 `TANYA_PROMPT` 已移除，yaml 残留键被忽略），模板走 `style` 管线：启动时 `ParseTemplate` 一次，每轮 `Bind` 占位符 + 渲染（解析仅一次，绑定微秒级）
+- 提示符模板内置固定不可配（`prompt` 配置项与 `TANYA_PROMPT` 已移除，yaml 残留键被忽略），模板走 `render` 管线：启动时 `render.ParseTemplate` 一次，每轮 `Bind` 占位符 + 渲染（解析仅一次，绑定微秒级）
 - 模板语法为 BBCode 风格标记：`[white]{cwd}[/] [blue]{model}[/]`，空格叠属性 `[red bold]`，支持语义名（dim/info/warn/ok/error/accent/think/run）；未知名/游离闭合/空标签降级原样，合法标签未闭合着色到行尾；旧裸 ANSI 模板自动 passthrough 兼容（无色环境 `Strip` 兜底）；不支持背景——markup 无 `bg:` 形式，`Style.Bg` 通道为预留（权威登记与启用条件见 `docs/style-split.md` §7.4）
 - 占位符口径规则：**加 `_total` 后缀即本次运行累计，无后缀即最近一次请求**。单次：`{usage}` 上下文用量（API 实报；无实报或实报为 0 时回落 `~` 估算）/ `{cache}` 本次命中量 / `{cache_rate}` 本次命中率。累计：`{usage_total}` 累计用量 / `{cache_total}` 累计命中量 / `{cache_rate_total}` 累计命中率。另有 `{cwd}` 短路径 / `{model}` 模型 / `{effort}` 思考等级（未设置渲染为空）/ `{usage_summary}` 组合显示——**混合口径**，前段取 `{usage}`（单次）、后段取 `{cache_rate_total}`（累计），有累计缓存数据时拼为 `12.3k 81.67%`，否则只显示用量。注意它与 `/stat` 命令既不同源也不同口径：`/stat` 是七行全量的纯累计视图，`{usage_summary}` 只是提示符上的一行组合；无数据一律渲染为空，未知占位符原样保留，占位符值永不二次解析
 - 缓存口径二分：**单次**取自最近一次响应（`Stats.ContextTokens`/`ContextHit`），**累计**取自本次运行加总（`Stats.PromptTokens`/`CacheHitTokens`/`TotalTokens`）；提示符变量以 `_total` 后缀区分两者，`/stat` 与响应回显行（`repl.RenderResponseInfo`）分别固定走累计与单次。所有比率经 `cacheRate`/`formatRate` 单一入口计算，「无数据」判定（`hit <= 0 || prompt <= 0`）全库只此一处
@@ -265,8 +266,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 回合视觉分隔（回合末尾方案）
 
-- 每回合结束后、下一个提示符之前打印一行绿色（`style.Ok`）分隔线：`──── 15:04:05`；有模型调用的回合追加 ` · 回合 12.4s`（斜杠命令回合只有时间）
-- 非 TTY 旁路：`style.GetProfile().TTY` 为假（管道/重定向）时**分隔线与"输入后留白"都不打印**——Degraded 输入不回显，留白会变成提示符下方凭空一行空行；且管道输出需保持可 diff、可再喂给其他工具。无色但仍是 TTY 时照常打印纯文本分隔线
+- 每回合结束后、下一个提示符之前打印一行绿色（语义色 `Ok`）分隔线：`──── 15:04:05`；有模型调用的回合追加 ` · 回合 12.4s`（斜杠命令回合只有时间）
+- 非 TTY 旁路：`term.GetProfile().TTY` 为假（管道/重定向）时**分隔线与"输入后留白"都不打印**——Degraded 输入不回显，留白会变成提示符下方凭空一行空行；且管道输出需保持可 diff、可再喂给其他工具。无色但仍是 TTY 时照常打印纯文本分隔线
 - 打印时机选在**回合末尾**而非回合开头：分隔线只在本回合确实结束时产生，空输入、`^C` 取消输入（`ErrInterrupt` → `continue`）、`/exit`、`^D` EOF 四条路径都不打印，屏幕不会留下"没有对应输出的孤儿行"；首个提示符之前也不打印（欢迎语即开场）。回合开头方案在物理上无法拦截这四条（分隔线必须先于 `Readline` 打印，而读入前无从判断本回合是否有输出），故不采用
 - 空行归一化：分隔线自带前导 `\n`，而工具状态行 / info 行 / 命令输出的末尾都恒为单 `\n`，因此"上一段输出 → 分隔线"之间恒 1 空行；用户提交后到本回合首个事件之间由 `turn.Handle` **懒补** 1 空行（首个事件前打一次，`KindDecor`），零事件回合（如 `Ask` 立即报错）不补，故不会与分隔线的前导换行叠成双空行
 - 耗时口径：用户提交 → `Ask` 返回，含本回合全部 LLM 请求与工具执行；`interactive: true` 的 run_shell 期间用户在终端应答的时间也计入（读数偏大属预期）。回合耗时是"提交 → 返回"的汇总层，与 info 行的单次请求耗时（`TTFT/x.xs`）、工具状态行的单工具耗时并列
@@ -277,7 +278,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 - editor：行编辑/历史，快捷键 Ctrl+A/E/B/F/U/K/W/Y/T/L、Alt+B/F（按空白分词）、Home/End/方向键；render 多行感知（`cursorRow` 精确跟踪光标行，重渲染上移清屏；光标行列由 `layoutCursor` 按终端软换行模型计算——宽字符在行尾放不下时整字换行留空、写满行末的 deferred autowrap，均与终端一致），Size 不可用退化单行；ErrInterrupt 区分 Ctrl+C；Ctrl+L 推屏保历史（一屏减一即 rows-1 个换行——恰把提示符上方内容滚入回滚区、不多滚一行，光标回视口顶部重画提示符，Size 不可用退化 `\x1b[2J` 擦屏），历史保留量受终端 scrollback 容量限制
 - Tab 补全菜单：多候选时在输入行下方渲染菜单，选中项反显（`\x1b[7m`）；`↑/↓` 循环选择（菜单打开时不触发历史导航）、`Tab` 循环下一项、`Enter` 仅插入选中项（再次 Enter 提交）、`Esc` 关闭、任意输入关闭菜单正常编辑；单候选直接补全、公共前缀先行扩展的行为不变；候选超 8 行滚动窗口显示
-- keys：ESC 序列/控制键/UTF-8 状态机；width：`style` 薄包装（宽度表/ANSI 剥离/感知截断均由 `style` 提供，截断自动复位悬空 SGR 防串色）
+- keys：ESC 序列/控制键/UTF-8 状态机；width：`term` 薄包装（宽度表/ANSI 剥离/感知截断均由 `render/term` 提供，截断自动复位悬空 SGR 防串色）
 - 终端挂断（pty master 关闭、控制终端消失）：挂断后 `read` 既可能返回 `EIO`，也可能返回 0 字节且无错误——后者与 `VMIN=0/VTIME=1` 的空闲超时（0.1s 后返回 0 字节）在返回值上无法区分。`ReadKey` 以 `poll` 的 `POLLHUP/POLLERR/POLLNVAL` 判挂断、并把 `EIO` 归一为 `io.EOF`，REPL 据此正常退出（修复前挂断后的空闲轮询退化为忙循环：实测约 400 万次 `read`/秒、单核满载、进程永不退出）
 - 非 TTY 降级：`Degraded` 按行读取，无状态行心跳/菜单
 - tty 桥接（`bridge.go` 接口 + `bridge_linux.go` 实现 + `bridge_stub.go` 非 Linux 返回 `ErrUnsupported`）：为 `interactive: true` 的 run_shell 提供"命令在自己的 pty 中运行"的执行器（`TTYBridge.Prepare/Attach`），复用本包 termios 读写与 raw 语义；生产入口 `readline.NewTTYBridge()` 由 `main.go` 经 `agent.WithTTYBridge` 注入到 `agent.New`（构造期定格进 `shellTool.bridge`），测试可在 `shellToolConfig` 里直接给 fake bridge
@@ -295,6 +296,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `model` | `deepseek-v4-flash` | 模型名（运行时可被 `agent_custom` 工具改写，仅本次会话） |
 | `temperature` | 0.7 | |
 | `reasoning_effort` | 空 | 思考等级 minimal/low/medium/high/max，非法值忽略；空则请求不带 `reasoning_effort` 字段（运行时可被 `agent_custom` 工具改写，仅本次会话） |
+| `api_protocol` | `responses` | API 协议 responses/chat（见《LLM 接入》），非法值启动报错 |
 | `colors` | `auto` | 终端配色 auto（跟随终端能力与 `NO_COLOR`）/ on（强制开色）/ off（强制纯文本） |
 | `theme` | `nord` | 内置配色主题（语义色/提示符/markdown 标题与代码整体切换）：default/minimal/solar/vivid/nord/gruv/dusk，非法值启动报错 |
 | `palette` | 空 | 语义色覆盖（info/warn/ok/error/dim/accent/think/run → 色名），叠加在当前主题之上（切换主题后自动重放） |
@@ -302,8 +304,9 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `global_session` | `~/.local/share/tanyan/sessions` | global 模式会话基础目录，支持 `~` 展开 |
 | `session_mode` | `auto` | 会话存储模式 auto/local/global |
 | `tool_output_lines` | 20 | 工具输出最多显示行数（1-1000） |
+| `shell` | 空 | run_shell 使用的 shell（名字或绝对路径）；空则平台探测（linux/darwin bash→sh→ash，windows pwsh），全部落空启动报错 |
 
-env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_SESSION_MODE` / `TANYA_THEME` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES`。
+env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_API_PROTOCOL` / `TANYA_SESSION_MODE` / `TANYA_THEME` / `TANYA_USER_AGENT` / `TANYA_SHELL` / `TANYA_TOOL_OUTPUT_LINES`。
 
 配色主题：`render/theme` 内置 `Scheme` 聚合（语义色 + 提示符模板 + markdown 样式集），**无全局可变状态**——`Lookup` 取方案、`Apply(sem, palette)` 纯函数叠加覆盖；REPL 持有当前 `Scheme`/`Semantics`，`/theme [name]` 切换后语义色、渲染器与提示符即时重建（palette 重放），readline 通过 `SetStyles` 注入。默认启动主题取 `theme` 配置，校验由 `repl.ValidateTheme` 承担（agent 不依赖表现层）。
 
