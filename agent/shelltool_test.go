@@ -35,7 +35,7 @@ func testShellTool(t *testing.T, mutate ...func(*shellToolConfig)) *shellTool {
 }
 
 func testToolDefs() []ToolDef {
-	return newToolRegistry(allTools(&shellTool{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}})...).defs()
+	return newToolRegistry(allTools(&shellTool{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}}, &stubConfigTarget{})...).defs()
 }
 
 func runShellString(t *testing.T, ctx context.Context, command string, timeoutSec int) string {

@@ -315,7 +315,9 @@ func (r *REPL) handleCommand(line string) bool {
 			r.st.out.emit(KindNotice, b.String())
 			break
 		}
-		r.agent.SetModel(parts[1])
+		if err := r.agent.SetModel(parts[1]); err != nil {
+			r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+		}
 	case "/think":
 		r.handleThink(parts[1:])
 	case "/theme":

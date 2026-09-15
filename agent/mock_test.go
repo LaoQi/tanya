@@ -31,6 +31,7 @@ type mockLLM struct {
 	server  *httptest.Server
 	mu      sync.Mutex
 	steps   []mockStep
+	models  []string
 	reqs    []chatRequest
 	rawReqs []map[string]any
 }
@@ -48,11 +49,31 @@ func (m *mockLLM) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if strings.HasSuffix(r.URL.Path, "/models") {
+		m.handleModels(w)
+		return
+	}
 	if strings.HasSuffix(r.URL.Path, "/responses") {
 		m.handleResponses(w, r)
 		return
 	}
 	m.handleChat(w, r)
+}
+
+func (m *mockLLM) handleModels(w http.ResponseWriter) {
+	m.mu.Lock()
+	models := m.models
+	m.mu.Unlock()
+	if models == nil {
+		models = []string{"model-b", "model-a"}
+	}
+	data := make([]map[string]string, 0, len(models))
+	for _, id := range models {
+		data = append(data, map[string]string{"id": id})
+	}
+	b, _ := json.Marshal(map[string]any{"data": data})
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprint(w, string(b))
 }
 
 func (m *mockLLM) handleChat(w http.ResponseWriter, r *http.Request) {

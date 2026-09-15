@@ -275,7 +275,7 @@ func TestChatStreamRequestFormat(t *testing.T) {
 	if !req.Stream {
 		t.Error("应为流式请求")
 	}
-	if len(req.Tools) != 4 {
+	if len(req.Tools) != len(testToolDefs()) {
 		t.Errorf("工具数: %d", len(req.Tools))
 	}
 	if req.Messages[0].Role != "system" || req.Messages[1].Role != "user" {

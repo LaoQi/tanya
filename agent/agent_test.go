@@ -302,9 +302,14 @@ func TestStatsSnapshot(t *testing.T) {
 
 func TestSetModel(t *testing.T) {
 	a := newTestAgent(t)
-	a.SetModel("new-model")
+	if err := a.SetModel("new-model"); err != nil {
+		t.Fatal(err)
+	}
 	if a.Model() != "new-model" {
 		t.Error("模型切换失败")
+	}
+	if err := a.SetModel("   "); err == nil {
+		t.Error("空白模型名应报错")
 	}
 }
 
