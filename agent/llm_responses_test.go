@@ -86,7 +86,7 @@ func TestResponsesContentAndUsage(t *testing.T) {
 		t.Errorf("input[0]: %v", first)
 	}
 	tools, _ := req["tools"].([]any)
-	if len(tools) != 4 {
+	if len(tools) != len(testToolDefs()) {
 		t.Fatalf("工具数: %d", len(tools))
 	}
 	tool := tools[0].(map[string]any)

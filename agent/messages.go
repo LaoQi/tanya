@@ -38,6 +38,25 @@ const (
 )
 
 const (
+	MsgEmptyModel            = "model 不能为空"
+	MsgControlBadAction      = "未知 action %q（可选: get/set/list_models）"
+	MsgControlNoChange       = "set 需要至少指定 model 或 reasoning_effort"
+	MsgControlUnset          = "(未设置)"
+	MsgControlModel          = "model: %s"
+	MsgControlEffort         = "reasoning_effort: %s"
+	MsgControlContext        = "上下文: %d tokens（缓存命中 %d，%s）"
+	MsgControlContextUnknown = "上下文: 未知（本轮尚无请求）"
+	MsgControlMessages       = "消息数: %d"
+	MsgControlModelSwitch    = "model: %s → %s"
+	MsgControlEffortSwitch   = "reasoning_effort: %s → %s"
+	MsgControlCacheHint      = "提示: 模型已切换，下一次请求生效；跨模型不复用 prompt cache"
+	MsgControlModelsHead     = "可用模型（%d）:"
+	MsgControlModelsEmpty    = "可用模型: 无"
+	MsgControlModelsTrim     = "（仅列出前 %d 项，共 %d 项）"
+	MsgControlNoCache        = "无缓存数据"
+)
+
+const (
 	MsgNoOutput    = "(无输出，退出码 0)"
 	MsgTruncMiddle = "[%s 中间截断 %d 字节]"
 	MsgTruncTail   = "[%s 截断 %d 字节]"

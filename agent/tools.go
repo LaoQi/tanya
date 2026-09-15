@@ -57,6 +57,6 @@ func interactiveOf(t Tool, argsJSON string) bool {
 	return it.Interactive(argsJSON)
 }
 
-func allTools(shell *shellTool) []Tool {
-	return append([]Tool{shell}, builtinTools()...)
+func allTools(shell *shellTool, ctl configTarget) []Tool {
+	return append(append([]Tool{shell}, builtinTools()...), newAgentTool(ctl))
 }

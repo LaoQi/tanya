@@ -75,17 +75,17 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	tools := newToolRegistry(allTools(tool)...)
 	sessionDir := resolveSessionDir(cfg, cwd)
 	a := &Agent{
 		cfg:       cfg,
-		client:    NewClient(cfg, tools.defs()),
-		tools:     tools,
 		workspace: cwd,
 		env:       envSection(cwd, tool.profile),
 		prompt:    newPromptBuilder(cwd, globalAgentsPath(), readAgentsFile),
 		store:     newSessionStore(sessionDir, o.noSave),
 	}
+	tools := newToolRegistry(allTools(tool, a)...)
+	a.tools = tools
+	a.client = NewClient(cfg, tools.defs())
 	if !o.noSave {
 		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 			return nil, err
@@ -291,7 +291,14 @@ func (a *Agent) Stats() Stats {
 
 func (a *Agent) Model() string { return a.cfg.Model }
 
-func (a *Agent) SetModel(m string) { a.cfg.Model = m }
+func (a *Agent) SetModel(m string) error {
+	m = strings.TrimSpace(m)
+	if m == "" {
+		return errors.New(MsgEmptyModel)
+	}
+	a.cfg.Model = m
+	return nil
+}
 
 func (a *Agent) ReasoningEffort() string { return a.cfg.ReasoningEffort }
 

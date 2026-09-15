@@ -27,9 +27,9 @@ func newTestShellTool() *shellTool {
 }
 
 func TestToolRegistryOrderAndDefs(t *testing.T) {
-	r := newToolRegistry(allTools(newTestShellTool())...)
+	r := newToolRegistry(allTools(newTestShellTool(), &stubConfigTarget{})...)
 	defs := r.defs()
-	want := []string{"run_shell", "get_time", "get_env", "calc"}
+	want := []string{"run_shell", "get_time", "get_env", "calc", "agent_custom"}
 	if len(defs) != len(want) {
 		t.Fatalf("工具数 = %d, 期望 %d", len(defs), len(want))
 	}
@@ -51,7 +51,7 @@ func TestToolRegistryOrderAndDefs(t *testing.T) {
 
 func TestToolRegistryLookup(t *testing.T) {
 	shell := newTestShellTool()
-	r := newToolRegistry(allTools(shell)...)
+	r := newToolRegistry(allTools(shell, &stubConfigTarget{})...)
 	tool, ok := r.lookup("run_shell")
 	if !ok || tool != shell {
 		t.Fatalf("run_shell 应命中同一 shellTool 实例: ok=%v tool=%v", ok, tool)
