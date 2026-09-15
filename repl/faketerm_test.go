@@ -13,7 +13,7 @@ import (
 	"github.com/LaoQi/tanyan/readline"
 )
 
-// syncBuf 让测试断言与 spinner goroutine 的写入互斥，-race 下安全。
+// syncBuf 让测试断言与心跳 goroutine 的写入互斥，-race 下安全。
 type syncBuf struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -33,16 +33,24 @@ func (b *syncBuf) String() string {
 
 // writeCounter 记录写入次数与内容，用于断言"整块一次写完"。
 type writeCounter struct {
-	mu sync.Mutex
-	n  int
-	b  bytes.Buffer
+	mu  sync.Mutex
+	n   int
+	b   bytes.Buffer
+	rec []string
 }
 
 func (w *writeCounter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.n++
+	w.rec = append(w.rec, string(p))
 	return w.b.Write(p)
+}
+
+func (w *writeCounter) writes() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.rec...)
 }
 
 func (w *writeCounter) count() int {

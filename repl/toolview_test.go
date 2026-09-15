@@ -2,18 +2,27 @@ package repl
 
 import (
 	"encoding/json"
-	"github.com/LaoQi/tanyan/render/term"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanyan/render/theme"
 )
+
+// renderToolEnd 还原一次完整工具块：ToolStart 的着色标题 + 追加式正文与状态行。
+func renderToolEnd(sem theme.Semantics, name, args string, res agent.ToolResult, width, maxLines int) string {
+	return sem.Dim.Frame(RenderToolStart(name, args, width)) + RenderToolEndAppend(sem, res, width, maxLines)
+}
 
 func TestRenderToolStart(t *testing.T) {
 	got := RenderToolStart("run_shell", `{"command":"ls -la","timeout":60}`, 80)
-	if !strings.Contains(got, "▸ run_shell") || !strings.Contains(got, "ls -la") || !strings.Contains(got, "⋯") {
+	if !strings.Contains(got, "▸ run_shell") || !strings.Contains(got, "ls -la") {
 		t.Errorf("got %q", got)
+	}
+	if strings.Contains(got, "⋯") {
+		t.Errorf("追加语义下不应有进行中标记: %q", got)
 	}
 	if !strings.HasPrefix(got, "\n") || !strings.HasSuffix(got, "\n") {
 		t.Errorf("应有前后空行包裹: %q", got)
@@ -33,7 +42,7 @@ func TestRenderToolEndShortOutput(t *testing.T) {
 		Duration: 250 * time.Millisecond,
 		ExitCode: 0,
 	}}
-	got := RenderToolEnd(testSem(), "run_shell", `{"command":"ls"}`, res, 80, 20)
+	got := renderToolEnd(testSem(), "run_shell", `{"command":"ls"}`, res, 80, 20)
 	if !strings.Contains(got, "line1") || !strings.Contains(got, "line3") {
 		t.Errorf("got %q", got)
 	}
@@ -50,7 +59,7 @@ func TestRenderToolEndLongOutput(t *testing.T) {
 	res := agent.ToolResult{Shell: &agent.ShellResult{
 		Stdout: []agent.ShellChunk{{Data: sb.String()}},
 	}}
-	got := RenderToolEnd(testSem(), "run_shell", `{"command":"seq"}`, res, 80, 20)
+	got := renderToolEnd(testSem(), "run_shell", `{"command":"seq"}`, res, 80, 20)
 	if strings.Contains(got, "L4x\n") || strings.Contains(got, "L28") {
 		t.Errorf("中段行应被省略: %q", got)
 	}
@@ -67,7 +76,7 @@ func TestRenderToolEndFailStatus(t *testing.T) {
 		Stderr:   []agent.ShellChunk{{Data: "oops"}},
 		ExitCode: 2,
 	}}
-	got := RenderToolEnd(testSem(), "run_shell", `{"command":"false"}`, res, 80, 20)
+	got := renderToolEnd(testSem(), "run_shell", `{"command":"false"}`, res, 80, 20)
 	if !strings.Contains(got, "2| oops") {
 		t.Errorf("stderr 应带 2| 标记: %q", got)
 	}
@@ -78,16 +87,16 @@ func TestRenderToolEndFailStatus(t *testing.T) {
 
 func TestRenderToolEndTimeoutInterrupt(t *testing.T) {
 	res := agent.ToolResult{Shell: &agent.ShellResult{TimedOut: true, Duration: 3 * time.Second}}
-	got := RenderToolEnd(testSem(), "run_shell", `{"command":"sleep"}`, res, 80, 20)
+	got := renderToolEnd(testSem(), "run_shell", `{"command":"sleep"}`, res, 80, 20)
 	if !strings.Contains(got, "执行超时") || !strings.Contains(got, "3.0s") {
 		t.Errorf("got %q", got)
 	}
 	res2 := agent.ToolResult{Shell: &agent.ShellResult{Interrupted: true}}
-	if got := RenderToolEnd(testSem(), "run_shell", `{}`, res2, 80, 20); !strings.Contains(got, "已中断") {
+	if got := renderToolEnd(testSem(), "run_shell", `{}`, res2, 80, 20); !strings.Contains(got, "已中断") {
 		t.Errorf("got %q", got)
 	}
 	res3 := agent.ToolResult{Shell: &agent.ShellResult{Interrupted: true, NotStarted: true}}
-	if got := RenderToolEnd(testSem(), "run_shell", `{}`, res3, 80, 20); !strings.Contains(got, "未执行") {
+	if got := renderToolEnd(testSem(), "run_shell", `{}`, res3, 80, 20); !strings.Contains(got, "未执行") {
 		t.Errorf("got %q", got)
 	}
 }
@@ -96,7 +105,7 @@ func TestRenderToolEndTruncateLongLine(t *testing.T) {
 	res := agent.ToolResult{Shell: &agent.ShellResult{
 		Stdout: []agent.ShellChunk{{Data: strings.Repeat("a", 200) + "\n"}},
 	}}
-	got := RenderToolEnd(testSem(), "run_shell", `{"command":"cat"}`, res, 80, 20)
+	got := renderToolEnd(testSem(), "run_shell", `{"command":"cat"}`, res, 80, 20)
 	if n := strings.Count(got, "\n"); n != 4 {
 		t.Errorf("应为前导空行+标题+正文+状态行 4 行，实际 %d: %q", n, got)
 	}
@@ -107,7 +116,7 @@ func TestRenderToolEndTruncateLongLine(t *testing.T) {
 
 func TestRenderToolEndBuiltin(t *testing.T) {
 	res := agent.ToolResult{Text: "1700000000 +0800 CST"}
-	got := RenderToolEnd(testSem(), "get_time", `{}`, res, 80, 20)
+	got := renderToolEnd(testSem(), "get_time", `{}`, res, 80, 20)
 	if !strings.Contains(got, "▸ get_time") || !strings.Contains(got, "1700000000") {
 		t.Errorf("got %q", got)
 	}
@@ -118,7 +127,7 @@ func TestRenderToolEndBuiltin(t *testing.T) {
 
 func TestRenderToolEndBuiltinError(t *testing.T) {
 	res := agent.ToolResult{Text: "error: 除数为零"}
-	got := RenderToolEnd(testSem(), "calc", `{"expression":"1/0"}`, res, 80, 20)
+	got := renderToolEnd(testSem(), "calc", `{"expression":"1/0"}`, res, 80, 20)
 	if !strings.Contains(got, "error: 除数为零") {
 		t.Errorf("got %q", got)
 	}
@@ -131,7 +140,7 @@ func TestRenderToolEndTruncationMarker(t *testing.T) {
 			{Data: "tail\n", Truncated: 9999},
 		},
 	}}
-	got := RenderToolEnd(testSem(), "run_shell", `{}`, res, 80, 20)
+	got := renderToolEnd(testSem(), "run_shell", `{}`, res, 80, 20)
 	if !strings.Contains(got, "中间省略 9999 字节") {
 		t.Errorf("应显示中间截断标记: %q", got)
 	}
@@ -152,20 +161,6 @@ func TestSemanticColors(t *testing.T) {
 	}
 	if got := testSem().Warn.Sprint("abc"); got != "\x1b[33mabc\x1b[0m" {
 		t.Errorf("Warn 应包橙黄: %q", got)
-	}
-}
-
-func TestRenderToolEndInline(t *testing.T) {
-	res := agent.ToolResult{Shell: &agent.ShellResult{
-		Stdout:   []agent.ShellChunk{{Data: "ok\n"}},
-		Duration: 300 * time.Millisecond,
-	}}
-	got := RenderToolEndInline(testSem(), "run_shell", `{"command":"echo ok"}`, res, 80, 20)
-	if !strings.HasPrefix(got, "\x1b[1A\r\x1b[K\x1b[90m▸ run_shell") {
-		t.Errorf("应以上移重绘开头且标题行框定: %q", got)
-	}
-	if !strings.Contains(got, "\x1b[94m  ↳ exit 0 · 300ms · 1 行") || !strings.Contains(got, "  ok\n") {
-		t.Errorf("状态行应亮蓝且含耗时行数: %q", got)
 	}
 }
 
@@ -222,13 +217,12 @@ func TestRenderToolBlocksNoWrap(t *testing.T) {
 		out  string
 	}{
 		{"start", RenderToolStart("run_shell", long, 80)},
-		{"end", RenderToolEnd(testSem(), "run_shell", long, res, 80, 20)},
-		{"inline", RenderToolEndInline(testSem(), "run_shell", long, res, 80, 20)},
+		{"end", renderToolEnd(testSem(), "run_shell", long, res, 80, 20)},
 	} {
 		for _, l := range strings.Split(strings.TrimSuffix(tc.out, "\n"), "\n") {
 			l = strings.ReplaceAll(l, "\r", "")
 			if w := term.Width(l); w > 80 {
-				t.Errorf("%s 行宽 %d 超出终端 80 列，折行会导致 CursorUp 擦错行: %q", tc.name, w, l)
+				t.Errorf("%s 行宽 %d 超出终端 80 列，折行会破坏块边界: %q", tc.name, w, l)
 			}
 		}
 	}
@@ -245,23 +239,56 @@ func TestRenderResponseInfoNoTTFCWhenImmediate(t *testing.T) {
 	}
 }
 
-func TestToolViewReasoningLabel(t *testing.T) {
+func TestToolViewStatusHeartbeat(t *testing.T) {
 	old := term.GetProfile()
 	term.SetProfile(term.Profile{TTY: true, Colors: term.LevelNone})
 	t.Cleanup(func() { term.SetProfile(old) })
 	var buf syncBuf
 	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), term.GetProfile(), testSem(), func() int { return 80 }, 20)
+	view.heart.interval = 2 * time.Millisecond
+	view.heart.span = 3
+	view.heart.now = stepClock(3 * time.Second)
 	view.Handle(agent.Event{Kind: agent.EventRequestStart})
-	time.Sleep(150 * time.Millisecond)
+	if !strings.Contains(buf.String(), MsgStatusWaiting+" 0s") {
+		t.Errorf("请求开始应打印带起始秒数的等待行: %q", buf.String())
+	}
+	waitUntil(t, "等待行换行", func() bool {
+		return strings.Contains(term.Strip(buf.String()), MsgStatusWaiting+" 3s")
+	})
 	view.Handle(agent.Event{Kind: agent.EventReasoning, Text: "想"})
-	time.Sleep(150 * time.Millisecond)
+	waitUntil(t, "切到思考行", func() bool {
+		return strings.Contains(term.Strip(buf.String()), MsgStatusThinking+" ")
+	})
+	view.Handle(agent.Event{Kind: agent.EventReasoning, Text: "想"})
 	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{Duration: time.Second}})
 	out := buf.String()
-	if !strings.Contains(out, "等待响应") {
-		t.Errorf("请求开始应显示等待响应: %q", out)
+	if !strings.Contains(term.Strip(out), MsgStatusWaiting) || !strings.Contains(term.Strip(out), MsgStatusThinking) {
+		t.Errorf("等待行与思考行都应出现: %q", out)
 	}
-	if !strings.Contains(out, "思考中") {
-		t.Errorf("收到思维链应切换为思考中: %q", out)
+	if !strings.HasSuffix(term.Strip(out), "\n") {
+		t.Errorf("停止心跳应收尾当前行: %q", out)
+	}
+	assertNoCursorControl(t, out)
+}
+
+func TestToolViewStopEndsHeartbeat(t *testing.T) {
+	old := term.GetProfile()
+	term.SetProfile(term.Profile{TTY: true, Colors: term.LevelNone})
+	t.Cleanup(func() { term.SetProfile(old) })
+	var buf syncBuf
+	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), term.GetProfile(), testSem(), func() int { return 80 }, 20)
+	view.heart.interval = 2 * time.Millisecond
+	view.Handle(agent.Event{Kind: agent.EventRequestStart})
+	waitUntil(t, "出现点", func() bool { return strings.Contains(term.Strip(buf.String()), ".") })
+	view.Stop()
+	first := buf.String()
+	time.Sleep(30 * time.Millisecond)
+	if got := buf.String(); got != first {
+		t.Errorf("Stop 后不应再有心跳输出: %q -> %q", first, got)
+	}
+	view.Content(KindContent, "答案\n")
+	if got := term.Strip(buf.String()); !strings.HasSuffix(strings.TrimSuffix(got, "答案\n"), "\n") {
+		t.Errorf("状态行未收尾，正文粘连: %q", got)
 	}
 }
 
@@ -271,8 +298,9 @@ func TestToolViewInteractive(t *testing.T) {
 	t.Cleanup(func() { term.SetProfile(old) })
 	var buf syncBuf
 	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), term.GetProfile(), testSem(), func() int { return 80 }, 20)
+	view.heart.interval = 10 * time.Millisecond
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true})
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "sudo -S true", ExitCode: 1}}})
 	out := buf.String()
 	if !strings.Contains(out, "等待终端输入") {
@@ -282,10 +310,13 @@ func TestToolViewInteractive(t *testing.T) {
 		t.Fatal("输出为空则负向断言会静默通过")
 	}
 	if strings.Contains(out, "执行中") {
-		t.Errorf("交互模式不应启动 spinner: %q", out)
+		t.Errorf("交互模式不应发心跳: %q", out)
 	}
 	if strings.Contains(out, "\x1b[1A") {
 		t.Errorf("交互模式不应上移重绘: %q", out)
+	}
+	if n := strings.Count(out, "▸ run_shell"); n != 1 {
+		t.Errorf("标题应只出现一次，实际 %d 次: %q", n, out)
 	}
 }
 
@@ -295,8 +326,9 @@ func TestToolViewNonInteractive(t *testing.T) {
 	t.Cleanup(func() { term.SetProfile(old) })
 	var buf syncBuf
 	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), term.GetProfile(), testSem(), func() int { return 80 }, 20)
+	view.heart.interval = 10 * time.Millisecond
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", ExitCode: 0}}})
 	out := buf.String()
 	if out == "" {
@@ -305,11 +337,14 @@ func TestToolViewNonInteractive(t *testing.T) {
 	if strings.Contains(out, "等待终端输入") {
 		t.Errorf("非交互模式不应打印引导行: %q", out)
 	}
-	if !strings.Contains(out, "执行中") {
-		t.Errorf("非交互模式应启动 spinner: %q", out)
+	if !strings.Contains(out, MsgStatusRunning+" 0s") {
+		t.Errorf("非交互模式应发心跳: %q", out)
 	}
-	if !strings.Contains(out, "\x1b[1A") {
-		t.Errorf("非交互模式应上移重绘标题: %q", out)
+	if strings.Contains(out, "\x1b[1A") {
+		t.Errorf("追加语义不应上移重绘: %q", out)
+	}
+	if n := strings.Count(out, "▸ run_shell"); n != 1 {
+		t.Errorf("标题应只出现一次，实际 %d 次: %q", n, out)
 	}
 }
 
@@ -361,11 +396,11 @@ func TestRenderToolEndANSIDirectView(t *testing.T) {
 		Stdout:   []agent.ShellChunk{{Data: "logo\n\x1b[90m版本行\x1b[0m\n"}},
 		Duration: 100 * time.Millisecond,
 	}}
-	got := RenderToolEnd(testSem(), "run_shell", `{"command":"printf"}`, res, 80, 20)
+	got := renderToolEnd(testSem(), "run_shell", `{"command":"printf"}`, res, 80, 20)
 	if !strings.Contains(got, "  \x1b[90m版本行\x1b[0m\n") {
 		t.Errorf("直显区应保留 SGR 原色: %q", got)
 	}
-	if !strings.Contains(got, "\x1b[90m▸ run_shell") {
+	if !strings.Contains(got, "\x1b[90m\n▸ run_shell") {
 		t.Errorf("标题行仍应 Dim 框定: %q", got)
 	}
 	pi := strings.Index(got, "版本行")
@@ -383,15 +418,15 @@ func TestRenderToolEndPlainBlockIntegrity(t *testing.T) {
 		Stdout:   []agent.ShellChunk{{Data: "a\x1b[2Kb\rc\n"}},
 		Duration: 100 * time.Millisecond,
 	}}
-	got := RenderToolEnd(testSem(), "run_shell", `{"command":"echo"}`, res, 80, 20)
+	got := renderToolEnd(testSem(), "run_shell", `{"command":"echo"}`, res, 80, 20)
 	if strings.Contains(got, "\x1b[2K") || strings.Contains(got, "\r") {
 		t.Errorf("布局序列与 C0 应被清洗: %q", got)
 	}
-	if strings.Count(got, "\x1b[90m") != 1 {
-		t.Errorf("单色块应单一 Dim 开启: %q", got)
+	if strings.Count(got, "\x1b[90m") != 2 {
+		t.Errorf("标题与正文各一次 Dim 开启: %q", got)
 	}
-	if strings.Count(got, "\x1b[0m") != 2 {
-		t.Errorf("Dim 与 Info 各一次闭合: %q", got)
+	if strings.Count(got, "\x1b[0m") != 3 {
+		t.Errorf("两处 Dim 与一处 Info 各一次闭合: %q", got)
 	}
 	if !strings.Contains(got, "\x1b[90m\n▸ run_shell") && !strings.Contains(got, "\x1b[90m▸ run_shell") {
 		t.Errorf("块级包裹应覆盖标题与输出: %q", got)
@@ -406,7 +441,7 @@ func TestRenderToolEndNonTTYNoEscape(t *testing.T) {
 		Stdout:   []agent.ShellChunk{{Data: "\x1b[31mred\x1b[0m\n"}},
 		Duration: 100 * time.Millisecond,
 	}}
-	got := RenderToolEnd(testSem(), "run_shell", `{"command":"echo"}`, res, 80, 20)
+	got := renderToolEnd(testSem(), "run_shell", `{"command":"echo"}`, res, 80, 20)
 	if strings.Contains(got, "\x1b") {
 		t.Errorf("非 TTY 输出不应含转义: %q", got)
 	}
@@ -421,7 +456,7 @@ func TestRenderToolEndSGRMixedStderr(t *testing.T) {
 		Stderr:   []agent.ShellChunk{{Data: "\x1b[91merr\x1b[0m\n"}},
 		Duration: 100 * time.Millisecond,
 	}}
-	got := RenderToolEnd(testSem(), "run_shell", `{}`, res, 80, 20)
+	got := renderToolEnd(testSem(), "run_shell", `{}`, res, 80, 20)
 	if !strings.Contains(got, "2| \x1b[91merr\x1b[0m\n") {
 		t.Errorf("stderr 标记行彩色应直显保留: %q", got)
 	}
@@ -459,20 +494,18 @@ func TestToolArgsDisplayCwd(t *testing.T) {
 
 func TestRenderToolStartCwd(t *testing.T) {
 	got := RenderToolStart("run_shell", `{"command":"ls -la","cwd":"/tmp/abc"}`, 80)
-	if !strings.HasPrefix(got, "\n▸ run_shell ⋯\n  cwd: /tmp/abc\n  ls -la\n") {
+	if !strings.HasPrefix(got, "\n▸ run_shell\n  cwd: /tmp/abc\n  ls -la\n") {
 		t.Errorf("应为首行工具名、cwd 与命令各占一行: %q", got)
 	}
-	block := RenderToolEnd(testSem(), "run_shell", `{"command":"ls -la","cwd":"/tmp/abc"}`, agent.ToolResult{Text: "ok"}, 80, 20)
-	if !strings.Contains(block, "▸ run_shell\n  cwd: /tmp/abc\n  ls -la\n") {
-		t.Errorf("结束标题应与起始同构: %q", block)
+	end := RenderToolEndAppend(testSem(), agent.ToolResult{Text: "ok"}, 80, 20)
+	if strings.Contains(end, "▸ run_shell") || strings.Contains(end, "cwd: /tmp/abc") {
+		t.Errorf("追加式收尾不应重复标题与 cwd 行: %q", end)
 	}
-	inline := RenderToolEndInline(testSem(), "run_shell", `{"command":"ls -la","cwd":"/tmp/abc"}`, agent.ToolResult{Text: "ok"}, 80, 20)
-	if want := strings.Repeat(term.CursorUp(1)+term.ClearLineHome(), 3); !strings.HasPrefix(inline, want) {
-		t.Errorf("三行标题应上移三行重绘: %q", inline)
+	if n := strings.Count(got+end, "cwd: /tmp/abc"); n != 1 {
+		t.Errorf("cwd 行应只出现一次，实际 %d 次", n)
 	}
-	// 未指定 cwd 时与旧版逐字节一致
 	plain := RenderToolStart("run_shell", `{"command":"ls -la"}`, 80)
-	if want := "\n▸ run_shell ls -la ⋯\n"; plain != want {
+	if want := "\n▸ run_shell ls -la\n"; plain != want {
 		t.Errorf("got %q, want %q", plain, want)
 	}
 	if strings.Contains(plain, "cwd") {
@@ -513,12 +546,12 @@ func TestToolBlockTitleSingleSpaceAndWidth(t *testing.T) {
 	cases := []string{"ls -la", strings.Repeat("z", 300), "cat <<'EOF'\nbody\nEOF"}
 	for _, cmd := range cases {
 		args, _ := json.Marshal(map[string]string{"command": cmd})
-		got := strings.Trim(RenderToolEnd(testSem(), "run_shell", string(args), agent.ToolResult{Text: "ok"}, 80, 20), "\n")
+		got := strings.Trim(term.Strip(renderToolEnd(testSem(), "run_shell", string(args), agent.ToolResult{Text: "ok"}, 80, 20)), "\n")
 		line, _, _ := strings.Cut(got, "\n")
 		if strings.Contains(line, "run_shell  ") {
-			t.Errorf("结束块标题应为单空格: %q", line)
+			t.Errorf("块标题应为单空格: %q", line)
 		}
-		if !strings.HasPrefix(term.Strip(line), "▸ run_shell ") {
+		if !strings.HasPrefix(line, "▸ run_shell ") {
 			t.Errorf("标题前缀异常: %q", line)
 		}
 		if w := term.Width(line); w > 79 {
@@ -533,11 +566,25 @@ func TestToolBlockSingleWrite(t *testing.T) {
 	t.Cleanup(func() { term.SetProfile(old) })
 	var wc writeCounter
 	view := NewToolView(NewStreams(&wc, &syncBuf{}, modeRich), term.GetProfile(), testSem(), func() int { return 80 }, 20)
+	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	before := wc.count()
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
 		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
-	if got := wc.count() - before; got != 1 {
-		t.Errorf("工具块应一次写完（标题+正文+状态行），实际 %d 次", got)
+	writes := wc.writes()[before:]
+	if len(writes) == 0 || writes[0] != "\n" {
+		t.Fatalf("收尾应先补一个换行收尾心跳行，实际 %q", writes)
+	}
+	var blocks []string
+	for _, w := range writes[1:] {
+		if w != "\n" {
+			blocks = append(blocks, w)
+		}
+	}
+	if len(blocks) != 1 {
+		t.Errorf("工具收尾正文块应一次写完，实际 %d 次: %q", len(blocks), writes)
+	}
+	if len(blocks) == 1 && (!strings.Contains(blocks[0], "↳ exit 0") || !strings.Contains(blocks[0], "hi")) {
+		t.Errorf("块内容不完整: %q", blocks[0])
 	}
 	got := wc.String()
 	if !strings.Contains(got, "▸ run_shell echo hi") || !strings.Contains(got, "↳ exit 0") || !strings.Contains(got, "hi") {
@@ -555,13 +602,17 @@ func TestToolViewStateFields(t *testing.T) {
 	if view.st != st || view.maxLines != 20 || !view.prof.TTY || view.width() != 80 {
 		t.Errorf("构造应把 writer/profile/宽度/行数写成字段: %+v", view)
 	}
+	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
 		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
 	if !view.justEnded || view.dirty {
 		t.Errorf("工具块结束应置 justEnded 并清 dirty: justEnded=%v dirty=%v", view.justEnded, view.dirty)
 	}
 	if !strings.Contains(buf.String(), "▸ run_shell") {
-		t.Errorf("TTY 下应上移重绘块: %q", buf.String())
+		t.Errorf("TTY 下应输出工具块: %q", buf.String())
+	}
+	if strings.Contains(buf.String(), "\x1b[1A") {
+		t.Errorf("追加语义不应上移重绘: %q", buf.String())
 	}
 	view.Content(KindContent, "答案")
 	if view.justEnded || !view.dirty {

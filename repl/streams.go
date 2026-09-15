@@ -41,14 +41,13 @@ func SingleShot(mode outMode) outMode {
 	return mode
 }
 
-func (m outMode) plain() bool  { return m != modeRich }
-func (m outMode) decor() bool  { return m == modeRich }
-func (m outMode) cursor() bool { return m == modeRich }
+func (m outMode) plain() bool { return m != modeRich }
+func (m outMode) decor() bool { return m == modeRich }
 
 // visSet 是可输出的 Kind 集合。
 type visSet uint16
 
-var allKinds = []Kind{KindContent, KindReasoning, KindToolBlock, KindToolStatus, KindNotice, KindDecor, KindError, KindSpinner}
+var allKinds = []Kind{KindContent, KindReasoning, KindToolBlock, KindToolStatus, KindNotice, KindDecor, KindError, KindStatus}
 
 func allVisible() visSet { return visOf(allKinds...) }
 
@@ -151,9 +150,6 @@ func NewStreams(stdout, stderr io.Writer, mode outMode) *streams {
 }
 
 func (s *streams) decor() bool { return s.mode.decor() }
-
-// cursor 报告是否允许光标控制序列（上移重绘）；plain 下一律追加式输出。
-func (s *streams) cursor() bool { return s.mode.cursor() }
 
 // Print/Content/End/Fail 是 main 包可用的语义化出口（Kind 与模式不导出包外）。
 func (s *streams) Print(text string)   { s.out.emit(KindNotice, text) }

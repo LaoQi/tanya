@@ -93,10 +93,34 @@ func TestTurnGapOnce(t *testing.T) {
 	if buf.String() != "\n" {
 		t.Errorf("首个事件前应恰好补一个空行且无其他输出: %q", buf.String())
 	}
+	turn.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	turn.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
 		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", ExitCode: 0}}})
-	if !strings.Contains(buf.String(), "▸ run_shell") {
+	if !strings.Contains(buf.String(), "▸ run_shell") || !strings.Contains(buf.String(), "↳ exit 0") {
 		t.Errorf("事件应送达工具视图: %q", buf.String())
+	}
+}
+
+// TestTurnEndStopsHeartbeat 锁住等待期被打断（无 content / 无工具事件）时的收口：
+// turn.End 必须停掉心跳，否则它会一直写到下一次请求、糊掉提示符。
+func TestTurnEndStopsHeartbeat(t *testing.T) {
+	ttyProfile(t, term.Profile{TTY: true, Colors: term.LevelNone})
+	r, out, errb := newTestREPL(t, newFakeTerm())
+	r.view.heart.interval = 2 * time.Millisecond
+	turn := r.beginTurn(nil)
+	turn.Handle(agent.Event{Kind: agent.EventRequestStart})
+	waitUntil(t, "出现点", func() bool { return strings.Contains(term.Strip(out.String()), ".") })
+	turn.End(errors.New("boom"))
+	after := out.String()
+	if !strings.HasSuffix(term.Strip(after), "\n") {
+		t.Errorf("回合收尾应收尾状态行: %q", after)
+	}
+	time.Sleep(30 * time.Millisecond)
+	if got := out.String(); got != after {
+		t.Errorf("回合结束后心跳仍在写: %q -> %q", after, got)
+	}
+	if !strings.Contains(errb.String(), "boom") {
+		t.Errorf("错误应写 stderr: %q", errb.String())
 	}
 }
 

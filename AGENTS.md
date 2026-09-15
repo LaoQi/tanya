@@ -27,7 +27,7 @@
 ```
 main.go            入口、flag 子命令、ask 单发、init 工作区脚手架
 ctty/              控制终端原语：前台组读/写、/dev/tty、SIGTTIN/SIGTTOU 忽略、能力常量 Supported；白名单 + stub，零内部依赖
-repl/              REPL 循环与输入分发（对话优先）、斜杠命令、提示符模板、ghost 补全、/load picker、工具块渲染、spinner、统计渲染、UI 文案
+repl/              REPL 循环与输入分发（对话优先）、斜杠命令、提示符模板、ghost 补全、/load picker、工具块渲染、状态行心跳、统计渲染、UI 文案
 readline/          自研终端输入层：行编辑/历史/Tab 补全菜单、按键解析、raw mode、显示宽度、pty 桥接（linux）、终端状态自愈
 agent/             核心逻辑：config（配置加载）/ llm + llm_http + llm_responses（双协议 client）/ agent（对话 loop）/ prompt / session / stats / envprobe / init（工作区脚手架）/ event
                    工具与终端：tools（Tool 接口 + allTools 清单）/ shelltool（run_shell 组件）/ shell + shell_unix + shell_other + shell_proc_*（叶子与平台分片）/ builtin（内置小工具）/ control（agent_custom 自调工具，key 表驱动）/ tty_bridge
@@ -49,8 +49,7 @@ render/            表现层树根：渲染管线（IR → ANSI 的 Renderer、�
 - `docs/ctty.md` 控制终端抽象与平台收敛；`docs/interactive-tty.md` pty 桥接
 - `docs/style-split.md` 表现层拆包；`docs/render-pipeline.md` 渲染管线；`docs/render-refs-compare.md` 参考项目对比
 - `docs/shell-tool.md` run_shell 组件化；`docs/agent-split.md` agent 接缝重组；`docs/agent-control-tool.md` agent_custom 自调工具
-- `docs/repl-output-refactor.md` 输出收敛；`docs/repl-replay-rendering.md` `/history` 回放评估（未实施，结论建议不做）
-- `docs/cache-probe.md` prompt cache 探测；`docs/probe-redesign.md` 环境探针（已归档）
+- `docs/cache-probe.md` prompt cache 探测与量化台阶（供后续设计引用）
 
 ## 构建与测试
 

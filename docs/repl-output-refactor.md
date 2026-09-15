@@ -638,7 +638,9 @@ script -qec "./tanyan -p --verbose -n ask '跑一条命令并总结'" /dev/null 
 | 2026-09 | `ask` 单发默认走 plain+verbose 档：`repl.SingleShot(outMode)` 把 CLI 的 rich 降到 `modePlainVerbose`（显式 `-p` 更窄时不动）；单发不再有 spinner 与光标上移重绘，工具块追加式输出，颜色保留 | `repl/streams.go`、`main.go` |
 | 2026-09 | 追加式工具块（非 TTY、plain+verbose）不再重复标题：新增 `RenderToolEndAppend`（正文块 + 状态行），`ToolEnd` 分支按 inline / 交互式 / 追加式三分派发 | `repl/toolview.go` |
 | 2026-09-15 | 工具状态行清洗：`renderToolBody` 的 `↳` 状态行文本走 `term.Strip`——该行此前由 `sem.Info.Sprint` 原样直出，`cwd`（模型可控）与 exec 错误文本里的 `\x1b` 序列可直接驱动终端 | `repl/toolview.go`、`repl/toolview_test.go` |
+| 2026-09-15 | 状态展示追加化（替代 spinner）：删 spinner 帧循环与工具块 inline 重绘，等待/执行期改为每 10s 换行追加 `» 等待响应 .` / `  » 执行中 .`，工具收尾三分派合一为 `RenderToolEndAppend`（标题只出现一次） | `repl/status.go`（新增）、`repl/spinner.go`（删除）、`repl/toolview.go`、`repl/flow.go`、`repl/streams.go`、`repl/messages.go` |
 | 2026-09-15 | 上条修复的回归修复：`ctty.resetModes` 去掉 `CSI r`（DECSTBM 会把光标移到滚动区首行），且常规 `run_shell` 路径不再调 `ResetModes`——`handed` 在 REPL 中恒真，等于每次命令后都写整串，工具块重绘的 `CSI 1A`/`CR CSI K` 落到屏幕顶部（工具块画到顶上、覆盖欢迎屏、残留 spinner） | `ctty/ctty_posix.go`、`agent/shell.go`、`ctty/ctty_linux_test.go` |
+| 2026-09-16 | 状态行心跳改为行内点累加：`statusTickInterval = 1s`、满 `statusLineSpan = 10` 点换行，行首写一次带墙钟秒数的前缀并以一个空格位收尾（`» 等待响应 0s `），追加的点与行首同色且各自 reset，`stop()` 补 `\n` 收尾当前行；`EventReasoning` 经 `heartbeat.setPhase` 回补 `» 思考中`（收尾当前行 + 新前缀开新行，秒数延续、同相位 no-op）；`turn.End` 调 `toolView.Stop()` 补上"等待期被打断无停止点、心跳写到下一次请求"的漏洞 | `repl/status.go`、`repl/flow.go`、`repl/status_test.go` |
 
 ### 已知缺口：动态文本的转义清洗（2026-09-15 登记，未做）
 
@@ -648,6 +650,6 @@ script -qec "./tanyan -p --verbose -n ask '跑一条命令并总结'" /dev/null 
 - `repl/repl.go` `printHistoryFull`：非 markdown 模式的 user/assistant 正文，以及 `→ <tool> <args>` 工具调用行（`historyLine` 摘要行走 `term.OneLine`，已安全）
 - `/model` 列表：服务端 `/models` 返回的模型名（`/theme` 与其余列表为内置常量，安全）
 
-方向：**在内容插入点清洗**，或给 `output` 增设"内容通道"（只放行自生成的控制序列）；**不要**在 `emit` 施加全局 `Strip`——工具块 inline 重绘（`\x1b[1A\r\x1b[K`）与 spinner 帧同走 `emit`，全局清洗会废掉上移重绘。
+方向：**在内容插入点清洗**，或给 `output` 增设"内容通道"（只放行自生成的控制序列）；**不要**在 `emit` 施加全局 `Strip`——该决定仍成立，但理由已变：原理由"会废掉工具块上移重绘与 spinner 帧"随 2026-09-15 追加化消失（`emit` 现只承载文本 + SGR + `\n`），改成"全局清洗会一并抹掉自生成的颜色"。
 
 本附录之前的章节保留历史方案与当时的 `mdLive`/ask 走 rich 的描述，不再随代码同步。

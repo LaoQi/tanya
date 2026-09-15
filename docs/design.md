@@ -8,7 +8,7 @@
 
 ```
 main.go            package main：入口、flag 子命令、ask 单发
-repl/              package repl：REPL 循环、斜杠命令、补全、工具视图渲染、等待动画
+repl/              package repl：REPL 循环、斜杠命令、补全、工具视图渲染、状态行心跳
 agent/             package agent：全部核心逻辑（config / llm / llm_http / agent / tools / prompt / session / stats / shell / builtin）
 readline/          package readline：自研终端输入层（editor / keys / terminal），pty 桥接与终端状态自愈
 ctty/              package ctty：控制终端原语（前台组读写、/dev/tty、SIGTTIN/SIGTTOU），白名单 linux||darwin，零依赖叶子
@@ -38,7 +38,7 @@ render/markup/     内联标记解析
 ## 运行模式
 
 - `tanyan`：交互 REPL，维护内存 messages 历史，SSE 逐 token 流式输出
-- `tanyan ask "问题"`：单发，输出后退出。单发默认走 plain+verbose 档（`repl.SingleShot` 在 CLI 模式为 rich 时降到 `modePlainVerbose`；显式 `-p` 更窄则保持不动）：无 spinner、无光标上移重绘（工具块追加式）、正文原样直出，颜色仍按终端能力保留，`End()` 按 plain 语义"缺行尾换行才补"
+- `tanyan ask "问题"`：单发，输出后退出。单发默认走 plain+verbose 档（`repl.SingleShot` 在 CLI 模式为 rich 时降到 `modePlainVerbose`；显式 `-p` 更窄则保持不动）：无状态行与心跳、无光标控制（工具块追加式）、正文原样直出，颜色仍按终端能力保留，`End()` 按 plain 语义"缺行尾换行才补"
 - `tanyan init`：新工作区脚手架，建 `<cwd>/.tanya/sessions/`、询问后建 `<cwd>/.tanya/.gitignore`（内容 `*`）、缺口时建 `<cwd>/AGENTS.md` 骨架，随后与普通模式无异地进入 REPL（见下节）
 - 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式、`-n` / `--no-save` 只读会话（见《会话与上下文》存储小节）
 - Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）：REPL 与 `ask` 单发统一走 `signal.Notify(SIGINT)`（`repl.InterruptContext`），要求终端 `ISIG` 开启——readline 侧每回合开始前做终端状态自愈保证该项成立（`docs/interactive-tty.md` §5.9）；命令执行期间子进程组持有终端前台，Ctrl+C 由内核直达子进程组（命令优雅退出），再次按下取消回合
@@ -113,7 +113,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 参数：`command`（必填）、`cwd`（可选，命令执行目录，默认会话启动目录）、`timeout`（默认 60s，上限 900s）、`interactive`（布尔，默认 false）
 - 执行目录：默认继承进程 cwd（= 会话启动目录，进程全程不 `os.Chdir`）；显式 `cwd` 时设 `cmd.Dir`（不改进程 cwd），解析规则为 `~`/`~/x` 展开家目录、相对路径按工作区基准合成（家目录与工作区由 `agent.New` 各读一次注入 `shellTool`，构造后只读；缺基准时相对路径直接失败而非退回环境 cwd），随后 `os.Stat` 校验——不存在或非目录直接快速失败（`MsgBadCwd`，不启动进程）。显式指定时 `ShellResult.Cwd` 填充解析后的绝对路径，`String()` 首行输出 `cwd: <路径>`。桥接与回退两条路径均生效（`TTYBridge.Prepare` 只改 `SysProcAttr`/标准流/`Env`，不覆盖 `cmd.Dir`）
 - 波浪号边界（不宣传的默认契约）：只处理 `~` 与 `~/x`（`~` 展开家目录，基准由 `agent.New` 注入）；`~user` 与 Windows 风格 `~\x` 一律不展开——按相对路径解析并因不存在直接报 `MsgBadCwd`（快速失败，不误执行）。`run_shell` 工具描述与 `cwd` 参数描述均不提 `~`（避免引导模型使用）；env 段 `CWD:` 行的 `~/...` 只是完整路径的显示缩写，不是路径语法引导
-- 交互模式（`interactive: true`）：仅由模型显式声明，**不做命令文本猜测**（早期版本有 sudo/ssh 关键词兜底，review 后移除）。声明后 repl 侧停用等待动画、标题行下打印引导行、结束用追加式渲染（避免 `CursorUp` 擦掉用户输入回显）；`timeout` 缺省时默认放宽至 300s（显式值优先，上限仍 900s）。命令在**独立 pty** 中运行（见下条），提示与输出实时可见；非桥接回退路径下命令提示须自行写入 `/dev/tty`，否则被工具捕获不可见
+- 交互模式（`interactive: true`）：仅由模型显式声明，**不做命令文本猜测**（早期版本有 sudo/ssh 关键词兜底，review 后移除）。声明后 repl 侧不发状态行心跳、标题行下打印引导行、结束用追加式渲染（避免 `CursorUp` 擦掉用户输入回显）；`timeout` 缺省时默认放宽至 300s（显式值优先，上限仍 900s）。命令在**独立 pty** 中运行（见下条），提示与输出实时可见；非桥接回退路径下命令提示须自行写入 `/dev/tty`，否则被工具捕获不可见
 - 交互式 pty 桥接（`readline/bridge_linux.go` + `agent/tty_bridge.go`，linux 专用；决策与背景见 `docs/interactive-tty.md`）：解决"交互程序拿不到输入"（`/dev/tty` 直通导致 `ttyname(0)` 退化为 `/dev/tty`、pinentry 等无 ctty 程序无法按路径打开）。流程 `Prepare`（分配 pty、`Setsid+Setctty+Ctty=0`、三条标准流全接 slave、`GPG_TTY`/`SSH_TTY` 覆盖为 slave 路径）→ `Attach`（真实 tty 切 raw、初始尺寸复制到 master、启动双向泵）→ `cmd.Start()` → 立即关闭父进程 slave（否则子进程退出后 master 收不到 EIO）→ `waitShell` → `stop()`（恢复 termios、关闭 tty/master、泵收尾 drain 后 `capture.finish()`）
   - 契约：master 输出**同时**写真实 tty（用户实时可见）与 `capture`（Writer，调用方决定去向）。本处 capture 即 `streamCapture` → `ShellResult.Stdout`，交互模式为**单流**（`Stderr` 空，`2|` 区分失效）；`streamCapture` 头尾截断与 `ShellResult` 字段语义不变
   - 子进程成为独立会话首进程、ctty 为 pty slave，真实 tty 前台组始终是 tanyan，**不再需要 `TIOCSPGRP` 移交**；`^C` 经泵作为字节进入 pty，由 slave 行规程投递 `SIGINT` 给子进程前台组，tanyan 不拦截
@@ -135,7 +135,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 组件化（`docs/shell-tool.md`）：`shellTool` 是 shell 执行层唯一所有者，`profile`/`programs`/`workspace`/`home`/`bridge` 在构造期定格、之后只读，`run` 每调用状态全在栈上（可重入）；唯一可变字段是终端租约 `ttyMu`——真实终端进程内只有一份，桥接与前台移交两条路径都在锁内。组件内不读环境（无 `os.Getwd`/`os.UserHomeDir`/`exec.LookPath`/`runtime.GOOS`），`agent.New` 装配点各读一次注入。包级可变状态（`shellRuntime*`/`shellLookPath`/`ttyBridgeMu`+`ttyBridgeCur`）已删除；`envSection`/`runShellDesc`/`runShellParams` 为纯函数；工具清单由 `allTools()` 显式组装、经 `toolRegistry.defs()` 在 `NewClient` 构造期注入 client（请求组装不再伸手读包级清单）
 - 实测契约（sudo 两模式对照）：`sudo` 默认模式自开 `/dev/tty` 完成提示与密码输入——前台移交后提示实时可见、密码不回显，仅最终错误走 stderr 回流；`sudo -S` 强制从 stdin 读密码时提示改写 stderr（被捕获，等待期间不可见），交互命令应避免 `-S` 类强制 stdin 选项
 - 终端前台移交（原语在 `ctty`，见 `docs/ctty.md`；`ctty.Supported` 为假的平台降级 no-op）：执行前经 `ctty.Open` 打开 `/dev/tty`，仅当自身进程组已是前台（`ctty.IsForeground`）时 `ctty.SetForeground` 移交子进程组，子进程结束后以 `handed` 门控归还（避免从未交接时抢占 shell 的前台）；无控制终端 / 非前台（嵌套、后台运行）自动跳过，行为与旧版一致。移交前台的同时将 `cmd.Stdin` 接到 `/dev/tty`（tty 打开成功时），子进程 stdin 直通用户终端，可直接在终端应答 ssh/git/sudo 等密码与确认提示，不再静默挂死至超时；无 tty 时 stdin 保持原状（/dev/null）
-- **终端状态保存与复原（2026-09-15 增补，修「命令把终端改坏后无人复原」）**：`runShellForeground` 在移交前用 `ctty.GetTermios` 快照控制终端，并在 defer 中 `ctty.SetTermios` 复原——defer 覆盖正常退出、超时 SIGKILL、Ctrl+C 中断三条路径，故**任何被强杀的子进程都不会把 `-opost`/`-icanon`/`-echo` 留在用户的终端上**（此前症状：killed 的交互程序使终端常驻 raw，后续所有 `\n` 不再回行首，表现为"每行多出上一行长度的空白"，颜色却仍正常）。`handed` 为真时只归还前台组，**不做模式复位**（2026-09-15 二次修订）。此前此处追加 `ctty.ResetModes` 清理被强杀 TUI 遗留的转义态，但该串含 `CSI r`（DECSTBM）：按 VT100/ECMA-48 语义它会把光标移到滚动区首行，而工具块 inline 重绘靠 `CSI 1A` + `CR CSI K` 相对寻址，光标被 home 后重绘落到屏幕顶部——症状为「执行 run_shell 时输出错乱」（工具块画到顶上、覆盖欢迎屏、残留 spinner 行）。常规路径子进程 stdout/stderr 走管道不经终端，屏幕模式不会被改，故只保留 termios 复原；模式复位仅在 `readline` 桥接 `release`（interactive 路径）使用，其序列已去掉 `CSI r`。快照失败（无 tty / 非 tty fd）不阻断执行；本路径不改 `cmd.Stdin` 契约（子进程仍直通 `/dev/tty`，见下条），只保证**用完复原**
+- **终端状态保存与复原（2026-09-15 增补，修「命令把终端改坏后无人复原」）**：`runShellForeground` 在移交前用 `ctty.GetTermios` 快照控制终端，并在 defer 中 `ctty.SetTermios` 复原——defer 覆盖正常退出、超时 SIGKILL、Ctrl+C 中断三条路径，故**任何被强杀的子进程都不会把 `-opost`/`-icanon`/`-echo` 留在用户的终端上**（此前症状：killed 的交互程序使终端常驻 raw，后续所有 `\n` 不再回行首，表现为"每行多出上一行长度的空白"，颜色却仍正常）。`handed` 为真时只归还前台组，**不做模式复位**（2026-09-15 二次修订）。此前此处追加 `ctty.ResetModes` 清理被强杀 TUI 遗留的转义态，但该串含 `CSI r`（DECSTBM）：按 VT100/ECMA-48 语义它会把光标移到滚动区首行，而当时工具块的 inline 重绘靠 `CSI 1A` + `CR CSI K` 相对寻址（该重绘已随工具块追加化移除），光标被 home 后重绘落到屏幕顶部——症状为「执行 run_shell 时输出错乱」（工具块画到顶上、覆盖欢迎屏、残留 spinner 行）。常规路径子进程 stdout/stderr 走管道不经终端，屏幕模式不会被改，故只保留 termios 复原；模式复位仅在 `readline` 桥接 `release`（interactive 路径）使用，其序列已去掉 `CSI r`。快照失败（无 tty / 非 tty fd）不阻断执行；本路径不改 `cmd.Stdin` 契约（子进程仍直通 `/dev/tty`，见下条），只保证**用完复原**
 - 信号防护（`ProtectTerminalSignals`，main 启动时 `sync.Once` 一次性）：`Notify(SIGTSTP)` 吞没（命令间隙 Ctrl+Z 不挂起自身）、`Ignore(SIGTTIN/SIGTTOU)`（自身后台 tty 读写不停止）；SIGQUIT 保持 Go 默认（全栈转储）。忽略处置随 exec 被子进程继承，子进程后台读写 tty 得 EIO 而非停止
 - 挂起探测（`waitShell`）：200ms 轮询 `/proc/<pid>/stat`，连续 2 次 `T` 判定被终端挂起（Ctrl+Z 等停止信号），SIGKILL 进程组并置 `Stopped`，状态行显示 `挂起已终止`，避免静默挂到超时；`processStopped` 由 shell_proc_linux.go 提供 /proc 实现，非 linux（shell_proc_other.go）恒 false（探测失效，其余功能不受影响）
 - 字段集：`ShellResult` 为 Command/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Stopped/Duration
@@ -144,22 +144,28 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 工具视图渲染（repl/toolview.go）
 
-- `NewToolView` 构造渲染器（`repl/repl.go` 与 `main.go` 各接一处；`Handle(e agent.Event)` 即事件入口，`toolView` 自身即 `agent.EventSink`），块状视图：`▸ 工具名 命令` 标题行 + 缩进输出行（stderr 加 `2|` 前缀）+ 亮蓝状态行；`run_shell` **显式指定** `cwd` 时标题区改为三行——首行仅工具名（进行中带 `⋯`），其后 `cwd: <原样值>`（不缩写）与折叠后的命令各占一行（逐行按宽度截断；inline 重绘按标题行数上移），未指定时保持单行、与旧版逐字节一致
+- `NewToolView` 构造渲染器（`repl/repl.go` 与 `main.go` 各接一处；`Handle(e agent.Event)` 即事件入口，`toolView` 自身即 `agent.EventSink`），块状视图：`▸ 工具名 命令` 标题行 + 缩进输出行（stderr 加 `2|` 前缀）+ 亮蓝状态行；`run_shell` **显式指定** `cwd` 时标题区改为三行——首行仅工具名，其后 `cwd: <原样值>`（不缩写）与折叠后的命令各占一行（逐行按宽度截断），未指定时保持单行
 - 状态行总是输出（语义色 `Info`，无色环境纯文本）：`↳ exit 0 · 0.3s · 12 行`；异常时首段为 `exit 2`/`执行超时`/`已中断`/`挂起已终止`/`错误: ...`；输出被截断时行数段显示 `共 N 行`；builtin 工具无状态行（截断时仅显示 `共 N 行`）
-- 颜色走 `theme.Semantics` 语义色 + `term.Profile` 驱动（`colors` 配置 / `NO_COLOR` / 非 TTY → 纯文本）：工具块 `Dim`、spinner 等待 `Warn`/思考 `Think`/执行 `Run` 三色、状态行 `Info`，可用 `palette` 配置覆盖
+- 颜色走 `theme.Semantics` 语义色 + `term.Profile` 驱动（`colors` 配置 / `NO_COLOR` / 非 TTY → 纯文本）：工具块 `Dim`、状态行心跳 等待 `Warn`/思考 `Think`/执行 `Run`、状态行 `Info`，可用 `palette` 配置覆盖
 - **捕获输出的 ANSI 治理**（`render/term` 清洗 + `Renderer.Frame/Passthrough`）：块组装内聚于 `renderToolBlock`，输出区无 SGR 时整块 `Dim.Frame`（全清洗 + 块级包裹，标题/输出单一包裹点）；检测到 SGR（`HasSGR`）时输出区改走直显——`Passthrough` 保色渲染（SGR 原样保留、布局序列/OSC/C0 仍清洗、脏状态结尾闭合），标题行独立 Frame，状态行 `Info` 显式后置（不依赖 SGR 时序巧合）。预览类彩色输出（如欢迎屏效果）在灰色块内原色可见，用户与模型双通道分离：**模型侧文本不做任何变换**（原始输出、信息保真、缓存与历史零影响），显示侧机制对模型完全不可见
 - `/history` 查看 tool 消息时正文走 `Dim.Frame`（纯显示侧，历史存储不动），顺带解决历史串裸序列漏进视图的问题
 - 显示行数上限 `tool_output_lines`（默认 20，范围 1-1000），超出保留头 3 行 + 尾 2 行并提示 `/history n` 查看完整输出
-- 执行开始即打印标题行（`⋯` 标记进行中，调用点 `Dim.Frame` 包裹，模型可控的 args 一并清洗）；结束分三种：TTY + 光标控制档 `\x1b[1A\r\x1b[K` 上移重绘标题替换 `⋯`（光标控制序列在 Frame 之外）→ `RenderToolEndInline`；交互式工具 → `RenderToolEnd`（前导空行 + 标题锚点，用户交互回显混在中间需要重新起头）；其余追加式场景（非 TTY、plain+verbose）→ `RenderToolEndAppend` 只补正文块与状态行——标题已由 ToolStart 打出且无法上移覆盖，重复标题会留下两行 `▸ 工具名`
-- 交互模式（`Event.Interactive`）例外：不启动 spinner（周期重绘会擦掉子进程写往 tty 的提示），标题行下打印引导行 `⏎ 等待终端输入，请在下方直接应答`，结束一律追加式渲染（上移重绘会擦掉用户刚输入的回显行）；桥接期间真实 tty 归 bridge 独占（repl 侧不写入：标题行在切 raw 前打印，结果块在 `stop()` 恢复 termios 后渲染）
+- 执行开始即打印标题行（调用点 `Dim.Frame` 包裹，模型可控的 args 一并清洗），**无进行中标记**；结束一律 `RenderToolEndAppend` 追加正文块与状态行——标题只由 ToolStart 打出一次，重复标题会留下两行 `▸ 工具名`。2026-09-15 追加化：删掉 TTY + 光标控制档的 `\x1b[1A\r\x1b[K` 上移重绘（`RenderToolEndInline`）与交互式的标题重打（`RenderToolEnd`），三条收尾路径合一；交互式仅保留前导 `\n`（用户交互回显混在中间需要重新起头）
+- 交互模式（`Event.Interactive`）：不发状态行心跳（周期写入会擦掉子进程写往 tty 的提示），标题行下打印引导行 `⏎ 等待终端输入，请在下方直接应答`，结束为前导 `\n` + `RenderToolEndAppend`；桥接期间真实 tty 归 bridge 独占（repl 侧不写入：标题行在切 raw 前打印，结果块在 `stop()` 恢复 termios 后渲染）
 - 流式输出行尾无 `\n` 时（`toolView.dirty` 跟踪），状态行打印前自动补换行
 - 输出收敛（`output`/`streams` 双流）、`Kind` 门禁与输出模式（rich/plain）、回合封装（`turn`）的改造规划见 `docs/repl-output-refactor.md`
+- 状态展示追加化（替代 spinner）的方案、取舍与实测见 `docs/repl-status-append.md`
 
-### 等待动画与请求状态（repl/spinner.go）
+### 状态行与心跳（repl/status.go，2026-09-15 替代 spinner，2026-09-16 行内点累加 + 思考相位回补）
 
-- `EventRequestStart`：TTY 下显示 braille spinner（`⠋ 等待响应 3s`，100ms 帧，`\r\x1b[K` 行内重绘，与全部终端输出共享 mutex），颜色随阶段切换（等待 `Warn`/思考 `Think`/执行 `Run`）；首个 content delta 到达即停并转为流式输出（纯 tool_calls 响应持续到本轮结束）
-- 工具执行期间标题行下方独立 spinner 行 `  ⠋ 执行中 3s`；`interactive` 工具不启动该 spinner（子进程直接写 tty 的提示会被 100ms 重绘擦除）
-- 每轮请求完成打印状态行 `  ↳ TTFT 0.8s · 3.2s · prompt 12.3k · completion 1.2k · 缓存 81.67%`（字段缺失自动省略；无 usage 时显示本地估算上下文）；非 TTY 动画关闭、状态行保留
+- 定位：**只追加、不重绘**——没有光标控制、没有清行、没有上移。旧 spinner 与 inline 工具块重绘依赖"光标停在自己写的那一行"：一旦终端被让出（`run_shell` 移交前台组，子进程可直接写 `/dev/tty`）或被第三方写，就会擦掉对方输出或重绘错位（实测 sudo 密码提示被帧清行抹掉）。追加式对交错免疫：顺序变化可接受，绝不覆盖。
+- `EventRequestStart` 起等待心跳并立刻打行首 `» 等待响应 0s`（`KindStatus`，语义色 `Warn`）；首个 content / `EventResponse` / 工具开始即停。思考相位由首个 `EventReasoning`（思维链 delta）经 `heartbeat.setPhase` 切到 `» 思考中`（语义色 `Think`）——与工具相位同一机制：**收尾当前行 + 用新前缀开新行**（一次写完，不重绘），秒数沿用同一 `started`（与旧 spinner 的累计口径一致）、点数归零；同相位重复事件（逐 token 到达）与心跳未在跑时（`statusOn` 为假、或 content 已开始后的零星 reasoning）都是 no-op，故每个请求最多多一行。工具执行期（非 `interactive`）起第二条心跳，`EventToolStart` 后立刻打 `  » 执行中 0s`（`Run` 色，前两空格与工具正文对齐）。
+- 心跳形态（`statusTickInterval = 1s`、`statusLineSpan = 10`）：行首**只写一次**带秒数的前缀（`statusSeconds`：`59s` / `1m10s` / `1h01m`；秒数取 `time.Since(started)` 的**真实经过时间**，开行时写一次后固定不变；前缀末尾以 `statusDotGap` 一个空格位收尾，点不与秒数粘连），行内每 tick **只追加一个点** `.`，满 `span` 个点即换行并以当时秒数开新行（`» 等待响应 0s ..........` → `» 等待响应 10s ..........` → …）。已写出的字节永不回头修改。行首前缀与每个点都由同一语义色 `Style.Sprint` 单独包裹（各自带 `term.Reset`，点写完终端立即回到无 SGR 状态）——点与文字同色，且不把终端留在着色态：子进程或第三方写 `/dev/tty` 不会继承 tanyan 的颜色。代价是每 tick 一段 `SGR + . + reset`（约 10 字节/秒，可忽略）；行首与点之间保留 `statusDotGap` 一个空格位，点不与秒数粘连。
+- `stop()`：`close(stopCh)` → 等 loop 退出（沿用有界 200ms）→ 当前行未收尾时补**一个换行**；未起心跳时不写任何字节（幂等，可重复调用）。重复 `start()` 先收尾上一行再开新行。
+- 回合收口：`turn.End` 调 `toolView.Stop()`——等待期被打断（无 content、无工具事件）时没有别的停止点，否则心跳会一直写到下一次请求、糊掉在途的 readline 提示符。
+- 门禁：`KindStatus` 仅 rich 档可见——plain / plain+verbose / 非 TTY 均无状态行与心跳，`ask` 单发默认档行为不变。
+- 每轮请求完成打印状态行 `  ↳ TTFT 0.8s · 3.2s · prompt 12.3k · completion 1.2k · 缓存 81.67%`（字段缺失自动省略；无 usage 时显示本地估算上下文）。
+- 方案、取舍与实测见 `docs/repl-status-append.md`（其中 09-15《取舍》对"思考中"的删除已被 09-16 的思考相位回补取代）。
 
 ### builtin（builtin.go）
 
@@ -210,19 +216,19 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## REPL
 
-用户可见文案统一为常量：`repl/messages.go`（UI/命令输出/选择器/工具视图/spinner）与 `agent/messages.go`（错误/ToolResult 文本），调用一律引用常量（经 `streams` 写出，见下），换行由调用处的格式串控制；`Bye`/`再见` 已统一为 `MsgBye`。工具描述与系统提示不在此列（模型侧文案，翻译需评估 prompt 影响）。
+用户可见文案统一为常量：`repl/messages.go`（UI/命令输出/选择器/工具视图/状态行）与 `agent/messages.go`（错误/ToolResult 文本），调用一律引用常量（经 `streams` 写出，见下），换行由调用处的格式串控制；`Bye`/`再见` 已统一为 `MsgBye`。工具描述与系统提示不在此列（模型侧文案，翻译需评估 prompt 影响）。
 
 欢迎屏由 `welcomLogo` + `welcomeText()` 组装：logo ASCII 图 + 一行 `输入 /help 查看命令   tanyan <版本>（构建于 <时间>）`；`repl.Version`/`repl.BuildTime` 由 `main` 注入（`make build` 经 ldflags 写 `main.version`（git describe）与 `main.buildTime`（date），直接 `go build` 为 `dev`/空，空时不渲染构建时间）。`-v` 与欢迎屏共用同一 version 源。
 
 ### 输出流与 Kind
 
-输出收敛到 `repl/streams.go`：`streams{out, err}` 是两条独立互斥流，`output` = writer + `sync.Mutex` + 可见集（`visSet`，按 `Kind` 门禁，当前恒为全开，rich/plain 三档在阶段 4 引入）+ 测试钩子 `guard`。`output.Write` 是无门禁通道（raw 期自绘：Editor 提示符/回显、picker），`emit`/`atomic` 是带门禁与 `guard` 的常规通道；`atomic` 回调内只允许写参数 `w`（自锁约束）。每次写入都携带 `Kind`（`repl/flow.go`：Content/Reasoning/ToolBlock/ToolStatus/Notice/Decor/Error/Spinner）。
+输出收敛到 `repl/streams.go`：`streams{out, err}` 是两条独立互斥流，`output` = writer + `sync.Mutex` + 可见集（`visSet`，按 `Kind` 门禁，当前恒为全开，rich/plain 三档在阶段 4 引入）+ 测试钩子 `guard`。`output.Write` 是无门禁通道（raw 期自绘：Editor 提示符/回显、picker），`emit`/`atomic` 是带门禁与 `guard` 的常规通道；`atomic` 回调内只允许写参数 `w`（自锁约束）。每次写入都携带 `Kind`（`repl/flow.go`：Content/Reasoning/ToolBlock/ToolStatus/Notice/Decor/Error/Status）。
 
-流分配：**stdout** 承载 assistant 正文、工具块与状态行、命令反馈、回放、欢迎屏、回合分隔线、spinner 帧与输入期回显；**stderr** 承载错误与诊断——`MsgErrLineFmt` 类、`MsgThemeBad`、`MsgInvalidIndex`、`MsgModelsFail`、`MsgInterruptKept`/`MsgInterruptBare`，以及 `main` 的启动/配置/agent 构造错误（`streams.Fail`）。两 fd 均无缓冲，同一 tty 下写序即调用序，故交互观感与收敛前逐字节一致（阶段 1 以 pty 对比前一提交的二进制验证）；stdout 被重定向时错误与诊断分流到终端，stdout 保持可解析。
+流分配：**stdout** 承载 assistant 正文、工具块与状态行、命令反馈、回放、欢迎屏、回合分隔线、状态行心跳与输入期回显；**stderr** 承载错误与诊断——`MsgErrLineFmt` 类、`MsgThemeBad`、`MsgInvalidIndex`、`MsgModelsFail`、`MsgInterruptKept`/`MsgInterruptBare`，以及 `main` 的启动/配置/agent 构造错误（`streams.Fail`）。两 fd 均无缓冲，同一 tty 下写序即调用序，故交互观感与收敛前逐字节一致（阶段 1 以 pty 对比前一提交的二进制验证）；stdout 被重定向时错误与诊断分流到终端，stdout 保持可解析。
 
 `Kind` 不导出包外、不进 `agent.Event`；`main` 侧只用语义化出口 `streams.Print`/`Content`/`End`/`Fail`。
 
-输出模式三档由 `outMode` 决定（`repl.ParseMode(plain, verbose)`，仅 CLI `-p`/`--plain` 与 `--verbose` 可设，env 与 config 不参与；`ask` 单发分支再套 `repl.SingleShot` 把 rich 降到 plain+verbose，显式 `-p` 更窄时保持不动）：**rich**（默认，全开）、**plain**（`out.vis` = Content/Notice，其余屏蔽；stderr 不参与屏蔽）、**plain+verbose**（再加 ToolBlock/ToolStatus）。plain 的六条语义：① `Colors=LevelNone`（main 在 profile 计算后强制）；② 不启动 spinner（`toolView.animate()` 同时查 TTY 与可见集，是查询不是快照）；③ 无光标控制（inline 上移重绘按 `streams.cursor()` 退化为 `RenderToolEndAppend`：不重复标题，只补正文块与状态行；spinner 帧与清行随 KindSpinner 一并屏蔽）；④ 关 markdown（`flow.mdEnabled` 并入 `st.decor()`）；⑤ 屏蔽 Decor（含首行空行与回合分隔线）与工具类；⑥ stdout 只留正文与命令反馈，错误与诊断走 stderr。工具块被屏蔽时**不得**置 `justEnded`，否则下一条正文前会留下孤立空行（`toolView.Handle` 的 ToolEnd 分支按 `allows(KindToolBlock)` 决定是否置位）。`streams.End()` 负责收尾换行：rich 沿用无条件补换行（零行为变更），plain 只在缺少行尾换行时补，保证 stdout 严格等于答案。
+输出模式三档由 `outMode` 决定（`repl.ParseMode(plain, verbose)`，仅 CLI `-p`/`--plain` 与 `--verbose` 可设，env 与 config 不参与；`ask` 单发分支再套 `repl.SingleShot` 把 rich 降到 plain+verbose，显式 `-p` 更窄时保持不动）：**rich**（默认，全开）、**plain**（`out.vis` = Content/Notice，其余屏蔽；stderr 不参与屏蔽）、**plain+verbose**（再加 ToolBlock/ToolStatus）。plain 的六条语义：① `Colors=LevelNone`（main 在 profile 计算后强制）；② 不发状态行与心跳（`toolView.statusOn()` 同时查 TTY 与可见集，是查询不是快照，`KindStatus` 仅 rich 放行）；③ 无光标控制（工具块一律 `RenderToolEndAppend`：不重复标题，只补正文块与状态行）；④ 关 markdown（`flow.mdEnabled` 并入 `st.decor()`）；⑤ 屏蔽 Decor（含首行空行与回合分隔线）与工具类；⑥ stdout 只留正文与命令反馈，错误与诊断走 stderr。工具块被屏蔽时**不得**置 `justEnded`，否则下一条正文前会留下孤立空行（`toolView.Handle` 的 ToolEnd 分支按 `allows(KindToolBlock)` 决定是否置位）。`streams.End()` 负责收尾换行：rich 沿用无条件补换行（零行为变更），plain 只在缺少行尾换行时补，保证 stdout 严格等于答案。
 
 ### 输入分发
 
@@ -269,7 +275,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - editor：行编辑/历史，快捷键 Ctrl+A/E/B/F/U/K/W/Y/T/L、Alt+B/F（按空白分词）、Home/End/方向键；render 多行感知（`cursorRow` 精确跟踪光标行，重渲染上移清屏；光标行列由 `layoutCursor` 按终端软换行模型计算——宽字符在行尾放不下时整字换行留空、写满行末的 deferred autowrap，均与终端一致），Size 不可用退化单行；ErrInterrupt 区分 Ctrl+C；Ctrl+L 推屏保历史（一屏减一即 rows-1 个换行——恰把提示符上方内容滚入回滚区、不多滚一行，光标回视口顶部重画提示符，Size 不可用退化 `\x1b[2J` 擦屏），历史保留量受终端 scrollback 容量限制
 - Tab 补全菜单：多候选时在输入行下方渲染菜单，选中项反显（`\x1b[7m`）；`↑/↓` 循环选择（菜单打开时不触发历史导航）、`Tab` 循环下一项、`Enter` 仅插入选中项（再次 Enter 提交）、`Esc` 关闭、任意输入关闭菜单正常编辑；单候选直接补全、公共前缀先行扩展的行为不变；候选超 8 行滚动窗口显示
 - keys：ESC 序列/控制键/UTF-8 状态机；width：`style` 薄包装（宽度表/ANSI 剥离/感知截断均由 `style` 提供，截断自动复位悬空 SGR 防串色）
-- 非 TTY 降级：`Degraded` 按行读取，无动画/菜单
+- 终端挂断（pty master 关闭、控制终端消失）：挂断后 `read` 既可能返回 `EIO`，也可能返回 0 字节且无错误——后者与 `VMIN=0/VTIME=1` 的空闲超时（0.1s 后返回 0 字节）在返回值上无法区分。`ReadKey` 以 `poll` 的 `POLLHUP/POLLERR/POLLNVAL` 判挂断、并把 `EIO` 归一为 `io.EOF`，REPL 据此正常退出（修复前挂断后的空闲轮询退化为忙循环：实测约 400 万次 `read`/秒、单核满载、进程永不退出）
+- 非 TTY 降级：`Degraded` 按行读取，无状态行心跳/菜单
 - tty 桥接（`bridge.go` 接口 + `bridge_linux.go` 实现 + `bridge_stub.go` 非 Linux 返回 `ErrUnsupported`）：为 `interactive: true` 的 run_shell 提供"命令在自己的 pty 中运行"的执行器（`TTYBridge.Prepare/Attach`），复用本包 termios 读写与 raw 语义；生产入口 `readline.NewTTYBridge()` 由 `main.go` 经 `agent.WithTTYBridge` 注入到 `agent.New`（构造期定格进 `shellTool.bridge`），测试可在 `shellToolConfig` 里直接给 fake bridge
 - 终端状态自愈（`secure.go` + `secure_stub.go`）：`InitTerminalGuard`（启动时记录"自己是否为终端前台作业"，并 `ctty.IgnoreJobSignals`——`tcsetpgrp` 在前台被抢时需忽略 `SIGTTOU` 才不被停住）+ `SecureTerminal`（恢复 `ISIG`、必要时 `ctty.SetForeground` 夺回前台组）；控制终端原语均走 `ctty`
 - 平台划分（白名单 `linux || darwin`）：`termios_linux.go` 用 TCGETS/TCSETS/TCSETSF、`termios_darwin.go` 用 TIOCGETA/TIOCSETA/TIOCSETAF；`terminal_posix.go` 为真实实现，`terminal_windows.go` 与 `terminal_stub.go`（其余非 windows 平台）返回 ErrUnsupported 走 Degraded 降级，保证所有 GOOS 可编译
@@ -299,9 +306,9 @@ env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERA
 
 ## 测试
 
-标准库 `testing` + `httptest` mock LLM（`agent/mock_test.go`，脚本化 `mockStep`，content/arguments 多 chunk 发送以覆盖流式合并）。覆盖 calc/shell/config/SSE 解析/trim/会话往返/Ask 全链路/回调。readline 用 fakeTerm 注入按键，真实终端行为 pty 人工验证。repl 覆盖渲染纯函数与非 TTY 降级。
+标准库 `testing` + `httptest` mock LLM（`agent/mock_test.go`，脚本化 `mockStep`，content/arguments 多 chunk 发送以覆盖流式合并）。覆盖 calc/shell/config/SSE 解析/trim/会话往返/Ask 全链路/回调。readline 用 fakeTerm 注入按键，终端挂断/空闲超时/转义残片等真实 pty 行为由自驱动 pty 自动覆盖（`readline/terminal_posix_pty_test.go`），其余真实终端行为 pty 人工验证。repl 覆盖渲染纯函数与非 TTY 降级。
 
-repl 输出侧测试方法（输出收敛方案阶段 0-4 建立）：① **注入 writer**——`NewStreams(out, err, mode)` 可注入，测试用 `syncBuf`（互斥缓冲，`-race` 安全）与 `writeCounter`（断言"整块一次写完"），不再替换 `os.Stdout`；② **fakeTerm 驱动 Run**——`repl/faketerm_test.go` 实现 `readline.Terminal`，带 `inKey` 标志与 `onKey` 钩子；③ **写权协议断言**——`output.guard` 仅在 `emit`/`atomic` 触发（裸 `Write` 不触发，避免 Editor 合法回显误报），"输入期不得 emit"由正向用例 + 反向对照用例（故意在 `ReadKey` 内写入必被捕获）双保险；④ **可见集矩阵**——`Kind` × 三档模式的可见性以硬编码表锁定；⑤ **golden 字节**——rich 非 TTY 与 TTY 内联重绘各一条基线，plain/plain+verbose 各一条；⑥ **跨提交逐字节回归**——用 `git worktree` 检出上一阶段提交构建旧二进制，同 cwd、同 ldflags 跑同一输入序列（pty 经 `script -qec`），归一化时钟与耗时后 `cmp`，作为"默认行为零变更"的硬证据。pty 目视模板见 `scripts/repl_tty_check.sh`（自动跑前两条，其余人工）。
+repl 输出侧测试方法（输出收敛方案阶段 0-4 建立）：① **注入 writer**——`NewStreams(out, err, mode)` 可注入，测试用 `syncBuf`（互斥缓冲，`-race` 安全）与 `writeCounter`（断言"整块一次写完"），不再替换 `os.Stdout`；② **fakeTerm 驱动 Run**——`repl/faketerm_test.go` 实现 `readline.Terminal`，带 `inKey` 标志与 `onKey` 钩子；③ **写权协议断言**——`output.guard` 仅在 `emit`/`atomic` 触发（裸 `Write` 不触发，避免 Editor 合法回显误报），"输入期不得 emit"由正向用例 + 反向对照用例（故意在 `ReadKey` 内写入必被捕获）双保险；④ **可见集矩阵**——`Kind` × 三档模式的可见性以硬编码表锁定；⑤ **golden 字节**——rich 非 TTY 与 TTY 追加式收尾各一条基线，plain/plain+verbose 各一条；⑥ **跨提交逐字节回归**——用 `git worktree` 检出上一阶段提交构建旧二进制，同 cwd、同 ldflags 跑同一输入序列（pty 经 `script -qec`），归一化时钟与耗时后 `cmp`，作为"默认行为零变更"的硬证据。pty 目视模板见 `scripts/repl_tty_check.sh`（自动跑前两条，其余人工）。
 
 pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（测试自身分配 pty 充当真实 tty，经 `newBridgeTTY` 注入）断言子进程 `/dev/tty` 可读、`tty` 输出为 pty slave、`GPG_TTY` 覆盖、初始尺寸复制、raw 设置与恢复、子进程退出后 master 收到 EIO（防忘关 slave）、Attach 前预置输入不丢、子进程存活时 `stop()` 及时返回；② `agent/shell_bridge_test.go` 用 fake bridge（os.Pipe 造流）断言桥接全流程、Prepare/Attach 失败回退现状路径、非交互不触桥接；③ 真实 tty E2E（gated，用 `script -qec` 驱动真实 /dev/tty，不参与默认 `go test`）：`TTY_BRIDGE_E2E=1`（readline 单命令）、`TTY_E2E=1`（agent 全链路）、`TTY_E2E_REUSE=1`（同进程连续两次交互命令，覆盖 `ownTTY` 打开/恢复/重开复用路径）。
 

@@ -24,7 +24,7 @@ const (
 	KindNotice                     // 信息性文案：命令反馈、回放列表
 	KindDecor                      // 纯装饰：欢迎屏、回合分隔线
 	KindError                      // 错误与中断提示
-	KindSpinner                    // 动画帧与清行
+	KindStatus                     // 过程状态行（等待/执行心跳）
 )
 
 // flow 是一次回合的渲染上下文：REPL 只在构造时快照 profile，渲染器与 markdown 缓冲按回合派生。
@@ -100,6 +100,7 @@ func (t *turn) settleMd() {
 
 func (t *turn) End(err error) {
 	dur := time.Since(t.start)
+	t.r.view.Stop()
 	t.settleMd()
 	if t.done != nil {
 		t.done()
