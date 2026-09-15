@@ -641,6 +641,7 @@ script -qec "./tanyan -p --verbose -n ask '跑一条命令并总结'" /dev/null 
 | 2026-09-15 | 状态展示追加化（替代 spinner）：删 spinner 帧循环与工具块 inline 重绘，等待/执行期改为每 10s 换行追加 `» 等待响应 .` / `  » 执行中 .`，工具收尾三分派合一为 `RenderToolEndAppend`（标题只出现一次） | `repl/status.go`（新增）、`repl/spinner.go`（删除）、`repl/toolview.go`、`repl/flow.go`、`repl/streams.go`、`repl/messages.go` |
 | 2026-09-15 | 上条修复的回归修复：`ctty.resetModes` 去掉 `CSI r`（DECSTBM 会把光标移到滚动区首行），且常规 `run_shell` 路径不再调 `ResetModes`——`handed` 在 REPL 中恒真，等于每次命令后都写整串，工具块重绘的 `CSI 1A`/`CR CSI K` 落到屏幕顶部（工具块画到顶上、覆盖欢迎屏、残留 spinner） | `ctty/ctty_posix.go`、`agent/shell.go`、`ctty/ctty_linux_test.go` |
 | 2026-09-16 | 状态行心跳改为行内点累加：`statusTickInterval = 1s`、满 `statusLineSpan = 10` 点换行，行首写一次带墙钟秒数的前缀并以一个空格位收尾（`» 等待响应 0s `），追加的点与行首同色且各自 reset，`stop()` 补 `\n` 收尾当前行；`EventReasoning` 经 `heartbeat.setPhase` 回补 `» 思考中`（收尾当前行 + 新前缀开新行，秒数延续、同相位 no-op）；`turn.End` 调 `toolView.Stop()` 补上"等待期被打断无停止点、心跳写到下一次请求"的漏洞 | `repl/status.go`、`repl/flow.go`、`repl/status_test.go` |
+| 2026-09-16 | 工具标题区命令可读性：`command` 不再用 `; ` 压成单行——短命令保持内联，超宽/多行转块形态（`▸ 工具名` + `cwd` 行 + `  $ ` 命令区），经新增 `render/term.Wrap` 按显示宽度折行（tab 摊平 4 空格、保留缩进与空行、只切分不改写、不做词级折行），上限 8 行、超出省略中段并提示 `/history` | `repl/toolview.go`、`repl/messages.go`、`render/term/text.go`、`README.md`、`docs/design.md` |
 
 ### 已知缺口：动态文本的转义清洗（2026-09-15 登记，未做）
 

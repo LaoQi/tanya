@@ -2,6 +2,7 @@ package repl
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -462,13 +463,13 @@ func TestRenderToolEndSGRMixedStderr(t *testing.T) {
 	}
 }
 
-func TestToolArgsDisplayCollapsesMultiline(t *testing.T) {
+func TestToolArgsDisplayKeepsMultiline(t *testing.T) {
 	cwd, cmd := toolArgsDisplay("run_shell", `{"command":"cat > a <<'EOF'\n  line one \n\nline two\nEOF"}`)
 	if cwd != "" {
 		t.Errorf("未指定 cwd 应为空: %q", cwd)
 	}
-	if want := "cat > a <<'EOF'; line one; line two; EOF"; cmd != want {
-		t.Errorf("got %q, want %q", cmd, want)
+	if want := "cat > a <<'EOF'\n  line one \n\nline two\nEOF"; cmd != want {
+		t.Errorf("多行命令应保留换行与缩进（只去首尾空行）: got %q, want %q", cmd, want)
 	}
 }
 
@@ -494,7 +495,7 @@ func TestToolArgsDisplayCwd(t *testing.T) {
 
 func TestRenderToolStartCwd(t *testing.T) {
 	got := RenderToolStart("run_shell", `{"command":"ls -la","cwd":"/tmp/abc"}`, 80)
-	if !strings.HasPrefix(got, "\n▸ run_shell\n  cwd: /tmp/abc\n  ls -la\n") {
+	if !strings.HasPrefix(got, "\n▸ run_shell\n  cwd: /tmp/abc\n  $ ls -la\n") {
 		t.Errorf("应为首行工具名、cwd 与命令各占一行: %q", got)
 	}
 	end := RenderToolEndAppend(testSem(), agent.ToolResult{Text: "ok"}, 80, 20)
@@ -515,47 +516,128 @@ func TestRenderToolStartCwd(t *testing.T) {
 
 func TestRenderToolStartCwdWidth(t *testing.T) {
 	long := `{"command":"` + strings.Repeat("y", 300) + `","cwd":"` + strings.Repeat("/seg", 50) + `"}`
-	for _, line := range strings.Split(strings.Trim(RenderToolStart("run_shell", long, 80), "\n"), "\n") {
-		if w := term.Width(line); w > 78 {
-			t.Errorf("标题行宽度 %d 越界: %q", w, line)
+	lines := strings.Split(strings.Trim(RenderToolStart("run_shell", long, 80), "\n"), "\n")
+	if len(lines) < 3 || lines[0] != "▸ run_shell" || !strings.HasPrefix(lines[1], "  cwd: ") {
+		t.Fatalf("显式 cwd 应为「工具名 / cwd / 命令区」块形态: %q", lines)
+	}
+	for _, line := range lines {
+		if w := term.Width(line); w > 80 {
+			t.Errorf("块内行宽 %d 越界: %q", w, line)
 		}
 	}
 }
 
-func TestRenderToolStartAlwaysSingleLine(t *testing.T) {
+// TestRenderToolStartInline 锁住内联形态：命令单行且与工具名同行放得下时保持旧版逐字节形态。
+func TestRenderToolStartInline(t *testing.T) {
+	cases := []struct {
+		name string
+		cmd  string
+	}{
+		{"短命令", "ls -la"},
+		{"恰好占满剩余宽度", strings.Repeat("z", 80-3-len("run_shell")-1)},
+	}
+	for _, c := range cases {
+		args, _ := json.Marshal(map[string]string{"command": c.cmd})
+		got := RenderToolStart("run_shell", string(args), 80)
+		if want := "\n▸ run_shell " + c.cmd + "\n"; got != want {
+			t.Errorf("%s: got %q, want %q", c.name, got, want)
+		}
+	}
+}
+
+// TestRenderToolStartBlockShape 锁住块形态：命令放不下（超宽或原本多行）时转块——首行只有工具名，
+// 命令逐行 `  $ ` 前缀、按显示宽度折行，折行只切不改内容，且每行不超终端宽度。
+func TestRenderToolStartBlockShape(t *testing.T) {
 	cmds := []string{
-		"ls -la",
 		strings.Repeat("x", 500),
 		"echo a\necho b",
 		strings.Repeat("中", 100),
 		"cd /tmp && ls\n" + strings.Repeat("y", 300),
+		strings.Repeat("z", 80-3-len("run_shell")) + "w",
 	}
 	for _, cmd := range cmds {
 		args, _ := json.Marshal(map[string]string{"command": cmd})
-		got := strings.Trim(RenderToolStart("run_shell", string(args), 80), "\n")
-		if strings.Contains(got, "\n") {
-			t.Errorf("占位行应为单行: %q", got)
+		lines := strings.Split(strings.Trim(term.Strip(RenderToolStart("run_shell", string(args), 80)), "\n"), "\n")
+		if lines[0] != "▸ run_shell" {
+			t.Errorf("块形态首行应只有工具名: %q", lines[0])
 		}
-		if w := term.Width(got); w > 79 {
-			t.Errorf("占位行宽度 %d 超过 width-1: %q", w, got)
+		var body []string
+		for _, l := range lines[1:] {
+			if !strings.HasPrefix(l, toolCommandPrefix) {
+				t.Errorf("命令行应带 %q 前缀: %q", toolCommandPrefix, l)
+				continue
+			}
+			if w := term.Width(l); w > 80 {
+				t.Errorf("命令行宽度 %d 越界: %q", w, l)
+			}
+			body = append(body, strings.TrimPrefix(l, toolCommandPrefix))
+		}
+		if joined := strings.Join(body, ""); joined != strings.ReplaceAll(cmd, "\n", "") {
+			t.Errorf("折行改写了命令内容:\n got %q\nwant %q", joined, strings.ReplaceAll(cmd, "\n", ""))
+		}
+	}
+}
+
+// TestRenderToolStartCommandOmitted 锁住命令行数上限：超上限保留头尾、中段换成省略提示。
+func TestRenderToolStartCommandOmitted(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 12; i++ {
+		lines = append(lines, fmt.Sprintf("step-%02d", i))
+	}
+	args, _ := json.Marshal(map[string]string{"command": strings.Join(lines, "\n")})
+	got := term.Strip(RenderToolStart("run_shell", string(args), 80))
+	body := strings.Split(strings.Trim(got, "\n"), "\n")[1:]
+	if len(body) != toolCommandMaxLines {
+		t.Fatalf("命令行数应为上限 %d，实际 %d: %q", toolCommandMaxLines, len(body), body)
+	}
+	wantOmitted := fmt.Sprintf(MsgCmdOmittedFmt, 12-toolCommandHeadLines-toolCommandTailLines)
+	if body[toolCommandHeadLines] != toolCommandPrefix+wantOmitted {
+		t.Errorf("省略行 = %q, want %q", body[toolCommandHeadLines], toolCommandPrefix+wantOmitted)
+	}
+	if body[0] != toolCommandPrefix+"step-01" || body[len(body)-1] != toolCommandPrefix+"step-12" {
+		t.Errorf("应保留头尾: %q", body)
+	}
+}
+
+// TestRenderToolStartTabsExpanded 锁住制表符摊平：宽度表把 \t 当单列，不摊平则折行位置与显示不符。
+func TestRenderToolStartTabsExpanded(t *testing.T) {
+	args, _ := json.Marshal(map[string]string{"command": "if x; then\n\techo tab\nfi"})
+	got := term.Strip(RenderToolStart("run_shell", string(args), 80))
+	if strings.ContainsRune(got, '\t') {
+		t.Errorf("命令行不应含制表符: %q", got)
+	}
+	if want := "  $ " + strings.Repeat(" ", toolTabWidth) + "echo tab"; !strings.Contains(got, want+"\n") {
+		t.Errorf("制表符应摊平成 %d 空格: %q", toolTabWidth, got)
+	}
+	// 摊平后宽度计算才准：tab 命令在窄终端里也必须每行不越界
+	for _, line := range strings.Split(strings.Trim(term.Strip(RenderToolStart("run_shell", string(args), 24)), "\n"), "\n") {
+		if w := term.Width(line); w > 24 {
+			t.Errorf("窄终端行宽 %d 越界: %q", w, line)
 		}
 	}
 }
 
 func TestToolBlockTitleSingleSpaceAndWidth(t *testing.T) {
-	cases := []string{"ls -la", strings.Repeat("z", 300), "cat <<'EOF'\nbody\nEOF"}
-	for _, cmd := range cases {
-		args, _ := json.Marshal(map[string]string{"command": cmd})
+	cases := []struct {
+		name string
+		cmd  string
+		want string
+	}{
+		{"内联", "ls -la", "▸ run_shell ls -la"},
+		{"超长转块", strings.Repeat("z", 300), "▸ run_shell"},
+		{"多行转块", "cat <<'EOF'\nbody\nEOF", "▸ run_shell"},
+	}
+	for _, c := range cases {
+		args, _ := json.Marshal(map[string]string{"command": c.cmd})
 		got := strings.Trim(term.Strip(renderToolEnd(testSem(), "run_shell", string(args), agent.ToolResult{Text: "ok"}, 80, 20)), "\n")
 		line, _, _ := strings.Cut(got, "\n")
-		if strings.Contains(line, "run_shell  ") {
-			t.Errorf("块标题应为单空格: %q", line)
+		if line != c.want {
+			t.Errorf("%s: 标题行 = %q, want %q", c.name, line, c.want)
 		}
-		if !strings.HasPrefix(line, "▸ run_shell ") {
-			t.Errorf("标题前缀异常: %q", line)
-		}
-		if w := term.Width(line); w > 79 {
-			t.Errorf("标题行宽度 %d 超过 width-1: %q", w, line)
+		for _, l := range strings.Split(got, "\n") {
+			if w := term.Width(l); w > 80 {
+				t.Errorf("%s: 行宽 %d 超过终端 80 列: %q", c.name, w, l)
+			}
 		}
 	}
 }

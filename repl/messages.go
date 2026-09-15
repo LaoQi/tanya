@@ -97,6 +97,7 @@ const (
 	MsgToolErr    = "错误: %s"
 
 	MsgInteractiveHint = "  ⏎ 等待终端输入，请在下方直接应答\n"
+	MsgCmdOmittedFmt   = "… 省略 %d 行（完整命令见 /history）"
 )
 
 const (
