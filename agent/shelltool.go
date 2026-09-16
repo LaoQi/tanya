@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 )
@@ -137,16 +136,12 @@ func (t *shellTool) resolveCwd(cwd string) (string, error) {
 }
 
 func (t *shellTool) toolDesc() string {
-	return runShellDesc(t.profile, t.programs)
+	return describeShell(platform, t.profile, t.programs)
 }
 
-func runShellDesc(profile *shellProfile, programs []string) string {
-	return describeShell(runtime.GOOS, platform, profile, programs)
-}
-
-func describeShell(goos string, plat shellPlatform, profile *shellProfile, programs []string) string {
+func describeShell(plat shellPlatform, profile *shellProfile, programs []string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "在 %s %s 中执行命令（%s），返回 stdout/stderr/退出码。", goos, profile.Name, shellSyntaxHint(profile.Kind))
+	fmt.Fprintf(&b, "在 %s %s 中执行命令（%s），返回 stdout/stderr/退出码。", plat.GOOS, profile.Name, shellSyntaxHint(profile.Kind))
 	b.WriteString("默认在会话启动目录（进程 cwd）下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。")
 	b.WriteString(plat.Capabilities(profile))
 	b.WriteString("读文件、搜索、文本处理等系统操作都用它。")

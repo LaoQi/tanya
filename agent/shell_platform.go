@@ -4,10 +4,12 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 )
 
 type shellPlatform struct {
+	GOOS           string
 	Candidates     []string
 	ConfigureGroup func(*exec.Cmd)
 	KillGroup      func(*exec.Cmd) error
@@ -22,11 +24,38 @@ var protectOnce sync.Once
 
 func ProtectTerminalSignals() { protectOnce.Do(platform.ProtectSignals) }
 
+func fillDefaults(p shellPlatform) shellPlatform {
+	if p.GOOS == "" {
+		p.GOOS = runtime.GOOS
+	}
+	if p.ConfigureGroup == nil {
+		p.ConfigureGroup = noopConfigureGroup
+	}
+	if p.KillGroup == nil {
+		p.KillGroup = defaultKillGroup
+	}
+	if p.ProtectSignals == nil {
+		p.ProtectSignals = noopProtectSignals
+	}
+	if p.ExitCode == nil {
+		p.ExitCode = defaultExitCode
+	}
+	if p.ProcessStopped == nil {
+		p.ProcessStopped = neverStopped
+	}
+	if p.Capabilities == nil {
+		p.Capabilities = noopCapabilities
+	}
+	return p
+}
+
 func noopConfigureGroup(*exec.Cmd) {}
 
 func noopProtectSignals() {}
 
 func neverStopped(int) bool { return false }
+
+func noopCapabilities(*shellProfile) string { return "" }
 
 func defaultKillGroup(cmd *exec.Cmd) error {
 	if cmd.Process == nil {

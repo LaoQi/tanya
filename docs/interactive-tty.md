@@ -114,7 +114,7 @@
 ### 5.7 中断、超时、挂起
 
 - **Ctrl+C**：`0x03` 经泵进入 pty，由 slave 行规程投 `SIGINT` 给子进程前台组（等价用户按键）；tanya 不拦截、不计次
-- **超时**：沿用 `context.WithTimeout`（interactive 默认 300s），到时 `cmd.Cancel → killProcessGroup`
+- **超时**：沿用 `context.WithTimeout`（interactive 默认 300s），到时 `cmd.Cancel → platform.KillGroup`
 - **挂起**：`^Z` 经 pty 投 `SIGTSTP`，`waitShell` 的挂起轮询（`platform.ProcessStopped`）判定路径不变
 
 ### 5.8 失败回退

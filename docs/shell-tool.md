@@ -65,7 +65,7 @@ func (t *shellTool) invocation() string   // env 段 SHELL 行用
 
 - `agent/shelltool.go`（新增）：`shellTool` / `shellToolConfig` / `shellRequest` / 构造 / `run` / `resolveCwd` / `toolDesc` / `invocation`
 - `agent/shell.go` 退化为"解析器 + 叶子"：`ShellResult`/`ShellChunk`/`streamCapture`/`writeStream`/`shellArgs`/`waitShell`/超时常量 + `shellProfile`/`resolveProfile`/`newProfile`/`probePrograms`（纯构造器，只收 `lookPath`；候选链取自平台抽象 `platform.Candidates`，算法 `firstAvailable` 可注入候选）
-- 平台文件收敛为平台抽象：`shell_platform.go`（无 tag，表定义 + 通用兜底 + `ProtectTerminalSignals`）、`shell_platform_posix.go`（`linux || darwin`）、`shell_platform_windows.go`（`windows`）、`shell_platform_stub.go`（其余平台），取代 `shell_unix.go`/`shell_other.go`/`shell_proc_*.go`/`shell_candidates_*.go`；tty 组（原 `shell_tty_unix.go`/`shell_tty_stub_unix.go`）后随 `ctty` 抽包删除（`docs/ctty.md`）
+- 平台文件收敛为平台抽象：`shell_platform.go`（无 tag，表定义 + `fillDefaults` 零值兜底 + `ProtectTerminalSignals`）、`shell_platform_posix.go`（`linux || darwin`，共享实现）、`shell_platform_linux.go`（`linux`，`/proc` 挂起探测）、`shell_platform_darwin.go`（`darwin`，`sysctl` 挂起探测）、`shell_platform_windows.go`（`windows`，`taskkill` 树杀）、`shell_platform_stub.go`（其余平台），取代 `shell_unix.go`/`shell_other.go`/`shell_proc_*.go`/`shell_candidates_*.go`；tty 组（原 `shell_tty_unix.go`/`shell_tty_stub_unix.go`）后随 `ctty` 抽包删除（`docs/ctty.md`）
 - `agent/tty_bridge.go`：保留 `TTYBridge` 接口，删包级注入，改 Option
 
 ## 4. 隐式依赖注入表
@@ -118,7 +118,7 @@ client := NewClient(cfg, ToolDefs(tool.profile))   // 工具清单随 client 定
 |---|---|---|
 | `dispatch`（`agent.go`） | `RunShellResult(ctx, cmd, timeout, interactive, cwd, a.cwd)` | `a.tool.run(ctx, shellRequest{Command:…, Cwd:…, TimeoutSec:…, Interactive: interactive})` |
 | `envSection`（`envprobe.go`） | 内部读包级 `ShellRuntime().profile` | 签名加 `profile *shellProfile`（保持纯函数）；`runtimePrompt()` 传 `a.tool.profile` |
-| `runShellDesc`（`agent.go`） | 收 `*shellRuntime` | 收 `*shellProfile` + `[]string`（描述还需要可用程序清单；能力句与清单取自平台抽象 `platform.Capabilities`/`platform.Programs`） |
+| `describeShell`（原 `runShellDesc` 转发层，`agent.go` → `shelltool.go`） | 收 `*shellRuntime` | 收 `shellPlatform` + `*shellProfile` + `[]string`（描述还需要可用程序清单；能力句、清单与平台名同取自平台抽象 `platform.Capabilities`/`platform.Programs`/`platform.GOOS`，2026-09-16 收敛 GOOS 到表并删转发层） |
 | `ToolDefs()`（`agent.go`） | 内部读 `ShellRuntime()` | 纯函数 `ToolDefs(tool *shellTool)`（描述依赖 profile+programs，收组件而非单 profile） |
 | `agent/llm.go` / `agent/llm_responses.go` | 每次请求调包级 `ToolDefs()` | `NewClient(cfg, tools []ToolDef)` 构造期注入，请求组装读 `c.tools` |
 | `main.go` | `agent.InitTTYBridge(readline.NewTTYBridge())` | `agent.New(cfg, agent.NoSave(*noSave), agent.WithTTYBridge(readline.NewTTYBridge()))` |
