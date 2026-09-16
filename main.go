@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/readline"
 	"github.com/LaoQi/tanya/repl"
 )
@@ -64,7 +65,8 @@ func main() {
 		os.Exit(1)
 	}
 	sem := repl.Semantics(cfg.Theme, cfg.Palette)
-	prof := term.DetectProfile(repl.ToolTTY())
+	facts := ctty.Probe()
+	prof := term.DetectProfile(facts.StdoutTTY, facts.VT)
 	switch cfg.Colors {
 	case "on":
 		if prof.Colors == term.LevelNone {
@@ -96,7 +98,8 @@ func main() {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
 	}
-	sink := repl.NewToolView(st, prof, sem, repl.ToolWidth, a.ToolOutputLines())
+	termFacts := repl.TermFacts{Cols: facts.Cols, ColsOK: facts.SizeOK}
+	sink := repl.NewToolView(st, prof, sem, termFacts.Width, a.ToolOutputLines())
 
 	if cmd == repl.CmdAsk {
 		ctx, done := repl.InterruptContext()
@@ -110,7 +113,7 @@ func main() {
 		return
 	}
 
-	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTheme(cfg.Theme, cfg.Palette))
+	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette))
 	if err != nil {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)

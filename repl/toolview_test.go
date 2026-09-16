@@ -147,9 +147,15 @@ func TestRenderToolEndTruncationMarker(t *testing.T) {
 	}
 }
 
-func TestToolWidthFallback(t *testing.T) {
-	if w := ToolWidth(); w <= 0 {
-		t.Errorf("宽度应回退 80: %d", w)
+func TestTermFactsWidth(t *testing.T) {
+	if w := (TermFacts{}).Width(); w != defaultToolWidth {
+		t.Errorf("无尺寸应回落 %d: %d", defaultToolWidth, w)
+	}
+	if w := (TermFacts{Cols: 0, ColsOK: true}).Width(); w != defaultToolWidth {
+		t.Errorf("零宽应回落 %d: %d", defaultToolWidth, w)
+	}
+	if w := (TermFacts{Cols: 120, ColsOK: true}).Width(); w != 120 {
+		t.Errorf("注入宽度应生效: %d", w)
 	}
 }
 

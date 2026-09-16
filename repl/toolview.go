@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
-	"github.com/LaoQi/tanya/readline"
 )
 
 const (
@@ -29,15 +28,6 @@ const (
 type tagLine struct {
 	text   string
 	stderr bool
-}
-
-func toolWidth(term readline.Terminal) int {
-	if term != nil {
-		if s, ok := term.Size(); ok && s.Cols > 0 {
-			return s.Cols
-		}
-	}
-	return 80
 }
 
 func RenderToolStart(name, args string, width int) string {
@@ -366,24 +356,5 @@ func (v *toolView) Handle(e agent.Event) {
 			v.justEnded = true
 		}
 		v.dirty = false
-	}
-}
-
-var toolTerm readline.Terminal
-var toolTTY bool
-
-func ToolWidth() int {
-	ensureToolTerm()
-	return toolWidth(toolTerm)
-}
-
-func ToolTTY() bool {
-	ensureToolTerm()
-	return toolTTY
-}
-
-func ensureToolTerm() {
-	if toolTerm == nil {
-		toolTerm, toolTTY = readline.NewTerminal()
 	}
 }

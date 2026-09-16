@@ -44,6 +44,11 @@
 | `GetTermios(fd) (Termios, error)` | 读 termios |
 | `SetTermios(fd, Termios) error` | 写 termios |
 | `SetTermiosFlush(fd, Termios) error` | 写 termios 并丢弃未读输入（raw 前用）|
+| `IsTerminal(fd int) bool` | 是否终端：posix `GetTermios` 成功、windows `GetConsoleMode` 成功（2026-09-16 增补）|
+| `Size(fd int) (int, int, bool)` | 终端尺寸：posix `TIOCGWINSZ`、windows `GetConsoleScreenBufferInfo` |
+| `EnableVT(fd int) bool` | 确保 ANSI 输出可用：windows 幂等开 `ENABLE_VIRTUAL_TERMINAL_PROCESSING`，posix 恒真 |
+| `ConsoleKind() string` | 控制台种类诊断串（windows: `WT_SESSION` → windows-terminal、`TERM_PROGRAM` → conpty，其余 console）|
+| `Facts` / `Probe()` | 探测结果聚合（StdinTTY/StdoutTTY/Cols/Rows/SizeOK/VT/Kind），`main` 单点调用 |
 | `ResetModes(tty *os.File) bool` | 复位终端模式：SGR、显示光标、自动换行、退出备用屏、关鼠标上报；**不含 `CSI r`（DECSTBM）**——该序列按 VT100/ECMA-48 语义会把光标移到滚动区首行。排除源于调用侧曾依赖 `CSI 1A` + `CR CSI K` 相对寻址（工具块 inline 重绘与 spinner 帧，2026-09-15 追加化后已移除，见 `docs/repl-status-append.md`）；该排除保留，以免未来再引入相对寻址渲染时踩坑 |
 
 设计原则：
@@ -57,8 +62,11 @@
 
 | 文件 | tag | 内容 |
 |---|---|---|
-| `ctty/ctty_posix.go` | `linux \|\| darwin` | ioctl 实现 + `Supported=true` |
-| `ctty/ctty_stub.go` | `!linux && !darwin` | no-op + `Supported=false`（覆盖 windows 及其它）|
+| `ctty/ctty.go` | 无 tag | `Facts` + `Probe()`（组合各分片原语）|
+| `ctty/ctty_posix.go` | `linux \|\| darwin` | ioctl 实现 + `Supported=true` + 探测原语 |
+| `ctty/ctty_windows.go` | `windows` | `GetConsoleMode`/`GetConsoleScreenBufferInfo`/`SetConsoleMode` 探测原语 |
+| `ctty/ctty_stub.go` | `!linux && !darwin` | 控制终端 no-op + `Supported=false`（含 windows）|
+| `ctty/ctty_probe_stub.go` | `!linux && !darwin && !windows` | 探测原语保守实现（全 false）|
 | `ctty/termios_linux.go` | `linux` | `Termios` 别名 + `TCGETS/TCSETS/TCSETSF` |
 | `ctty/termios_darwin.go` | `darwin` | `Termios` 别名 + `TIOCGETA/TIOCSETA/TIOCSETAF` |
 | `ctty/termios_stub.go` | `!linux && !darwin` | 空 `Termios` + 恒错实现 |

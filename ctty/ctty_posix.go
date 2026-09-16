@@ -11,6 +11,23 @@ import (
 
 const Supported = true
 
+func IsTerminal(fd int) bool {
+	_, err := GetTermios(fd)
+	return err == nil
+}
+
+func Size(fd int) (int, int, bool) {
+	ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
+	if err != nil || ws.Col == 0 || ws.Row == 0 {
+		return 0, 0, false
+	}
+	return int(ws.Col), int(ws.Row), true
+}
+
+func EnableVT(int) bool { return true }
+
+func ConsoleKind() string { return "" }
+
 func Open() (*os.File, error) {
 	return os.OpenFile("/dev/tty", os.O_RDWR, 0)
 }
