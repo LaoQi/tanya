@@ -111,3 +111,19 @@ func TestKeySourceReset(t *testing.T) {
 		t.Error("reset 应清空解析器残片状态")
 	}
 }
+
+func TestKeySourceDropsIncompleteRuneOnTimeout(t *testing.T) {
+	k := newScriptKeySource(scriptStep{data: []byte{0xe4}}, scriptStep{}, scriptStep{data: []byte("中")})
+	ev := readKeys(t, k, 1)[0]
+	if ev.Code != KeyRune || ev.Rune != '中' {
+		t.Fatalf("残片超时后应丢弃并继续读后续字符: %+v", ev)
+	}
+}
+
+func TestKeySourceIncompleteRuneThenHangUp(t *testing.T) {
+	src := &scriptReader{steps: []scriptStep{{data: []byte{0xe4}}, {}, {}}, hung: true}
+	k := &keySource{src: src}
+	if _, err := k.readKey(); err != io.EOF {
+		t.Fatalf("残片丢弃后挂断应返回 io.EOF（不得越界 panic）: %v", err)
+	}
+}

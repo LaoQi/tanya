@@ -50,7 +50,10 @@ func (k *keySource) readKey() (KeyEvent, error) {
 		}
 		if k.parser.needsMore() && n == 0 {
 			k.queue = append(k.queue, k.parser.flush()...)
-			break
+			if len(k.queue) > 0 {
+				break
+			}
+			continue
 		}
 		if len(k.queue) > 0 {
 			break
@@ -58,6 +61,9 @@ func (k *keySource) readKey() (KeyEvent, error) {
 		if h, ok := k.src.(hangUpDetector); ok && h.hungUp() {
 			return KeyEvent{}, io.EOF
 		}
+	}
+	if len(k.queue) == 0 {
+		return KeyEvent{}, io.EOF
 	}
 	ev := k.queue[0]
 	k.queue = k.queue[1:]
