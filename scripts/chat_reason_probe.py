@@ -18,7 +18,7 @@ def load_endpoint(path):
     base = os.environ.get("TANYA_BASE_URL", "")
     key = os.environ.get("TANYA_API_KEY", "")
     model = os.environ.get("TANYA_MODEL", "")
-    for candidate in [path, os.path.expanduser("~/.config/tanyan/config.yaml"), "config.yaml"]:
+    for candidate in [path, os.path.expanduser("~/.config/tanya/config.yaml"), "config.yaml"]:
         if not candidate or not os.path.exists(candidate):
             continue
         text = open(candidate, encoding="utf-8").read()

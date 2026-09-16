@@ -62,7 +62,7 @@ func defaultConfig() *Config {
 		ApiProtocol:     "responses",
 		Theme:           "nord",
 		UserAgent:       DefaultUserAgent,
-		GlobalSession:   filepath.Join(home, ".local", "share", "tanyan", "sessions"),
+		GlobalSession:   filepath.Join(home, ".local", "share", "tanya", "sessions"),
 		ToolOutputLines: 20,
 	}
 }
@@ -71,7 +71,7 @@ func LoadConfig(path string) (*Config, error) {
 	cfg := defaultConfig()
 	if path == "" {
 		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, ".config", "tanyan", "config.yaml")
+		path = filepath.Join(home, ".config", "tanya", "config.yaml")
 	}
 	b, err := os.ReadFile(path)
 	switch {
