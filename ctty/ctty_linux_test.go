@@ -226,31 +226,59 @@ func TestResetModesWritesEscapeState(t *testing.T) {
 	}
 }
 
-func TestResetModesKeepsCursor(t *testing.T) {
-	save := strings.Index(resetModes, "\x1b7")
-	restore := strings.Index(resetModes, "\x1b8")
-	if save < 0 || restore < save {
-		t.Fatalf("模式复位缺 DECSC/DECRC 包裹: %q", resetModes)
+func TestResetModesHasNoCursorAnchor(t *testing.T) {
+	for _, seq := range []string{"\x1b7", "\x1b8"} {
+		if strings.Contains(resetModes, seq) {
+			t.Errorf("模式复位不得内含 %q：DECSC/DECRC 的保存槽归调用方（子进程启动前 SaveCursor、复位后 RestoreCursor），串内自包会覆盖该槽，主屏场景下退回「块体从顶部覆盖旧数据」: %q", seq, resetModes)
+		}
 	}
-	if strings.Count(resetModes, "\x1b7") != 1 || strings.Count(resetModes, "\x1b8") != 1 {
-		t.Errorf("DECSC/DECRC 应各出现一次: %q", resetModes)
+	movers := []string{"\x1b[?1049l", "\x1b[r"}
+	for _, seq := range movers {
+		if strings.Index(resetModes, seq) < 0 {
+			t.Errorf("模式复位缺会移动光标的 %q: %q", seq, resetModes)
+		}
 	}
-	for _, seq := range []string{"\x1b[r", "\x1b[?1049l"} {
+	for _, seq := range []string{"\x1b[0m", "\x0f", "\x1b(B", "\x1b)B", "\x1b[?25h", "\x1b[?7h"} {
 		idx := strings.Index(resetModes, seq)
 		if idx < 0 {
+			t.Errorf("模式复位缺 %q: %q", seq, resetModes)
 			continue
 		}
-		if idx < save || idx > restore {
-			t.Errorf("%q 会移动光标（DECSTBM 把光标移到滚动区首行；DECRST 1049 即使在主屏也按 DECRC 恢复保存槽），必须落在 DECSC…DECRC 内: %q", seq, resetModes)
+		if idx > strings.Index(resetModes, movers[0]) {
+			t.Errorf("属性类复位 %q 必须排在 %q 之前：DECRC 会把保存槽里的属性与字符集原样恢复回去: %q", seq, movers[0], resetModes)
 		}
 	}
-	for _, seq := range []string{"\x0f", "\x1b(B", "\x1b)B"} {
-		idx := strings.Index(resetModes, seq)
-		if idx < 0 || idx > save {
-			t.Errorf("字符集复位 %q 必须出现在 DECSC 之前：DECSC 会保存字符集与属性，放后面会被 DECRC 原样恢复回去: %q", seq, resetModes)
-		}
+}
+
+func TestCursorAnchorPrimitives(t *testing.T) {
+	master, slave, err := openTestPTY(t)
+	if err != nil {
+		t.Skipf("分配 pty: %v", err)
 	}
-	if strings.Index(resetModes, "\x1b[?1049l") < save {
-		t.Errorf("DECRST 1049 必须在 DECSC 之后：主屏场景下它无条件 DECRC 主屏保存槽，前导 DECSC 把当前位置写进该槽，1049 才能回到原处（挪到前面会恢复到陈旧槽值，即原始「块体从顶部覆盖」的回归）: %q", resetModes)
+	defer master.Close()
+	defer slave.Close()
+	buf := make([]byte, 16)
+	if !SaveCursor(slave) {
+		t.Fatal("SaveCursor 应写入成功")
+	}
+	n, err := master.Read(buf)
+	if err != nil {
+		t.Fatalf("读 pty: %v", err)
+	}
+	if got := string(buf[:n]); got != "\x1b7" {
+		t.Errorf("SaveCursor 应只写 DECSC，得 %q", got)
+	}
+	if !RestoreCursor(slave) {
+		t.Fatal("RestoreCursor 应写入成功")
+	}
+	n, err = master.Read(buf)
+	if err != nil {
+		t.Fatalf("读 pty: %v", err)
+	}
+	if got := string(buf[:n]); got != "\x1b8" {
+		t.Errorf("RestoreCursor 应只写 DECRC，得 %q", got)
+	}
+	if SaveCursor(nil) || RestoreCursor(nil) {
+		t.Error("nil tty 应返回 false")
 	}
 }

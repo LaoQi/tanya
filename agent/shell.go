@@ -220,6 +220,11 @@ const (
 	stopPollHits     = 2
 )
 
+var (
+	openTTY      = ctty.Open
+	isForeground = ctty.IsForeground
+)
+
 func waitShell(cmd *exec.Cmd, stopped *bool) error {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -247,8 +252,9 @@ func waitShell(cmd *exec.Cmd, stopped *bool) error {
 
 func runShellForeground(ctx context.Context, command string, timeoutSec int, profile *shellProfile, dir string) *ShellResult {
 	res := &ShellResult{Command: command, Cwd: dir}
-	tty, _ := ctty.Open()
+	tty, _ := openTTY()
 	handed := false
+	anchored := false
 	var saved ctty.Termios
 	hasSaved := false
 	if tty != nil {
@@ -266,8 +272,9 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 		if handed {
 			ctty.SetForeground(int(tty.Fd()), ctty.OwnPgrp())
 		}
-		if ctty.IsForeground(int(tty.Fd())) {
+		if anchored && isForeground(int(tty.Fd())) {
 			ctty.ResetModes(tty)
+			ctty.RestoreCursor(tty)
 		}
 		tty.Close()
 	}()
@@ -288,6 +295,9 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 	if tty != nil {
 		cmd.Stdin = tty
 	}
+	if tty != nil && isForeground(int(tty.Fd())) {
+		anchored = ctty.SaveCursor(tty)
+	}
 	if err := cmd.Start(); err != nil {
 		switch {
 		case ctx.Err() != nil:
@@ -301,7 +311,7 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 		res.Duration = time.Since(start)
 		return res
 	}
-	if tty != nil && ctty.IsForeground(int(tty.Fd())) {
+	if anchored {
 		handed = ctty.SetForeground(int(tty.Fd()), cmd.Process.Pid)
 	}
 	err := waitShell(cmd, &res.Stopped)
