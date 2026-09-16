@@ -8,14 +8,14 @@ import (
 
 func TestPromptBuilderInjectedRead(t *testing.T) {
 	ws := "/fake/ws"
-	global := "/fake/home/.config/tanyan/AGENTS.md"
+	global := "/fake/home/.config/tanya/AGENTS.md"
 	files := map[string]string{
 		global:                         "全局 G",
 		filepath.Join(ws, "AGENTS.md"): "项目 P",
 	}
 	b := newPromptBuilder(ws, global, func(p string) string { return files[p] })
 	want := DefaultSystemPrompt +
-		"\n\n# 全局说明（~/.config/tanyan/AGENTS.md）\n\n全局 G" +
+		"\n\n# 全局说明（~/.config/tanya/AGENTS.md）\n\n全局 G" +
 		"\n\n# 项目说明（AGENTS.md）\n\n项目 P"
 	if b.system() != want {
 		t.Errorf("system = %q", b.system())
@@ -42,7 +42,7 @@ func TestPromptBuilderInjectedRead(t *testing.T) {
 
 func TestPromptBuilderAdopt(t *testing.T) {
 	ws := "/fake/ws"
-	global := "/fake/home/.config/tanyan/AGENTS.md"
+	global := "/fake/home/.config/tanya/AGENTS.md"
 	files := map[string]string{filepath.Join(ws, "AGENTS.md"): "项目 P"}
 	b := newPromptBuilder(ws, global, func(p string) string { return files[p] })
 	b.adopt("文件里的 system")

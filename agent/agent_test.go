@@ -369,13 +369,13 @@ func TestSystemPromptAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(home, ".config", "tanyan"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, ".config", "tanya"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeAgents(t, filepath.Join(home, ".config", "tanyan", "AGENTS.md"), "全局规则 G")
+	writeAgents(t, filepath.Join(home, ".config", "tanya", "AGENTS.md"), "全局规则 G")
 	a.NewSession()
 	want = DefaultSystemPrompt +
-		"\n\n# 全局说明（~/.config/tanyan/AGENTS.md）\n\n全局规则 G" +
+		"\n\n# 全局说明（~/.config/tanya/AGENTS.md）\n\n全局规则 G" +
 		"\n\n# 项目说明（AGENTS.md）\n\n项目规则 A"
 	if a.systemPrompt() != want {
 		t.Errorf("双层组装异常: %q", a.systemPrompt())

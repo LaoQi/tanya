@@ -28,7 +28,7 @@ func (p *promptBuilder) reset() {
 func (p *promptBuilder) build() string {
 	prompt := DefaultSystemPrompt
 	if global := p.read(p.globalPath); global != "" {
-		prompt += "\n\n# 全局说明（~/.config/tanyan/AGENTS.md）\n\n" + global
+		prompt += "\n\n# 全局说明（~/.config/tanya/AGENTS.md）\n\n" + global
 	}
 	if project := p.read(filepath.Join(p.cwd, "AGENTS.md")); project != "" {
 		prompt += "\n\n# 项目说明（AGENTS.md）\n\n" + project
@@ -58,7 +58,7 @@ func (p *promptBuilder) runtime(env string) string {
 
 func globalAgentsPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "tanyan", "AGENTS.md")
+	return filepath.Join(home, ".config", "tanya", "AGENTS.md")
 }
 
 func readAgentsFile(path string) string {

@@ -18,7 +18,7 @@ WORDS = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel
 def load_endpoint(path):
     base = os.environ.get("TANYA_BASE_URL", "")
     key = os.environ.get("TANYA_API_KEY", "")
-    for candidate in [path, os.path.expanduser("~/.config/tanyan/config.yaml"), "config.yaml"]:
+    for candidate in [path, os.path.expanduser("~/.config/tanya/config.yaml"), "config.yaml"]:
         if base and key:
             break
         if not candidate or not os.path.exists(candidate):
