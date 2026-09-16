@@ -7,9 +7,12 @@
   3. cu_clamped     相对上移超过光标所在行（会被视口夹到顶行 → 整块从屏幕顶部重画）
   4. autowrap_off / cursor_hidden / margins_set / alt_screen_on / sgr_open  结束时的终端状态
 
+诊断计数（不断言，仅报告）：cursor_restore —— 光标被“恢复”且位置确实发生跳变（裸发
+`DECRST 1049` 或 `CSI r` 的典型症状；被 DECSC/DECRC 包住时该恢复为 no-op，不计数）。
+
 场景 want 语义：
   clean  全部不变量必须为 0/off（回归门）
-  leak   期望出现 expect 列出的违反项（已知缺口复现；P1 修好后把 want 改成 clean）
+  leak   期望出现 expect 列出的违反项（已知缺口复现；修好后把 want 改成 clean）
   note   只报告不断言（内容层面的已知限制）
 
 用法：make build && python3 scripts/render_audit.py
@@ -60,6 +63,7 @@ class VT:
         self.cursor_visible = True
         self.alt = False
         self.saved_alt = None
+        self.saved_slot = (0, 0)
         self.sgr_open = False
         self.events = {"overwrite": 0, "region_scroll": 0, "cu_clamped": 0}
         self.samples = []
@@ -140,20 +144,34 @@ class VT:
             for r in range(self.rows):
                 self._blank(r)
 
+    def save_slot(self):
+        self.saved_slot = (self.row, self.col)
+
+    def restore_slot(self):
+        r, c = self.saved_slot
+        r, c = min(self.rows - 1, max(0, r)), min(self.cols - 1, max(0, c))
+        if (r, c) != (self.row, self.col):
+            self.note("cursor_restore", "(%d,%d) → (%d,%d)" % (self.row, self.col, r, c))
+        self.row, self.col = r, c
+        self.wrap_pending = False
+
     def _switch_alt(self, on):
         if on and not self.alt:
             self.saved_alt = ([list(r) for r in self.grid], self.row, self.col)
+            self.save_slot()
             self.alt = True
             for r in range(self.rows):
                 self._blank(r)
             self.row = self.col = 0
-        elif not on and self.alt:
-            self.alt = False
-            if self.saved_alt:
+        elif not on:
+            had = self.alt
+            if had and self.saved_alt:
                 grid, r, c = self.saved_alt
                 self.grid = grid
                 self.row, self.col = r, c
                 self.saved_alt = None
+            self.alt = False
+            self.restore_slot()
 
     CSI_RE = re.compile(r"\x1b\[([0-9;?]*)([ -/]*)([@-~])")
 
@@ -178,9 +196,9 @@ class VT:
                     continue
                 if i + 1 < n and data[i + 1] in "78":
                     if data[i + 1] == "7":
-                        self.cursor_saved = (self.row, self.col, self.sgr_open)
-                    elif getattr(self, "cursor_saved", None):
-                        self.row, self.col, self.sgr_open = self.cursor_saved
+                        self.save_slot()
+                    else:
+                        self.restore_slot()
                     self.wrap_pending = False
                 i += 2
                 continue
@@ -468,6 +486,10 @@ def sh(command):
     return json.dumps({"command": command}, ensure_ascii=False)
 
 
+def shi(command):
+    return json.dumps({"command": command, "interactive": True}, ensure_ascii=False)
+
+
 SCENARIOS = [
     {
         "name": "clean-markdown",
@@ -497,9 +519,8 @@ SCENARIOS = [
         "screen_has": ["▸ run_shell", "共 31 行", "exit 0"],
     },
     {
-        "name": "leak-decpstbm",
-        "want": "leak",
-        "expect": ["region_scroll"],
+        "name": "clean-tty-scrollregion",
+        "want": "clean",
         "prompt": "用 run_shell 跑一条命令\n",
         "steps": [
             {"tool_calls": [{"name": "run_shell",
@@ -509,15 +530,28 @@ SCENARIOS = [
         "screen_has": ["▸ run_shell"],
     },
     {
-        "name": "leak-terminal-modes",
-        "want": "leak",
-        "expect": ["autowrap_off", "cursor_hidden"],
+        "name": "clean-tty-modes",
+        "want": "clean",
         "prompt": "用 run_shell 跑一条命令\n",
         "steps": [
             {"tool_calls": [{"name": "run_shell", "args": sh("printf '\\033[?7l\\033[?25l' > /dev/tty")}]},
             {"content": "命令已执行。\n"},
         ],
         "screen_has": ["▸ run_shell"],
+    },
+    {
+        "name": "clean-interactive-release",
+        "want": "clean",
+        "inputs": [
+            {"data": "用 run_shell 跑一条需要输入密码的命令（interactive）\n", "wait": 2.5},
+            {"data": "s3cretpw\n", "wait": 1.0},
+        ],
+        "steps": [
+            {"tool_calls": [{"name": "run_shell",
+                             "args": shi("read -s -p 'Password: ' pw; echo \"len=${#pw}\"")}]},
+            {"content": "已收到输入。\n"},
+        ],
+        "screen_has": ["▸ run_shell", "等待终端输入", "len=8", "exit 0"],
     },
     {
         "name": "leak-picker-unpaged",
@@ -543,6 +577,8 @@ SCENARIOS = [
         "screen_has": ["LEAK-PARTIAL"],
     },
 ]
+
+DIAGNOSTIC = ("cursor_restore",)
 
 # ---------------------------------------------------------------- 主流程
 
@@ -584,7 +620,8 @@ def run_case(binary, case, cols, rows, timeout, dump, raw_dir=""):
             f.write(raw)
     vt = replay(raw, cols, rows)
     state = vt.state()
-    viol = {k: v for k, v in vt.events.items() if v}
+    viol = {k: v for k, v in vt.events.items() if v and k not in DIAGNOSTIC}
+    diag = {k: v for k, v in vt.events.items() if v and k in DIAGNOSTIC}
     viol.update({k: v for k, v in state.items() if v})
     screen = vt.dump()
     missing = [s for s in case.get("screen_has", []) if s not in screen]
@@ -592,7 +629,7 @@ def run_case(binary, case, cols, rows, timeout, dump, raw_dir=""):
         print("=" * 20, case["name"], "=" * 20)
         print(vt.dump())
     ok, why = verdict(case, viol, missing, raw)
-    return ok, viol, missing, len(raw), why, vt.samples
+    return ok, viol, missing, len(raw), why, vt.samples, diag
 
 
 def verdict(case, viol, missing, raw):
@@ -631,7 +668,7 @@ def main():
     fails = []
     print("tanya 输出侧渲染审计  %dx%d  %s" % (args.cols, args.rows, args.bin))
     for case in cases:
-        ok, viol, missing, nbytes, why, samples = run_case(
+        ok, viol, missing, nbytes, why, samples, diag = run_case(
             args.bin, case, args.cols, args.rows, args.timeout, args.dump == case["name"], args.raw)
         tag = {"clean": "clean", "leak": "leak", "note": "note "}[case["want"]]
         print("  %-22s %-5s %s  %s" % (case["name"], tag, "PASS" if ok else "FAIL", why))
@@ -641,6 +678,8 @@ def main():
             print("       不变量: %s" % viol)
             for kind, detail, row, col in samples[:3]:
                 print("         · %s @row=%d col=%d %s" % (kind, row, col, detail))
+        if diag:
+            print("       诊断: %s" % diag)
     if fails:
         print("失败: %s" % ", ".join(fails))
         return 1

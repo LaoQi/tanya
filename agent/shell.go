@@ -266,6 +266,9 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 		if handed {
 			ctty.SetForeground(int(tty.Fd()), ctty.OwnPgrp())
 		}
+		if handed || ctty.IsForeground(int(tty.Fd())) {
+			ctty.ResetModes(tty)
+		}
 		tty.Close()
 	}()
 	start := time.Now()
