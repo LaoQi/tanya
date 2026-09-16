@@ -67,9 +67,11 @@ func TestHandleCommandExit(t *testing.T) {
 	a := newSessTestAgent(t, t.TempDir())
 	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
 
-	exit := r.handleCommand("/exit")
-	if !exit || out.String() != "再见\n" {
-		t.Errorf("exit: ret=%v out=%q want %q", exit, out.String(), "再见\n")
+	if !r.handleCommand("/exit") {
+		t.Error("/exit 应返回 true 表示退出")
+	}
+	if out.String() != "" {
+		t.Errorf("退出输出由 Run 统一收尾，handleCommand 不应写字节: %q", out.String())
 	}
 }
 

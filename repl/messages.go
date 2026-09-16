@@ -1,7 +1,6 @@
 package repl
 
 const (
-	MsgBye          = "再见"
 	MsgErrLineFmt   = "错误: %v"
 	MsgAskUsage     = "用法: tanya ask \"问题\"\n"
 	MsgNoSessions   = "(无历史会话)\n"
@@ -108,6 +107,15 @@ const (
 	MsgStatusWaiting  = "» 等待响应"
 	MsgStatusThinking = "» 思考中"
 	MsgStatusRunning  = "» 执行中"
+)
+
+const (
+	MsgFarewellSessionFmt = "会话 %s · 时长 %s · 消息 %d 条"
+	MsgFarewellTimeFmt    = "时长 %s · 消息 %d 条"
+	MsgFarewellUsageFmt   = "用量 %s"
+	MsgFarewellCacheTail  = "· 缓存 %s"
+	MsgFarewellFileFmt    = "会话文件 %s"
+	MsgFarewellNoFile     = "会话文件 未写入（不落盘模式）"
 )
 
 const helpText = `斜杠命令：

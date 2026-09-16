@@ -56,6 +56,13 @@ func (s *sessionStore) rotate() {
 
 func (s *sessionStore) path() string { return s.file }
 
+func (s *sessionStore) id() string {
+	if s.file == "" {
+		return ""
+	}
+	return strings.TrimSuffix(filepath.Base(s.file), ".jsonl")
+}
+
 func (s *sessionStore) append(msgs []Message, system string) error {
 	if s.disabled || s.saved >= len(msgs) {
 		return nil

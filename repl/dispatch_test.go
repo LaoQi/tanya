@@ -69,7 +69,16 @@ func TestSlashCommandsAllHandled(t *testing.T) {
 			continue
 		}
 		r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
-		r.handleCommand(cmd)
+		exit := r.handleCommand(cmd)
+		if cmd == "/exit" || cmd == "/quit" {
+			if !exit || out.String() != "" || errb.String() != "" {
+				t.Errorf("%q 应静默返回退出: ret=%v out=%q err=%q", cmd, exit, out.String(), errb.String())
+			}
+			continue
+		}
+		if exit {
+			t.Errorf("%q 不应退出", cmd)
+		}
 		if out.String() == "" && errb.String() == "" {
 			t.Errorf("%q 在白名单内但没有任何输出，说明 handleCommand 缺少对应分支", cmd)
 		}
