@@ -75,6 +75,7 @@ const (
 	MsgControlBadKey         = "未知 key %q（可用: %s）"
 	MsgControlReadOnlyKey    = "%q 是只读 key（可写: %s）"
 	MsgControlNeedValue      = "set 需要 value（%s）"
+	MsgControlConfigPath     = "配置文件: %s\n改动需重启 tanya 生效（本次会话可用 agent_custom 调整 model/reasoning_effort）"
 	MsgControlModelSpec      = "非空模型名"
 	MsgControlEffortSpec     = "minimal/low/medium/high/max/off，off 表示清空"
 )

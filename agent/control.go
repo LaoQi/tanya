@@ -12,7 +12,7 @@ const agentModelListLimit = 50
 
 const agentSessionListLimit = 20
 
-var agentKeyNames = []string{"model", "reasoning_effort", "models", "usage", "stat", "sessions"}
+var agentKeyNames = []string{"model", "reasoning_effort", "models", "usage", "stat", "sessions", "config_path"}
 
 var agentWritableKeys = []string{"model", "reasoning_effort"}
 
@@ -33,6 +33,7 @@ type configTarget interface {
 	SetReasoningEffort(string) error
 	ListModels() ([]string, error)
 	ListSessions() ([]SessionInfo, error)
+	ConfigPath() string
 	NoSave() bool
 	Stats() Stats
 }
@@ -71,10 +72,11 @@ func (t *agentTool) keys() map[string]keySpec {
 			read:     func() string { return fmt.Sprintf(MsgControlEffort, effortLabel(t.target.ReasoningEffort())) },
 			write:    t.writeEffort,
 		},
-		"models":   {read: t.readModels},
-		"usage":    {read: t.readUsage},
-		"stat":     {read: t.readStat},
-		"sessions": {read: t.readSessions},
+		"models":      {read: t.readModels},
+		"usage":       {read: t.readUsage},
+		"stat":        {read: t.readStat},
+		"sessions":    {read: t.readSessions},
+		"config_path": {read: t.readConfigPath},
 	}
 }
 
@@ -125,6 +127,10 @@ func (t *agentTool) writeEffort(v string) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf(MsgControlEffortSwitch, old, effortLabel(t.target.ReasoningEffort())), nil
+}
+
+func (t *agentTool) readConfigPath() string {
+	return fmt.Sprintf(MsgControlConfigPath, t.target.ConfigPath())
 }
 
 func (t *agentTool) readModels() string {
@@ -200,7 +206,7 @@ func agentParams() string {
 	keys, _ := json.Marshal(agentKeyNames)
 	return fmt.Sprintf(`{"type":"object","properties":{`+
 		`"action":{"type":"string","enum":["get","set"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）"},`+
-		`"key":{"type":"string","enum":%s,"description":"可写键 %s；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）"},`+
+		`"key":{"type":"string","enum":%s,"description":"可写键 %s；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）、config_path（生效配置文件绝对路径，可用 run_shell 读取或修改，改动需重启生效）"},`+
 		`"value":{"type":"string","description":"set 的新值（get 时忽略）。reasoning_effort 取 minimal/low/medium/high/max/off，off 表示清空该字段"}},`+
 		`"required":["action","key"]}`, keys, agentWritableLabel())
 }

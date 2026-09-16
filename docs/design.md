@@ -187,7 +187,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 `agent_custom` 是唯一带状态的工具，形态为**键值化三参数**：`action`（`get`/`set`）+ `key`（能力名，enum）+ `value`（仅 `set` 且 key 可写时使用）。顶层参数形态恒定，能力面由 `key` 展开；实现走 key 表（`keySpec{writable, read, write}`）驱动，新增能力 = 表加一行 + `key` enum 加一值：
 
 - 可写 key：`model`（非空字符串）、`reasoning_effort`（minimal/low/medium/high/max/off）——`set` 校验失败不改动状态，对下一次请求生效
-- 只读 key：`models`（服务端可用模型列表，超 50 项截断并标注总数）、`usage`（最近一次请求的上下文 tokens、缓存命中、命中率）、`stat`（会话 id、消息数、累计 token；`--no-save` 时会话显示 `(不落盘)`）、`sessions`（本工作区会话列表 + 每个会话 `.jsonl` 的绝对路径，id 倒序列前 20）
+- 只读 key：`models`（服务端可用模型列表，超 50 项截断并标注总数）、`usage`（最近一次请求的上下文 tokens、缓存命中、命中率）、`stat`（会话 id、消息数、累计 token；`--no-save` 时会话显示 `(不落盘)`）、`sessions`（本工作区会话列表 + 每个会话 `.jsonl` 的绝对路径，id 倒序列前 20）、`config_path`（生效配置文件绝对路径 + 改动需重启生效的提示——`Config.Path` 由 `LoadConfig` 记录，`-c` 优先、`~` 展开并绝对化；只回路径不回内容，读文件由模型自理，改自身配置走 `run_shell`）
 - 只读 key 出现在 `set` 里**明确报错**（不静默忽略）；未知 `action`/`key`、缺 `value`、值非法均返回带可修建议的错误文本 (`MsgErrPrefix` 前缀)
 
 `get sessions` 只给列表与文件位置，**不读内容**——读内容交回 `run_shell`（符合「新能力优先用 shell 命令组合实现」）。依赖经窄接口 `configTarget`（`*Agent` 满足，测试可注入替身）注入，与 `shellTool` 的构造期注入同一风格。改动只写内存 `Config`：不落盘、不入会话文件，`/load` 或重启后回落配置文件值；`repl` 的 `{model}`/`{effort}` 占位符每轮现读 `Agent`，自动跟上，无需事件通知。`SetModel` 带空值校验（`/model` 命令共用同一路径）。形态选型与偏差记录见 `docs/agent-control-tool.md`。
@@ -314,6 +314,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `model` | `deepseek-v4-flash` | 模型名（运行时可被 `agent_custom` 工具改写，仅本次会话） |
 | `temperature` | 0.7 | |
 | `reasoning_effort` | 空 | 思考等级 minimal/low/medium/high/max，非法值忽略；空则请求不带 `reasoning_effort` 字段（运行时可被 `agent_custom` 工具改写，仅本次会话） |
+| `path`（只读，非 yaml 项） | — | 生效配置文件绝对路径，仅经 `agent_custom get config_path` 暴露给模型；默认 `~/.config/tanya/config.yaml`，`-c` 覆盖 |
 | `show_reasoning` | `false` | 思维链是否随对话显示（markdown 渲染 + `─── 思考 ───` / `─── 思考结束 · 3.2s ───` 分隔；仅 REPL rich 档生效，无 env）；REPL 内 `/reasoning on\|off` 可运行时切换 |
 | `api_protocol` | `responses` | API 协议 responses/chat（见《LLM 接入》），非法值启动报错 |
 | `colors` | `auto` | 终端配色 auto（跟随终端能力与 `NO_COLOR`）/ on（强制开色）/ off（强制纯文本） |

@@ -17,6 +17,7 @@ type Config struct {
 	Temperature     float64           `yaml:"temperature"`
 	ReasoningEffort string            `yaml:"reasoning_effort"`
 	ShowReasoning   bool              `yaml:"show_reasoning"`
+	Path            string            `yaml:"-"`
 	ApiProtocol     string            `yaml:"api_protocol"`
 	UserAgent       string            `yaml:"user_agent"`
 	GlobalSession   string            `yaml:"global_session"`
@@ -54,9 +55,23 @@ func normalizeApiProtocol(v string) string {
 
 const DefaultUserAgent = "pi/0.85.0 (linux; node/v22.14.0; x64)"
 
+func defaultConfigPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "tanya", "config.yaml")
+}
+
+func normalizeConfigPath(p string) string {
+	p = expandHome(p)
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
+}
+
 func defaultConfig() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
+		Path:            defaultConfigPath(),
 		BaseURL:         "https://api.openai.com/v1",
 		Model:           "deepseek-v4-flash",
 		Temperature:     0.7,
@@ -71,9 +86,11 @@ func defaultConfig() *Config {
 func LoadConfig(path string) (*Config, error) {
 	cfg := defaultConfig()
 	if path == "" {
-		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, ".config", "tanya", "config.yaml")
+		path = cfg.Path
+	} else {
+		path = normalizeConfigPath(path)
 	}
+	cfg.Path = path
 	b, err := os.ReadFile(path)
 	switch {
 	case err == nil:

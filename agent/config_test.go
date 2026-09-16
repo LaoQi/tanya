@@ -56,6 +56,31 @@ func TestLoadConfigApiProtocol(t *testing.T) {
 	}
 }
 
+func TestConfigPathDefaultAndExplicit(t *testing.T) {
+	cfg := defaultConfig()
+	if cfg.Path == "" || !filepath.IsAbs(cfg.Path) {
+		t.Fatalf("默认配置路径应非空且绝对: %q", cfg.Path)
+	}
+	path := filepath.Join(t.TempDir(), "nonexistent.yaml")
+	fallback, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fallback.Path != path {
+		t.Errorf("显式路径应记录生效值: %q", fallback.Path)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := normalizeConfigPath("~/x.yaml"); got != filepath.Join(home, "x.yaml") {
+		t.Errorf("波浪号展开: %q", got)
+	}
+	if got := normalizeConfigPath("rel.yaml"); !filepath.IsAbs(got) {
+		t.Errorf("相对路径应绝对化: %q", got)
+	}
+}
+
 func TestLoadConfigMissingFile(t *testing.T) {
 	cfg, err := LoadConfig(filepath.Join(t.TempDir(), "nonexistent.yaml"))
 	if err != nil {
