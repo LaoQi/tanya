@@ -199,7 +199,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## 会话
 
-- 每次启动/`/new` 开启新会话，id 为启动时间戳（`20060102-150405`）
+- 每次启动/`/new` 开启新会话，id 为启动时间戳（`20060102-150405`）：`time.Now` 就地取、不做时钟注入（与 shell 执行层同一口径；文件名可用正则断言）
 - 存储模式（CLI `-m` > env `TANYA_SESSION_MODE` > 配置 `session_mode`，默认 auto）：
   - `auto`：当前目录存在 `.tanya/` → local，否则 global
   - `local`：`<启动目录>/.tanya/sessions/`（.tanya 本身即项目隔离，不叠加 workspace-id）
