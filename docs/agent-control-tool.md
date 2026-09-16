@@ -86,7 +86,7 @@ v1 §2 曾用"schema 变化击穿 cache / 前缀每轮失效"论证"单工具 + 
 ## 7. schema（golden）
 
 ```json
-{"type":"object","properties":{"action":{"type":"string","enum":["get","set"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）"},"key":{"type":"string","enum":["model","reasoning_effort","models","usage","stat","sessions","config_path"],"description":"可写键 model、reasoning_effort；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）"},"value":{"type":"string","description":"set 的新值（get 时忽略）。reasoning_effort 取 minimal/low/medium/high/max/off，off 表示清空该字段"}},"required":["action","key"]}
+{"type":"object","properties":{"action":{"type":"string","enum":["get","set"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）"},"key":{"type":"string","enum":["model","reasoning_effort","models","usage","stat","sessions","config_path"],"description":"可写键 model、reasoning_effort；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）、config_path（生效配置文件绝对路径，可用 run_shell 读取或修改，改动需重启生效）"},"value":{"type":"string","description":"set 的新值（get 时忽略）。reasoning_effort 取 minimal/low/medium/high/max/off，off 表示清空该字段"}},"required":["action","key"]}
 ```
 
 - `action` 与 `key` **双 enum**：这是模型填对参数的唯一约束来源（`value` 无法在 schema 层约束，见 §5）。
@@ -242,3 +242,5 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 2. **必须带生效语义**：返回值固定两行，第二行写明"改动需重启 tanya 生效（本次会话可用 agent_custom 调整 model/reasoning_effort）"，避免模型误以为改完即生效（配置在 `LoadConfig` 一次加载，运行期不重载；`model`/`reasoning_effort` 的内存覆盖路径是另一回事）。
 3. **按需查询、不做常驻注入**：不写进 system 环境段、不加 `/` 命令、不做运行期 reload——用户拍板"平时使用机会较少，只在需要获取配置时取"。
 4. 只读语义与其他只读 key 一致：`set config_path` 明确报错，不改状态。
+5. **代价**：`key` 的 enum 与描述属于工具 schema 前缀，加值/改文案会打掉一次 prompt cache（见 `AGENTS.md` 的工具清单约束），属一次性预热成本。
+6. 文档 §7 的 golden 由 `TestAgentToolParamsDocInSync` 与 `agentParams()` 全串比对守卫，改 enum/描述需同步改本节的两处。
