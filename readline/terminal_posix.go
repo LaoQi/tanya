@@ -11,19 +11,20 @@ import (
 
 type unixTerminal struct {
 	in    *os.File
+	out   *os.File
 	saved ctty.Termios
 	keys  keySource
 }
 
 func openTerminal() (Terminal, error) {
-	return openTerminalFile(os.Stdin)
+	return openTerminalFile(os.Stdin, os.Stdout)
 }
 
-func openTerminalFile(in *os.File) (*unixTerminal, error) {
+func openTerminalFile(in, out *os.File) (*unixTerminal, error) {
 	if os.Getenv("TANYA_NO_RAW_INPUT") != "" {
 		return nil, ErrUnsupported
 	}
-	t := &unixTerminal{in: in}
+	t := &unixTerminal{in: in, out: out}
 	if _, err := ctty.GetTermios(int(in.Fd())); err != nil {
 		return nil, err
 	}
@@ -56,7 +57,10 @@ func (t *unixTerminal) Restore() {
 }
 
 func (t *unixTerminal) Size() (Size, bool) {
-	cols, rows, ok := ctty.Size(int(os.Stdout.Fd()))
+	if t.out == nil {
+		return Size{}, false
+	}
+	cols, rows, ok := ctty.Size(int(t.out.Fd()))
 	if !ok {
 		return Size{}, false
 	}
