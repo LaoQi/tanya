@@ -21,17 +21,18 @@ session_mode: auto
 # colors: auto
 # 内置配色主题（影响语义色/提示符/markdown 标题与代码色，REPL 内 /theme 可切换）：
 # default 默认（蓝绿黄高亮） / minimal 克制灰阶 / solar 冷暖青金（低饱和护眼） / vivid 高对比霓虹
-# / nord 冷蓝灰 / gruv 暖金复古 / dusk 蓝紫夜
+# nord 冷蓝灰 / gruv 暖金复古 / dusk 蓝紫夜
 # theme: nord
 # 语义色覆盖：叠加在当前主题之上（仅影响状态行/等待动画/菜单选中等 UI 色，提示符随主题不受影响）
+# 可覆盖的语义色：info / warn / ok / error / dim / accent / think / run
 # 可用色名：black red green yellow blue magenta cyan white 与 bright_ 前缀亮色
 # palette:
 #   info: bright_cyan
 #   error: bright_red
 
-# 工具输出在终端最多显示的行数（超出后仅显示头 3 行 + 尾 2 行与总数提示），范围 1-1000
+# 工具输出在终端最多显示的行数（run_shell 超出后仅显示头 3 行 + 尾 2 行与总数提示，其余工具只保留前 N 行并附总行数），范围 1-1000
 tool_output_lines: 20
 
 # run_shell 使用的 shell：名字或绝对路径（如 zsh、/usr/bin/fish），缺省自动探测
-# Windows 仅用 pwsh；Linux/macOS 依次尝试 bash → sh → ash；找不到则不注册 run_shell
+# Windows 依次尝试 pwsh → powershell（Windows PowerShell 5.1 兜底）；Linux/macOS 依次尝试 bash → sh → ash；全部落空（含配置的 shell 不存在）则启动报错退出
 # shell: bash
