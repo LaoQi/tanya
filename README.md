@@ -50,7 +50,7 @@ model: deepseek-v4-flash
 
 `reasoning_effort` 配置项（env `TANYA_REASONING_EFFORT`）设置思考等级，随请求发送 OpenAI 标准字段（o 系 / gpt-5 及兼容网关支持），可选 `minimal` / `low` / `medium` / `high` / `max`，留空不发送；REPL 内 `/think` 可运行时切换。`responses` 协议下映射为 `reasoning.effort`，`chat` 协议下为 `reasoning_effort`。设置思考等级后请求不再发送 `temperature`（两协议一致），以兼容 o 系 / gpt-5 等仅支持 `temperature=1` 的推理模型。
 
-`show_reasoning` 配置项（仅 yaml，默认 `false`）让思维链随对话显示：思维链以与正文一致的 markdown 渲染呈现在 `─── 思考 ───` 与 `─── 思考结束 · 3.2s ───` 两条分隔符之间（`Think` 语义色，时长取该段思考耗时），同时不再打印 `» 思考中` 状态行——`» 等待响应` 心跳也在首个思维链片段到达时收尾。仅 REPL 的 rich 输出档生效（stdout 非终端、`-p`、`-p --verbose`、`ask` 一律不显示），REPL 内 `/reasoning on|off` 可运行时切换。
+`show_reasoning` 配置项（仅 yaml，默认 `false`）让思维链随对话显示：思维链以与正文一致的 markdown 渲染呈现在 `─── 思考 ───` 与 `─── 思考结束 · 3.2s ───` 两条分隔符之间（`Think` 语义色，时长取该段思考耗时），同时不再打印 `» 思考中` 状态行——`» 等待响应` 心跳也在首个思维链片段到达时收尾。仅 REPL 的 rich 输出档生效（stdout 非终端、`-p`、`-p --verbose`、`ask` 一律不显示），REPL 内 `/reasoning on|off` 可运行时切换；门禁外 `/reasoning on` 会提示「当前输出档不显示思维链」（开关记忆仍保留，切回富档即生效）。
 
 `theme` 配置项（env `TANYA_THEME`）选择内置配色主题，REPL 内 `/theme` 可运行时切换；`colors`（auto/on/off）控制是否着色；`palette` 可覆盖单个语义色。可用主题与色名见 `config.example.yaml`。
 

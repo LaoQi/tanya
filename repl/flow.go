@@ -18,7 +18,7 @@ type Kind uint8
 
 const (
 	KindContent    Kind = iota + 1 // assistant 正文（流式 + 回放）
-	KindReasoning                  // 思维链（当前不上屏，预留）
+	KindReasoning                  // 思维链（仅 rich 档且开关打开时上屏）
 	KindToolBlock                  // 工具标题/正文块（含其结构性空行）
 	KindToolStatus                 // 工具状态行与响应状态行（↳ …）
 	KindNotice                     // 信息性文案：命令反馈、回放列表
@@ -95,9 +95,9 @@ func (t *turn) Handle(e agent.Event) {
 	}
 }
 
-// reasonOn 报告思维链是否上屏：开关打开、TTY、且 KindReasoning 过门禁（仅 rich 档）。
+// reasonOn 报告思维链是否上屏：开关打开且当前输出档可显示（见 reasonVisible）。
 func (t *turn) reasonOn() bool {
-	return t.r.showReasoning && t.f.prof.TTY && t.f.st.out.allows(KindReasoning)
+	return t.r.showReasoning && t.r.reasonVisible()
 }
 
 // writeReasoning 渲染思维链 delta：首个 delta 停掉等待心跳并打开分隔块，

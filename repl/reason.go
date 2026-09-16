@@ -17,6 +17,11 @@ func reasonSep(sem theme.Semantics, label string, d time.Duration) string {
 	return sem.Think.Sprint(reasonRuleLeft+text+reasonRuleRight) + "\n"
 }
 
+// reasonVisible 报告当前输出档能否显示思维链：TTY 且 KindReasoning 过门禁（仅 rich 档）。
+func (r *REPL) reasonVisible() bool {
+	return r.prof.TTY && r.st.out.allows(KindReasoning)
+}
+
 func reasoningTag(on bool) string {
 	if on {
 		return MsgReasoningOnTag
@@ -32,7 +37,11 @@ func (r *REPL) handleReasoning(args []string) {
 	switch strings.ToLower(args[0]) {
 	case "on":
 		r.showReasoning = true
-		r.st.out.emit(KindNotice, MsgReasoningOn)
+		if r.reasonVisible() {
+			r.st.out.emit(KindNotice, MsgReasoningOn)
+		} else {
+			r.st.out.emit(KindNotice, MsgReasoningHidden)
+		}
 	case "off":
 		r.showReasoning = false
 		r.st.out.emit(KindNotice, MsgReasoningOff)
