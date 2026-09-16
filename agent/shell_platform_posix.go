@@ -4,29 +4,20 @@ package agent
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/LaoQi/tanya/ctty"
 )
 
-var platform = shellPlatform{
-	Candidates:     []string{"bash", "sh", "ash"},
-	ConfigureGroup: posixConfigureGroup,
-	KillGroup:      posixKillGroup,
-	ProtectSignals: posixProtectSignals,
-	ExitCode:       posixExitCode,
-	ProcessStopped: posixProcessStopped,
-	Programs: []string{
-		"ls", "cat", "head", "tail", "grep", "rg", "fd", "sed", "awk",
-		"find", "sort", "wc", "cut", "tr", "xargs",
-		"git", "curl", "wget", "go", "node", "python",
-	},
-	Capabilities: posixCapabilities,
+var posixCandidates = []string{"bash", "sh", "ash"}
+
+var posixPrograms = []string{
+	"ls", "cat", "head", "tail", "grep", "rg", "fd", "sed", "awk",
+	"find", "sort", "wc", "cut", "tr", "xargs",
+	"git", "curl", "wget", "go", "node", "python",
 }
 
 func posixCapabilities(*shellProfile) string {
@@ -63,24 +54,4 @@ func posixExitCode(err error) (int, bool) {
 		return 128 + int(ws.Signal()), true
 	}
 	return exitErr.ExitCode(), true
-}
-
-func posixProcessStopped(pid int) bool {
-	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err != nil {
-		return false
-	}
-	return statState(string(b)) == "T"
-}
-
-func statState(stat string) string {
-	i := strings.IndexByte(stat, ')')
-	if i < 0 || i+2 > len(stat) {
-		return ""
-	}
-	fields := strings.Fields(stat[i+2:])
-	if len(fields) == 0 {
-		return ""
-	}
-	return fields[0]
 }
