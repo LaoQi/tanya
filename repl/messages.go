@@ -107,7 +107,7 @@ const (
 const (
 	MsgStatusWaiting  = "» 等待响应"
 	MsgStatusThinking = "» 思考中"
-	MsgStatusRunning  = "  » 执行中"
+	MsgStatusRunning  = "» 执行中"
 )
 
 const helpText = `斜杠命令：
