@@ -22,7 +22,7 @@ type Terminal interface {
 }
 
 func NewTerminal() (Terminal, bool) {
-	if t, err := newUnixTerminal(); err == nil {
+	if t, err := openTerminal(); err == nil {
 		return t, true
 	}
 	return NewDegraded(), false

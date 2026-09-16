@@ -18,7 +18,7 @@ func newPTYTerminal(t *testing.T) (*os.File, *unixTerminal) {
 	if err != nil {
 		t.Fatalf("openPTY: %v", err)
 	}
-	term, err := newUnixTerminalFile(slave)
+	term, err := openTerminalFile(slave)
 	if err != nil {
 		master.Close()
 		slave.Close()

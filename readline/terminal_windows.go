@@ -8,7 +8,7 @@ import (
 
 type windowsTerminal struct{}
 
-func newUnixTerminal() (Terminal, error) {
+func openTerminal() (Terminal, error) {
 	return nil, ErrUnsupported
 }
 
