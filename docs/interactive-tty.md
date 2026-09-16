@@ -2,7 +2,7 @@
 
 > 状态：**已落地**（linux 专用；`readline/bridge_linux.go` + `agent/tty_bridge.go`，契约已并入 `docs/design.md`《工具》/《工具视图渲染》/《终端输入》三节），本文归档保留决策过程。
 >
-> 落地差异：① `readline/bridge.go` 承载跨平台接口（`bridge_stub.go` 返回 `ErrUnsupported`）；② 调用顺序为 `Prepare → Attach → Start`（Attach 失败即回退，Start 失败由 `stop()` 收尾）；③ 泵用 `poll` + 自管道唤醒替代"关 fd 打断阻塞读"（Linux 上 close 不会唤醒阻塞中的读）；④ raw 切换用不清输入队列的 `TCSETS`（`TCSETSF` 会丢弃用户提前键入的密码）；⑤ `stop()` 在泵退出前 drain master 残留输出，避免与 `capture.finish()` 竞态；⑥ `stop()` 唤醒泵前若终端写缓冲已满，最多放弃当前 chunk 的**显示**副本（捕获流完整，属 §7 显示侧豁免）；⑦ 实例带 busy/attached 守卫，重复/并发使用返回 `ErrUnsupported`；⑧ 测试改用 pty 自驱集成（`readline/bridge_linux_test.go`）+ 真实 tty E2E（`TTY_BRIDGE_E2E=1` / `TTY_E2E=1` 经 `script` 驱动）。
+> 落地差异：① `readline/bridge.go` 承载跨平台接口（`bridge_stub.go` 返回 `ErrUnsupported`）；② 调用顺序为 `Prepare → Attach → Start`（Attach 失败即回退，Start 失败由 `stop()` 收尾）；③ 泵用 `poll` + 自管道唤醒替代"关 fd 打断阻塞读"（Linux 上 close 不会唤醒阻塞中的读）；④ raw 切换用不清输入队列的 `TCSETS`（`TCSETSF` 会丢弃用户提前键入的密码）；⑤ `stop()` 在泵退出前 drain master 残留输出，避免与 `capture.finish()` 竞态；⑥ `stop()` 唤醒泵前若终端写缓冲已满，最多放弃当前 chunk 的**显示**副本（捕获流完整，属 §7 显示侧豁免）；⑦ 实例带 busy/attached 守卫，重复/并发使用返回 `ErrUnsupported`；⑧ 测试改用 pty 自驱集成（`readline/bridge_linux_test.go`）+ 真实 tty E2E（`TTY_BRIDGE_E2E=1` / `TTY_E2E=1` 经 `script` 驱动）；⑨ 光标锚点（2026-09-16 增补）：`Prepare`（切 raw 与 `Start` 之前）调 `ctty.SaveCursor` 存锚点，`release` 里 `ResetModes` 之后调 `ctty.RestoreCursor` 归位——交互期子进程改滚动区/挪光标/进出备用屏都不再让结果块从屏幕顶部开始画，理由与顺序见 `docs/ctty.md`。
 
 ## 1. 背景与根因
 
