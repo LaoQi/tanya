@@ -76,11 +76,9 @@ func (p *keyParser) flush() []KeyEvent {
 		if more || n == 0 {
 			if p.buf[0] == 0x1b {
 				out = append(out, KeyEvent{Code: KeyEsc})
-				p.buf = p.buf[1:]
-				continue
 			}
-			p.buf = nil
-			break
+			p.buf = p.buf[1:]
+			continue
 		}
 		p.buf = p.buf[n:]
 		if ev != nil {

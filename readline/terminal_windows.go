@@ -81,7 +81,9 @@ func (t *windowsTerminal) readChunk(p []byte) (int, error) {
 			if err := windows.ReadFile(windows.Handle(t.in.Fd()), p, &done, nil); err != nil {
 				return 0, err
 			}
-			return int(done), nil
+			if done > 0 {
+				return int(done), nil
+			}
 		}
 		if !time.Now().Before(deadline) {
 			return 0, nil
