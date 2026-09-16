@@ -215,7 +215,7 @@ func TestResetModesWritesEscapeState(t *testing.T) {
 		t.Fatalf("读 pty: %v", err)
 	}
 	got := string(buf[:n])
-	for _, want := range []string{"\x1b[0m", "\x1b[?25h", "\x1b[?7h", "\x1b[?6l", "\x1b[?1l",
+	for _, want := range []string{"\x1b[0m", "\x0f", "\x1b(B", "\x1b)B", "\x1b[?25h", "\x1b[?7h", "\x1b[?6l", "\x1b[?1l",
 		"\x1b[?1049l", "\x1b[?1000l", "\x1b[?1006l", "\x1b[?2004l", "\x1b[?1004l", "\x1b[r"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("模式复位缺 %q: %q", want, got)
@@ -243,5 +243,14 @@ func TestResetModesKeepsCursor(t *testing.T) {
 		if idx < save || idx > restore {
 			t.Errorf("%q 会移动光标（DECSTBM 把光标移到滚动区首行；DECRST 1049 即使在主屏也按 DECRC 恢复保存槽），必须落在 DECSC…DECRC 内: %q", seq, resetModes)
 		}
+	}
+	for _, seq := range []string{"\x0f", "\x1b(B", "\x1b)B"} {
+		idx := strings.Index(resetModes, seq)
+		if idx < 0 || idx > save {
+			t.Errorf("字符集复位 %q 必须出现在 DECSC 之前：DECSC 会保存字符集与属性，放后面会被 DECRC 原样恢复回去: %q", seq, resetModes)
+		}
+	}
+	if strings.Index(resetModes, "\x1b[?1049l") < save {
+		t.Errorf("DECRST 1049 必须在 DECSC 之后：主屏场景下它无条件 DECRC 主屏保存槽，前导 DECSC 把当前位置写进该槽，1049 才能回到原处（挪到前面会恢复到陈旧槽值，即原始「块体从顶部覆盖」的回归）: %q", resetModes)
 	}
 }

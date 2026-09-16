@@ -120,6 +120,14 @@ func TestKeySourceDropsIncompleteRuneOnTimeout(t *testing.T) {
 	}
 }
 
+func TestKeySourceKeepsCompleteBytesAfterFragmentTimeout(t *testing.T) {
+	k := newScriptKeySource(scriptStep{data: []byte{0xe4, 'A'}}, scriptStep{})
+	ev := readKeys(t, k, 1)[0]
+	if ev.Code != KeyRune || ev.Rune != 'A' {
+		t.Fatalf("残片超时只能丢残片自身，其后的完整字节不得连带丢弃: %+v", ev)
+	}
+}
+
 func TestKeySourceIncompleteRuneThenHangUp(t *testing.T) {
 	src := &scriptReader{steps: []scriptStep{{data: []byte{0xe4}}, {}, {}}, hung: true}
 	k := &keySource{src: src}

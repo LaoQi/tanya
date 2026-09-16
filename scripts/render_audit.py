@@ -7,13 +7,19 @@
   3. cu_clamped     相对上移超过光标所在行（会被视口夹到顶行 → 整块从屏幕顶部重画）
   4. autowrap_off / cursor_hidden / margins_set / alt_screen_on / sgr_open  结束时的终端状态
 
-诊断计数（不断言，仅报告）：cursor_restore —— 光标被“恢复”且位置确实发生跳变（裸发
-`DECRST 1049` 或 `CSI r` 的典型症状；被 DECSC/DECRC 包住时该恢复为 no-op，不计数）。
+诊断计数（不断言，仅报告）：cursor_restore —— 光标被终端的保存槽“恢复”且位置确实跳变，
+且该槽在本回放中从未被写过（= 陈旧槽值被恢复，裸发 `DECRST 1049` 的典型症状）。被
+`DECSC` 或 `1049h` 写过的槽被恢复属预期，不计数。槽按屏索引（xterm `sc[whichBuf]`：主屏
+槽 0、备用屏槽 1），故备用屏里发的 `DECSC` 写的是备用屏槽，保护不到只读主屏槽的 `DECRST 1049`。
 
 场景 want 语义：
   clean  全部不变量必须为 0/off（回归门）
   leak   期望出现 expect 列出的违反项（已知缺口复现；修好后把 want 改成 clean）
   note   只报告不断言（内容层面的已知限制）
+         `note-alt-screen-stale-slot`：子进程用 `47h` 进备用屏后退出（`47` 不保存光标、也不自动
+         退出），复位串里的 `DECSC` 落在备用屏槽，`DECRST 1049` 只能读主屏槽的陈旧值 → 光标被
+         送去旧位置、后续输出覆盖旧内容。真实终端同理（主屏槽的值取决于应用是否用过 `1049h`），
+         属终端行为、复位串无法修复，如实报告不断言。
 
 用法：make build && python3 scripts/render_audit.py
       [--only NAME]        只跑一个场景
@@ -63,7 +69,8 @@ class VT:
         self.cursor_visible = True
         self.alt = False
         self.saved_alt = None
-        self.saved_slot = (0, 0)
+        self.saved_slots = [(0, 0, False), (0, 0, False)]
+        self.slot_owner = [None, None]
         self.sgr_open = False
         self.events = {"overwrite": 0, "region_scroll": 0, "cu_clamped": 0}
         self.samples = []
@@ -144,34 +151,41 @@ class VT:
             for r in range(self.rows):
                 self._blank(r)
 
-    def save_slot(self):
-        self.saved_slot = (self.row, self.col)
+    def slot_index(self):
+        return 1 if self.alt else 0
+
+    def save_slot(self, owner):
+        idx = self.slot_index()
+        self.saved_slots[idx] = (self.row, self.col, self.sgr_open)
+        self.slot_owner[idx] = owner
 
     def restore_slot(self):
-        r, c = self.saved_slot
+        idx = self.slot_index()
+        r, c, sgr = self.saved_slots[idx]
         r, c = min(self.rows - 1, max(0, r)), min(self.cols - 1, max(0, c))
-        if (r, c) != (self.row, self.col):
+        if (r, c) != (self.row, self.col) and self.slot_owner[idx] is None:
             self.note("cursor_restore", "(%d,%d) → (%d,%d)" % (self.row, self.col, r, c))
-        self.row, self.col = r, c
+        self.row, self.col, self.sgr_open = r, c, sgr
         self.wrap_pending = False
 
-    def _switch_alt(self, on):
+    def _switch_alt(self, on, save_cursor, restore_cursor):
         if on and not self.alt:
             self.saved_alt = ([list(r) for r in self.grid], self.row, self.col)
-            self.save_slot()
+            if save_cursor:
+                self.save_slot("1049")
             self.alt = True
             for r in range(self.rows):
                 self._blank(r)
             self.row = self.col = 0
         elif not on:
-            had = self.alt
-            if had and self.saved_alt:
+            if self.alt and self.saved_alt:
                 grid, r, c = self.saved_alt
                 self.grid = grid
                 self.row, self.col = r, c
                 self.saved_alt = None
             self.alt = False
-            self.restore_slot()
+            if restore_cursor:
+                self.restore_slot()
 
     CSI_RE = re.compile(r"\x1b\[([0-9;?]*)([ -/]*)([@-~])")
 
@@ -196,7 +210,7 @@ class VT:
                     continue
                 if i + 1 < n and data[i + 1] in "78":
                     if data[i + 1] == "7":
-                        self.save_slot()
+                        self.save_slot("decsc")
                     else:
                         self.restore_slot()
                     self.wrap_pending = False
@@ -215,6 +229,8 @@ class VT:
                 self.col = min(self.cols - 1, (self.col // 8 + 1) * 8)
                 self.wrap_pending = False
             elif ch in ("\x07", "\x00"):
+                pass
+            elif ch < " " or ch == "\x7f":
                 pass
             elif ch == "\x0b" or ch == "\x0c":
                 self._down()
@@ -274,8 +290,10 @@ class VT:
                         self.autowrap = on
                     elif p == 25:
                         self.cursor_visible = on
+                    elif p == 47 or p == 1047:
+                        self._switch_alt(on, False, False)
                     elif p == 1049:
-                        self._switch_alt(on)
+                        self._switch_alt(on, True, True)
         elif final == "m":
             seq = nums or [0]
             if 0 in seq and len(seq) == 1:
@@ -565,6 +583,17 @@ SCENARIOS = [
             {"data": "q", "wait": 1.0},
         ],
         "screen_has": ["选择会话"],
+    },
+    {
+        "name": "note-alt-screen-stale-slot",
+        "want": "note",
+        "prompt": "用 run_shell 跑一条命令\n",
+        "steps": [
+            {"tool_calls": [{"name": "run_shell",
+                             "args": sh("printf '\\033[?47h\\033[3;3HALT-SCREEN' > /dev/tty; echo done")}]},
+            {"content": "命令已执行。\n"},
+        ],
+        "screen_has": ["done"],
     },
     {
         "name": "note-partial-line",
