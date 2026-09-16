@@ -102,7 +102,7 @@
 ### 不受影响
 
 - readline 输入期的一切重绘（提示符多行布局、ghost、补全菜单、Ctrl+L、picker）——输入期 tanya 独占终端（工具执行期间编辑器不在读键），前提成立，本次不动。
-- `agent` 侧：终端让出、termios 复原、`ResetModes`（已去掉 `CSI r`）均不变。
+- `agent` 侧：终端让出、termios 复原、`ResetModes`（当时不含 `CSI r`；2026-09-16 随光标锚点方案回归，见 `docs/ctty.md`）均不变。
 
 ## 实施步骤
 

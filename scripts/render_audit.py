@@ -16,10 +16,12 @@
   clean  全部不变量必须为 0/off（回归门）
   leak   期望出现 expect 列出的违反项（已知缺口复现；修好后把 want 改成 clean）
   note   只报告不断言（内容层面的已知限制）
-         `note-alt-screen-stale-slot`：子进程用 `47h` 进备用屏后退出（`47` 不保存光标、也不自动
-         退出），复位串里的 `DECSC` 落在备用屏槽，`DECRST 1049` 只能读主屏槽的陈旧值 → 光标被
-         送去旧位置、后续输出覆盖旧内容。真实终端同理（主屏槽的值取决于应用是否用过 `1049h`），
-         属终端行为、复位串无法修复，如实报告不断言。
+
+DECSTBM 建模按真实终端实测：光标一律被 home 到绝对 (1,1)（区外/区内同，比 xterm 的「夹到上边界」
+更狠）。子进程一设区，锚点前的位置就丢了，这就是 `clean-tty-scrollregion` / `clean-tty-cup` /
+`clean-alt-screen-exit` 三条门的由来——它们的共同前提是调用方在交出终端前 `SaveCursor`、
+复位后 `RestoreCursor`（`ctty` 原语），复位串内不再自包 DECSC/DECRC（否则会覆盖该存档槽）；
+去掉存档或恢复中的任一步，这三条都会变红。
 
 用法：make build && python3 scripts/render_audit.py
       [--only NAME]        只跑一个场景
@@ -280,7 +282,11 @@ class VT:
                 self.top, self.bottom = t, b
             else:
                 self.top, self.bottom = 0, self.rows - 1
-            self.row, self.col = self.top, 0
+            # DECSTBM 把光标 home 到绝对 (1,1)：2026-09-16 在真实终端（51x75 SSH、
+            # DA1 ?64;…）用 DSR 逐点实测，光标在区外下方(51)、区内(22)、区外上方(5) 三种
+            # 起点设区后一律读到 1;1（xterm 的「夹到上边界」也比这温和）。取实测行为建模——
+            # 子进程一设区，锚点前的光标位置就没了，这正是「块体从顶部覆盖」的成因。
+            self.row, self.col = 0, 0
             self.wrap_pending = False
         elif final == "h" or final == "l":
             on = final == "h"
@@ -585,8 +591,8 @@ SCENARIOS = [
         "screen_has": ["选择会话"],
     },
     {
-        "name": "note-alt-screen-stale-slot",
-        "want": "note",
+        "name": "clean-alt-screen-exit",
+        "want": "clean",
         "prompt": "用 run_shell 跑一条命令\n",
         "steps": [
             {"tool_calls": [{"name": "run_shell",
@@ -594,6 +600,17 @@ SCENARIOS = [
             {"content": "命令已执行。\n"},
         ],
         "screen_has": ["done"],
+    },
+    {
+        "name": "clean-tty-cup",
+        "want": "clean",
+        "prompt": "用 run_shell 跑一条命令\n",
+        "steps": [
+            {"tool_calls": [{"name": "run_shell",
+                             "args": sh("printf '\\033[3;7H' > /dev/tty; echo done")}]},
+            {"content": "命令已执行。\n"},
+        ],
+        "screen_has": ["▸ run_shell", "done"],
     },
     {
         "name": "note-partial-line",
