@@ -13,7 +13,7 @@
 
 | # | 前提 | 破法 |
 |---|---|---|
-| P1 | 屏幕只有 tanyan 在写 | 子进程/第三方写 `/dev/tty`（sudo/ssh/gpg/vim/stty/`> /dev/tty`）|
+| P1 | 屏幕只有 tanya 在写 | 子进程/第三方写 `/dev/tty`（sudo/ssh/gpg/vim/stty/`> /dev/tty`）|
 | P2 | 光标总在"当前行"、上移 n 行能回到标题行 | 外部字节换行/滚动/移动光标 |
 | P3 | Start 与 End 之间标题行数不变 | resize 改变折行 |
 | P4 | `stop()` 必定清干净 | 200ms 超时分支（`spinner.go:100`）不清行，残留帧使下次上移错位 |
@@ -23,7 +23,7 @@
 
 - `sleep 1`：正常；
 - `printf 'SIDE-EFFECT\n' > /dev/tty; sleep 1`：外部那行**被帧擦掉**，工具块收尾错位、标题残留两行；
-- `printf '[sudo] password for user: ' > /dev/tty; sleep 1`：密码提示**完全消失**（用户盲输），修复 `resetModes` 前同样如此——与 `CSI r` 问题同源，是"让出终端的窗口里 tanyan 仍在写"。
+- `printf '[sudo] password for user: ' > /dev/tty; sleep 1`：密码提示**完全消失**（用户盲输），修复 `resetModes` 前同样如此——与 `CSI r` 问题同源，是"让出终端的窗口里 tanya 仍在写"。
 
 `run_shell` 的常规路径必然让出终端（`agent/shell.go:304` 子进程 stdin 直通 `/dev/tty`、`:319` 移交前台组），所以 P1/P2 在日常用法里就会破。interactive 路径早就承认这一点（不启帧、收尾追加式，`toolview.go:366,378`），常规路径没有。
 
@@ -101,13 +101,13 @@
 
 ### 不受影响
 
-- readline 输入期的一切重绘（提示符多行布局、ghost、补全菜单、Ctrl+L、picker）——输入期 tanyan 独占终端（工具执行期间编辑器不在读键），前提成立，本次不动。
+- readline 输入期的一切重绘（提示符多行布局、ghost、补全菜单、Ctrl+L、picker）——输入期 tanya 独占终端（工具执行期间编辑器不在读键），前提成立，本次不动。
 - `agent` 侧：终端让出、termios 复原、`ResetModes`（已去掉 `CSI r`）均不变。
 
 ## 实施步骤
 
 1. **状态行落地**：新增 `KindStatus`；`EventRequestStart` 打起始行；删 spinner 帧循环（保留工具块现状）。
-   验证：`go test ./repl/`；pty 复现 B/C 场景，外部字节不再被擦（工具执行期 tanyan 只在心跳时刻写整行）。
+   验证：`go test ./repl/`；pty 复现 B/C 场景，外部字节不再被擦（工具执行期 tanya 只在心跳时刻写整行）。
 2. **心跳**：等待期与执行期各起一个 10s ticker，按点符号规则追加。
    验证：`go test ./repl/`（注入短间隔）；pty 跑 `sleep 25`，肉眼核对三行心跳与结束状态行。
 3. **收尾统一 + 清理**：删 inline 分支与相关函数，ToolEnd 一律 append（interactive 前缀 `\n`）；删 `cursor()`、`spinner_test.go`；文档同步。
@@ -149,7 +149,7 @@
 - 节奏不变：`statusTickInterval = 1s`（新）、每行 10s，行密度与旧实现一致（6 行/分钟）。
 - 秒数口径：**墙钟**（`time.Since(started)` 的整秒），开行时写定——进程被挂起/系统睡眠后恢复，秒数反映真实等待时长（点与换行仍由 ticker 驱动，因此可能出现"上一行 `0s`、停摆后下一行 `3m10s`"的跳变，点数不变）；测试经 `heartbeat.now` 注入假时钟，确定性不受影响。
 - 思考相位回补（2026-09-16）：`EventReasoning` 接回 `heartbeat.setPhase(statusThinking)`——`» 思考中`（`Think` 色）与等待相位只差前缀，秒数沿用同一 `started`、点数归零；`setPhase` 只在"心跳在跑且相位变化"时动作，逐 token 的重复事件与 content 之后的零星 reasoning 均 no-op，故每请求最多多一行。旧 spinner 的三相位（等待/思考/执行）由此补齐，`/theme` 图例里的"思考中"重新名副其实。
-- 点与行首同色：每 tick 的 `.` 由该阶段语义色（等待 `Warn` / 思考 `Think` / 执行 `Run`）单独 `Style.Sprint` 包裹，点自带 `term.Reset`——行不会停在着色态，子进程/第三方写 `/dev/tty` 不继承 tanyan 颜色；代价约 10 字节/秒。
+- 点与行首同色：每 tick 的 `.` 由该阶段语义色（等待 `Warn` / 思考 `Think` / 执行 `Run`）单独 `Style.Sprint` 包裹，点自带 `term.Reset`——行不会停在着色态，子进程/第三方写 `/dev/tty` 不继承 tanya 颜色；代价约 10 字节/秒。
 - 门禁不变：`KindStatus` 仅 rich + TTY；plain / plain+verbose / 非 TTY / `ask` 单发 / interactive 均无变化。
 - 顺带修一处既有漏洞：等待期被打断（无 content、无工具事件）时没有任何停止点，心跳会一直写到下一次请求；现由 `turn.End` 调 `toolView.Stop()` 收口。
 

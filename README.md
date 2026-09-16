@@ -1,4 +1,4 @@
-# tanyan
+# tanya
 
 极简命令行 AI Agent，Go 编写，无 GUI/WebUI/TUI。单二进制，交互式 REPL + 单发模式。
 
@@ -24,15 +24,15 @@ go install github.com/LaoQi/tanya@latest
 或从源码构建：
 
 ```bash
-git clone https://github.com/LaoQi/tanya.git && cd tanyan
+git clone https://github.com/LaoQi/tanya.git && cd tanya
 make build
 ```
 
-`make build` 经 ldflags 注入版本号（`git describe`）与构建时间：欢迎屏显示 `tanyan <版本>（构建于 <时间>）`，`-v` 显示版本号。直接 `go build` 时版本为 `dev`、不显示构建时间。
+`make build` 经 ldflags 注入版本号（`git describe`）与构建时间：欢迎屏显示 `tanya <版本>（构建于 <时间>）`，`-v` 显示版本号。直接 `go build` 时版本为 `dev`、不显示构建时间。
 
 ## 配置
 
-`~/.config/tanyan/config.yaml`（完整示例见 `config.example.yaml`）：
+`~/.config/tanya/config.yaml`（完整示例见 `config.example.yaml`）：
 
 ```yaml
 base_url: https://api.deepseek.com/v1
@@ -55,29 +55,29 @@ model: deepseek-v4-flash
 ## 使用
 
 ```bash
-tanyan                 # 交互 REPL
-tanyan ask "问题"      # 单发模式（默认纯文本+verbose：无状态行心跳/无光标控制，保留工具块与状态行）
-tanyan init            # 新工作区脚手架：建 .tanya/ 与 AGENTS.md 骨架，随后进入 REPL
-tanyan -n              # 只读会话：可载入历史，不写入
-tanyan -n ask "问题"   # 单发且不写入会话历史
-tanyan -c x.yaml       # 指定配置文件
-tanyan -m local        # 会话存到当前目录 .tanya/
-tanyan -p              # 纯文本输出：无颜色/状态行/工具块，stdout 只留答案与命令反馈
-tanyan -p --verbose    # 纯文本输出但保留工具块与状态行（仍无颜色与光标控制）
-tanyan -v              # 显示版本号
+tanya                 # 交互 REPL
+tanya ask "问题"      # 单发模式（默认纯文本+verbose：无状态行心跳/无光标控制，保留工具块与状态行）
+tanya init            # 新工作区脚手架：建 .tanya/ 与 AGENTS.md 骨架，随后进入 REPL
+tanya -n              # 只读会话：可载入历史，不写入
+tanya -n ask "问题"   # 单发且不写入会话历史
+tanya -c x.yaml       # 指定配置文件
+tanya -m local        # 会话存到当前目录 .tanya/
+tanya -p              # 纯文本输出：无颜色/状态行/工具块，stdout 只留答案与命令反馈
+tanya -p --verbose    # 纯文本输出但保留工具块与状态行（仍无颜色与光标控制）
+tanya -v              # 显示版本号
 ```
 
 会话存储模式（`-m` 参数 / 配置项 `session_mode` / env `TANYA_SESSION_MODE`，优先级从高到低）：
 
 | 模式 | 会话目录 |
 |---|---|
-| `auto`（默认） | 当前目录存在 `.tanya/` 则用 `<cwd>/.tanya/sessions/`，否则用全局（`tanyan init` 建出 `.tanya/` 后即落本地） |
+| `auto`（默认） | 当前目录存在 `.tanya/` 则用 `<cwd>/.tanya/sessions/`，否则用全局（`tanya init` 建出 `.tanya/` 后即落本地） |
 | `local` | `<启动目录>/.tanya/sessions/` |
-| `global` | `~/.local/share/tanyan/sessions/<workspace-id>/` |
+| `global` | `~/.local/share/tanya/sessions/<workspace-id>/` |
 
 只读会话（`-n` / `--no-save`，只由命令行开启，配置文件与 env 均无法设置）：`ask` 单发与 REPL 通用。历史会话照常列出与载入，之后的对话只存在于内存、不写入会话文件，也不创建会话目录（REPL 启动时在欢迎屏下方显示黄色警告，`ask` 保持静默）。
 
-新工作区初始化（`tanyan init`，无参数）：为空白目录搭好工作区骨架后进入普通 REPL——建 `<cwd>/.tanya/sessions/`（使 `session_mode: auto` 落到本地工作区，首个会话即写入此处）、建 `<cwd>/AGENTS.md` 骨架（已存在则不动），并询问是否为 `.tanya/` 建立忽略文件（内容 `*`，避免会话与历史入库；非交互场合不询问也不创建，输出里给出手动命令）。不做项目探测、不调用模型；每一项幂等、不覆盖既有文件，任一项失败即以 1 退出。生成的 `AGENTS.md` 会进入本次会话的 system prompt，可随后让 AI 读完目录补全。
+新工作区初始化（`tanya init`，无参数）：为空白目录搭好工作区骨架后进入普通 REPL——建 `<cwd>/.tanya/sessions/`（使 `session_mode: auto` 落到本地工作区，首个会话即写入此处）、建 `<cwd>/AGENTS.md` 骨架（已存在则不动），并询问是否为 `.tanya/` 建立忽略文件（内容 `*`，避免会话与历史入库；非交互场合不询问也不创建，输出里给出手动命令）。不做项目探测、不调用模型；每一项幂等、不覆盖既有文件，任一项失败即以 1 退出。生成的 `AGENTS.md` 会进入本次会话的 system prompt，可随后让 AI 读完目录补全。
 
 纯文本输出（`-p` / `--plain`，只由命令行开启，配置文件与 env 均无法设置）：`ask` 单发与 REPL 通用，供本程序作为子 agent 被调用时拿到可解析的输出——stdout 只承载 assistant 正文与命令反馈（无颜色、无状态行与心跳、无光标控制、无 markdown 装饰、无工具块与状态行），stderr 承载错误与诊断；`ask` 结束时若正文已以换行结尾则不再补空行，stdout 严格等于答案。`--verbose` 必须与 `--plain` 同用，作用是在该模式下恢复工具块与状态行的**纯文本**形态（仍不启用颜色与光标控制；工具块为追加式，标题只在开始行出现一次）。
 
@@ -91,7 +91,7 @@ REPL 输入按前缀分发：
 | `/命令` | 斜杠命令（见下表）；未命中的 `/` 开头输入按对话内容处理 |
 | `exit` / `quit` | 退出（等价 `/exit`） |
 
-直通 shell 执行面已归档（恢复步骤见 `docs/design.md`）：agent 需要执行命令时经 `run_shell` 工具完成（输出截断与超时策略见其工具说明）。进程 cwd 恒为 tanyan 启动目录、全程不变；`run_shell` 默认在此执行，也可用 `cwd` 参数为单次命令指定其它目录（不影响后续调用）。
+直通 shell 执行面已归档（恢复步骤见 `docs/design.md`）：agent 需要执行命令时经 `run_shell` 工具完成（输出截断与超时策略见其工具说明）。进程 cwd 恒为 tanya 启动目录、全程不变；`run_shell` 默认在此执行，也可用 `cwd` 参数为单次命令指定其它目录（不影响后续调用）。
 
 REPL 斜杠命令：
 
@@ -115,7 +115,7 @@ REPL 斜杠命令：
 
 | 层级 | 路径 | 标题 |
 |---|---|---|
-| 全局 | `~/.config/tanyan/AGENTS.md` | `# 全局说明（~/.config/tanyan/AGENTS.md）` |
+| 全局 | `~/.config/tanya/AGENTS.md` | `# 全局说明（~/.config/tanya/AGENTS.md）` |
 | 工作区 | `<启动目录>/AGENTS.md` | `# 项目说明（AGENTS.md）` |
 
 - 文件不存在或内容为空白则跳过该层；组装在会话开始（`/new`、`/load`、启动）时刻快照，会话进行中不再读取文件
@@ -150,8 +150,8 @@ TTY 下的状态展示是**追加式**（不重绘、不移动光标，终端被
 信号语义：
 
 - 执行期间 Ctrl+C 直接送达命令进程组（命令可优雅退出）；再次按下 Ctrl+C 取消当前回合
-- 普通路径下 Ctrl+Z 会挂起命令进程，tanyan 检测到后立即终止并标注 `挂起已终止`，无需等超时
-- 命令间隙/流式阶段 Ctrl+Z 被 tanyan 忽略（不会挂起自身），Ctrl+\ 保持 Go 默认行为（全栈转储）
+- 普通路径下 Ctrl+Z 会挂起命令进程，tanya 检测到后立即终止并标注 `挂起已终止`，无需等超时
+- 命令间隙/流式阶段 Ctrl+Z 被 tanya 忽略（不会挂起自身），Ctrl+\ 保持 Go 默认行为（全栈转储）
 - 用户脚本内故意 `kill -STOP` 长挂起的进程会被同一机制终止
 
 

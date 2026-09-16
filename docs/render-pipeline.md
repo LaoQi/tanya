@@ -2,7 +2,7 @@
 
 > 状态：**已实施**——第 1 节的升级需求全部落地，包结构由单包 `style` 拆为 `render` 树（`term`/`style`/`ir`/`theme`/`markdown`/`markup` + `render`），拆包决策与落地偏差见 `docs/style-split.md`。
 >
-> 原计划分阶段推进：阶段 1（管线骨架与存量收编）、阶段 2（markup 模板与 palette 配置）、阶段 3（markdown 管线与 `/md` 开关）已完成；阶段 4（表格、truecolor palette、非终端 Renderer）待排期（truecolor 一档已明确删除，见 §4）。目标：为 tanyan 建立统一的富文本中间表示（IR）与渲染管线，收敛散落各处的颜色/终端控制代码，支撑 Markdown 输出染色与跨终端（Windows Terminal 等）渲染。
+> 原计划分阶段推进：阶段 1（管线骨架与存量收编）、阶段 2（markup 模板与 palette 配置）、阶段 3（markdown 管线与 `/md` 开关）已完成；阶段 4（表格、truecolor palette、非终端 Renderer）待排期（truecolor 一档已明确删除，见 §4）。目标：为 tanya 建立统一的富文本中间表示（IR）与渲染管线，收敛散落各处的颜色/终端控制代码，支撑 Markdown 输出染色与跨终端（Windows Terminal 等）渲染。
 > 决策背景（备选方案对比与取舍过程）见文末附录。参考项目对比分析见 `docs/render-refs-compare.md`（持续补录）。
 >
 > 阅读约定：本文保留方案原貌，凡与落地现状不符之处一律以 **「落地修订」** / **「落地」** 就地标注（§3/§4/§5/§6/§8/§9/§11/§12/§15），未标注者即原样落地。

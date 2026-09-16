@@ -1,4 +1,4 @@
-# tanyan 核心设计
+# tanya 核心设计
 
 ## 定位
 
@@ -37,22 +37,22 @@ render/markup/     内联标记解析
 
 ## 运行模式
 
-- `tanyan`：交互 REPL，维护内存 messages 历史，SSE 逐 token 流式输出
-- `tanyan ask "问题"`：单发，输出后退出。单发默认走 plain+verbose 档（`repl.SingleShot` 在 CLI 模式为 rich 时降到 `modePlainVerbose`；显式 `-p` 更窄则保持不动）：无状态行与心跳、无光标控制（工具块追加式）、正文原样直出，颜色仍按终端能力保留，`End()` 按 plain 语义"缺行尾换行才补"
-- `tanyan init`：新工作区脚手架，建 `<cwd>/.tanya/sessions/`、询问后建 `<cwd>/.tanya/.gitignore`（内容 `*`）、缺口时建 `<cwd>/AGENTS.md` 骨架，随后与普通模式无异地进入 REPL（见下节）
+- `tanya`：交互 REPL，维护内存 messages 历史，SSE 逐 token 流式输出
+- `tanya ask "问题"`：单发，输出后退出。单发默认走 plain+verbose 档（`repl.SingleShot` 在 CLI 模式为 rich 时降到 `modePlainVerbose`；显式 `-p` 更窄则保持不动）：无状态行与心跳、无光标控制（工具块追加式）、正文原样直出，颜色仍按终端能力保留，`End()` 按 plain 语义"缺行尾换行才补"
+- `tanya init`：新工作区脚手架，建 `<cwd>/.tanya/sessions/`、询问后建 `<cwd>/.tanya/.gitignore`（内容 `*`）、缺口时建 `<cwd>/AGENTS.md` 骨架，随后与普通模式无异地进入 REPL（见下节）
 - 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式、`-n` / `--no-save` 只读会话（见《会话与上下文》存储小节）
 - Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）：REPL 与 `ask` 单发统一走 `signal.Notify(SIGINT)`（`repl.InterruptContext`），要求终端 `ISIG` 开启——readline 侧每回合开始前做终端状态自愈保证该项成立（`docs/interactive-tty.md` §5.9）；命令执行期间子进程组持有终端前台，Ctrl+C 由内核直达子进程组（命令优雅退出），再次按下取消回合
 
 ### init 模式（`agent/init.go` + `repl/initflow.go`）
 
-新工作区（通常既无 `.tanya/` 也无 `AGENTS.md`）的一次性脚手架，之后与普通 REPL **完全无二**：不改提示符、不加斜杠命令、不改运行期行为。只作用于启动目录，不做项目探测、不调模型、不碰 `~/.config/tanyan/*`。
+新工作区（通常既无 `.tanya/` 也无 `AGENTS.md`）的一次性脚手架，之后与普通 REPL **完全无二**：不改提示符、不加斜杠命令、不改运行期行为。只作用于启动目录，不做项目探测、不调模型、不碰 `~/.config/tanya/*`。
 
 - 三项动作，逐项幂等、永不覆盖既有文件：建 `<cwd>/.tanya/sessions/`（0755）→ 询问后建 `<cwd>/.tanya/.gitignore`（`*\n`，0644）→ 缺 `AGENTS.md` 时建骨架（`# <目录名>` + `## 项目说明` + `## 构建与测试` 两小节 + 生成标记注释，0644）
 - **顺序不变量**：`main` 在配置与 `-m` 覆盖之后、`agent.New` 之前调用 `repl.RunInit`。`.tanya/` 既是会话落点、也是 `session_mode: auto` 的判定依据（`resolveSessionDir` 的 `isDir(cwd/.tanya)`），先建后 New 才知道本次启动要落本地工作区，首个会话即写入 `<cwd>/.tanya/sessions/`；同一次构造里 `promptBuilder` 也随即读到新生成的 AGENTS.md（进入本次会话 system 快照，`/new` 时重读）
 - 忽略文件走交互确认：`ctty.Open()` 打开 `/dev/tty` 成功才提问（`是否…？[y/N]`，仅 `y`/`yes` 为真），失败即非交互（管道调用、无控制终端、Windows stub）不提问也不创建，报告里以 `MsgInitSkipNoTTY` 说明并给出手动命令；用户拒绝为 `MsgInitSkipDeclined`。既有 `.gitignore` 时不再提问
 - 报告：`repl.RunInit` 编排（头行 → 询问 → `agent.InitWorkspace` → 条目与会话目录行 + 一行提示），走 `st.Print`（KindNotice，plain 下仍可见），标记着色只用 `sem.Ok`/`sem.Dim`；条目路径相对工作区显示，头行与会话目录经 `initPath` 做 `~` 归约（不用提示符的 `shortPath` 缩写，避免报错路径被压缩）；`SessionDir` 取自 `resolveSessionDir(cfg, cwd)`，与 `agent.New` 同函数同输入，显式 `-m global` 时如实报告 global 落点（`.tanya/` 标记照建）
 - 失败即中止：任一项创建失败（`AGENTS.md` 是目录、`sessions` 是文件、写入出错）返回 `MsgInitFailFmt` 错误，`main` 打印后以 1 退出、不进 REPL；幂等使重试安全
-- CLI：`tanyan init` 无参数（带多余参数报 `MsgInitUsage`），`-n` 只读会话与 init 不冲突（骨架照建，会话不写盘）；`repl.ParseCommand` 统一解析 `ask`/`init`，未知首 token 保持旧行为（忽略并进 REPL）
+- CLI：`tanya init` 无参数（带多余参数报 `MsgInitUsage`），`-n` 只读会话与 init 不冲突（骨架照建，会话不写盘）；`repl.ParseCommand` 统一解析 `ask`/`init`，未知首 token 保持旧行为（忽略并进 REPL）
 
 ## LLM 接入
 
@@ -116,12 +116,12 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 交互模式（`interactive: true`）：仅由模型显式声明，**不做命令文本猜测**（早期版本有 sudo/ssh 关键词兜底，review 后移除）。声明后 repl 侧不发状态行心跳、标题行下打印引导行、结束用追加式渲染（避免 `CursorUp` 擦掉用户输入回显）；`timeout` 缺省时默认放宽至 300s（显式值优先，上限仍 900s）。命令在**独立 pty** 中运行（见下条），提示与输出实时可见；非桥接回退路径下命令提示须自行写入 `/dev/tty`，否则被工具捕获不可见
 - 交互式 pty 桥接（`readline/bridge_linux.go` + `agent/tty_bridge.go`，linux 专用；决策与背景见 `docs/interactive-tty.md`）：解决"交互程序拿不到输入"（`/dev/tty` 直通导致 `ttyname(0)` 退化为 `/dev/tty`、pinentry 等无 ctty 程序无法按路径打开）。流程 `Prepare`（分配 pty、`Setsid+Setctty+Ctty=0`、三条标准流全接 slave、`GPG_TTY`/`SSH_TTY` 覆盖为 slave 路径）→ `Attach`（真实 tty 切 raw、初始尺寸复制到 master、启动双向泵）→ `cmd.Start()` → 立即关闭父进程 slave（否则子进程退出后 master 收不到 EIO）→ `waitShell` → `stop()`（恢复 termios、关闭 tty/master、泵收尾 drain 后 `capture.finish()`）
   - 契约：master 输出**同时**写真实 tty（用户实时可见）与 `capture`（Writer，调用方决定去向）。本处 capture 即 `streamCapture` → `ShellResult.Stdout`，交互模式为**单流**（`Stderr` 空，`2|` 区分失效）；`streamCapture` 头尾截断与 `ShellResult` 字段语义不变
-  - 子进程成为独立会话首进程、ctty 为 pty slave，真实 tty 前台组始终是 tanyan，**不再需要 `TIOCSPGRP` 移交**；`^C` 经泵作为字节进入 pty，由 slave 行规程投递 `SIGINT` 给子进程前台组，tanyan 不拦截
+  - 子进程成为独立会话首进程、ctty 为 pty slave，真实 tty 前台组始终是 tanya，**不再需要 `TIOCSPGRP` 移交**；`^C` 经泵作为字节进入 pty，由 slave 行规程投递 `SIGINT` 给子进程前台组，tanya 不拦截
   - 已知语义差异：`Setsid` 后子进程组为孤儿进程组，内核按 POSIX 丢弃停止信号，**`^Z` 在桥接下不挂起子进程**（无效按键，`^C` 正常）；按 `docs/interactive-tty.md` §7 沿用现状、不新增分支（`waitShell` 的 `processStopped` 轮询保留，显式 `SIGSTOP` 等仍检出）
   - 泵用 `poll` + 自管道唤醒（`stop()` 关写端令两向阻塞读退出），保证 stop 不悬挂、不漏读残留输出；写侧 `O_NONBLOCK` + `POLLOUT` 防子进程不消费时卡死
   - 接口契约：**单次使用、非并发**——`Prepare → Attach → stop` 各一次；实例带 busy/attached 守卫（互斥量），并发或重复调用一律返回 `ErrUnsupported` 走回退，避免 pty/泵泄漏（为 §6"用户前台命令"复用的地基预留）
   - 失败回退：无控制终端 / 非前台（`TIOCGPGRP != getpgrp`）/ pty 分配失败 / `SetNonblock` 失败 / `Attach` 失败 / 非 Linux（`bridge_stub.go` 返回 `ErrUnsupported`）→ 走原 `open("/dev/tty")` + `TIOCSPGRP` 路径，非交互路径行为零变化
-  - 终端状态自愈（`readline/secure.go`）：桥接 `Prepare` 的前台检查**之前**与 REPL 每回合开始前调用 `SecureTerminal()`——① 恢复被外部清掉的 `ISIG`（否则 `^C` 不产生 `SIGINT`，中断路径完全失效）② **恢复被外部清掉的 canonical/回显/输出后处理**（`ICANON|ECHO|IEXTEN|ICRNL|IXON|OPOST|ONLCR`，2026-09-15 由"只修 ISIG"扩宽：终端被任何外部程序留成 raw 时，tanyan 下一回合即可自愈，而不是整场会话按损坏状态渲染）③ 限"启动瞬间自己就是终端前台作业"时夺回被 shell 抢占的前台组；后台启动（`&`）/无控制终端场景门控为否，语义不变（`docs/interactive-tty.md` §5.9）
+  - 终端状态自愈（`readline/secure.go`）：桥接 `Prepare` 的前台检查**之前**与 REPL 每回合开始前调用 `SecureTerminal()`——① 恢复被外部清掉的 `ISIG`（否则 `^C` 不产生 `SIGINT`，中断路径完全失效）② **恢复被外部清掉的 canonical/回显/输出后处理**（`ICANON|ECHO|IEXTEN|ICRNL|IXON|OPOST|ONLCR`，2026-09-15 由"只修 ISIG"扩宽：终端被任何外部程序留成 raw 时，tanya 下一回合即可自愈，而不是整场会话按损坏状态渲染）③ 限"启动瞬间自己就是终端前台作业"时夺回被 shell 抢占的前台组；后台启动（`&`）/无控制终端场景门控为否，语义不变（`docs/interactive-tty.md` §5.9）
   - 结果语义：被信号终止的子进程按 shell 惯例记 `128 + signum`（`^C` → `exit 130`、`SIGKILL` → `137`），不再是 `-1`（`shellExitCode`，unix 取 `WaitStatus.Signaled()`）
   - 刻意简化（`docs/interactive-tty.md` §7 登记，评审直接引用关闭）：`^C` 计数双杀、中断结果标记、输出清洗、`SIGWINCH` 转发（尽力而为，失败不报错）、桥接期显示对齐
 - 实现：按 `shellProfile` 组装命令（posix `<path> -c`、powershell `<path> -NoProfile -NonInteractive -Command`、cmd `<path> /d /s /c`），捕获 stdout/stderr/退出码/耗时（`ShellResult` 结构化返回：Command/Cwd/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Stopped/NotStarted/Duration）
@@ -163,7 +163,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 - 定位：**只追加、不重绘**——没有光标控制、没有清行、没有上移。旧 spinner 与 inline 工具块重绘依赖"光标停在自己写的那一行"：一旦终端被让出（`run_shell` 移交前台组，子进程可直接写 `/dev/tty`）或被第三方写，就会擦掉对方输出或重绘错位（实测 sudo 密码提示被帧清行抹掉）。追加式对交错免疫：顺序变化可接受，绝不覆盖。
 - `EventRequestStart` 起等待心跳并立刻打行首 `» 等待响应 0s`（`KindStatus`，语义色 `Warn`）；首个 content / `EventResponse` / 工具开始即停。思考相位由首个 `EventReasoning`（思维链 delta）经 `heartbeat.setPhase` 切到 `» 思考中`（语义色 `Think`）——与工具相位同一机制：**收尾当前行 + 用新前缀开新行**（一次写完，不重绘），秒数沿用同一 `started`（与旧 spinner 的累计口径一致）、点数归零；同相位重复事件（逐 token 到达）与心跳未在跑时（`statusOn` 为假、或 content 已开始后的零星 reasoning）都是 no-op，故每个请求最多多一行。工具执行期（非 `interactive`）起第二条心跳，`EventToolStart` 后立刻打 `  » 执行中 0s`（`Run` 色，前两空格与工具正文对齐）。
-- 心跳形态（`statusTickInterval = 1s`、`statusLineSpan = 10`）：行首**只写一次**带秒数的前缀（`statusSeconds`：`59s` / `1m10s` / `1h01m`；秒数取 `time.Since(started)` 的**真实经过时间**，开行时写一次后固定不变；前缀末尾以 `statusDotGap` 一个空格位收尾，点不与秒数粘连），行内每 tick **只追加一个点** `.`，满 `span` 个点即换行并以当时秒数开新行（`» 等待响应 0s ..........` → `» 等待响应 10s ..........` → …）。已写出的字节永不回头修改。行首前缀与每个点都由同一语义色 `Style.Sprint` 单独包裹（各自带 `term.Reset`，点写完终端立即回到无 SGR 状态）——点与文字同色，且不把终端留在着色态：子进程或第三方写 `/dev/tty` 不会继承 tanyan 的颜色。代价是每 tick 一段 `SGR + . + reset`（约 10 字节/秒，可忽略）；行首与点之间保留 `statusDotGap` 一个空格位，点不与秒数粘连。
+- 心跳形态（`statusTickInterval = 1s`、`statusLineSpan = 10`）：行首**只写一次**带秒数的前缀（`statusSeconds`：`59s` / `1m10s` / `1h01m`；秒数取 `time.Since(started)` 的**真实经过时间**，开行时写一次后固定不变；前缀末尾以 `statusDotGap` 一个空格位收尾，点不与秒数粘连），行内每 tick **只追加一个点** `.`，满 `span` 个点即换行并以当时秒数开新行（`» 等待响应 0s ..........` → `» 等待响应 10s ..........` → …）。已写出的字节永不回头修改。行首前缀与每个点都由同一语义色 `Style.Sprint` 单独包裹（各自带 `term.Reset`，点写完终端立即回到无 SGR 状态）——点与文字同色，且不把终端留在着色态：子进程或第三方写 `/dev/tty` 不会继承 tanya 的颜色。代价是每 tick 一段 `SGR + . + reset`（约 10 字节/秒，可忽略）；行首与点之间保留 `statusDotGap` 一个空格位，点不与秒数粘连。
 - `stop()`：`close(stopCh)` → 等 loop 退出（沿用有界 200ms）→ 当前行未收尾时补**一个换行**；未起心跳时不写任何字节（幂等，可重复调用）。重复 `start()` 先收尾上一行再开新行。
 - 回合收口：`turn.End` 调 `toolView.Stop()`——等待期被打断（无 content、无工具事件）时没有别的停止点，否则心跳会一直写到下一次请求、糊掉在途的 readline 提示符。
 - 门禁：`KindStatus` 仅 rich 档可见——plain / plain+verbose / 非 TTY 均无状态行与心跳，`ask` 单发默认档行为不变。
@@ -210,7 +210,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## 系统提示与缓存友好
 
-- 组装规则：`DefaultSystemPrompt`（内置，固定不可配，`system_prompt` 配置项已移除）+ 全局 `~/.config/tanyan/AGENTS.md`（存在时）+ 工作区 `./AGENTS.md`（存在时），各段以 `# 全局说明`/`# 项目说明` 标题分隔，文件缺失/空白跳过
+- 组装规则：`DefaultSystemPrompt`（内置，固定不可配，`system_prompt` 配置项已移除）+ 全局 `~/.config/tanya/AGENTS.md`（存在时）+ 工作区 `./AGENTS.md`（存在时），各段以 `# 全局说明`/`# 项目说明` 标题分隔，文件缺失/空白跳过
 - 规则与事实分离：persistPrompt（上述规则）在 `/new`/`/load` 时组装并冻结进会话首行；每次请求的 system = persistPrompt + 空行 + `Agent.env`（环境事实在 `agent.New` 构造期算一次、冻结进内存，既不持久化也不再重算）
 - 快照机制：`/new` 与 `/load` 时刻读取 AGENTS.md 组装快照；会话进行中零文件 IO，快照冻结；旧格式会话（system 首行含历史环境段）原样保留并标记，`/load` 时提示 `/new`
 - 缓存收益：history 全程 append-only，system 两段（规则快照 + 环境段）在本进程内逐字节恒定，同一会话内请求前缀不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中。env 段自 2026-09-14 起在构造期定格（此前的 `WORKSPACE` 行是 system 内唯一会自行变化的输入，已随本次收口删除）
@@ -221,7 +221,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 用户可见文案统一为常量：`repl/messages.go`（UI/命令输出/选择器/工具视图/状态行）与 `agent/messages.go`（错误/ToolResult 文本），调用一律引用常量（经 `streams` 写出，见下），换行由调用处的格式串控制；`Bye`/`再见` 已统一为 `MsgBye`。工具描述与系统提示不在此列（模型侧文案，翻译需评估 prompt 影响）。
 
-欢迎屏由 `welcomLogo` + `welcomeText()` 组装：logo ASCII 图 + 一行 `输入 /help 查看命令   tanyan <版本>（构建于 <时间>）`；`repl.Version`/`repl.BuildTime` 由 `main` 注入（`make build` 经 ldflags 写 `main.version`（git describe）与 `main.buildTime`（date），直接 `go build` 为 `dev`/空，空时不渲染构建时间）。`-v` 与欢迎屏共用同一 version 源。
+欢迎屏由 `welcomLogo` + `welcomeText()` 组装：logo ASCII 图 + 一行 `输入 /help 查看命令   tanya <版本>（构建于 <时间>）`；`repl.Version`/`repl.BuildTime` 由 `main` 注入（`make build` 经 ldflags 写 `main.version`（git describe）与 `main.buildTime`（date），直接 `go build` 为 `dev`/空，空时不渲染构建时间）。`-v` 与欢迎屏共用同一 version 源。
 
 ### 输出流与 Kind
 
@@ -287,7 +287,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## 配置
 
-优先级：env（`TANYA_*`）> `~/.config/tanyan/config.yaml` > 默认值。
+优先级：env（`TANYA_*`）> `~/.config/tanya/config.yaml` > 默认值。
 
 | 配置项 | 默认 | 说明 |
 |---|---|---|
@@ -301,7 +301,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `theme` | `nord` | 内置配色主题（语义色/提示符/markdown 标题与代码整体切换）：default/minimal/solar/vivid/nord/gruv/dusk，非法值启动报错 |
 | `palette` | 空 | 语义色覆盖（info/warn/ok/error/dim/accent/think/run → 色名），叠加在当前主题之上（切换主题后自动重放） |
 | `user_agent` | `pi/0.85.0 (...)` | 出站 UA 伪装 |
-| `global_session` | `~/.local/share/tanyan/sessions` | global 模式会话基础目录，支持 `~` 展开 |
+| `global_session` | `~/.local/share/tanya/sessions` | global 模式会话基础目录，支持 `~` 展开 |
 | `session_mode` | `auto` | 会话存储模式 auto/local/global |
 | `tool_output_lines` | 20 | 工具输出最多显示行数（1-1000） |
 | `shell` | 空 | run_shell 使用的 shell（名字或绝对路径）；空则平台探测（linux/darwin bash→sh→ash，windows pwsh），全部落空启动报错 |
