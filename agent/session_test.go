@@ -158,3 +158,46 @@ func TestSessionStoreListMissingDir(t *testing.T) {
 		t.Fatalf("目录不存在应返回空列表: %+v %v", list, err)
 	}
 }
+
+func TestSessionIDAndFile(t *testing.T) {
+	a := newTestAgent(t)
+	id := a.SessionID()
+	if id == "" || strings.ContainsAny(id, "/\\") || strings.HasSuffix(id, ".jsonl") {
+		t.Fatalf("会话 id 异常: %q", id)
+	}
+	if got := a.SessionFile(); got != "" {
+		t.Errorf("未落盘不应报文件: %q", got)
+	}
+	a.history = []Message{{Role: "user", Content: "q"}}
+	if err := a.save(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := a.SessionFile(), a.Stats().Session; got != want {
+		t.Errorf("落盘后文件: got %q want %q", got, want)
+	}
+	if filepath.Base(a.SessionFile()) != id+".jsonl" {
+		t.Errorf("id 与文件名不一致: %q vs %q", id, a.SessionFile())
+	}
+}
+
+func TestSessionIDAndFileNoSave(t *testing.T) {
+	isolatePromptEnv(t)
+	cfg := defaultConfig()
+	cfg.GlobalSession = t.TempDir()
+	a, err := New(cfg, NoSave(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.SessionID() != "" || a.SessionFile() != "" {
+		t.Errorf("只读模式不应有 id/文件: %q %q", a.SessionID(), a.SessionFile())
+	}
+	if a.NoSave() != true {
+		t.Error("NoSave 应为真")
+	}
+}
+
+func TestSessionStoreIDEmpty(t *testing.T) {
+	if got := (&sessionStore{}).id(); got != "" {
+		t.Errorf("未 rotate 的 store 不应有 id: %q", got)
+	}
+}

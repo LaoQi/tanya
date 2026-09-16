@@ -148,9 +148,6 @@ func TestFakeTermDrivesRun(t *testing.T) {
 	if !strings.Contains(got, "输入 /help 查看命令") {
 		t.Errorf("欢迎屏应写入注入 writer: %q", got)
 	}
-	if !strings.Contains(got, MsgBye) {
-		t.Errorf("退出文案应写入注入 writer: %q", got)
-	}
 	if n := strings.Count(got, "› "); n != 2 {
 		t.Errorf("两轮输入应各写一次提示符，实际 %d: %q", n, got)
 	}

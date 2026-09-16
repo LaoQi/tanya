@@ -318,6 +318,24 @@ func (a *Agent) History() []Message { return a.history }
 
 func (a *Agent) NoSave() bool { return a.store.disabled }
 
+func (a *Agent) SessionID() string {
+	if a.store.disabled {
+		return ""
+	}
+	return a.store.id()
+}
+
+func (a *Agent) SessionFile() string {
+	if a.store.disabled {
+		return ""
+	}
+	p := a.store.path()
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	return p
+}
+
 func (a *Agent) ListModels() ([]string, error) { return a.client.ListModels() }
 
 func (a *Agent) ToolOutputLines() int {

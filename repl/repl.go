@@ -32,6 +32,7 @@ type REPL struct {
 	prompt    render.Template
 	view      *toolView
 	rend      render.Renderer
+	started   time.Time
 }
 
 type options struct {
@@ -208,6 +209,7 @@ func (r *REPL) noSaveWarn() string {
 }
 
 func (r *REPL) Run() error {
+	r.started = time.Now()
 	r.st.out.emit(KindDecor, welcomeText()+r.noSaveWarn())
 	for {
 		prompt := r.prompt.Render(r.resolveVars())
@@ -216,7 +218,7 @@ func (r *REPL) Run() error {
 			continue
 		}
 		if err == io.EOF {
-			r.st.out.emit(KindNotice, MsgBye+"\n")
+			r.farewell()
 			return nil
 		}
 		if err != nil {
@@ -227,11 +229,12 @@ func (r *REPL) Run() error {
 			continue
 		}
 		if isExitLine(line) {
-			r.st.out.emit(KindNotice, MsgBye+"\n")
+			r.farewell()
 			return nil
 		}
 		if isSlashCommand(line) {
 			if r.handleCommand(line) {
+				r.farewell()
 				return nil
 			}
 			r.st.out.emit(KindDecor, turnSep(r.prof, r.sem, 0))
@@ -281,7 +284,6 @@ func (r *REPL) handleCommand(line string) bool {
 	parts := strings.Fields(line)
 	switch parts[0] {
 	case "/exit", "/quit":
-		r.st.out.emit(KindNotice, MsgBye+"\n")
 		return true
 	case "/help":
 		r.st.out.emit(KindNotice, helpText)

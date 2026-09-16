@@ -222,7 +222,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## REPL
 
-用户可见文案统一为常量：`repl/messages.go`（UI/命令输出/选择器/工具视图/状态行）与 `agent/messages.go`（错误/ToolResult 文本），调用一律引用常量（经 `streams` 写出，见下），换行由调用处的格式串控制；`Bye`/`再见` 已统一为 `MsgBye`。工具描述与系统提示不在此列（模型侧文案，翻译需评估 prompt 影响）。
+用户可见文案统一为常量：`repl/messages.go`（UI/命令输出/选择器/工具视图/状态行）与 `agent/messages.go`（错误/ToolResult 文本），调用一律引用常量（经 `streams` 写出，见下），换行由调用处的格式串控制；退出文案曾统一为 `MsgBye`（「再见」），2026-09-16 起由收尾块取代并删除该常量，见《退出收尾》。工具描述与系统提示不在此列（模型侧文案，翻译需评估 prompt 影响）。
 
 欢迎屏由 `welcomLogo` + `welcomeText()` 组装：logo ASCII 图 + 一行 `输入 /help 查看命令   tanya <版本>（构建于 <时间>）`；`repl.Version`/`repl.BuildTime` 由 `main` 注入（`make build` 经 ldflags 写 `main.version`（git describe）与 `main.buildTime`（date），直接 `go build` 为 `dev`/空，空时不渲染构建时间）。`-v` 与欢迎屏共用同一 version 源。
 
@@ -235,6 +235,18 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 `Kind` 不导出包外、不进 `agent.Event`；`main` 侧只用语义化出口 `streams.Print`/`Content`/`End`/`Fail`。
 
 输出模式三档由 `outMode` 决定（`repl.ParseMode(plain, verbose)`，仅 CLI `-p`/`--plain` 与 `--verbose` 可设，env 与 config 不参与；`ask` 单发分支再套 `repl.SingleShot` 把 rich 降到 plain+verbose，显式 `-p` 更窄时保持不动）：**rich**（默认，全开）、**plain**（`out.vis` = Content/Notice，其余屏蔽；stderr 不参与屏蔽）、**plain+verbose**（再加 ToolBlock/ToolStatus）。plain 的六条语义：① `Colors=LevelNone`（main 在 profile 计算后强制）；② 不发状态行与心跳（`toolView.statusOn()` 同时查 TTY 与可见集，是查询不是快照，`KindStatus` 仅 rich 放行）；③ 无光标控制（工具块一律 `RenderToolEndAppend`：不重复标题，只补正文块与状态行）；④ 关 markdown（`flow.mdEnabled` 并入 `st.decor()`）；⑤ 屏蔽 Decor（含首行空行与回合分隔线）与工具类；⑥ stdout 只留正文与命令反馈，错误与诊断走 stderr。工具块被屏蔽时**不得**置 `justEnded`，否则下一条正文前会留下孤立空行（`toolView.Handle` 的 ToolEnd 分支按 `allows(KindToolBlock)` 决定是否置位）。`streams.End()` 负责收尾换行：rich 沿用无条件补换行（零行为变更），plain 只在缺少行尾换行时补，保证 stdout 严格等于答案。
+
+### 退出收尾（repl/farewell.go，2026-09-16）
+
+四条退出路径统一收敛到 `REPL.farewell()`：`Run` 的 `io.EOF` 分支（Ctrl-D 与终端挂断）、`isExitLine` 分支（`exit`/`quit`）与 `handleCommand` 返回真之后的 `/exit`/`/quit`。`handleCommand` 自身不再写字节、只返回退出信号（此前命令面自打文案，与 EOF 面重复一份），`Run` 拿到信号后统一收尾。
+
+输出为单个 `KindDecor` 块、三行，文本由纯函数 `farewellText(farewellInfo)` 生成（`farewellInfo` 是退出瞬间的快照：会话 id、时长、`Agent.Stats()`、落盘文件、只读标志）：
+
+- **会话行**：`会话 <id> · 时长 <dur> · 消息 <n> 条`；id 取 `Agent.SessionID()`（会话文件名去 `.jsonl`），只读模式无 id 时该段省略，退化为 `时长 … · 消息 … 条`
+- **用量行**：`用量 <总量>（prompt … / completion …）`，有累计缓存数据时追加 `· 缓存 <命中率>`——分别复用 `totalsText`/`cacheRateTotalText`（与 `/stat`、提示符占位符同源同公式）；无 usage 显示 `无（未收到 API usage）`
+- **文件行**：`会话文件 <homePath>`（只做 home → `~` 前缀替换、**不缩写中间目录**，路径需可直接拿去 `/load` 或查看文件；提示符用的 `shortPath` 会缩写中间目录，不适用于此），仅当 `Agent.SessionFile()` 非空（可写且文件确实存在）时打印；只读模式（`-n`）打印 `会话文件 未写入（不落盘模式）`；本次未产生对话（`sessionStore.append` 在 history 为空时直接返回、不建文件）则整行省略
+
+口径与门禁：时长在 `Run` 入口由 `REPL.started` 置位、退出时 `time.Since`（含提示符前的 idle 时间，`/new`/`/load` 不重置），格式化复用 `turnDuration`；`KindDecor` 仅 rich 可见，故 `-p` 与 `-p --verbose` 下退出**完全静默**（此前 plain 面会打「再见」；`MsgBye` 随本次改版删除）；`ask` 单发不经过 `Run`，stdout 契约不变。agent 侧新增只读访问器 `SessionID()`/`SessionFile()`，`store.disabled` 时均返回空串（后者另做 `os.Stat` 存在性判定）；`SessionFile` 与 `/stat` 的「会话文件」（`Stats().Session`，是**预定落点**、只读模式下也非空）刻意不同口径——`/stat` 报落点，退出报已落盘实体。
 
 ### 输入分发
 
