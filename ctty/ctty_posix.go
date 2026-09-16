@@ -66,12 +66,28 @@ const resetModes = "\x1b[0m" +
 	"\x1b[?25h\x1b[?7h\x1b[?6l\x1b[?1l" +
 	"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l" +
 	"\x1b[?2004l\x1b[?1004l" +
-	"\x1b7\x1b[?1049l\x1b[r\x1b8"
+	"\x1b[?1049l\x1b[r"
 
 func ResetModes(tty *os.File) bool {
 	if tty == nil {
 		return false
 	}
 	_, err := tty.WriteString(resetModes)
+	return err == nil
+}
+
+func SaveCursor(tty *os.File) bool {
+	if tty == nil {
+		return false
+	}
+	_, err := tty.WriteString("\x1b7")
+	return err == nil
+}
+
+func RestoreCursor(tty *os.File) bool {
+	if tty == nil {
+		return false
+	}
+	_, err := tty.WriteString("\x1b8")
 	return err == nil
 }

@@ -24,3 +24,7 @@ func IsForeground(fd int) bool { return false }
 func IgnoreJobSignals() {}
 
 func ResetModes(tty *os.File) bool { return false }
+
+func SaveCursor(tty *os.File) bool { return false }
+
+func RestoreCursor(tty *os.File) bool { return false }

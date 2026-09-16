@@ -70,6 +70,7 @@ func (b *bridgeTTY) Prepare(cmd *exec.Cmd) (*os.File, error) {
 		b.tty = tty
 		b.ownTTY = true
 	}
+	ctty.SaveCursor(b.tty)
 	master, slave, err := openPTY()
 	if err != nil {
 		b.release()
@@ -186,6 +187,7 @@ func (b *bridgeTTY) release() {
 			_ = ctty.SetTermios(b.ttyFd, b.saved)
 			if b.tty != nil {
 				ctty.ResetModes(b.tty)
+				ctty.RestoreCursor(b.tty)
 			}
 			b.rawSet = false
 		}
