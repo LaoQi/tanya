@@ -1,4 +1,4 @@
-module github.com/LaoQi/tanyan
+module github.com/LaoQi/tanya
 
 go 1.22
 

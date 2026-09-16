@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LaoQi/tanyan/render/ir"
-	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanya/render/ir"
+	"github.com/LaoQi/tanya/render/term"
 )
 
 func TestRenderBlockProfiles(t *testing.T) {

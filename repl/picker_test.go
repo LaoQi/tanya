@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LaoQi/tanyan/agent"
-	"github.com/LaoQi/tanyan/readline"
+	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/readline"
 )
 
 func testSessions(n int) []agent.SessionInfo {

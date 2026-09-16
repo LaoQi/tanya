@@ -3,14 +3,14 @@ package repl
 import (
 	"errors"
 	"fmt"
-	"github.com/LaoQi/tanyan/render"
-	"github.com/LaoQi/tanyan/render/ir"
-	"github.com/LaoQi/tanyan/render/markdown"
-	"github.com/LaoQi/tanyan/render/term"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/render"
+	"github.com/LaoQi/tanya/render/ir"
+	"github.com/LaoQi/tanya/render/markdown"
+	"github.com/LaoQi/tanya/render/term"
+	"github.com/LaoQi/tanya/render/theme"
 	"time"
 
-	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanya/agent"
 )
 
 // Kind 标记每次输出的类别，是噪音门禁与测试断言的把手（不导出包外、不进 agent.Event）。

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanya/render/term"
 )
 
 var sgrSeq = regexp.MustCompile(`\x1b\[[0-9;]*m`)

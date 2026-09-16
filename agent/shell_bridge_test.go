@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LaoQi/tanyan/readline"
+	"github.com/LaoQi/tanya/readline"
 )
 
 type fakeTTYBridge struct {

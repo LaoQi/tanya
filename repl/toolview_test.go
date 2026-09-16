@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanyan/agent"
-	"github.com/LaoQi/tanyan/render/term"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/render/term"
+	"github.com/LaoQi/tanya/render/theme"
 )
 
 // renderToolEnd 还原一次完整工具块：ToolStart 的着色标题 + 追加式正文与状态行。

@@ -3,8 +3,8 @@ package theme
 import (
 	"testing"
 
-	rstyle "github.com/LaoQi/tanyan/render/style"
-	"github.com/LaoQi/tanyan/render/term"
+	rstyle "github.com/LaoQi/tanya/render/style"
+	"github.com/LaoQi/tanya/render/term"
 )
 
 func TestSemanticSGR(t *testing.T) {

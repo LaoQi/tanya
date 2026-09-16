@@ -3,9 +3,9 @@ package render
 import (
 	"testing"
 
-	"github.com/LaoQi/tanyan/render/ir"
-	"github.com/LaoQi/tanyan/render/term"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/render/ir"
+	"github.com/LaoQi/tanya/render/term"
+	"github.com/LaoQi/tanya/render/theme"
 )
 
 func defSem() theme.Semantics {

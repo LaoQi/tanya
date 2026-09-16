@@ -3,10 +3,10 @@ package repl
 import (
 	"context"
 	"fmt"
-	"github.com/LaoQi/tanyan/render"
-	"github.com/LaoQi/tanyan/render/ir"
-	"github.com/LaoQi/tanyan/render/term"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/render"
+	"github.com/LaoQi/tanya/render/ir"
+	"github.com/LaoQi/tanya/render/term"
+	"github.com/LaoQi/tanya/render/theme"
 	"io"
 	"os"
 	"os/signal"
@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LaoQi/tanyan/agent"
-	"github.com/LaoQi/tanyan/readline"
+	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/readline"
 )
 
 type REPL struct {

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/LaoQi/tanyan/ctty"
+	"github.com/LaoQi/tanya/ctty"
 	"golang.org/x/sys/unix"
 )
 

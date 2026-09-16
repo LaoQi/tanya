@@ -10,7 +10,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/LaoQi/tanyan/ctty"
+	"github.com/LaoQi/tanya/ctty"
 )
 
 func configureProcessGroup(cmd *exec.Cmd) {

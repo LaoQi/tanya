@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/LaoQi/tanyan/render/style"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/render/style"
+	"github.com/LaoQi/tanya/render/theme"
 )
 
 const (

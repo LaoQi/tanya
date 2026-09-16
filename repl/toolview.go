@@ -3,14 +3,14 @@ package repl
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/LaoQi/tanyan/render/term"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/render/term"
+	"github.com/LaoQi/tanya/render/theme"
 	"io"
 	"strings"
 	"time"
 
-	"github.com/LaoQi/tanyan/agent"
-	"github.com/LaoQi/tanyan/readline"
+	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/readline"
 )
 
 const (

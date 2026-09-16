@@ -3,12 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanya/render/term"
 	"os"
 
-	"github.com/LaoQi/tanyan/agent"
-	"github.com/LaoQi/tanyan/readline"
-	"github.com/LaoQi/tanyan/repl"
+	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/readline"
+	"github.com/LaoQi/tanya/repl"
 )
 
 var (

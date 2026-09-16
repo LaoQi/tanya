@@ -1,6 +1,6 @@
 package ir
 
-import rstyle "github.com/LaoQi/tanyan/render/style"
+import rstyle "github.com/LaoQi/tanya/render/style"
 
 type Block interface {
 	blockNode()

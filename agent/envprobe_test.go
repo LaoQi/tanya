@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/LaoQi/tanyan/ctty"
+	"github.com/LaoQi/tanya/ctty"
 )
 
 func TestEnvSectionGolden(t *testing.T) {

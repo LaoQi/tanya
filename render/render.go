@@ -1,13 +1,13 @@
 package render
 
 import (
-	"github.com/LaoQi/tanyan/render/ir"
-	rstyle "github.com/LaoQi/tanyan/render/style"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/render/ir"
+	rstyle "github.com/LaoQi/tanya/render/style"
+	"github.com/LaoQi/tanya/render/theme"
 	"strconv"
 	"strings"
 
-	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanya/render/term"
 )
 
 func NewRenderer(prof term.Profile) Renderer {

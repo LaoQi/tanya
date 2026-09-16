@@ -2,14 +2,14 @@ package repl
 
 import (
 	"errors"
-	"github.com/LaoQi/tanyan/render/term"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/render/term"
+	"github.com/LaoQi/tanya/render/theme"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanya/agent"
 )
 
 func ttyProfile(t *testing.T, p term.Profile) {

@@ -1,12 +1,12 @@
 package repl
 
 import (
-	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanya/render/term"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanya/agent"
 )
 
 func withPlainProfile(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanya/agent"
 )
 
 func TestHistoryLineStripsControlAndSGR(t *testing.T) {

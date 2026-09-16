@@ -2,15 +2,15 @@ package repl
 
 import (
 	"bytes"
-	"github.com/LaoQi/tanyan/render/term"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/render/term"
+	"github.com/LaoQi/tanya/render/theme"
 	"io"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/LaoQi/tanyan/agent"
-	"github.com/LaoQi/tanyan/readline"
+	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/readline"
 )
 
 // syncBuf 让测试断言与心跳 goroutine 的写入互斥，-race 下安全。

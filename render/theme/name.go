@@ -1,6 +1,6 @@
 package theme
 
-import rstyle "github.com/LaoQi/tanyan/render/style"
+import rstyle "github.com/LaoQi/tanya/render/style"
 
 func (s Semantics) ByName(name string) (rstyle.Style, bool) {
 	switch name {

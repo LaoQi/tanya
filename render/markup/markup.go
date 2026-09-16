@@ -1,9 +1,9 @@
 package markup
 
 import (
-	"github.com/LaoQi/tanyan/render/ir"
-	rstyle "github.com/LaoQi/tanyan/render/style"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/render/ir"
+	rstyle "github.com/LaoQi/tanya/render/style"
+	"github.com/LaoQi/tanya/render/theme"
 	"strings"
 	"unicode/utf8"
 )

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanya/agent"
 )
 
 func initWorkdir(t *testing.T) string {

@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/LaoQi/tanyan/ctty"
+	"github.com/LaoQi/tanya/ctty"
 )
 
 func envSection(cwd string, profile *shellProfile) string {

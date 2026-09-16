@@ -1,7 +1,7 @@
 package readline
 
 import (
-	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanya/render/term"
 )
 
 func stringWidth(s string) int {
