@@ -39,6 +39,7 @@ const (
 
 	MsgCurReasoning    = "思维链显示: %s\n"
 	MsgReasoningOn     = "思维链显示已开启\n"
+	MsgReasoningHidden = "思维链显示已开启（当前输出档不显示思维链）\n"
 	MsgReasoningOff    = "思维链显示已关闭\n"
 	MsgReasoningBad    = "无效参数 %q（可用: on / off）"
 	MsgReasoningOnTag  = "开"
@@ -139,7 +140,7 @@ const helpText = `斜杠命令：
   /history [n|all] 无参截断列表；n 全量查看单条；all 全量显示
   /model [name]    无参显示当前模型；带名切换模型
   /think [level]   无参显示思考等级；设置 minimal/low/medium/high/max，off 关闭
-  /reasoning [on|off]  思维链开关（开启后以 markdown 呈现，不打「思考中」）
+  /reasoning       无参显示开关；带参 on/off 切换
   /theme [name]    无参显示当前主题与可用列表；带名切换内置主题
   /exit            退出
 输入分发：

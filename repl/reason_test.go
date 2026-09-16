@@ -143,6 +143,27 @@ func TestReasoningStopsWaitingHeartbeat(t *testing.T) {
 	tn.End(nil)
 }
 
+func TestReasoningOnOutsideGateWarns(t *testing.T) {
+	r, out, _ := newTestREPLMode(t, newFakeTerm(), modePlain, reasonProfile())
+	out.Reset()
+	r.handleCommand("/reasoning on")
+	if got := out.String(); got != MsgReasoningHidden || !r.showReasoning {
+		t.Errorf("门禁外开启应提示不显示且仍记住开关: %q %v", got, r.showReasoning)
+	}
+	if r.reasonVisible() {
+		t.Error("plain 档不应判定为可见")
+	}
+	rn, outn, _ := newTestREPLMode(t, newFakeTerm(), modeRich, reasonProfile())
+	outn.Reset()
+	rn.handleCommand("/reasoning on")
+	if got := outn.String(); got != MsgReasoningOn {
+		t.Errorf("rich 档开启 = %q", got)
+	}
+	if !rn.reasonVisible() {
+		t.Error("rich 档应判定为可见")
+	}
+}
+
 func TestHandleCommandReasoning(t *testing.T) {
 	r, out, errb := newTestREPLMode(t, newFakeTerm(), modeRich, reasonProfile())
 	run := func(cmd string) string {
