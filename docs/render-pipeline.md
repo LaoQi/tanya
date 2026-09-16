@@ -327,6 +327,7 @@ func (b *MarkdownBuf) Close() []Block               // 收尾：未闭合块降�
 - 块级分组：代码围栏（闭合出块）、列表/引用（组断出块）、标题/分隔线（单行即时）；未闭合围栏在流结束 `Close()` 降级为 `RawText` 原样
 - 行内未闭合标记按行解析，行尾不闭合自然按原样文本输出（乐观降级，不重绘、不闪屏）
 - 工具调用时序：`EventToolStart`/`EventResponse` 事件链先**结算缓冲**再交渲染——结算走 `Close()`（不只刷完整行），把流式响应滞留的**无 `\n` 尾行**输出为段落并闭合未完结块。若仅按行 flush，末行会滞留到下次写入/`Close()`，状态行与工具块抢先在正文尾行前上屏，把渲染内容从中间劈开；结算保证整条正文先于工具块/状态行输出
+- **流式缓冲看门狗（2026-09-17）**：hold 有界——围栏未闭合超过 `fenceLineLimit`（2000 行）或 `fenceByteLimit`（256 KB）即就地降级为 `CodeBlock` 并恢复普通行解析；无换行 pending 超过 `pendingByteLimit`（64 KB）提前作为 `Paragraph` 输出（处于围栏内则并入代码行、累计超字节上限再关闭）。目的不是限制长度而是让畸形/失控输入（漏闭合的反引号、超长单行）的影响止于局部、后续内容立即恢复流式渲染；正文与思维链共用同一缓冲实现
 - markdown 渲染默认开启，非 TTY 与 plain 输出走旁路（原 `/md` 开关已移除）：模型输出原样直出；`/history n|all` 回放的 assistant 正文走同一管线渲染（`mdEnabled` 判断 + 整段 `Write`/`Close` → `Renderer.Block`），消息头 `#N 角色` 因 `#` 与序号连写不构成 markdown 标题语法，单独构造 `Heading{Level:1}` IR 按标题渲染；user/tool 消息与工具参数永远原样（工具输出红线）
 
 ### 范围

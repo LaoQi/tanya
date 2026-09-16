@@ -9,7 +9,9 @@ import (
 	"github.com/LaoQi/tanya/readline"
 )
 
-var slashCommands = []string{"/help", "/new", "/load", "/stat", "/history", "/model", "/think", "/theme", "/exit", "/quit"}
+var slashCommands = []string{"/help", "/new", "/load", "/stat", "/history", "/model", "/think", "/reasoning", "/theme", "/exit", "/quit"}
+
+var onOffCandidates = []string{"on", "off"}
 
 var effortCandidates = func() []string {
 	out := make([]string, 0, len(agent.EffortLevels)+1)
@@ -49,6 +51,14 @@ func (c *completer) isThemeContext(line string) bool {
 		return false
 	}
 	prefix := strings.TrimPrefix(line, "/theme ")
+	return !strings.Contains(prefix, " ")
+}
+
+func (c *completer) isReasoningContext(line string) bool {
+	if !strings.HasPrefix(line, "/reasoning ") {
+		return false
+	}
+	prefix := strings.TrimPrefix(line, "/reasoning ")
 	return !strings.Contains(prefix, " ")
 }
 
@@ -93,6 +103,13 @@ func (c *completer) suggest(line string) string {
 		for _, m := range c.models() {
 			if strings.HasPrefix(m, prefix) && m != prefix {
 				return m[len(prefix):]
+			}
+		}
+	case c.isReasoningContext(line):
+		prefix := strings.TrimPrefix(line, "/reasoning ")
+		for _, v := range onOffCandidates {
+			if strings.HasPrefix(v, prefix) && v != prefix {
+				return v[len(prefix):]
 			}
 		}
 	case c.isThinkContext(line):
@@ -141,6 +158,15 @@ func (c *completer) complete(line string) []readline.Completion {
 		for _, m := range c.models() {
 			if strings.HasPrefix(m, prefix) {
 				out = append(out, readline.Completion{Insert: "/model " + m, Display: m})
+			}
+		}
+		return out
+	case c.isReasoningContext(line):
+		prefix := strings.TrimPrefix(line, "/reasoning ")
+		var out []readline.Completion
+		for _, v := range onOffCandidates {
+			if strings.HasPrefix(v, prefix) {
+				out = append(out, readline.Completion{Insert: "/reasoning " + v, Display: v})
 			}
 		}
 		return out

@@ -37,6 +37,19 @@ const (
 	MsgMarkCurrent = "* "
 	MsgMarkPlain   = "  "
 
+	MsgCurReasoning    = "思维链显示: %s\n"
+	MsgReasoningOn     = "思维链显示已开启\n"
+	MsgReasoningOff    = "思维链显示已关闭\n"
+	MsgReasoningBad    = "无效参数 %q（可用: on / off）"
+	MsgReasoningOnTag  = "开"
+	MsgReasoningOffTag = "关"
+	MsgReasonHead      = "思考"
+	MsgReasonTail      = "思考结束"
+	MsgReasonDurFmt    = " · %s"
+
+	reasonRuleLeft  = "─── "
+	reasonRuleRight = " ───"
+
 	MsgThinkUnset = "思考等级: 未设置\n"
 	MsgCurEffort  = "思考等级: %s\n"
 	MsgEffortSet  = "思考等级已设为 %s\n"
@@ -126,6 +139,7 @@ const helpText = `斜杠命令：
   /history [n|all] 无参截断列表；n 全量查看单条；all 全量显示
   /model [name]    无参显示当前模型；带名切换模型
   /think [level]   无参显示思考等级；设置 minimal/low/medium/high/max，off 关闭
+  /reasoning [on|off]  思维链开关（开启后以 markdown 呈现，不打「思考中」）
   /theme [name]    无参显示当前主题与可用列表；带名切换内置主题
   /exit            退出
 输入分发：

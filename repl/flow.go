@@ -47,6 +47,10 @@ type turn struct {
 	start time.Time
 	done  func()
 	gap   bool
+
+	reasonBuf   *markdown.MarkdownBuf
+	reasonOpen  bool
+	reasonStart time.Time
 }
 
 func (r *REPL) beginTurn(done func()) *turn {
@@ -61,6 +65,7 @@ func (r *REPL) beginTurn(done func()) *turn {
 			md:   markdown.NewMarkdownBuf(),
 			rend: r.rend,
 		},
+		reasonBuf: markdown.NewMarkdownBuf(),
 	}
 }
 
@@ -72,14 +77,56 @@ func (t *turn) Handle(e agent.Event) {
 		}
 	}
 	switch e.Kind {
+	case agent.EventReasoning:
+		if t.reasonOn() {
+			t.writeReasoning(e.Text)
+			return
+		}
+		t.r.view.Handle(e)
 	case agent.EventContent:
+		t.flushReason()
 		t.writeContent(e.Text)
 	case agent.EventToolStart, agent.EventResponse:
+		t.flushReason()
 		t.settleMd()
 		t.r.view.Handle(e)
 	default:
 		t.r.view.Handle(e)
 	}
+}
+
+// reasonOn 报告思维链是否上屏：开关打开、TTY、且 KindReasoning 过门禁（仅 rich 档）。
+func (t *turn) reasonOn() bool {
+	return t.r.showReasoning && t.f.prof.TTY && t.f.st.out.allows(KindReasoning)
+}
+
+// writeReasoning 渲染思维链 delta：首个 delta 停掉等待心跳并打开分隔块，
+// 其余 delta 走与正文同一 markdown 管线（逐块上屏，畸形影响由缓冲看门狗限制在局部）。
+func (t *turn) writeReasoning(s string) {
+	if s == "" {
+		return
+	}
+	t.r.view.Stop()
+	if !t.reasonOpen {
+		t.reasonOpen = true
+		t.reasonStart = time.Now()
+		t.r.print(reasonSep(t.f.sem, MsgReasonHead, 0), KindReasoning)
+	}
+	for _, blk := range t.reasonBuf.Write(s) {
+		t.r.print(t.f.rend.Block(blk), KindReasoning)
+	}
+}
+
+// flushReason 收尾思维链（幂等）：结算残留块并补带时长的下分隔符，正文随后紧接下一行。
+func (t *turn) flushReason() {
+	if !t.reasonOpen {
+		return
+	}
+	for _, blk := range t.reasonBuf.Close() {
+		t.r.print(t.f.rend.Block(blk), KindReasoning)
+	}
+	t.r.print(reasonSep(t.f.sem, MsgReasonTail, time.Since(t.reasonStart)), KindReasoning)
+	t.reasonOpen = false
 }
 
 func (t *turn) writeContent(s string) {
@@ -101,6 +148,7 @@ func (t *turn) settleMd() {
 func (t *turn) End(err error) {
 	dur := time.Since(t.start)
 	t.r.view.Stop()
+	t.flushReason()
 	t.settleMd()
 	if t.done != nil {
 		t.done()

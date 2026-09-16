@@ -9,6 +9,12 @@ import (
 	"github.com/LaoQi/tanya/render/term"
 )
 
+const (
+	fenceLineLimit   = 2000
+	fenceByteLimit   = 256 << 10
+	pendingByteLimit = 64 << 10
+)
+
 type groupKind uint8
 
 const (
@@ -23,6 +29,7 @@ type MarkdownBuf struct {
 	lines       []string
 	kind        groupKind
 	fenceLang   string
+	fenceBytes  int
 	listOrdered bool
 	closed      []ir.Block
 }
@@ -55,6 +62,8 @@ func (b *MarkdownBuf) Close() []ir.Block {
 	}
 	b.kind = groupNone
 	b.lines = nil
+	b.fenceLang = ""
+	b.fenceBytes = 0
 	if b.pending.Len() > 0 {
 		p := cleanLine(b.pending.String())
 		b.pending.Reset()
@@ -78,7 +87,28 @@ func (b *MarkdownBuf) drain() {
 		p = p[idx+1:]
 	}
 	b.pending.Reset()
+	if len(p) > pendingByteLimit {
+		b.flushPending(p)
+		return
+	}
 	b.pending.WriteString(p)
+}
+
+// flushPending 把超出阈值的无换行缓冲就地降级输出：围栏内并入代码行，其余作为段落，
+// 使畸形（或超长）输入的影响止于当前行，后续 delta 立即恢复流式解析。
+func (b *MarkdownBuf) flushPending(p string) {
+	if b.kind == groupFence {
+		b.lines = append(b.lines, cleanLine(p))
+		b.fenceBytes += len(p) + 1
+		if len(b.lines) > fenceLineLimit || b.fenceBytes > fenceByteLimit {
+			b.closeFence()
+		}
+		return
+	}
+	b.closeGroup()
+	if line := cleanLine(p); line != "" {
+		b.closed = append(b.closed, ir.Paragraph{Inlines: ParseInline(line)})
+	}
 }
 
 func (b *MarkdownBuf) feedLine(line string) {
@@ -86,12 +116,13 @@ func (b *MarkdownBuf) feedLine(line string) {
 	trimmed := strings.TrimSpace(line)
 	if b.kind == groupFence {
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
-			b.closed = append(b.closed, ir.CodeBlock{Lang: b.fenceLang, Lines: b.lines})
-			b.lines = nil
-			b.kind = groupNone
-			b.fenceLang = ""
-		} else {
-			b.lines = append(b.lines, line)
+			b.closeFence()
+			return
+		}
+		b.lines = append(b.lines, line)
+		b.fenceBytes += len(line) + 1
+		if len(b.lines) > fenceLineLimit || b.fenceBytes > fenceByteLimit {
+			b.closeFence()
 		}
 		return
 	}
@@ -104,6 +135,7 @@ func (b *MarkdownBuf) feedLine(line string) {
 		b.closeGroup()
 		b.kind = groupFence
 		b.fenceLang = strings.TrimSpace(strings.TrimPrefix(line, "```"))
+		b.fenceBytes = 0
 		return
 	}
 	if lvl := headingLevel(line); lvl > 0 {
@@ -137,6 +169,14 @@ func (b *MarkdownBuf) feedLine(line string) {
 	}
 	b.closeGroup()
 	b.closed = append(b.closed, ir.Paragraph{Inlines: ParseInline(line)})
+}
+
+func (b *MarkdownBuf) closeFence() {
+	b.closed = append(b.closed, ir.CodeBlock{Lang: b.fenceLang, Lines: b.lines})
+	b.lines = nil
+	b.kind = groupNone
+	b.fenceLang = ""
+	b.fenceBytes = 0
 }
 
 func (b *MarkdownBuf) closeGroup() {

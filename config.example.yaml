@@ -9,6 +9,10 @@ temperature: 0.7
 # 留空或注释则不发送；REPL 内 /think 可运行时切换
 # 设置后请求不再发送 temperature（兼容 o 系/gpt-5 等仅支持 temperature=1 的推理模型）
 # reasoning_effort: medium
+# 思维链显示（仅 yaml，默认关闭）：开启后思维链以 markdown 渲染，并夹在 `─── 思考 ───` / `─── 思考结束 · 3.2s ───` 分隔符之间，
+# 同时不再打印 `» 思考中` 状态行（`» 等待响应` 在首个思维链片段到达时收尾）
+# 仅 REPL 的 rich 输出档生效（stdout 非终端 / -p / ask 一律不显示），REPL 内 /reasoning on|off 可运行时切换
+# show_reasoning: false
 # 出站请求 User-Agent（伪装，避免厂商风控）
 user_agent: "pi/0.85.0 (linux; node/v22.14.0; x64)"
 # REPL 提示符为内置固定模板（不可配），占位符按口径分两组（加 _total 后缀即本次运行累计，无后缀即最近一次请求）：{cwd} 短路径 / {model} 模型 / {effort} 思考等级 / {usage} 上下文用量 / {cache} 本次命中量 / {cache_rate} 本次命中率 / {usage_total} 累计用量 / {cache_total} 累计命中量 / {cache_rate_total} 累计命中率 / {usage_summary} 组合显示（混合口径，{usage} 其后有累计缓存数据时追加累计命中率；与 /stat 命令不同源）

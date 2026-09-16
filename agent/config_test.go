@@ -310,3 +310,26 @@ func TestConfigTheme(t *testing.T) {
 		t.Errorf("默认主题应为 nord: %q", cfg.Theme)
 	}
 }
+
+func TestLoadConfigShowReasoning(t *testing.T) {
+	if defaultConfig().ShowReasoning {
+		t.Error("默认应为关闭")
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("show_reasoning: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.ShowReasoning {
+		t.Error("yaml show_reasoning 未生效")
+	}
+	if err := os.WriteFile(path, []byte("show_reasoning: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = LoadConfig(path); err != nil || cfg.ShowReasoning {
+		t.Errorf("显式关闭应生效: %v %v", cfg.ShowReasoning, err)
+	}
+}

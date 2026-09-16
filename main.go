@@ -113,7 +113,7 @@ func main() {
 		return
 	}
 
-	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette))
+	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning))
 	if err != nil {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)

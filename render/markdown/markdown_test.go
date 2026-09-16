@@ -217,3 +217,56 @@ func TestInlineCodeBrightAndDistinct(t *testing.T) {
 		t.Errorf("行内 code 与代码块应有不同配色: %q", inline)
 	}
 }
+
+func TestMarkdownFenceWatchdogRecovers(t *testing.T) {
+	input := "```\n" + strings.Repeat("code\n", fenceLineLimit+1) + "after\n"
+	buf := NewMarkdownBuf()
+	got := blocksText(t, buf, input)
+	if n := strings.Count(got, "code"); n != fenceLineLimit+1 {
+		t.Errorf("超限围栏内容应原样出块: %d 行", n)
+	}
+	if !strings.HasSuffix(got, "after\n") {
+		t.Errorf("围栏关闭后应恢复普通解析，后续行不得被吞: %q", got[max(0, len(got)-40):])
+	}
+	if rest := closeText(t, buf); rest != "" {
+		t.Errorf("看门狗已降级出块，Close 不应再有残留: %q", rest)
+	}
+}
+
+func TestMarkdownPendingWatchdogFlushes(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := blocksText(t, buf, strings.Repeat("a", pendingByteLimit+1))
+	if got != strings.Repeat("a", pendingByteLimit+1)+"\n" {
+		t.Errorf("超限无换行缓冲应提前出段: %d 字节", len(got))
+	}
+	if after := blocksText(t, buf, "tail\n") + closeText(t, buf); after != "tail\n" {
+		t.Errorf("降级后应继续流式解析: %q", after)
+	}
+}
+
+func TestMarkdownFenceLongLineStaysInFence(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := blocksText(t, buf, "```\n"+strings.Repeat("x", pendingByteLimit+1)+"\n```\n")
+	if strings.Contains(got, "x\nx") {
+		t.Errorf("围栏内超限行不得降级为段落: %q", got[:40])
+	}
+	want := "\x1b[90m" + strings.Repeat("x", pendingByteLimit+1) + "\x1b[0m\n"
+	if got != want {
+		t.Errorf("围栏内超限行应并入代码块: got %d 字节", len(got))
+	}
+}
+
+func TestMarkdownFenceByteWatchdog(t *testing.T) {
+	line := strings.Repeat("y", 64<<10)
+	buf := NewMarkdownBuf()
+	got := blocksText(t, buf, "```\n"+strings.Repeat(line+"\n", 5)+"after\n")
+	if !strings.HasSuffix(got, "after\n") {
+		t.Errorf("围栏字节超限应关闭围栏并恢复解析: %d 字节", len(got))
+	}
+	if n := strings.Count(got, line); n != 5 {
+		t.Errorf("所有行都应保留: %d 行", n)
+	}
+	if !strings.Contains(got, "\x1b[0m\n"+line) {
+		t.Errorf("超限后的行应回到普通段落渲染")
+	}
+}
