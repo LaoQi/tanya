@@ -173,6 +173,17 @@ func (p *keyParser) parseEscape() (*KeyEvent, int, bool) {
 		return &KeyEvent{Code: KeyHome}, 3, false
 	case 'F':
 		return &KeyEvent{Code: KeyEnd}, 3, false
+	case '1', '4':
+		if len(p.buf) < 4 {
+			return nil, 0, true
+		}
+		if p.buf[3] == '~' {
+			if p.buf[2] == '1' {
+				return &KeyEvent{Code: KeyHome}, 4, false
+			}
+			return &KeyEvent{Code: KeyEnd}, 4, false
+		}
+		return nil, 3, false
 	case '3':
 		if len(p.buf) < 4 {
 			return nil, 0, true

@@ -77,8 +77,8 @@ func TestParseAltWordKeys(t *testing.T) {
 
 func TestParseEscapeSequences(t *testing.T) {
 	p := &keyParser{}
-	evs := feedAll(t, p, "\x1b[A\x1b[B\x1b[C\x1b[D\x1b[H\x1b[F\x1b[3~")
-	want := []KeyCode{KeyUp, KeyDown, KeyRight, KeyLeft, KeyHome, KeyEnd, KeyDelete}
+	evs := feedAll(t, p, "\x1b[A\x1b[B\x1b[C\x1b[D\x1b[H\x1b[F\x1b[3~\x1b[1~\x1b[4~")
+	want := []KeyCode{KeyUp, KeyDown, KeyRight, KeyLeft, KeyHome, KeyEnd, KeyDelete, KeyHome, KeyEnd}
 	if len(evs) != len(want) {
 		t.Fatalf("got %d: %+v", len(evs), evs)
 	}

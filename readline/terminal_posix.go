@@ -3,7 +3,6 @@
 package readline
 
 import (
-	"io"
 	"os"
 
 	"github.com/LaoQi/tanya/ctty"
@@ -11,21 +10,21 @@ import (
 )
 
 type unixTerminal struct {
-	in     *os.File
-	saved  ctty.Termios
-	parser keyParser
-	queue  []KeyEvent
+	in    *os.File
+	saved ctty.Termios
+	keys  keySource
 }
 
-func newUnixTerminal() (Terminal, error) {
-	return newUnixTerminalFile(os.Stdin)
+func openTerminal() (Terminal, error) {
+	return openTerminalFile(os.Stdin)
 }
 
-func newUnixTerminalFile(in *os.File) (*unixTerminal, error) {
+func openTerminalFile(in *os.File) (*unixTerminal, error) {
 	t := &unixTerminal{in: in}
 	if _, err := ctty.GetTermios(int(in.Fd())); err != nil {
 		return nil, err
 	}
+	t.keys.src = t
 	return t, nil
 }
 
@@ -45,8 +44,7 @@ func (t *unixTerminal) Raw() error {
 	if err := ctty.SetTermiosFlush(int(t.in.Fd()), raw); err != nil {
 		return err
 	}
-	t.queue = nil
-	t.parser = keyParser{}
+	t.keys.reset()
 	return nil
 }
 
@@ -55,11 +53,11 @@ func (t *unixTerminal) Restore() {
 }
 
 func (t *unixTerminal) Size() (Size, bool) {
-	ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
-	if err != nil {
+	cols, rows, ok := ctty.Size(int(os.Stdout.Fd()))
+	if !ok {
 		return Size{}, false
 	}
-	return Size{Cols: int(ws.Col), Rows: int(ws.Row)}, true
+	return Size{Cols: cols, Rows: rows}, true
 }
 
 func (t *unixTerminal) readChunk(p []byte) (int, error) {
@@ -80,42 +78,4 @@ func (t *unixTerminal) hungUp() bool {
 	}
 }
 
-func (t *unixTerminal) ReadKey() (KeyEvent, error) {
-	if len(t.queue) > 0 {
-		ev := t.queue[0]
-		t.queue = t.queue[1:]
-		return ev, nil
-	}
-	buf := make([]byte, 256)
-	for {
-		n, err := t.readChunk(buf)
-		if err != nil {
-			if err == unix.EINTR {
-				continue
-			}
-			if err == unix.EIO {
-				return KeyEvent{}, io.EOF
-			}
-			return KeyEvent{}, err
-		}
-		if n > 0 {
-			t.queue = append(t.queue, t.parser.feed(buf[:n])...)
-		}
-		if t.parser.needsMore() && n > 0 {
-			continue
-		}
-		if t.parser.needsMore() && n == 0 {
-			t.queue = append(t.queue, t.parser.flush()...)
-			break
-		}
-		if len(t.queue) > 0 {
-			break
-		}
-		if t.hungUp() {
-			return KeyEvent{}, io.EOF
-		}
-	}
-	ev := t.queue[0]
-	t.queue = t.queue[1:]
-	return ev, nil
-}
+func (t *unixTerminal) ReadKey() (KeyEvent, error) { return t.keys.readKey() }
