@@ -322,6 +322,8 @@ repl 输出侧测试方法（输出收敛方案阶段 0-4 建立）：① **注�
 
 pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（测试自身分配 pty 充当真实 tty，经 `newBridgeTTY` 注入）断言子进程 `/dev/tty` 可读、`tty` 输出为 pty slave、`GPG_TTY` 覆盖、初始尺寸复制、raw 设置与恢复、子进程退出后 master 收到 EIO（防忘关 slave）、Attach 前预置输入不丢、子进程存活时 `stop()` 及时返回；② `agent/shell_bridge_test.go` 用 fake bridge（os.Pipe 造流）断言桥接全流程、Prepare/Attach 失败回退现状路径、非交互不触桥接；③ 真实 tty E2E（gated，用 `script -qec` 驱动真实 /dev/tty，不参与默认 `go test`）：`TTY_BRIDGE_E2E=1`（readline 单命令）、`TTY_E2E=1`（agent 全链路）、`TTY_E2E_REUSE=1`（同进程连续两次交互命令，覆盖 `ownTTY` 打开/恢复/重开复用路径）。
 
+输出侧渲染审计（`scripts/render_audit.py`，先 `make build`）：内置 mock LLM（responses 协议 SSE，事件形态对齐 `agent/mock_test.go`）+ pty 驱动真实二进制 + VT 回放（DECSTBM / 自动换行 / 光标可见性 / 备用屏 / SGR 状态）+ 不变量断言，全量约 15s、无网络依赖。不变量：`overwrite`（写入非空白单元格）、`region_scroll`（只在滚动区内滚动）、`cu_clamped`（相对上移超出光标所在行，会被视口夹到顶行）、结束时 `autowrap_off` / `cursor_hidden` / `margins_set` / `alt_screen_on` / `sgr_open`。场景 want 三档：`clean` 要求不变量全为 0（回归门）、`leak` 断言 `expect` 列出的违反项被复现（已知缺口门，修好后改成 `clean`）、`note` 只报告不断言；`--dump NAME` 打印该场景回放后的屏幕。当前登记为 leak 的三条即三项待修：`leak-decpstbm`（子进程 `printf '\033[14;20r' > /dev/tty` 留下滚动区，非交互 `run_shell` 结束后不复位屏幕模式）、`leak-terminal-modes`（`?7l`/`?25l` 残留）、`leak-picker-unpaged`（picker 未按屏幕高度分页，`CursorUp(len(items)+1)` 被夹到顶行）。
+
 ## 环境段（envprobe）
 
 - 定位：只注入模型无法廉价自探的最小事实集——平台事实与 run_shell 执行契约；工具清单不注入 prompt（function calling 已完整提供），工具版本/分支/目录列表等易变信息模型可按需自探，一律不预注入

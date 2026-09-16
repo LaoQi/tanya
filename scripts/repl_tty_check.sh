@@ -17,6 +17,8 @@ printf '\n\n/exit\n' | script -qec "./tanya" /dev/null | cat -v || true
 cat <<'TIP'
 
 == 人工目视（需交互） ==
+（输出侧自动审计见 scripts/render_audit.py）
+
 3) 状态行追加语义：script -qec "./tanya" /dev/null，跑一条 sleep 30 的命令，看 `▸ 工具名` 只出现一次、
    `  » 执行中 0s `（秒数与点之间一个空格位）起行后每秒一个点、满 10 点换行、结束追加 `  ↳ exit 0 · …`，且输出中 \x1b[1A 出现 0 次、块间无空行错位；
    含思维链的模型另有 `» 等待响应 0s ` → `» 思考中 3s ` 的相位切换（秒数连续、每次请求只多一行）

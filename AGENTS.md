@@ -60,6 +60,7 @@ go vet ./...          # 静态检查
 go test ./...         # 全量测试
 go test -race ./...   # 竞态检测
 go run . ask "你好"   # 单发冒烟（需配置 api_key）
+python3 scripts/render_audit.py   # 输出侧渲染审计（pty + VT 回放，需先 make build）
 ```
 
 测试约定：`agent`/`repl` 各自的 `TestMain` 提供包级基线隔离（HOME 与 cwd 指向临时目录，`TestProcessEnvIsolated` 守卫），用例不得依赖真实 HOME/配置；会话目录用 `t.TempDir()`，多 agent 共享会话时显式同步 `cfg.GlobalSession`；LLM mock 用 `agent/mock_test.go` 的 `newMockLLM` + `mockStep`；readline 用 fakeTerm 注入按键，真实终端与 pty 桥接 E2E 门控变量见 `docs/design.md`《测试》。交互/中断类手工验证用 `make build` 产出的 `./tanya`：**不要用 `go run .`**（`^Z` 会停住 wrapper，shell 抢走终端前台后 `^C` 失效）。
