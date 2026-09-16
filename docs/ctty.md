@@ -51,7 +51,7 @@
 | `ConsoleMode(fd) (uint32, bool)` | 读 Windows 控制台模式（2026-09-16 增补，windows 专属）|
 | `SetConsoleMode(fd, mode) bool` | 写 Windows 控制台模式 |
 | `Facts` / `Probe()` | 探测结果聚合（StdinTTY/StdoutTTY/Cols/Rows/SizeOK/VT/Kind），`main` 单点调用 |
-| `ResetModes(tty *os.File) bool` | 复位终端模式：SGR、显示光标、自动换行、退出备用屏、关鼠标上报；**不含 `CSI r`（DECSTBM）**——该序列按 VT100/ECMA-48 语义会把光标移到滚动区首行。排除源于调用侧曾依赖 `CSI 1A` + `CR CSI K` 相对寻址（工具块 inline 重绘与 spinner 帧，2026-09-15 追加化后已移除，见 `docs/repl-status-append.md`）；该排除保留，以免未来再引入相对寻址渲染时踩坑 |
+| `ResetModes(tty *os.File) bool` | 复位终端模式：SGR、显示光标、自动换行、origin 模式、普通方向键、鼠标上报、bracketed paste、focus 上报、退出备用屏、复位滚动区。**会移光标的两条包在 `DECSC`…`DECRC` 内**：`DECRST 1049` 即使在主屏也会按 DECRC 恢复保存槽（实测症状：interactive 输入密码后工具块正文从屏幕顶部开始画、覆盖旧数据），`CSI r`（DECSTBM）把光标移到滚动区首行；为此顺序固定为「模式/SGR 复位 → `\x1b7` → `?1049l` → `\x1b[r` → `\x1b8`」，DECSC 保存的已是复位后的状态，光标最终回原处。副作用登记：`\x1b7` 占用终端保存槽，故 `?1049l` 的恢复目标变成当前行列（而非进备用屏前的位置）；子进程死在真备用屏里时，回主屏后位置为备用屏上的行列（合法、内容无损）。2026-09-16 修订，取代此前直接排除 `CSI r` 的做法 |
 
 设计原则：
 
@@ -79,9 +79,9 @@
 
 **readline**：`secure.go` 的开 tty/Ignore/前台判定改走 `ctty`，`terminalGuardOwns` 与自愈策略保留；`bridge_linux.go` 删 `foregroundTTY`，`Prepare` 改 `ctty.IsForeground`；`secure_stub.go` tag 收敛为 `!linux && !darwin`。删私有 `termios_linux.go`/`termios_darwin.go`，`terminal_posix.go`/`bridge_linux.go`/测试改调 `ctty.GetTermios`/`ctty.SetTermios`/`ctty.SetTermiosFlush`；桥接 `release` 在复原 termios 后追加 `ctty.ResetModes`。
 
-**agent**（2026-09-15 增补）：`runShellForeground` 在移交前快照 termios、在 defer 中复原（覆盖正常退出、超时 SIGKILL、中断三条路径）；`handed` 时只归还前台组，**不再做模式复位**。自愈范围从 ISIG 扩到 canonical/输出后处理，见 `docs/design.md`《run_shell》。
+**agent**（2026-09-15 增补，2026-09-16 修订）：`runShellForeground` 在移交前快照 termios、在 defer 中复原（覆盖正常退出、超时 SIGKILL、中断三条路径），归还前台组后、`tty.Close()` 前调用 `ctty.ResetModes`——仅在 `handed || ctty.IsForeground(fd)`（自己确实是终端前台）时发，避免后台运行/前台被抢占时改动别人的终端状态。自愈范围从 ISIG 扩到 canonical/输出后处理，见 `docs/design.md`《run_shell》。
 
-**模式复位的使用面收敛（2026-09-15 二次修订）**：`ResetModes` 曾同时被 `agent` 常规路径（`handed` 在 REPL 中恒真，等于每次 `run_shell` 都写）与 `readline` 桥接 `release` 调用，且串内包含 `CSI r`。DECSTBM 会把光标移到滚动区首行，之后工具块 inline 重绘的 `CSI 1A` / `CR CSI K` 全部落在屏幕顶部——表现为「执行 run_shell 时输出错乱」：工具块画到顶上、覆盖欢迎屏、残留 spinner 行。现串内去掉 `CSI r`，并让常规路径只复原 termios（该路径子进程 stdout/stderr 走管道、不经终端，屏幕模式不会被改），`ResetModes` 仅由 `readline` 桥接 `release` 使用（工具块的 `CSI 1A` 相对重绘已于同日随追加化移除，该排除保留）。
+**模式复位的使用面（2026-09-15 引入，2026-09-16 修订）**：`ResetModes` 曾同时被 `agent` 常规路径与 `readline` 桥接 `release` 调用，且串内含裸 `CSI r`；DECSTBM 会把光标移到滚动区首行，而当时工具块靠 `CSI 1A` 相对重绘，症状为「执行 run_shell 时输出错乱」（工具块画到顶上、覆盖欢迎屏）。当时做法是去掉 `CSI r` 并把调用收敛到桥接 release，理由写作「常规路径子进程 stdout/stderr 走管道、不经终端，屏幕模式不会被改」。该理由**已被证伪**：非交互路径把真实 tty 交给子进程作 stdin（`cmd.Stdin = tty`），子进程写 `/dev/tty` 的转义（滚动区、`?7l`、`?25l`、SGR、鼠标上报）照样改屏幕状态。2026-09-16 修订：`CSI r` 回归但被 `DECSC`…`DECRC` 包住、`DECRST 1049` 同理，两条路径都发且带前台门控；`scripts/render_audit.py` 的 `clean-tty-scrollregion` / `clean-tty-modes` / `clean-interactive-release` 即该回归门（去掉复位或退回裸串都会变红）。
 
 **分片收敛**：`terminal_unix.go`→`terminal_posix.go`（`linux||darwin`）、`termios_bsd.go`→`termios_darwin.go`（`darwin`）、`termios_sysv.go`→`termios_linux.go`（`linux`）；删 `terminal_unix_stub.go`，新增 `terminal_stub.go`（`!linux && !darwin && !windows`）补齐非目标平台的 `newUnixTerminal`。
 

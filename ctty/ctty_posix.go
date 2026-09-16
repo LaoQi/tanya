@@ -61,7 +61,11 @@ func IgnoreJobSignals() {
 	signal.Ignore(unix.SIGTTIN, unix.SIGTTOU)
 }
 
-const resetModes = "\x1b[0m\x1b[?25h\x1b[?7h\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l"
+const resetModes = "\x1b[0m" +
+	"\x1b[?25h\x1b[?7h\x1b[?6l\x1b[?1l" +
+	"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l" +
+	"\x1b[?2004l\x1b[?1004l" +
+	"\x1b7\x1b[?1049l\x1b[r\x1b8"
 
 func ResetModes(tty *os.File) bool {
 	if tty == nil {

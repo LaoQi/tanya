@@ -209,13 +209,14 @@ func TestResetModesWritesEscapeState(t *testing.T) {
 	if !ResetModes(slave) {
 		t.Fatal("ResetModes 应写入成功")
 	}
-	buf := make([]byte, 128)
+	buf := make([]byte, 256)
 	n, err := master.Read(buf)
 	if err != nil {
 		t.Fatalf("读 pty: %v", err)
 	}
 	got := string(buf[:n])
-	for _, want := range []string{"\x1b[0m", "\x1b[?25h", "\x1b[?7h", "\x1b[?1049l", "\x1b[?1000l", "\x1b[?1006l"} {
+	for _, want := range []string{"\x1b[0m", "\x1b[?25h", "\x1b[?7h", "\x1b[?6l", "\x1b[?1l",
+		"\x1b[?1049l", "\x1b[?1000l", "\x1b[?1006l", "\x1b[?2004l", "\x1b[?1004l", "\x1b[r"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("模式复位缺 %q: %q", want, got)
 		}
@@ -226,7 +227,21 @@ func TestResetModesWritesEscapeState(t *testing.T) {
 }
 
 func TestResetModesKeepsCursor(t *testing.T) {
-	if strings.Contains(resetModes, "\x1b[r") {
-		t.Errorf("模式复位不得含 DECSTBM：光标会被移到滚动区首行，后续相对重绘（CSI 1A + CR CSI K）落到屏幕顶部: %q", resetModes)
+	save := strings.Index(resetModes, "\x1b7")
+	restore := strings.Index(resetModes, "\x1b8")
+	if save < 0 || restore < save {
+		t.Fatalf("模式复位缺 DECSC/DECRC 包裹: %q", resetModes)
+	}
+	if strings.Count(resetModes, "\x1b7") != 1 || strings.Count(resetModes, "\x1b8") != 1 {
+		t.Errorf("DECSC/DECRC 应各出现一次: %q", resetModes)
+	}
+	for _, seq := range []string{"\x1b[r", "\x1b[?1049l"} {
+		idx := strings.Index(resetModes, seq)
+		if idx < 0 {
+			continue
+		}
+		if idx < save || idx > restore {
+			t.Errorf("%q 会移动光标（DECSTBM 把光标移到滚动区首行；DECRST 1049 即使在主屏也按 DECRC 恢复保存槽），必须落在 DECSC…DECRC 内: %q", seq, resetModes)
+		}
 	}
 }
