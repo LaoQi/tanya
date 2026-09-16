@@ -4,11 +4,11 @@
 
 ## 设计约束
 
-- 极简优先：依赖仅 `gopkg.in/yaml.v3` 与 `golang.org/x/sys/unix`，新增依赖需先讨论
-- package 划分：`main`（仅入口）、`repl`（REPL/补全/渲染）、`agent`（核心逻辑）、`readline`（自研终端输入层）、`render`（表现层树：样式词汇/终端原语/配色/IR/渲染/解析）、`ctty`（控制终端原语，零依赖叶子）；根目录只放 main.go 与顶级包
+- 极简优先：依赖仅 `gopkg.in/yaml.v3` 与 `golang.org/x/sys`（unix 做 termios/pty，windows 做控制台探测），新增依赖需先讨论
+- package 划分：`main`（仅入口）、`repl`（REPL/补全/渲染）、`agent`（核心逻辑）、`readline`（自研终端输入层）、`render`（表现层树：样式词汇/终端原语/配色/IR/渲染/解析）、`ctty`（控制终端原语与终端探测，零依赖叶子）；根目录只放 main.go 与顶级包
 - 终端输入层自研（raw mode + ANSI 渲染），fish 风格 ghost 置灰建议，不引入 TUI 框架；Windows 仅支持 Windows Terminal（`terminal_windows.go` 占位未实现），不支持 cmd/老 conhost
 - 平台分片一律白名单：`linux`/`darwin`/`windows` 各一个装配文件，posix 共享实现落在 `linux || darwin` 文件，其余平台 stub，不枚举边缘平台；目标平台 Linux/Windows 为主（Windows 交互待实现）、macOS 尽力、其余仅保证可编译
-- 中断依赖两项终端不变量（`ISIG` 开启、前台组是 tanya），自愈时机与信号退出码口径（`128 + signum`）见 `docs/ctty.md`；`/dev/tty`、前台组、termios 读写与模式复位等原语一律走 `ctty`，是否移交/夺回/复原由 `agent`、`readline` 各自决定：`run_shell` 移交终端前快照 termios、子进程结束后（含超时强杀）只复原 termios，模式复位仅在 pty 桥接 release 使用且不含会 home 光标的 `CSI r`（相对重绘前提），自愈侧把被外部留成 raw 的终端拉回 canonical
+- 中断依赖两项终端不变量（`ISIG` 开启、前台组是 tanya），自愈时机与信号退出码口径（`128 + signum`）见 `docs/ctty.md`；`/dev/tty`、前台组、termios 读写与模式复位、终端探测（isatty/尺寸/VT）等原语一律走 `ctty`，是否移交/夺回/复原由 `agent`、`readline` 各自决定：`run_shell` 移交终端前快照 termios、子进程结束后（含超时强杀）只复原 termios，模式复位仅在 pty 桥接 release 使用且不含会 home 光标的 `CSI r`（相对重绘前提），自愈侧把被外部留成 raw 的终端拉回 canonical
 - `interactive: true` 的 run_shell 走全 pty 桥接（命令在独立 pty 中运行，真实 tty 由 bridge 切 raw 双向泵转）；仅 Linux 实现，失败回退 `/dev/tty` + `TIOCSPGRP`，见 `docs/interactive-tty.md`
 - 工具只有编译期显式清单 `allTools()`（`run_shell` + `builtinTools()` + `agent_custom`），不做动态注册/插件；清单顺序即请求顺序，改动会破坏 prompt cache
 - 模型可经 `agent_custom` 运行时自调与自省：形态为 `action`(get/set) + `key` + `value`，可写 key `model`/`reasoning_effort`，只读 key `models`/`usage`/`stat`/`sessions`（`get sessions` 返回会话列表 + jsonl 绝对路径，内容由 run_shell 读）；实现 key 表驱动。只写内存、不落盘不入会话，`/load` 或重启后回落配置文件值
@@ -26,7 +26,7 @@
 
 ```
 main.go            入口、flag 子命令、ask 单发、init 工作区脚手架
-ctty/              控制终端原语：前台组读/写、/dev/tty、SIGTTIN/SIGTTOU 忽略、能力常量 Supported；白名单 + stub，零内部依赖
+ctty/              控制终端原语与终端探测：前台组读/写、/dev/tty、SIGTTIN/SIGTTOU 忽略、能力常量 Supported、Facts 探测（isatty/尺寸/VT）；白名单 + stub，零内部依赖
 repl/              REPL 循环与输入分发（对话优先）、斜杠命令、提示符模板、ghost 补全、/load picker、工具块渲染、状态行心跳、统计渲染、UI 文案
 readline/          自研终端输入层：行编辑/历史/Tab 补全菜单、按键解析、raw mode、显示宽度、pty 桥接（linux）、终端状态自愈
 agent/             核心逻辑：config（配置加载）/ llm + llm_http + llm_responses（双协议 client）/ agent（对话 loop）/ prompt / session / stats / envprobe / init（工作区脚手架）/ event
@@ -48,7 +48,7 @@ render/            表现层树根：渲染管线（IR → ANSI 的 Renderer、�
 - `README.md` 使用说明与配置项
 - `docs/ctty.md` 控制终端抽象与平台收敛；`docs/interactive-tty.md` pty 桥接
 - `docs/style-split.md` 表现层拆包；`docs/render-pipeline.md` 渲染管线；`docs/render-refs-compare.md` 参考项目对比
-- `docs/shell-tool.md` run_shell 组件化；`docs/agent-control-tool.md` agent_custom 自调工具
+- `docs/shell-tool.md` run_shell 组件化；`docs/agent-control-tool.md` agent_custom 自调工具；`docs/terminal-caps.md` 终端探测与能力降级（支持范围约定、判定口径）
 - `docs/cache-probe.md` prompt cache 探测与量化台阶（供后续设计引用）
 - `docs/repl-output-refactor.md` 输出收敛与双流；`docs/repl-status-append.md` 状态展示追加化；`docs/repl-replay-rendering.md` 回放复用评估（未实施）；`docs/probe-redesign.md` 环境探针重构（归档）
 

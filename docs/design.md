@@ -11,7 +11,7 @@ main.go            package main：入口、flag 子命令、ask 单发
 repl/              package repl：REPL 循环、斜杠命令、补全、工具视图渲染、状态行心跳
 agent/             package agent：全部核心逻辑（config / llm / llm_http / agent / tools / prompt / session / stats / shell / builtin）
 readline/          package readline：自研终端输入层（editor / keys / terminal），pty 桥接与终端状态自愈
-ctty/              package ctty：控制终端原语（前台组读写、/dev/tty、SIGTTIN/SIGTTOU），白名单 linux||darwin，零依赖叶子
+ctty/              package ctty：控制终端原语（前台组读写、/dev/tty、SIGTTIN/SIGTTOU）与终端探测（Facts：isatty/尺寸/VT），白名单 linux/darwin/windows，零依赖叶子
 render/            package render：渲染管线（IR → ANSI：Renderer、提示符模板），可 import 其下子包
 render/style/      样式词汇与编码（SGR 唯一产地）
 render/term/       终端原语（ANSI 词法/清洗、宽度/截断、光标控制、能力档案；零依赖叶子）
@@ -26,8 +26,8 @@ render/markup/     内联标记解析
 
 - **不做细粒度拆包**：代码总量小，按包分职责即可
 - **不做动态工具注册**：工具经 `Tool` 接口（`agent/tools.go`）自述名/描述/参数并提供执行，`allTools()` 编译期显式列清单（`run_shell` + `builtinTools()` + `agent_custom`），`toolRegistry.lookup` 线性扫描（N=4 实测快于 map，现 N=5，不做索引），无插件/运行时注册，存量小且预计长期以 shell 为主
-- **依赖仅 2 个**：`gopkg.in/yaml.v3`（配置）、`golang.org/x/sys/unix`（raw mode）；终端输入层与富文本管线自研
-- **颜色铁律**：SGR 与 CSI 仅 `render/style`、`render/term` 产生（业务代码不得出现裸 `\x1b`，readline 的光标操作也走 `term.Cursor*`）；同一 IR 按终端能力档案（`term.Profile`）降级，无色终端自动纯文本
+- **依赖仅 2 个**：`gopkg.in/yaml.v3`（配置）、`golang.org/x/sys`（`unix` 做 termios/pty、`windows` 做控制台探测）；终端输入层与富文本管线自研
+- **颜色铁律**：SGR 与 CSI 仅 `render/style`、`render/term` 产生（业务代码不得出现裸 `\x1b`，readline 的光标操作也走 `term.Cursor*`）；同一 IR 按终端能力档案（`term.Profile`）降级，无色终端自动纯文本。档案由 `main` 单点探测（`ctty.Probe()`）后注入：**渲染类判定看 stdout 是否终端、输入类看 stdin**，见 `docs/terminal-caps.md`
 
 事实归属（不设共享暴露层）——这些结论不再重复讨论：
 
@@ -152,7 +152,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - **命令区折行（`commandLines` + `render/term.Wrap`）**：保留命令原有的换行结构与行首缩进（不再用 `; ` 压成单行——旧实现会把 `for …; do` / `if …; then` 拼成语法上不存在的 `do; if`，且丢空行与缩进）；制表符先按 4 空格摊平（`runeWidth` 把 `\t` 当单列、与终端制表位不符，不摊平则折行位置与显示不符）；`Wrap` 按显示宽度切分（宽字符整字换行、遇 `\n` 硬断行、`\r` 丢弃），只切分不改写内容、**不做词级折行**（超长 token 一样硬切），每行宽度 ≤ 终端列数 − 4。行数上限 `toolCommandMaxLines = 8`：超出保留头 6 行 + 省略行 + 尾 1 行，省略行 `… 省略 N 行（完整命令见 /history）`——命令是有序脚本，省略中段比省略尾部更不易误读收尾的 `done`/`EOF`；完整参数始终在 `/history n` 的工具消息里（显示侧改造不影响模型通道与会话存储）
 - 命令文本里的 ANSI 由调用点的 `Dim.Frame` 清洗（`Wrap` 遇到序列原样保留、不计宽度），折行发生在清洗之前，故宽度计算不会被模型可控的转义序列干扰
 - 状态行总是输出（语义色 `Info`，无色环境纯文本）：`↳ exit 0 · 0.3s · 12 行`；异常时首段为 `exit 2`/`执行超时`/`已中断`/`挂起已终止`/`错误: ...`；输出被截断时行数段显示 `共 N 行`；builtin 工具无状态行（截断时仅显示 `共 N 行`）
-- 颜色走 `theme.Semantics` 语义色 + `term.Profile` 驱动（`colors` 配置 / `NO_COLOR` / 非 TTY → 纯文本）：工具块 `Dim`、状态行心跳 等待 `Warn`/思考 `Think`/执行 `Run`、状态行 `Info`，可用 `palette` 配置覆盖
+- 颜色走 `theme.Semantics` 语义色 + `term.Profile` 驱动（`colors` 配置 / `NO_COLOR` / stdout 非终端 → 纯文本）：工具块 `Dim`、状态行心跳 等待 `Warn`/思考 `Think`/执行 `Run`、状态行 `Info`，可用 `palette` 配置覆盖
 - **捕获输出的 ANSI 治理**（`render/term` 清洗 + `Renderer.Frame/Passthrough`）：块组装内聚于 `RenderToolStart`/`RenderToolEndAppend`，输出区无 SGR 时整块 `Dim.Frame`（全清洗 + 块级包裹，标题/输出单一包裹点）；检测到 SGR（`HasSGR`）时输出区改走直显——`Passthrough` 保色渲染（SGR 原样保留、布局序列/OSC/C0 仍清洗、脏状态结尾闭合），标题行独立 Frame，状态行 `Info` 显式后置（不依赖 SGR 时序巧合）。预览类彩色输出（如欢迎屏效果）在灰色块内原色可见，用户与模型双通道分离：**模型侧文本不做任何变换**（原始输出、信息保真、缓存与历史零影响），显示侧机制对模型完全不可见
 - `/history` 查看 tool 消息时正文走 `Dim.Frame`（纯显示侧，历史存储不动），顺带解决历史串裸序列漏进视图的问题
 - 显示行数上限 `tool_output_lines`（默认 20，范围 1-1000），超出保留头 3 行 + 尾 2 行并提示 `/history n` 查看完整输出
@@ -169,7 +169,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 心跳形态（`statusTickInterval = 1s`、`statusLineSpan = 10`）：行首**只写一次**带秒数的前缀（`statusSeconds`：`59s` / `1m10s` / `1h01m`；秒数取 `time.Since(started)` 的**真实经过时间**，开行时写一次后固定不变；前缀末尾以 `statusDotGap` 一个空格位收尾，点不与秒数粘连），行内每 tick **只追加一个点** `.`，满 `span` 个点即换行并以当时秒数开新行（`» 等待响应 0s ..........` → `» 等待响应 10s ..........` → …）。已写出的字节永不回头修改。行首前缀与每个点都由同一语义色 `Style.Sprint` 单独包裹（各自带 `term.Reset`，点写完终端立即回到无 SGR 状态）——点与文字同色，且不把终端留在着色态：子进程或第三方写 `/dev/tty` 不会继承 tanya 的颜色。代价是每 tick 一段 `SGR + . + reset`（约 10 字节/秒，可忽略）；行首与点之间保留 `statusDotGap` 一个空格位，点不与秒数粘连。
 - `stop()`：`close(stopCh)` → 等 loop 退出（沿用有界 200ms）→ 当前行未收尾时补**一个换行**；未起心跳时不写任何字节（幂等，可重复调用）。重复 `start()` 先收尾上一行再开新行。
 - 回合收口：`turn.End` 调 `toolView.Stop()`——等待期被打断（无 content、无工具事件）时没有别的停止点，否则心跳会一直写到下一次请求、糊掉在途的 readline 提示符。
-- 门禁：`KindStatus` 仅 rich 档可见——plain / plain+verbose / 非 TTY 均无状态行与心跳，`ask` 单发默认档行为不变。
+- 门禁：`KindStatus` 仅 rich 档可见——plain / plain+verbose / stdout 非终端均无状态行与心跳，`ask` 单发默认档行为不变。
 - 每轮请求完成打印状态行 `  ↳ TTFT 0.8s · 3.2s · prompt 12.3k · completion 1.2k · 缓存 81.67%`（字段缺失自动省略；无 usage 时显示本地估算上下文）。
 - 方案、取舍与实测见 `docs/repl-status-append.md`（其中 09-15《取舍》对"思考中"的删除已被 09-16 的思考相位回补取代）。
 
@@ -209,7 +209,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 落盘原子性：本批消息先编码进内存缓冲再单次追加写入，写入报错或短写时 `Truncate` 回滚到写入前大小，`saved` 游标与文件内容始终一致（重试不会产生重复行/半行）
 - 首行持久化 system prompt 快照（`systemSaved` 标志防重复），`/load` 还原后前缀与当初逐字节一致；旧格式文件（无 system 首行）回退为载入时快照当前 AGENTS.md，且保持不补写；system 行不计入会话条数与摘要
 - 会话列表扫描：`agent.New` 启动时预扫描填充缓存（只读模式不建目录，目录缺失按空处理）；`ListSessions` 按 (mtime,size) 增量刷新，仅重扫变化的文件；每文件 `bufio` 逐行计数条数、仅解码至首条 user 消息取摘要
-- 会话浏览经 `/load` 无参菜单（`repl/picker.go`，非 TTY 降级为序号输入），候选带 id、时间、条数、首条 user 摘要；`/load <id>` 直接恢复继续对话；id 校验拒绝路径穿越（`/sessions` 命令已移除，浏览职责由 picker 承接）
+- 会话浏览经 `/load` 无参菜单（`repl/picker.go`，stdin 非终端降级为序号输入），候选带 id、时间、条数、首条 user 摘要；`/load <id>` 直接恢复继续对话；id 校验拒绝路径穿越（`/sessions` 命令已移除，浏览职责由 picker 承接）
 
 ## 系统提示与缓存友好
 
@@ -250,11 +250,11 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 白名单（`slashCommands`，同时驱动 Tab 补全）即分发契约：`Run` 先用 `isSlashCommand` 过滤，未命中的 `/` 开头输入按对话内容处理，因此 `handleCommand` 的 switch 不再有 `default` 分支（原先的 `MsgUnknownCmd` 不可达，已删）。白名单与 case 必须一一对应，`TestSlashCommandsAllHandled` 覆盖该不变量（`/load` 走 stdin 交互路径，单独测试）。
 
-- `/history` 无参截断列表（`term.OneLine` 先剥离 ANSI 转义与控制字符、压成单行，再按 120 rune 截断，避免 `\r`/`\x1b[K` 覆盖已打印行与未闭合 SGR 泄漏）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染、并按角色着色（user 用 `Ok` 绿、其余用 `Warn` 黄；`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 TTY 与输出模式约束：非 TTY、plain 一并旁路），user/tool 消息与工具参数原样
+- `/history` 无参截断列表（`term.OneLine` 先剥离 ANSI 转义与控制字符、压成单行，再按 120 rune 截断，避免 `\r`/`\x1b[K` 覆盖已打印行与未闭合 SGR 泄漏）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染、并按角色着色（user 用 `Ok` 绿、其余用 `Warn` 黄；`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 stdout 是否终端与输出模式约束：stdout 非终端、plain 一并旁路），user/tool 消息与工具参数原样
 - `/stat` 显示会话统计：工作区（构造期定格的启动目录）、会话文件、消息条数、本次运行累计 token（prompt/completion）、当前上下文占用（最近一次实报 prompt tokens，无 usage 回落本地估算）、缓存命中量与命中率（累计 hit / 累计 prompt）；数据全部来自 `Agent.Stats()` 单一快照，渲染在 `repl/stats.go`，与提示符占位符同源同公式
 - `/model` 无参实时调接口列出可用模型（`*` 标注当前，失败仍显示当前模型），带参直接切换不校验；带尾随空格支持补全（接口列表在 REPL 内首次加载后缓存，失败不重试）
 - `/think` 无参显示当前思考等级（未设置显示"未设置"）；带参 `minimal/low/medium/high/max` 设置，`off` 关闭，非法值报错不变更；带尾随空格补全等级候选（含 off，静态列表）
-- `/load` 无参打开方向键选择菜单（`repl/picker.go`，非 TTY 降级为序号输入），候选 Display 带时间/条数/简介
+- `/load` 无参打开方向键选择菜单（`repl/picker.go`，stdin 非终端降级为序号输入），候选 Display 带时间/条数/简介
 - `/theme` 无参显示当前主题与可用主题列表（含描述，`*` 标注当前），带参切换内置主题（非法值报错、主题不变）；带尾随空格补全主题名（内置静态列表）
 
 ### 提示符模板
@@ -270,7 +270,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 ### 回合视觉分隔（回合末尾方案）
 
 - 每回合结束后、下一个提示符之前打印一行绿色（语义色 `Ok`）分隔线：`──── 15:04:05`；有模型调用的回合追加 ` · 回合 12.4s`（斜杠命令回合只有时间）
-- 非 TTY 旁路：`term.GetProfile().TTY` 为假（管道/重定向）时**分隔线与"输入后留白"都不打印**——Degraded 输入不回显，留白会变成提示符下方凭空一行空行；且管道输出需保持可 diff、可再喂给其他工具。无色但仍是 TTY 时照常打印纯文本分隔线
+- stdout 非终端旁路：`term.GetProfile().TTY` 为假（管道/重定向）时**分隔线与"输入后留白"都不打印**——Degraded 输入不回显，留白会变成提示符下方凭空一行空行；且管道输出需保持可 diff、可再喂给其他工具。无色但仍是 TTY 时照常打印纯文本分隔线
 - 打印时机选在**回合末尾**而非回合开头：分隔线只在本回合确实结束时产生，空输入、`^C` 取消输入（`ErrInterrupt` → `continue`）、`/exit`、`^D` EOF 四条路径都不打印，屏幕不会留下"没有对应输出的孤儿行"；首个提示符之前也不打印（欢迎语即开场）。回合开头方案在物理上无法拦截这四条（分隔线必须先于 `Readline` 打印，而读入前无从判断本回合是否有输出），故不采用
 - 空行归一化：分隔线自带前导 `\n`，而工具状态行 / info 行 / 命令输出的末尾都恒为单 `\n`，因此"上一段输出 → 分隔线"之间恒 1 空行；用户提交后到本回合首个事件之间由 `turn.Handle` **懒补** 1 空行（首个事件前打一次，`KindDecor`），零事件回合（如 `Ask` 立即报错）不补，故不会与分隔线的前导换行叠成双空行
 - 耗时口径：用户提交 → `Ask` 返回，含本回合全部 LLM 请求与工具执行；`interactive: true` 的 run_shell 期间用户在终端应答的时间也计入（读数偏大属预期）。回合耗时是"提交 → 返回"的汇总层，与 info 行的单次请求耗时（`TTFT/x.xs`）、工具状态行的单工具耗时并列
@@ -283,10 +283,11 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - Tab 补全菜单：多候选时在输入行下方渲染菜单，选中项反显（`\x1b[7m`）；`↑/↓` 循环选择（菜单打开时不触发历史导航）、`Tab` 循环下一项、`Enter` 仅插入选中项（再次 Enter 提交）、`Esc` 关闭、任意输入关闭菜单正常编辑；单候选直接补全、公共前缀先行扩展的行为不变；候选超 8 行滚动窗口显示
 - keys：ESC 序列/控制键/UTF-8 状态机；width：`term` 薄包装（宽度表/ANSI 剥离/感知截断均由 `render/term` 提供，截断自动复位悬空 SGR 防串色）
 - 终端挂断（pty master 关闭、控制终端消失）：挂断后 `read` 既可能返回 `EIO`，也可能返回 0 字节且无错误——后者与 `VMIN=0/VTIME=1` 的空闲超时（0.1s 后返回 0 字节）在返回值上无法区分。`ReadKey` 以 `poll` 的 `POLLHUP/POLLERR/POLLNVAL` 判挂断、并把 `EIO` 归一为 `io.EOF`，REPL 据此正常退出（修复前挂断后的空闲轮询退化为忙循环：实测约 400 万次 `read`/秒、单核满载、进程永不退出）
-- 非 TTY 降级：`Degraded` 按行读取，无状态行心跳/菜单
+- stdin 非终端降级：`Degraded` 按行读取（无行编辑/历史/补全菜单/ghost）；状态行是否输出另由 stdout 判定，见 `docs/terminal-caps.md`
 - tty 桥接（`bridge.go` 接口 + `bridge_linux.go` 实现 + `bridge_stub.go` 非 Linux 返回 `ErrUnsupported`）：为 `interactive: true` 的 run_shell 提供"命令在自己的 pty 中运行"的执行器（`TTYBridge.Prepare/Attach`），复用本包 termios 读写与 raw 语义；生产入口 `readline.NewTTYBridge()` 由 `main.go` 经 `agent.WithTTYBridge` 注入到 `agent.New`（构造期定格进 `shellTool.bridge`），测试可在 `shellToolConfig` 里直接给 fake bridge
 - 终端状态自愈（`secure.go` + `secure_stub.go`）：`InitTerminalGuard`（启动时记录"自己是否为终端前台作业"，并 `ctty.IgnoreJobSignals`——`tcsetpgrp` 在前台被抢时需忽略 `SIGTTOU` 才不被停住）+ `SecureTerminal`（恢复 `ISIG`、必要时 `ctty.SetForeground` 夺回前台组）；控制终端原语均走 `ctty`
-- 平台划分（白名单 `linux || darwin`）：`termios_linux.go` 用 TCGETS/TCSETS/TCSETSF、`termios_darwin.go` 用 TIOCGETA/TIOCSETA/TIOCSETAF；`terminal_posix.go` 为真实实现，`terminal_windows.go` 与 `terminal_stub.go`（其余非 windows 平台）返回 ErrUnsupported 走 Degraded 降级，保证所有 GOOS 可编译
+- 平台划分（白名单 `linux || darwin`）：`termios_linux.go` 用 TCGETS/TCSETS/TCSETSF、`termios_darwin.go` 用 TIOCGETA/TIOCSETA/TIOCSETAF；`terminal_posix.go` 为真实输入实现，`terminal_windows.go` 与 `terminal_stub.go`（其余非 windows 平台）返回 ErrUnsupported 走 Degraded 降级——**只降输入侧**，显示侧不受影响，保证所有 GOOS 可编译
+- 终端探测（`ctty.Facts` + `ctty.Probe()`，2026-09-16）：stdin/stdout 是否终端（posix `GetTermios`、windows `GetConsoleMode`）、尺寸（`TIOCGWINSZ` / `GetConsoleScreenBufferInfo`）、VT（windows 幂等开 `ENABLE_VIRTUAL_TERMINAL_PROCESSING`，posix 恒真）由 `ctty` 单点探测，`main.go` 组装出 `term.Profile`（`DetectProfile(stdoutTTY, vt)`）与 `repl.TermFacts`（宽度）；`readline.NewTerminal` 的 bool 语义收窄为"输入后端可用"，不再外泄为渲染判定。支持范围、组合矩阵与分阶段见 `docs/terminal-caps.md`
 
 ## 配置
 

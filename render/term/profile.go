@@ -23,9 +23,9 @@ func SetProfile(p Profile) { current = p }
 
 func GetProfile() Profile { return current }
 
-func DetectProfile(isTTY bool) Profile {
+func DetectProfile(isTTY, vt bool) Profile {
 	p := Profile{TTY: isTTY, Colors: Level16}
-	if !isTTY {
+	if !isTTY || !vt {
 		p.Colors = LevelNone
 	}
 	if os.Getenv("NO_COLOR") != "" {

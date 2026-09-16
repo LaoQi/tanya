@@ -38,6 +38,8 @@ type options struct {
 	st        *streams
 	term      readline.Terminal
 	raw       bool
+	facts     TermFacts
+	factsSet  bool
 	themeName string
 	palette   map[string]string
 }
@@ -50,6 +52,10 @@ func WithStreams(st *streams) Option {
 
 func WithTerminal(dev readline.Terminal, raw bool) Option {
 	return func(o *options) { o.term, o.raw = dev, raw }
+}
+
+func WithTermFacts(f TermFacts) Option {
+	return func(o *options) { o.facts, o.factsSet = f, true }
 }
 
 func WithTheme(name string, palette map[string]string) Option {
@@ -114,7 +120,13 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if a != nil {
 		maxLines = a.ToolOutputLines()
 	}
-	r.view = NewToolView(o.st, r.prof, r.sem, func() int { return toolWidth(dev) }, maxLines)
+	facts := o.facts
+	if !o.factsSet {
+		if s, ok := dev.Size(); ok && s.Cols > 0 {
+			facts = TermFacts{Cols: s.Cols, ColsOK: true}
+		}
+	}
+	r.view = NewToolView(o.st, r.prof, r.sem, facts.Width, maxLines)
 	return r, nil
 }
 
