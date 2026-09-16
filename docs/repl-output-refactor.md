@@ -36,9 +36,9 @@
 会话 `20260911-165625` 用 `/history` 查看时出现三种现象：中间开始整段变黄、`pong` 与状态行插进列表中间、行内容互相覆盖。根因不在渲染算法，而在**输出没有单一出口、没有写权契约、没有统一清洗约定**：
 
 - `/history` 摘要行（`historyLine`）绕过 `style` 管线直写 `fmt.Println`，原始 `\r`、`\x1b[K`、`\x1b[33m` 直接进终端：`\r\x1b[K` 触发回车清行，把已打印的摘要行覆盖成 `pong` + 状态行；`truncateRunes` 按 120 rune 硬截断又切断了 `\x1b[33m` 的闭合序列，导致后续输出整段继承黄色。
-- 这些字节来自当时那条 `run_shell` 命令的产物——命令本身是在跑 tanyan（E2E），子 tanyan 的 UI 写到了 stdout，被父进程原样捕获成 tool 结果。
+- 这些字节来自当时那条 `run_shell` 命令的产物——命令本身是在跑 tanya（E2E），子 tanya 的 UI 写到了 stdout，被父进程原样捕获成 tool 结果。
 
-**这条事故链本身就是本方案的第二个动机**：父进程捕获子 tanyan 的 UI 噪音。`§1.2` 的 `OneLine` 是**读侧止血**（父进程读历史时清洗），plain 模式是**写侧根治**（子 tanyan 不再产生噪音）。两者互补，都不能省。
+**这条事故链本身就是本方案的第二个动机**：父进程捕获子 tanya 的 UI 噪音。`§1.2` 的 `OneLine` 是**读侧止血**（父进程读历史时清洗），plain 模式是**写侧根治**（子 tanya 不再产生噪音）。两者互补，都不能省。
 
 ### 1.2 已完成的止血（commit 54897cb）
 
@@ -76,10 +76,10 @@
 
 **数据侧事实**（评估用，非本方案改动对象）：
 
-- 全库 28 个会话、133 条工具消息含 ESC/CR；其中 UI 文案（spinner / 状态行）出现在"命令内容含 tanyan"的结果里，其余多为命令自产 ANSI 或读源码/文档时的字面量命中。
+- 全库 28 个会话、133 条工具消息含 ESC/CR；其中 UI 文案（spinner / 状态行）出现在"命令内容含 tanya"的结果里，其余多为命令自产 ANSI 或读源码/文档时的字面量命中。
 - 复现实验（本地 mock LLM）：
-  - `tanyan -n ask "hi" > f 2>&1`（stdin 为 tty、stdout 被重定向）→ `f` 含 `\r\x1b[K\x1b[33m⠋ 等待响应 0s\x1b[0m\r\x1b[Kpong\n\x1b[94m  ↳ TTFT …`；
-  - `tanyan -n ask "hi" < /dev/null > f2 2>&1` → spinner 消失，`  ↳ TTFT …` 仍在。
+  - `tanya -n ask "hi" > f 2>&1`（stdin 为 tty、stdout 被重定向）→ `f` 含 `\r\x1b[K\x1b[33m⠋ 等待响应 0s\x1b[0m\r\x1b[Kpong\n\x1b[94m  ↳ TTFT …`；
+  - `tanya -n ask "hi" < /dev/null > f2 2>&1` → spinner 消失，`  ↳ TTFT …` 仍在。
 - 两个成因独立：spinner 取决于 `style.DetectProfile(repl.ToolTTY())`，而 `ToolTTY()` 经 `readline.NewTerminal()` 最终只看 **stdin** 的 termios（`readline/terminal_unix.go:19`）；状态行在 `WireToolView` 的 `EventResponse` 分支**没有任何 TTY 门槛**。宽度反而已经取 stdout（`terminal_unix.go:51` 的 `TIOCGWINSZ`）。
 
 ### 1.3.1 最安静配置下仍剩的噪音（实测）
@@ -111,7 +111,7 @@ TTY=true, Colors=None:
 
 1. 本次修复是"点状补漏"，同类问题（清洗漏一处、写点漏一处、回放与实时分叉）还会再发生；
 2. 测试无法注入输出，只能靠替换 `os.Stdout`/`os.Stderr`（`captureStdout` 25 处调用，`captureStderr` 死代码）与全局 profile，覆盖面受限；
-3. 子代理调用场景（tanyan 作为子 agent）需要 stdout 可解析，现状无法提供；
+3. 子代理调用场景（tanya 作为子 agent）需要 stdout 可解析，现状无法提供；
 4. 后续任何输出侧需求（回放复用实时渲染、日志分流、结构化输出）都需要一个明确的落点，而不是继续加 `if`。
 
 ## 2. 目标与非目标
@@ -121,7 +121,7 @@ TTY=true, Colors=None:
 1. **输出收敛**：repl 内所有输出走唯一出口（`streams.out` / `streams.err`），writer 可注入、互斥统一。
 2. **数据流封装**：引入 `flow` 上下文、`Kind` 枚举与 `turn` 生命周期，`REPL` 只保留装配与分发。
 3. **可测试性**：测试可注入 writer 与 fake 终端，不再替换 `os.Stdout`/`os.Stderr`；写权冲突以协议断言覆盖。
-4. **输出模式**：以 `Kind` 为把手做噪音屏蔽，提供 `plain` / `plain+verbose` 两档，使 `ask` 可产出纯答案（stdout=答案、stderr=错误），支撑 tanyan 作为子 agent 被调用。
+4. **输出模式**：以 `Kind` 为把手做噪音屏蔽，提供 `plain` / `plain+verbose` 两档，使 `ask` 可产出纯答案（stdout=答案、stderr=错误），支撑 tanya 作为子 agent 被调用。
 
 **非目标（明确不做）**
 
@@ -516,20 +516,20 @@ func (t *turn) End(err error)        // md 结算、done()、中断/错误文案
 make build                                   # 不要用 go run（^Z/^C 语义不同）
 
 # 1) 工具块 inline 重绘（⋯ 被替换为最终标题）
-printf '跑一条命令\n/exit\n' | script -qec "./tanyan" /dev/null | cat -v | head -40
+printf '跑一条命令\n/exit\n' | script -qec "./tanya" /dev/null | cat -v | head -40
 
 # 2) 输入期与输出期不交错（观察提示符行不被 output 覆盖）
-script -qec "./tanyan" /dev/null
+script -qec "./tanya" /dev/null
 
 # 3) 补全菜单 / ghost / picker
 #    （键入 / 与 /load 后按 Tab、/load 回车）
 
 # 4) plain 子代理契约（stdout 仅答案、stderr 仅诊断、零 ANSI）
-script -qec "./tanyan -p -n ask '说一句话'" /dev/null | cat -v
-./tanyan -p -n ask '说一句话' >/tmp/ans 2>/tmp/err; cat -v /tmp/ans; cat -v /tmp/err
+script -qec "./tanya -p -n ask '说一句话'" /dev/null | cat -v
+./tanya -p -n ask '说一句话' >/tmp/ans 2>/tmp/err; cat -v /tmp/ans; cat -v /tmp/err
 
 # 5) plain+verbose（工具痕迹以纯文本追加式出现，无光标控制）
-script -qec "./tanyan -p --verbose -n ask '跑一条命令并总结'" /dev/null | cat -v
+script -qec "./tanya -p --verbose -n ask '跑一条命令并总结'" /dev/null | cat -v
 ```
 
 人工检查清单：

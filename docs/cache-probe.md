@@ -1,6 +1,6 @@
 # prompt cache 机制探测（参考记录）
 
-tanyan 的 history 全程 append-only、system 前缀冻结、工具描述按请求组装，这些设计都建立在"对端有前缀缓存"这一假设上。其中"system 前缀冻结"是**需要代码维护的不变量**：规则快照在 `/new`/`/load` 冻结，环境段自 2026-09-14 起在 `agent.New` 构造期定格（此前 `WORKSPACE` 行每轮重探、是 system 内唯一会自行变化的内容，见《落实：env 段的动态源》）。本文记录该假设的实测验证结论，以及"改动 prompt 中的哪一部分会损失多少缓存"的量化台阶，供后续设计（动态工具描述、运行时改配置、会话注入）引用。
+tanya 的 history 全程 append-only、system 前缀冻结、工具描述按请求组装，这些设计都建立在"对端有前缀缓存"这一假设上。其中"system 前缀冻结"是**需要代码维护的不变量**：规则快照在 `/new`/`/load` 冻结，环境段自 2026-09-14 起在 `agent.New` 构造期定格（此前 `WORKSPACE` 行每轮重探、是 system 内唯一会自行变化的内容，见《落实：env 段的动态源》）。本文记录该假设的实测验证结论，以及"改动 prompt 中的哪一部分会损失多少缓存"的量化台阶，供后续设计（动态工具描述、运行时改配置、会话注入）引用。
 
 探测脚本：`scripts/cache_probe.py`（标准库，无依赖），结论对应 golang 侧 `llm.go` / `llm_responses.go` 的请求构造。
 
@@ -50,16 +50,16 @@ python3 scripts/cache_probe.py --group preheat --model glm-5.3-flash --repeats 5
 python3 scripts/cache_probe.py --group all --model deepseek-flash
 ```
 
-- 端点与凭证读取顺序：`TANYA_BASE_URL`/`TANYA_API_KEY` > `-c` 指定文件 > `~/.config/tanyan/config.yaml` > `./config.yaml`。
+- 端点与凭证读取顺序：`TANYA_BASE_URL`/`TANYA_API_KEY` > `-c` 指定文件 > `~/.config/tanya/config.yaml` > `./config.yaml`。
 - **每次探测必须以新 seed 或新内容开始**：内容一旦被缓存，后续同 seed 的"建立"请求也会满命中，无法观察冷启动。
 - `--gap`（默认 3s）是请求间隔；`--ttl N` 触发 TTL 检测（会等待 N 秒）。
 - 所有 hit 后带 `[非 64 对齐!]` 标记的行即上文偶发异常。
 
-## 对 tanyan 设计的含义
+## 对 tanya 设计的含义
 
 - **动态工具描述成本可控**：仅在 DeepSeek 后端成立，且代价可量化（按 64 对齐、随改动位置递增）。GLM/Qwen 后端本就没有可依赖的前缀缓存，多轮对话第 1–2 轮零收益，动态工具描述不构成额外损失。
 - **工具顺序必须稳定**：交换工具顺序会在 tools 段开头断开（实测命中 5248 → 5120）。`allTools()` 的显式顺序（`run_shell` → `builtinTools()`）满足；条件注册（如 `run_shell` 缺失时）会从变化点起失效，影响面限于 tools 段。
-- **不要把易变状态注入 system 前缀**：env 段变化会击穿 messages，代价是整个会话前缀；tanyan 侧的落实方式是「只在构造期算一次」（见《落实：env 段的动态源》）。
+- **不要把易变状态注入 system 前缀**：env 段变化会击穿 messages，代价是整个会话前缀；tanya 侧的落实方式是「只在构造期算一次」（见《落实：env 段的动态源》）。
 - **假设不可默认成立**：多后端并存时，缓存收益要按后端判定；`auto-flash` 这类"自动路由"模型的缓存行为不可预期。
 
 ## 落实：env 段的动态源（2026-09-14）

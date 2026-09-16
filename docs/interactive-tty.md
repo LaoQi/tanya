@@ -64,7 +64,7 @@
 关键点：
 
 - **全 pty**：子进程 stdin/stdout/stderr 全接 pty slave，slave 即 ctty。因"原生直通"要求用户实时看到完整输出，命令输出不能走捕获管道、必须走终端流；master 输出**同时**写真实 tty（用户看）与 `capture`（模型）——这是"既显示又捕获"的唯一手段
-- 子进程经 `Setsid + Setctty` 成为独立会话首进程，ctty 为 pty slave；真实 tty 前台组始终是 tanyan，桥接路径下 `TIOCSPGRP` 移交**不再需要**
+- 子进程经 `Setsid + Setctty` 成为独立会话首进程，ctty 为 pty slave；真实 tty 前台组始终是 tanya，桥接路径下 `TIOCSPGRP` 移交**不再需要**
 - 真实 tty 由 bridge 切 raw 并独占读写；pty 侧行规程（cooked + `ISIG` + echo）承担行编辑与信号语义
 - **契约**：`capture` 是"捕获内容"，进 `ShellResult` → 模型；实时流是"即时展示"，仅写真实 tty，不单独进模型
 
@@ -113,7 +113,7 @@
 
 ### 5.7 中断、超时、挂起
 
-- **Ctrl+C**：`0x03` 经泵进入 pty，由 slave 行规程投 `SIGINT` 给子进程前台组（等价用户按键）；tanyan 不拦截、不计次
+- **Ctrl+C**：`0x03` 经泵进入 pty，由 slave 行规程投 `SIGINT` 给子进程前台组（等价用户按键）；tanya 不拦截、不计次
 - **超时**：沿用 `context.WithTimeout`（interactive 默认 300s），到时 `cmd.Cancel → killProcessGroup`
 - **挂起**：`^Z` 经 pty 投 `SIGTSTP`，`waitShell` 的 `processStopped` 轮询判定路径不变
 
@@ -123,12 +123,12 @@
 
 ### 5.9 终端状态自愈（`readline/secure.go`）
 
-桥接与中断都依赖两项终端不变量：**`ISIG` 开启**（否则 `^C` 不产生 `SIGINT`，`signal.Notify(SIGINT)` 的中断路径完全失效）与**终端前台进程组是 tanyan**（否则 `^C` 投递给别的进程组）。二者都可能被外部因素破坏，且 termios 与前台组**跨进程存活**、不随程序退出复位。验收实测到的两起：
+桥接与中断都依赖两项终端不变量：**`ISIG` 开启**（否则 `^C` 不产生 `SIGINT`，`signal.Notify(SIGINT)` 的中断路径完全失效）与**终端前台进程组是 tanya**（否则 `^C` 投递给别的进程组）。二者都可能被外部因素破坏，且 termios 与前台组**跨进程存活**、不随程序退出复位。验收实测到的两起：
 
 | 观测 | 起因 | 后果 |
 |---|---|---|
 | `lflag` 变成"cooked 减 `ISIG`"（`0x8a3a`） | 历史会话残留（termios 跨进程存活） | 任何 `^C` 都不产生信号，请求无法中断 |
-| 终端前台 pgrp 变为 shell 的 pgrp、termios 变为 shell 提示符模式（实测持续 28s） | 非桥接时段按 `^Z`：`SIGTSTP` 投给 tanyan 所在进程组，tanyan 因 `ProtectTerminalSignals` 免疫，但 **`go run` wrapper 被停止** → shell 判定前台作业已停并抢回终端 | 之后 `^C` 全给 shell，tanyan 收不到；且桥接因 `ctty.IsForeground` 判负而静默回退（表现为"按键无反应"） |
+| 终端前台 pgrp 变为 shell 的 pgrp、termios 变为 shell 提示符模式（实测持续 28s） | 非桥接时段按 `^Z`：`SIGTSTP` 投给 tanya 所在进程组，tanya 因 `ProtectTerminalSignals` 免疫，但 **`go run` wrapper 被停止** → shell 判定前台作业已停并抢回终端 | 之后 `^C` 全给 shell，tanya 收不到；且桥接因 `ctty.IsForeground` 判负而静默回退（表现为"按键无反应"） |
 
 处置：
 
@@ -189,7 +189,7 @@ func WithTTYBridge(b TTYBridge) Option // 未注入或 Prepare 失败 → 回退
 
 | 项 | 结论 |
 |---|---|
-| A1 `^Z` 语义 | **不改代码**。实测：桥接期按 `^Z` 仅回显、子进程不挂起、命令跑完（与 §7 登记一致）。附带发现见 §5.9——非桥接时段按 `^Z` 会走 shell 作业控制：`./tanyan` 直接运行因 `ProtectTerminalSignals` 免疫，但 **`go run .` 启动时 wrapper 会被停止**，shell 抢走终端后 `^C` 失效。**交付/自测请用 `make build` 产出的 `./tanyan`，不要用 `go run .`** |
+| A1 `^Z` 语义 | **不改代码**。实测：桥接期按 `^Z` 仅回显、子进程不挂起、命令跑完（与 §7 登记一致）。附带发现见 §5.9——非桥接时段按 `^Z` 会走 shell 作业控制：`./tanya` 直接运行因 `ProtectTerminalSignals` 免疫，但 **`go run .` 启动时 wrapper 会被停止**，shell 抢走终端后 `^C` 失效。**交付/自测请用 `make build` 产出的 `./tanya`，不要用 `go run .`** |
 | A2 `Attach(cmd, capture)` 未用 `cmd` | **已删参**（接口、两处实现、fake、调用点、文档同步） |
 | A3 双 `TTYBridge` 定义 | **保留**：agent 不 import readline 的依赖倒置，漂移会在 `main.go` 注入处编译期暴露 |
 | A4 `RunShellResult` 新增 `interactive` 参数 | **保留**：模块非公共库，仓库内调用点已同步。（后续 shellTool 组件化中该函数已删除，语义由 `shellRequest.Interactive` 承接） |
@@ -218,7 +218,7 @@ func WithTTYBridge(b TTYBridge) Option // 未注入或 Prepare 失败 → 回退
 
 - sudo 密码、ssh 交互、gpg 签名（先 `gpg-connect-agent reloadagent /bye` 清缓存）、`read` 提示
 - 超时、Ctrl+Z 挂起、Ctrl+C 透传、窗口 resize
-- tanyan 内嵌 tanyan、`/load` 后交互
+- tanya 内嵌 tanya、`/load` 后交互
 
 **回归**：非交互路径零变化；`go build ./... / go vet ./... / go test -race ./...` 全绿
 
@@ -242,7 +242,7 @@ func WithTTYBridge(b TTYBridge) Option // 未注入或 Prepare 失败 → 回退
 ## 10. 开放问题
 
 1. "默认全具备"（§2 触发·探索方向）：是否对所有命令默认启用桥接，或按命令特征自动识别
-2. 受控输入（tanyan 接管输入行 + 掩码）的演进，作为 §2 交互形态的次选
+2. 受控输入（tanya 接管输入行 + 掩码）的演进，作为 §2 交互形态的次选
 3. 非交互命令 `cmd.Stdin` 是否改绑 `/dev/null`（现状绑 `/dev/tty` 的隐患，超出本次范围）
 4. pinentry-curses 等全屏界面在"原样全量"下噪声较高——已按 §7 豁免，若实际不可读再评估
 5. macOS/BSD 桥接（`TIOCPTY` 系列）与 Windows ConPTY：当前 stub 回退，未排期
