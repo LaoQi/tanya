@@ -6,7 +6,7 @@
 
 - 极简优先：依赖仅 `gopkg.in/yaml.v3` 与 `golang.org/x/sys`（unix termios/pty、windows 控制台探测），新增依赖需先讨论
 - package 划分：`main`（仅入口）、`repl`（REPL/输入分发/渲染）、`agent`（核心逻辑）、`readline`（自研终端输入层）、`render`（表现层树）、`ctty`（控制终端原语与探测，零依赖叶子）；根目录只放 main.go 与顶级包
-- 终端输入层自研（raw mode + ANSI 渲染，fish 风格 ghost 置灰建议），不引入 TUI 框架；Windows 仅支持 Windows Terminal（`terminal_windows.go` 占位未实现），不支持 cmd/老 conhost
+- 终端输入层自研（raw mode + ANSI 渲染，fish 风格 ghost 置灰建议），不引入 TUI 框架；Windows 仅支持 Windows Terminal（`readline/terminal_windows.go` 输入后端已实现、实机验证待做；`interactive: true` 交互命令待实现），不支持 cmd/老 conhost
 - 平台分片一律白名单：`linux`/`darwin`/`windows` 各一个装配文件，posix 共享实现落在 `linux || darwin` 文件，其余平台 stub，不枚举边缘平台；Linux 为主、Windows 交互待实现、macOS 尽力
 - 终端原语（`/dev/tty`、前台组、termios 读写与模式复位、探测）一律走 `ctty`，移交/夺回/复原策略由 `agent`、`readline` 各自决定；`run_shell` 交终端前快照 termios、子进程结束（含超时强杀）后复原，自仍是前台时发 `ctty.ResetModes`；交终端前 `SaveCursor`、复位后 `RestoreCursor`，复位串内不得自包 `DECSC`/`DECRC`（会覆盖存档槽）；中断依赖两项不变量（`ISIG` 开启、前台组是 tanya），信号退出码 `128 + signum`，readline 每回合自愈把被留成 raw 的终端拉回 canonical。见 `docs/ctty.md`、`docs/interactive-tty.md` §5.9
 - `interactive: true` 的 run_shell 走全 pty 桥接（命令在独立 pty 中运行，真实 tty 由 bridge 切 raw 双向泵转），仅 Linux 实现，失败回退 `/dev/tty` + `TIOCSPGRP`，见 `docs/interactive-tty.md`

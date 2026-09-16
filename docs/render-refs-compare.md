@@ -90,11 +90,11 @@ glamour 有 `WithPreservedNewLines` 开关（`refs/glow/ui/pager.go:373` 使用�
 - `Truncate` 达限后转 ignoring，但**继续收集后续转义序列**（保留颜色状态变化，适配"截断串还要接续输出"的场景）；另有 `Cut/TruncateLeft`（左右截断，行编辑器场景）
 - reflow 丢尾部序列+显式复位 vs x/ansi 保留尾部序列不复位：两种取舍对应不同使用场景，行式 REPL 取 reflow 派更安全
 
-**对我们设计文档的修正**（需回写 §9）：
+**对我们设计文档的修正**（已回写 §9；各条落地状态随行标注）：
 
-1. `style.Truncate` 必须处理截断后样式复位（reflow 的 lastseq+ResetAnsi 模式）——原设计只写了"ANSI-aware"，漏了串色问题
+1. `style.Truncate` 必须处理截断后样式复位（reflow 的 lastseq+ResetAnsi 模式）——原设计只写了"ANSI-aware"，漏了串色问题。**已落地**（`render/term/text.go` 的 `Truncate`）
 2. IR 路径的截断可结构性免疫：渲染器按 span 切分时天然知道样式边界，切完即收尾该 span 的 SGR——**IR 分层在此处直接消掉一类 bug**，是分离架构的又一收益
-3. 字素簇宽度依赖 uniseg，与"依赖仅 2 个"约束冲突。裁决留待实施：a) 扩充现有 runeWidth 表（接受 emoji 组合序列误差）b) 引入 uniseg（讨论后定）c) IR 路径内自算（渲染器已知 span 内容与样式，可统计）
+3. 字素簇宽度依赖 uniseg，与"依赖仅 2 个"约束冲突。**已裁决取 a**：维持手写 `runeWidth` 表、接受 emoji 组合序列误差（`render/term/text.go`），不引入 `uniseg`（守住依赖仅 2 个的约束）；b) 引入 uniseg 与 c) IR 路径内自算不再评估
 
 ## 议题 7：rich 的 IR 分层架构（重点印证，Textualize/rich）
 
@@ -139,4 +139,4 @@ Python 生态终端富文本标杆（⭐57k）。管线：`markup/Markdown 解�
 - 色深量化算法（**已裁定延后**，不重要；届时可拉 `charmbracelet/colorprofile`）
 - Windows Terminal 探测细节（`WT_SESSION` 之外的能力探测）
 - 表格渲染（远期；glamour `ansi/table.go` 届时再读）
-- 字素簇宽度依赖裁决（议题 6.3：扩表 / 引入 uniseg / IR 内自算，实施前定）
+- ~~字素簇宽度依赖裁决~~（**已裁决**：取"扩表"路线，见议题 6.3，不再追踪）

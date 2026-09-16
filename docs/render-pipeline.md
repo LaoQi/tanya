@@ -304,7 +304,7 @@ func (r Renderer) Inline(in ...ir.Inline) string     // 提示符等行内场景
 
 **落地修订**：三个函数统一走 `scanSequence`，因此 OSC（窗口标题、超链接）、字符集选择序列也被正确跳过——修掉旧 `Strip` 把 `\x1b]0;my-title\x07` 留在文本里的缺陷（新用例 `TestStripOSCAndNonCSISequences`/`TestWidthOSC`/`TestTruncateOSC`）。
 
-补充（参考 reflow 后发现的设计缺口，详见 `render-refs-compare.md` 议题 6）：**截断须处理样式复位**——截断点若处于样式内，SGR 处于打开状态会向后续输出串色，`Truncate` 需跟踪活跃 SGR 序列并在截断处显式复位（reflow `ansi/writer.go` 的 lastseq 模式）。IR 路径的折行/截断由渲染器按 span 边界切分，天然免疫此类问题。宽度口径是否升级为字素簇（uniseg 依赖）实施前裁决。
+补充（参考 reflow 的对照结论，详见 `render-refs-compare.md` 议题 6）：**截断须处理样式复位**——截断点若处于样式内，SGR 处于打开状态会向后续输出串色。**已落地**（`render/term/text.go` 的 `Truncate` 累积活跃 SGR 序列、截断处追加 `Reset`，即 reflow 的 lastseq 模式）；IR 路径的折行/截断由渲染器按 span 边界切分，天然免疫此类问题。宽度口径**已裁决保留手写表**（`runeWidth`，接受 emoji 组合序列误差，不引入 `uniseg`），见议题 6.3。
 
 ## 10. Markdown 管线（render/markdown）
 
