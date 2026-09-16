@@ -16,6 +16,7 @@ type stubConfigTarget struct {
 	stats    Stats
 	noSave   bool
 	err      error
+	path     string
 }
 
 func (s *stubConfigTarget) Model() string                        { return s.model }
@@ -24,6 +25,7 @@ func (s *stubConfigTarget) ReasoningEffort() string              { return s.effo
 func (s *stubConfigTarget) SetReasoningEffort(v string) error    { s.effort = v; return nil }
 func (s *stubConfigTarget) ListModels() ([]string, error)        { return s.models, s.err }
 func (s *stubConfigTarget) ListSessions() ([]SessionInfo, error) { return s.sessions, s.err }
+func (s *stubConfigTarget) ConfigPath() string                   { return s.path }
 func (s *stubConfigTarget) NoSave() bool                         { return s.noSave }
 func (s *stubConfigTarget) Stats() Stats                         { return s.stats }
 
@@ -76,7 +78,7 @@ func TestAgentToolDescGolden(t *testing.T) {
 		"改动仅本次会话有效（不写入配置文件，进程退出即恢复），对下一次请求生效。" +
 		"切换模型后 prompt cache 不复用，需重新预热。" +
 		"action=get 按 key 读取；action=set 按 key 写入可写 key（需同时给 value）。" +
-		"key 可用: model、reasoning_effort、models、usage、stat、sessions；可写 key: model、reasoning_effort。"
+		"key 可用: model、reasoning_effort、models、usage、stat、sessions、config_path；可写 key: model、reasoning_effort。"
 	tool := newAgentTool(&stubConfigTarget{})
 	if got := tool.Definition().Function.Description; got != want {
 		t.Errorf("描述全串不匹配:\n got %q\nwant %q", got, want)
@@ -89,7 +91,7 @@ func TestAgentToolDescGolden(t *testing.T) {
 func TestAgentToolParamsGolden(t *testing.T) {
 	want := `{"type":"object","properties":{` +
 		`"action":{"type":"string","enum":["get","set"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）"},` +
-		`"key":{"type":"string","enum":["model","reasoning_effort","models","usage","stat","sessions"],"description":"可写键 model、reasoning_effort；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）"},` +
+		`"key":{"type":"string","enum":["model","reasoning_effort","models","usage","stat","sessions","config_path"],"description":"可写键 model、reasoning_effort；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）、config_path（生效配置文件绝对路径，可用 run_shell 读取或修改，改动需重启生效）"},` +
 		`"value":{"type":"string","description":"set 的新值（get 时忽略）。reasoning_effort 取 minimal/low/medium/high/max/off，off 表示清空该字段"}},` +
 		`"required":["action","key"]}`
 	got := string(newAgentTool(&stubConfigTarget{}).Definition().Function.Parameters)
@@ -119,6 +121,29 @@ func TestAgentToolKeyTableConsistent(t *testing.T) {
 		if writable && spec.write == nil {
 			t.Errorf("%q 可写但缺少 write", name)
 		}
+	}
+}
+
+func TestAgentToolConfigPath(t *testing.T) {
+	st := &stubConfigTarget{path: "/home/u/.config/tanya/config.yaml"}
+	want := "配置文件: /home/u/.config/tanya/config.yaml\n" +
+		"改动需重启 tanya 生效（本次会话可用 agent_custom 调整 model/reasoning_effort）"
+	if got := invokeAgentTool(t, st, `{"action":"get","key":"config_path"}`); got != want {
+		t.Errorf("config_path 输出不匹配:\n got %q\nwant %q", got, want)
+	}
+	got := invokeAgentTool(t, st, `{"action":"set","key":"config_path","value":"/tmp/other.yaml"}`)
+	if !strings.Contains(got, "只读 key") || !strings.HasPrefix(got, MsgErrPrefix) {
+		t.Errorf("set config_path 应明确拒绝: %q", got)
+	}
+	if got := invokeAgentTool(t, st, `{"action":"get","key":"config_paths"}`); !strings.Contains(got, "未知 key") {
+		t.Errorf("未知 key 应报错: %q", got)
+	}
+}
+
+func TestAgentConfigPathFollowsConfig(t *testing.T) {
+	a := newControlAgent(t, nil, "responses")
+	if got := a.ConfigPath(); got != a.cfg.Path || got == "" {
+		t.Errorf("ConfigPath = %q, cfg.Path = %q", got, a.cfg.Path)
 	}
 }
 

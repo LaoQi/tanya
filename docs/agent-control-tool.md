@@ -79,13 +79,14 @@ v1 §2 曾用"schema 变化击穿 cache / 前缀每轮失效"论证"单工具 + 
 | `usage` | ✅ | ❌ | — | 最近一次请求的上下文 tokens、缓存命中、命中率 | `Stats()` |
 | `stat` | ✅ | ❌ | — | 会话 id、消息数、累计 token 用量 | `Stats()` |
 | `sessions` | ✅ | ❌ | — | 本工作区会话列表 + **每个会话的文件绝对路径** | `ListSessions()`（`SessionInfo` 需补 `Path`） |
+| `config_path` | ✅ | ❌ | — | 生效配置文件绝对路径 + 改动需重启生效的提示（2026-09-17 追加，见 §18） | `ConfigPath()` |
 
-可写键只有 `model` 与 `reasoning_effort`（沿用 v1 §8 的边界）；其余四个为只读。将来扩展（输出行数预算、单向收紧权限）只需在本表加行 + 在 §7 的 enum 加值。
+可写键只有 `model` 与 `reasoning_effort`（沿用 v1 §8 的边界）；其余为只读（`config_path` 是只读的**定位**能力：给出文件路径，改文件走 `run_shell`）。将来扩展（输出行数预算、单向收紧权限）只需在本表加行 + 在 §7 的 enum 加值。
 
 ## 7. schema（golden）
 
 ```json
-{"type":"object","properties":{"action":{"type":"string","enum":["get","set"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）"},"key":{"type":"string","enum":["model","reasoning_effort","models","usage","stat","sessions"],"description":"可写键 model、reasoning_effort；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）"},"value":{"type":"string","description":"set 的新值（get 时忽略）。reasoning_effort 取 minimal/low/medium/high/max/off，off 表示清空该字段"}},"required":["action","key"]}
+{"type":"object","properties":{"action":{"type":"string","enum":["get","set"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）"},"key":{"type":"string","enum":["model","reasoning_effort","models","usage","stat","sessions","config_path"],"description":"可写键 model、reasoning_effort；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）"},"value":{"type":"string","description":"set 的新值（get 时忽略）。reasoning_effort 取 minimal/low/medium/high/max/off，off 表示清空该字段"}},"required":["action","key"]}
 ```
 
 - `action` 与 `key` **双 enum**：这是模型填对参数的唯一约束来源（`value` 无法在 schema 层约束，见 §5）。
@@ -194,7 +195,7 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 - **golden**：描述与 params 全串固定（双 enum 顺序）
 - **get 各 key**：model / reasoning_effort（设置与未设置两分支）/ models（排序、50 截断、空列表、查询失败透传）/ usage（有请求、无请求）/ stat / sessions（空目录、超 20 截断、路径正确）
 - **set**：model 正常与 trim、effort 五档 + off、大小写归一
-- **set 拒绝**：只读 key（`models`/`usage`/`stat`/`sessions` → 报错且状态不变）、缺 value、model 空白、effort 非法
+- **set 拒绝**：只读 key（`models`/`usage`/`stat`/`sessions`/`config_path` → 报错且状态不变）、缺 value、model 空白、effort 非法
 - **错误**：未知 action、未知 key、缺 key、坏 JSON
 - **集成**：mock 两步，第 2 次请求已带新值（chat `reqs[1].Model`、responses `rawReqs[1]["model"]`）
 - **工具清单**：`tools_test.go` 期望不变（5 项，`agent_custom` 仍在末尾）
@@ -206,7 +207,7 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 ## 15. 已定事项
 
 1. 形态：键值化 `{action, key, value}`，`action`/`key` 双 enum，工具名沿用 `agent_custom`。
-2. key 全集：可写 `model`、`reasoning_effort`；只读 `models`、`usage`、`stat`、`sessions`（§6）。
+2. key 全集：可写 `model`、`reasoning_effort`；只读 `models`、`usage`、`stat`、`sessions`、`config_path`（§6、§18）。
 3. `value` 声明为 `string`，按 key 校验（数值型 key 将来由实现解析）。
 4. `get sessions` 本期纳入：列表 + 文件绝对路径，**不读内容**；范围仅当前 `sessionDir`，列前 20。
 5. 实现走 key 表驱动（新增能力 = 表加一行 + enum 加一值）。
@@ -230,3 +231,14 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 | `stat` 的不落盘情形 | §8 未定义 | `--no-save` 时 `会话: (不落盘)`；同时删掉 `Session == ""` 分支 | `store.path()` 由 `rotate()` 恒定赋值（`Agent.New` → `NewSession()`），空串分支不可达，属 §3 偏差 2 同类死代码；不落盘才是可达状态 |
 | `usage` token 口径 | `上下文: %d tokens`（§8） | `上下文: %d tokens（最近一次请求）` | 与 `stat` 的"累计"口径显式区分（`ContextTokens` 每次请求覆写） |
 | `models` 可用性表述 | §6 依赖列标注"网络，10s，需 api_key" | 依赖列只写 `Client.ListModels()`；工具描述与错误文案不做网络/凭据提醒（§15 第 6 条） | 启动即要求 `api_key`（`agent.New` 无降级路径），可用性与 LLM 请求同源 |
+
+## 18. 追加 `config_path`（2026-09-17）
+
+**动机**：模型此前无从得知自己被哪个配置文件驱动，无法"修改自身"（如按用户要求改默认模型、开启思维链显示）。`Config.Path` 记录生效路径（`-c` 优先，否则 `~/.config/tanya/config.yaml`；`~` 展开并绝对化），`agent_custom get config_path` 把它交回模型。
+
+**口径**：
+
+1. **只回路径，不回内容**——配置含 `api_key`，工具不主动读文件；要看内容由模型自己 `run_shell`（与 `get sessions` 只给位置、不读内容同一原则）。
+2. **必须带生效语义**：返回值固定两行，第二行写明"改动需重启 tanya 生效（本次会话可用 agent_custom 调整 model/reasoning_effort）"，避免模型误以为改完即生效（配置在 `LoadConfig` 一次加载，运行期不重载；`model`/`reasoning_effort` 的内存覆盖路径是另一回事）。
+3. **按需查询、不做常驻注入**：不写进 system 环境段、不加 `/` 命令、不做运行期 reload——用户拍板"平时使用机会较少，只在需要获取配置时取"。
+4. 只读语义与其他只读 key 一致：`set config_path` 明确报错，不改状态。

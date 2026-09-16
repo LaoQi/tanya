@@ -338,6 +338,13 @@ func (a *Agent) SessionFile() string {
 
 func (a *Agent) ListModels() ([]string, error) { return a.client.ListModels() }
 
+func (a *Agent) ConfigPath() string {
+	if a.cfg.Path == "" {
+		return defaultConfigPath()
+	}
+	return a.cfg.Path
+}
+
 func (a *Agent) ToolOutputLines() int {
 	if a.cfg == nil || a.cfg.ToolOutputLines < 1 {
 		return 20

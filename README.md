@@ -7,7 +7,7 @@
 - OpenAI 兼容接口（OpenAI / DeepSeek / GLM / Ollama / vLLM 等），SSE 流式输出
 - 以 shell 为核心的工具体系：模型可直接执行 shell 命令（自动适配平台：Linux/macOS bash/sh/ash，Windows pwsh/powershell；`shell` 配置可指定任意 shell）；命令前后保存/复原控制终端状态（复原 termios + 在自己是前台时归位光标锚点并复位屏幕模式：SGR、字符集、滚动区/换行/光标/鼠标等；交出终端前先 `DECSC` 存锚点、复位后 `DECRC` 归位，子进程设滚动区或挪走光标都不会把后续输出带到屏幕顶部），被超时强杀的交互程序不会留下坏终端
 - 内置轻量工具：`get_time` / `get_env` / `calc`
-- 模型可运行时自调与自省：`agent_custom` 按 `key` 读写（可写 `model`、`reasoning_effort`；只读 `models`、`usage`、`stat`、`sessions`），`get sessions` 给出会话列表与 jsonl 文件路径（仅本次会话有效，不写配置文件）
+- 模型可运行时自调与自省：`agent_custom` 按 `key` 读写（可写 `model`、`reasoning_effort`；只读 `models`、`usage`、`stat`、`sessions`、`config_path`），`get sessions` 给出会话列表与 jsonl 文件路径（仅本次会话有效，不写配置文件），`get config_path` 给出生效配置文件路径（模型据此可读取或修改自身配置，改动需重启生效）
 - 会话持久化与恢复（JSONL，记录完整历史，system 快照随会话冻结）
 - token 用量实时显示在提示符（API 实报优先，本地估算兜底），支持显示缓存命中
 - AI 输出 Markdown 渲染（默认开启，stdout 非终端与 plain 输出自动旁路）与内置配色主题（`/theme` 切换）
@@ -146,7 +146,7 @@ TTY 下的状态展示是**追加式**（不重绘、不移动光标，终端被
 | `get_time` | 当前时间 |
 | `get_env` | 环境变量查询（敏感变量名拒绝） |
 | `calc` | 四则运算求值 |
-| `agent_custom` | 按 `key` 读取或修改：可写 `model`、`reasoning_effort`（`set` 需给 `value`）；只读 `models`（可用模型）、`usage`（上下文/缓存）、`stat`（会话统计）、`sessions`（会话列表 + jsonl 路径）。改动对下一次请求生效，仅本次会话有效 |
+| `agent_custom` | 按 `key` 读取或修改：可写 `model`、`reasoning_effort`（`set` 需给 `value`）；只读 `models`（可用模型）、`usage`（上下文/缓存）、`stat`（会话统计）、`sessions`（会话列表 + jsonl 路径）、`config_path`（生效配置文件路径，改动需重启生效）。改动对下一次请求生效，仅本次会话有效 |
 
 ### 终端与信号行为
 

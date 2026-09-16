@@ -11,7 +11,7 @@
 - 终端原语（`/dev/tty`、前台组、termios 读写与模式复位、探测）一律走 `ctty`，移交/夺回/复原策略由 `agent`、`readline` 各自决定；`run_shell` 交终端前快照 termios、子进程结束（含超时强杀）后复原，自仍是前台时发 `ctty.ResetModes`；交终端前 `SaveCursor`、复位后 `RestoreCursor`，复位串内不得自包 `DECSC`/`DECRC`（会覆盖存档槽）；中断依赖两项不变量（`ISIG` 开启、前台组是 tanya），信号退出码 `128 + signum`，readline 每回合自愈把被留成 raw 的终端拉回 canonical。见 `docs/ctty.md`、`docs/interactive-tty.md` §5.9
 - `interactive: true` 的 run_shell 走全 pty 桥接（命令在独立 pty 中运行，真实 tty 由 bridge 切 raw 双向泵转），仅 Linux 实现，失败回退 `/dev/tty` + `TIOCSPGRP`，见 `docs/interactive-tty.md`
 - 工具只有编译期显式清单 `allTools()`（`run_shell` + `builtinTools()` + `agent_custom`），不做动态注册/插件；清单顺序即请求顺序，改动会破坏 prompt cache
-- 模型经 `agent_custom` 运行时自调与自省：`action`(get/set) + `key` + `value`，可写 `model`/`reasoning_effort`，只读 `models`/`usage`/`stat`/`sessions`；key 表驱动，只写内存、不落盘不入会话，`/load` 或重启后回落配置，见 `docs/agent-control-tool.md`
+- 模型经 `agent_custom` 运行时自调与自省：`action`(get/set) + `key` + `value`，可写 `model`/`reasoning_effort`，只读 `models`/`usage`/`stat`/`sessions`/`config_path`（生效配置文件路径，改动需重启生效；读文件走 `run_shell`）；key 表驱动，只写内存、不落盘不入会话，`/load` 或重启后回落配置，见 `docs/agent-control-tool.md`
 - 工具策略：以 `run_shell` 为核心，新能力优先用 shell 命令组合实现；小型纯计算/查询工具放 `builtin.go`
 - 启动即要求可用 shell：`agent.New` 解析（配置覆盖 > 平台探测）全落空直接报错退出，无降级路径
 - `init` 子命令是新工作区的一次性脚手架（建 `.tanya/sessions/`、按确认建 `.tanya/.gitignore`、缺口时建 AGENTS.md 骨架），三项动作幂等且不覆盖既有文件，**必须在 `agent.New` 之前执行**（`.tanya/` 既是会话落点也是 `session_mode: auto` 判定依据）；不做项目探测、不调模型，见 `docs/design.md`《init 模式》
