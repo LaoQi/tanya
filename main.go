@@ -39,7 +39,7 @@ func main() {
 	st := repl.NewStreams(os.Stdout, os.Stderr, mode)
 
 	if *showVersion {
-		st.Print(fmt.Sprintf("tanyan %s\n", version))
+		st.Print(fmt.Sprintf("tanya %s\n", version))
 		return
 	}
 	if cmd == repl.CmdAsk && rest == "" {

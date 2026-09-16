@@ -171,7 +171,7 @@ def group_preheat(p, model, seed, repeats):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="tanyan 缓存机制探测（64-token 块前缀缓存）")
+    ap = argparse.ArgumentParser(description="tanya 缓存机制探测（64-token 块前缀缓存）")
     ap.add_argument("-c", "--config", default="", help="配置文件路径（读 base_url/api_key）")
     ap.add_argument("-m", "--model", default=os.environ.get("TANYA_MODEL", "deepseek-flash"))
     ap.add_argument("--models", default="", help="[models] 组用的逗号分隔模型列表")

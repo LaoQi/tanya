@@ -110,7 +110,7 @@ func TestShellToolResolveCwdInjected(t *testing.T) {
 			t.Errorf("resolveCwd(%q) = %q, %v; want %q", c.in, got, err, c.want)
 		}
 	}
-	for _, bad := range []string{filepath.Join(ws, "nope"), file, "~user", "/no/such/dir-tanyan"} {
+	for _, bad := range []string{filepath.Join(ws, "nope"), file, "~user", "/no/such/dir-tanya"} {
 		if got, err := tool.resolveCwd(bad); err == nil {
 			t.Errorf("resolveCwd(%q) 应报错，得到 %q", bad, got)
 		}

@@ -130,7 +130,7 @@ func ensureFile(path, note, content string) (InitEntry, error) {
 
 const agentsSkeletonFmt = `# %s
 
-<!-- 由 tanyan init 创建；请补全下面各节，AI 每次会话都会读到本文件 -->
+<!-- 由 tanya init 创建；请补全下面各节，AI 每次会话都会读到本文件 -->
 
 ## 项目说明
 
