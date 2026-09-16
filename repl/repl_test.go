@@ -137,7 +137,7 @@ func TestWelcomeText(t *testing.T) {
 			line = l
 		}
 	}
-	if !strings.Contains(line, "tanyan 1.2.3") {
+	if !strings.Contains(line, "tanya 1.2.3") {
 		t.Errorf("版本应与帮助提示同行: %q", out)
 	}
 	if strings.Contains(out, "构建于") {
@@ -147,7 +147,7 @@ func TestWelcomeText(t *testing.T) {
 		t.Errorf("welcome 不应含已删除的输入提示: %q", out)
 	}
 	BuildTime = "2026-09-11 12:00"
-	if out = welcomeText(); !strings.Contains(out, "tanyan 1.2.3（构建于 2026-09-11 12:00）") {
+	if out = welcomeText(); !strings.Contains(out, "tanya 1.2.3（构建于 2026-09-11 12:00）") {
 		t.Errorf("welcome 应含版本与构建时间: %q", out)
 	}
 }

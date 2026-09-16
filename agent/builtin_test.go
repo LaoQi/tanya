@@ -64,15 +64,15 @@ func TestDispatchCalc(t *testing.T) {
 }
 
 func TestDispatchGetEnv(t *testing.T) {
-	t.Setenv("TANYAN_TEST_VAR", "xyz")
-	got, ok := invokeBuiltin(t, "get_env", `{"names":["TANYAN_TEST_VAR","TANYAN_NO_SUCH_XXX","MY_SECRET_KEY"]}`)
+	t.Setenv("TANYA_TEST_VAR", "xyz")
+	got, ok := invokeBuiltin(t, "get_env", `{"names":["TANYA_TEST_VAR","TANYA_NO_SUCH_XXX","MY_SECRET_KEY"]}`)
 	if !ok {
 		t.Fatal("get_env 未命中")
 	}
-	if !strings.Contains(got, "TANYAN_TEST_VAR=xyz") {
+	if !strings.Contains(got, "TANYA_TEST_VAR=xyz") {
 		t.Errorf("应包含已设置的变量: %q", got)
 	}
-	if !strings.Contains(got, "TANYAN_NO_SUCH_XXX: <未设置>") {
+	if !strings.Contains(got, "TANYA_NO_SUCH_XXX: <未设置>") {
 		t.Errorf("应标注未设置变量: %q", got)
 	}
 	if !strings.Contains(got, "拒绝：疑似敏感变量") {

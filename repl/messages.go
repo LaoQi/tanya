@@ -3,7 +3,7 @@ package repl
 const (
 	MsgBye          = "再见"
 	MsgErrLineFmt   = "错误: %v"
-	MsgAskUsage     = "用法: tanyan ask \"问题\"\n"
+	MsgAskUsage     = "用法: tanya ask \"问题\"\n"
 	MsgNoSessions   = "(无历史会话)\n"
 	MsgNoHistoryMsg = "(当前会话无消息)\n"
 	MsgCancelled    = "已取消\n"
@@ -20,7 +20,7 @@ const (
 	MsgInitEntryFmt   = "  %s  %s  %s\n"
 	MsgInitSessionFmt = "  会话目录 %s\n"
 	MsgInitHint       = "提示: 直接描述需求即可开工，可让 AI 读完目录后补全 AGENTS.md\n"
-	MsgInitUsage      = "用法: tanyan init\n"
+	MsgInitUsage      = "用法: tanya init\n"
 )
 
 const (
@@ -140,7 +140,7 @@ var (
 )
 
 func welcomeText() string {
-	ver := "tanyan " + Version
+	ver := "tanya " + Version
 	if BuildTime != "" {
 		ver += "（构建于 " + BuildTime + "）"
 	}

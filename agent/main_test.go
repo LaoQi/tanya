@@ -8,7 +8,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	cleanup, err := isolateProcessEnv("tanyan-agent")
+	cleanup, err := isolateProcessEnv("tanya-agent")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "TestMain:", err)
 		os.Exit(1)

@@ -208,7 +208,7 @@ func TestWrapLinesNeverExceedWidth(t *testing.T) {
 		"for f in *.go; do echo \"$f\"; done",
 		strings.Repeat("中", 20),
 		"中a中b中c中d中e中f",
-		"journalctl -u tanyan --since '2 hours ago' | grep -Ei 'error|warn'",
+		"journalctl -u tanya --since '2 hours ago' | grep -Ei 'error|warn'",
 		"\x1b[32mecho\x1b[0m " + strings.Repeat("x", 40),
 	}
 	for _, in := range inputs {

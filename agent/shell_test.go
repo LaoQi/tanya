@@ -87,7 +87,7 @@ func TestRunShellTruncation(t *testing.T) {
 }
 
 func TestRunShellKillsProcessGroup(t *testing.T) {
-	marker := fmt.Sprintf("tanyan_pg_%d", os.Getpid())
+	marker := fmt.Sprintf("tanya_pg_%d", os.Getpid())
 	got := runShellString(t, context.Background(), "exec -a "+marker+" sleep 30 & wait", 1)
 	if !strings.Contains(got, "超时") {
 		t.Fatalf("got %q", got)
