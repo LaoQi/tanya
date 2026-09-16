@@ -16,6 +16,7 @@ type Config struct {
 	Model           string            `yaml:"model"`
 	Temperature     float64           `yaml:"temperature"`
 	ReasoningEffort string            `yaml:"reasoning_effort"`
+	ShowReasoning   bool              `yaml:"show_reasoning"`
 	ApiProtocol     string            `yaml:"api_protocol"`
 	UserAgent       string            `yaml:"user_agent"`
 	GlobalSession   string            `yaml:"global_session"`

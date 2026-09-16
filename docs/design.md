@@ -172,6 +172,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 门禁：`KindStatus` 仅 rich 档可见——plain / plain+verbose / stdout 非终端均无状态行与心跳，`ask` 单发默认档行为不变。
 - 每轮请求完成打印状态行 `  ↳ TTFT 0.8s · 3.2s · prompt 12.3k · completion 1.2k · 缓存 81.67%`（字段缺失自动省略；无 usage 时显示本地估算上下文）。
 - 方案、取舍与实测见 `docs/repl-status-append.md`（其中 09-15《取舍》对"思考中"的删除已被 09-16 的思考相位回补取代）。
+- **思维链显示（`show_reasoning` / `/reasoning`，2026-09-17）**：开关打开且 `KindReasoning` 过门禁（TTY + rich 档）时 `EventReasoning` 不再切思考相位——首个 delta 先 `view.Stop()` 收尾 `» 等待响应` 行，再打印上分隔 `─── 思考 ───`（`Think` 色，前后各三条横线），delta 走与正文同一 markdown 管线（`turn.reasonBuf` → `Renderer.Block` 逐块上屏）；`EventContent` / 工具起止 / `EventResponse` / `turn.End` 调 `flushReason` 结算残留块并补下分隔 `─── 思考结束 · 3.2s ───`（时长同 `turnDuration`），正文之后再现 reasoning 则重开一段。开关关闭或门禁外走原相位路径，plain / `-p --verbose` / `ask` / 非终端一律不显示（`KindReasoning` 不在其可见集）。思维链与正文共用 markdown 缓冲的 hold 看门狗（`fenceLineLimit` 2000 行 / `fenceByteLimit` 256 KB / `pendingByteLimit` 64 KB）：畸形输入（漏闭合围栏、超长单行）就地降级为 `CodeBlock` / `Paragraph`，影响止于局部、后续 delta 立即恢复流式解析，见 `docs/render-pipeline.md` §10
 
 ### builtin（builtin.go）
 
@@ -258,7 +259,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 斜杠命令
 
-`/help` `/new` `/load` `/stat` `/history` `/model` `/think` `/theme` `/exit`（`/quit` 等价）：
+`/help` `/new` `/load` `/stat` `/history` `/model` `/think` `/reasoning` `/theme` `/exit`（`/quit` 等价）：
 
 白名单（`slashCommands`，同时驱动 Tab 补全）即分发契约：`Run` 先用 `isSlashCommand` 过滤，未命中的 `/` 开头输入按对话内容处理，因此 `handleCommand` 的 switch 不再有 `default` 分支（原先的 `MsgUnknownCmd` 不可达，已删）。白名单与 case 必须一一对应，`TestSlashCommandsAllHandled` 覆盖该不变量（`/load` 走 stdin 交互路径，单独测试）。
 
@@ -266,6 +267,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - `/stat` 显示会话统计：工作区（构造期定格的启动目录）、会话文件、消息条数、本次运行累计 token（prompt/completion）、当前上下文占用（最近一次实报 prompt tokens，无 usage 回落本地估算）、缓存命中量与命中率（累计 hit / 累计 prompt）；数据全部来自 `Agent.Stats()` 单一快照，渲染在 `repl/stats.go`，与提示符占位符同源同公式
 - `/model` 无参实时调接口列出可用模型（`*` 标注当前，失败仍显示当前模型），带参直接切换不校验；带尾随空格支持补全（接口列表在 REPL 内首次加载后缓存，失败不重试）
 - `/think` 无参显示当前思考等级（未设置显示"未设置"）；带参 `minimal/low/medium/high/max` 设置，`off` 关闭，非法值报错不变更；带尾随空格补全等级候选（含 off，静态列表）
+- `/reasoning` 无参显示思维链开关（`开`/`关`），带参 `on`/`off` 切换（非法值报错不变更）；带尾随空格补全 on/off 候选；开关是 REPL 局部状态（启动默认取 `show_reasoning` 配置，不落盘、重启回落）
 - `/load` 无参打开方向键选择菜单（`repl/picker.go`，stdin 非终端降级为序号输入），候选 Display 带时间/条数/简介
 - `/theme` 无参显示当前主题与可用主题列表（含描述，`*` 标注当前），带参切换内置主题（非法值报错、主题不变）；带尾随空格补全主题名（内置静态列表）
 
@@ -312,6 +314,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `model` | `deepseek-v4-flash` | 模型名（运行时可被 `agent_custom` 工具改写，仅本次会话） |
 | `temperature` | 0.7 | |
 | `reasoning_effort` | 空 | 思考等级 minimal/low/medium/high/max，非法值忽略；空则请求不带 `reasoning_effort` 字段（运行时可被 `agent_custom` 工具改写，仅本次会话） |
+| `show_reasoning` | `false` | 思维链是否随对话显示（markdown 渲染 + `─── 思考 ───` / `─── 思考结束 · 3.2s ───` 分隔；仅 REPL rich 档生效，无 env）；REPL 内 `/reasoning on\|off` 可运行时切换 |
 | `api_protocol` | `responses` | API 协议 responses/chat（见《LLM 接入》），非法值启动报错 |
 | `colors` | `auto` | 终端配色 auto（跟随终端能力与 `NO_COLOR`）/ on（强制开色）/ off（强制纯文本） |
 | `theme` | `nord` | 内置配色主题（语义色/提示符/markdown 标题与代码整体切换）：default/minimal/solar/vivid/nord/gruv/dusk，非法值启动报错 |

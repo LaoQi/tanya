@@ -160,3 +160,39 @@ func TestCompleteLoadEmptyPrefix(t *testing.T) {
 		t.Errorf("候选应按列表顺序: %q", cands[0].Display)
 	}
 }
+
+func TestSuggestReasoningContext(t *testing.T) {
+	c := &completer{}
+	if got := c.suggest("/reasoning o"); got != "n" {
+		t.Errorf("got %q", got)
+	}
+	if got := c.suggest("/reasoning of"); got != "f" {
+		t.Errorf("off 候选: %q", got)
+	}
+	if got := c.suggest("/reasoning on"); got != "" {
+		t.Errorf("已完整应为空: %q", got)
+	}
+}
+
+func TestCompleteReasoningContext(t *testing.T) {
+	c := &completer{}
+	cands := c.complete("/reasoning ")
+	if len(cands) != 2 {
+		t.Fatalf("应为 on/off 两项: %v", cands)
+	}
+	if cands[0].Insert != "/reasoning on" || cands[0].Display != "on" || cands[1].Insert != "/reasoning off" {
+		t.Errorf("got %+v", cands)
+	}
+}
+
+func TestSlashCommandsIncludeReasoning(t *testing.T) {
+	found := false
+	for _, cmd := range slashCommands {
+		if cmd == "/reasoning" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("/reasoning 应在斜杠命令白名单内")
+	}
+}

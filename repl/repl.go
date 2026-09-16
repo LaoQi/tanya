@@ -19,20 +19,21 @@ import (
 )
 
 type REPL struct {
-	agent     *agent.Agent
-	ed        *readline.Editor
-	term      readline.Terminal
-	raw       bool
-	st        *streams
-	prof      term.Profile
-	sch       theme.Scheme
-	sem       theme.Semantics
-	palette   map[string]string
-	promptTpl string
-	prompt    render.Template
-	view      *toolView
-	rend      render.Renderer
-	started   time.Time
+	agent         *agent.Agent
+	ed            *readline.Editor
+	term          readline.Terminal
+	raw           bool
+	showReasoning bool
+	st            *streams
+	prof          term.Profile
+	sch           theme.Scheme
+	sem           theme.Semantics
+	palette       map[string]string
+	promptTpl     string
+	prompt        render.Template
+	view          *toolView
+	rend          render.Renderer
+	started       time.Time
 }
 
 type options struct {
@@ -43,6 +44,7 @@ type options struct {
 	factsSet  bool
 	themeName string
 	palette   map[string]string
+	reasoning bool
 }
 
 type Option func(*options)
@@ -53,6 +55,10 @@ func WithStreams(st *streams) Option {
 
 func WithTerminal(dev readline.Terminal, raw bool) Option {
 	return func(o *options) { o.term, o.raw = dev, raw }
+}
+
+func WithShowReasoning(on bool) Option {
+	return func(o *options) { o.reasoning = on }
 }
 
 func WithTermFacts(f TermFacts) Option {
@@ -113,7 +119,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &REPL{agent: a, ed: ed, term: dev, raw: raw, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
+	r := &REPL{agent: a, ed: ed, term: dev, raw: raw, showReasoning: o.reasoning, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
 	r.prof = term.GetProfile()
 	r.rend = render.NewThemedRenderer(r.prof, sch.MD)
 	ed.SetStyles(sem.Dim, sem.Accent)
@@ -334,6 +340,8 @@ func (r *REPL) handleCommand(line string) bool {
 		}
 	case "/think":
 		r.handleThink(parts[1:])
+	case "/reasoning":
+		r.handleReasoning(parts[1:])
 	case "/theme":
 		r.handleTheme(parts[1:])
 	}
