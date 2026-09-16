@@ -45,13 +45,7 @@ func (p *shellProfile) arg() string {
 	}
 }
 
-var shellPrograms = []string{
-	"ls", "cat", "head", "tail", "grep", "rg", "fd", "sed", "awk",
-	"find", "sort", "wc", "cut", "tr", "xargs",
-	"git", "curl", "wget", "go", "node", "python",
-}
-
-func resolveProfile(override, goos string, lookPath func(string) (string, error)) (*shellProfile, error) {
+func resolveProfile(override string, lookPath func(string) (string, error)) (*shellProfile, error) {
 	if override != "" {
 		p, err := lookPath(override)
 		if err != nil {
@@ -59,10 +53,10 @@ func resolveProfile(override, goos string, lookPath func(string) (string, error)
 		}
 		return newProfile(p), nil
 	}
-	candidates := []string{"bash", "sh", "ash"}
-	if goos == "windows" {
-		candidates = []string{"pwsh"}
-	}
+	return firstAvailable(platform.Candidates, lookPath)
+}
+
+func firstAvailable(candidates []string, lookPath func(string) (string, error)) (*shellProfile, error) {
 	for _, name := range candidates {
 		if p, err := lookPath(name); err == nil {
 			return newProfile(p), nil
@@ -88,9 +82,9 @@ func newProfile(path string) *shellProfile {
 	return p
 }
 
-func probePrograms(lookPath func(string) (string, error)) []string {
+func probePrograms(names []string, lookPath func(string) (string, error)) []string {
 	var found []string
-	for _, name := range shellPrograms {
+	for _, name := range names {
 		if _, err := lookPath(name); err == nil {
 			found = append(found, name)
 		}
@@ -237,11 +231,11 @@ func waitShell(cmd *exec.Cmd, stopped *bool) error {
 		case err := <-done:
 			return err
 		case <-tick.C:
-			if processStopped(cmd.Process.Pid) {
+			if platform.ProcessStopped(cmd.Process.Pid) {
 				hits++
 				if hits >= stopPollHits {
 					*stopped = true
-					killProcessGroup(cmd)
+					platform.KillGroup(cmd)
 					return <-done
 				}
 			} else {
@@ -249,18 +243,6 @@ func waitShell(cmd *exec.Cmd, stopped *bool) error {
 			}
 		}
 	}
-}
-
-func statState(stat string) string {
-	i := strings.IndexByte(stat, ')')
-	if i < 0 || i+2 > len(stat) {
-		return ""
-	}
-	fields := strings.Fields(stat[i+2:])
-	if len(fields) == 0 {
-		return ""
-	}
-	return fields[0]
 }
 
 func runShellForeground(ctx context.Context, command string, timeoutSec int, profile *shellProfile, dir string) *ShellResult {
@@ -292,8 +274,8 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 
 	cmd := exec.CommandContext(runCtx, profile.Path, shellArgs(profile, command)...)
 	cmd.Dir = dir
-	configureProcessGroup(cmd)
-	cmd.Cancel = func() error { return killProcessGroup(cmd) }
+	platform.ConfigureGroup(cmd)
+	cmd.Cancel = func() error { return platform.KillGroup(cmd) }
 	cmd.WaitDelay = shellWaitDelay
 	var stdout, stderr streamCapture
 	stdout.chunks = &res.Stdout
@@ -331,7 +313,7 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 		res.TimedOut = true
 	case res.Stopped:
 	case err != nil:
-		if code, ok := shellExitCode(err); ok {
+		if code, ok := platform.ExitCode(err); ok {
 			res.ExitCode = code
 		} else {
 			res.Err = err.Error()
@@ -351,7 +333,7 @@ func runShellBridged(ctx context.Context, bridge TTYBridge, command string, time
 
 	cmd := exec.CommandContext(runCtx, profile.Path, shellArgs(profile, command)...)
 	cmd.Dir = dir
-	cmd.Cancel = func() error { return killProcessGroup(cmd) }
+	cmd.Cancel = func() error { return platform.KillGroup(cmd) }
 	cmd.WaitDelay = shellWaitDelay
 	var capture streamCapture
 	capture.chunks = &res.Stdout
@@ -393,7 +375,7 @@ func runShellBridged(ctx context.Context, bridge TTYBridge, command string, time
 		res.TimedOut = true
 	case res.Stopped:
 	case err != nil:
-		if code, ok := shellExitCode(err); ok {
+		if code, ok := platform.ExitCode(err); ok {
 			res.ExitCode = code
 		} else {
 			res.Err = err.Error()

@@ -30,7 +30,7 @@ ctty/              控制终端原语：前台组读/写、/dev/tty、SIGTTIN/SI
 repl/              REPL 循环与输入分发（对话优先）、斜杠命令、提示符模板、ghost 补全、/load picker、工具块渲染、状态行心跳、统计渲染、UI 文案
 readline/          自研终端输入层：行编辑/历史/Tab 补全菜单、按键解析、raw mode、显示宽度、pty 桥接（linux）、终端状态自愈
 agent/             核心逻辑：config（配置加载）/ llm + llm_http + llm_responses（双协议 client）/ agent（对话 loop）/ prompt / session / stats / envprobe / init（工作区脚手架）/ event
-                   工具与终端：tools（Tool 接口 + allTools 清单）/ shelltool（run_shell 组件）/ shell + shell_unix + shell_other + shell_proc_*（叶子与平台分片）/ builtin（内置小工具）/ control（agent_custom 自调工具，key 表驱动）/ tty_bridge
+                   工具与终端：tools（Tool 接口 + allTools 清单）/ shelltool（run_shell 组件）/ shell（叶子）+ shell_platform{,_posix,_windows,_stub}（平台抽象与分片）/ builtin（内置小工具）/ control（agent_custom 自调工具，key 表驱动）/ tty_bridge
 render/            表现层树根：渲染管线（IR → ANSI 的 Renderer、提示符模板 Template）
   style/           样式词汇与编码（Color/Attr/Style/ColorLevel/SGR/Sprint/Frame），依赖 term
   term/            终端原语（ANSI 词法/清洗、宽度/截断/单行化、光标控制、能力档案 Profile），零依赖叶子

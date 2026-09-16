@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -66,7 +65,6 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 	}
 	tool, err := newShellTool(shellToolConfig{
 		Override:  cfg.Shell,
-		GOOS:      runtime.GOOS,
 		LookPath:  exec.LookPath,
 		Home:      home,
 		Workspace: cwd,

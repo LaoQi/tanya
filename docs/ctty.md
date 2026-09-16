@@ -65,7 +65,7 @@
 
 ## 迁移
 
-**agent**：删 `shell_tty_unix.go`、`shell_tty_stub_unix.go`；`shell_other.go` 去掉 4 个 tty 函数（保留进程组/信号）；`shell.go` 的 `openForegroundTTY/handoverForeground/restoreForeground` 改为 `ctty.Open/IsForeground/SetForeground` 组合，`handed` 门控不变；`envprobe.go` 的 `ttyStdinSupported()` → `ctty.Supported`。
+**agent**：删 `shell_tty_unix.go`、`shell_tty_stub_unix.go`；`shell_other.go` 去掉 4 个 tty 函数（保留进程组/信号；该文件与 `shell_unix.go` 后续收敛为 `shell_platform*.go`，见 `docs/design.md`《shell》）；`shell.go` 的 `openForegroundTTY/handoverForeground/restoreForeground` 改为 `ctty.Open/IsForeground/SetForeground` 组合，`handed` 门控不变；`envprobe.go` 的 `ttyStdinSupported()` → `ctty.Supported`。
 
 **readline**：`secure.go` 的开 tty/Ignore/前台判定改走 `ctty`，`terminalGuardOwns` 与自愈策略保留；`bridge_linux.go` 删 `foregroundTTY`，`Prepare` 改 `ctty.IsForeground`；`secure_stub.go` tag 收敛为 `!linux && !darwin`。删私有 `termios_linux.go`/`termios_darwin.go`，`terminal_posix.go`/`bridge_linux.go`/测试改调 `ctty.GetTermios`/`ctty.SetTermios`/`ctty.SetTermiosFlush`；桥接 `release` 在复原 termios 后追加 `ctty.ResetModes`。
 

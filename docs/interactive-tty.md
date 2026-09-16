@@ -115,7 +115,7 @@
 
 - **Ctrl+C**：`0x03` 经泵进入 pty，由 slave 行规程投 `SIGINT` 给子进程前台组（等价用户按键）；tanya 不拦截、不计次
 - **超时**：沿用 `context.WithTimeout`（interactive 默认 300s），到时 `cmd.Cancel → killProcessGroup`
-- **挂起**：`^Z` 经 pty 投 `SIGTSTP`，`waitShell` 的 `processStopped` 轮询判定路径不变
+- **挂起**：`^Z` 经 pty 投 `SIGTSTP`，`waitShell` 的挂起轮询（`platform.ProcessStopped`）判定路径不变
 
 ### 5.8 失败回退
 
@@ -172,7 +172,7 @@ func WithTTYBridge(b TTYBridge) Option // 未注入或 Prepare 失败 → 回退
 |---|---|---|
 | `^C` 计数双杀（1s 窗口、第 2 次强杀） | **不做**。`^C` 一律透传；需强制终止由超时兜底 | 触发极少；需额外维护计数、abort 接线与结果标记，收益不抵成本 |
 | 中断结果标记（`Interrupted` / 新增字段 + 文案） | **不做**。桥接路径中断沿用既有结果路径，不新增字段与文案 | 模型对"中断 vs 退出码"语义不敏感 |
-| `^Z` 挂起精细化语义 | **沿用现状**（`processStopped` 轮询），不因桥接新增分支 | 现状已可用 |
+| `^Z` 挂起精细化语义 | **沿用现状**（挂起轮询 `platform.ProcessStopped`），不因桥接新增分支 | 现状已可用 |
 | 窗口 resize 转发 | **尽力而为**：`SIGWINCH` → `TIOCSWINSZ(master)`，失败或遗漏不报错、不重试（**初始尺寸复制不在此列，属必须，见 §5.4**） | 交互命令跨窗口变化场景少，失败无后果 |
 | 输出清洗（去 ANSI / 退格 / `\r` / 提示行） | **不做**。原样全量，复用 `streamCapture` 头尾截断 | 去提示行不可靠、易误删实质输出；ANSI 剥离收益存疑 |
 | stdout/stderr 区分（`2|` 标记） | **豁免**。交互模式捕获为单流 | 全 pty 固有代价，对 sudo/ssh/gpg 无影响 |
@@ -181,7 +181,7 @@ func WithTTYBridge(b TTYBridge) Option // 未注入或 Prepare 失败 → 回退
 | 编辑器进 raw 时 `TCSETSF` 清 typeahead | **不做**。属编辑器既有行为，非桥接引入 | 实测放大为"回合未结束时键入的字符被丢弃"（如模型仍在回答时敲 `/exit`）；要改需在进 raw 前先 drain 输入缓冲，影响面超出桥接 |
 | 桥接期 repl 侧写终端互斥 | **复核无问题** | 状态行心跳未启动（`interactive` 不发）、标题行在切 raw 前打印、结果块在 `stop()` 后渲染；ask 模式无其它写终端路径 |
 
-> 落地补充（实测）：`Setsid` 使子进程组成为**孤儿进程组**（父进程在另一会话），内核按 POSIX 规则丢弃停止信号——`^Z` 经 pty 投递的 `SIGTSTP` 不会挂起子进程（表现为无效按键，等价 `script` 会话内 `^Z` 的现象），`^C`（SIGINT）不受影响、正常透传。按 §7「`^Z` 沿用现状、不因桥接新增分支」，不为此增加泵内按键识别/强杀分支；`waitShell` 的 `processStopped` 轮询保留（显式 `SIGSTOP` 等场景仍生效）。
+> 落地补充（实测）：`Setsid` 使子进程组成为**孤儿进程组**（父进程在另一会话），内核按 POSIX 规则丢弃停止信号——`^Z` 经 pty 投递的 `SIGTSTP` 不会挂起子进程（表现为无效按键，等价 `script` 会话内 `^Z` 的现象），`^C`（SIGINT）不受影响、正常透传。按 §7「`^Z` 沿用现状、不因桥接新增分支」，不为此增加泵内按键识别/强杀分支；`waitShell` 的挂起轮询保留（显式 `SIGSTOP` 等场景仍生效）。
 
 **不在豁免范围（核心正确性，必须做）**：pty 分配与 ctty 正确建立（§5.2）；Start 后关闭父进程 slave 与泵双终止路径（§5.3）；`stop()` 无条件恢复 termios；`GPG_TTY`/`SSH_TTY` 覆盖（§5.5）；桥接期渲染互斥；失败回退现状路径。
 
@@ -237,7 +237,7 @@ func WithTTYBridge(b TTYBridge) Option // 未注入或 Prepare 失败 → 回退
 | `readline/secure.go` / `secure_stub.go`（新） | 终端状态自愈：`InitTerminalGuard`（记录启动前台组归属 + 忽略 `SIGTTIN/SIGTTOU`）、`SecureTerminal`（恢复 `ISIG`、夺回前台组）；原语走 `ctty`（`docs/ctty.md`）|
 | `readline/bridge_linux.go` | `Prepare` 的前台检查前调用 `SecureTerminal()` |
 | `repl/repl.go` / `main.go` | 每回合开始前 / 启动时调用自愈 |
-| `agent/shell_unix.go` / `shell_other.go` | `shellExitCode`：信号终止记 `128 + signum` |
+| `agent/shell_platform_posix.go` | `posixExitCode`：信号终止记 `128 + signum` |
 
 ## 10. 开放问题
 

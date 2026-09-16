@@ -5,7 +5,7 @@
 ## 特性
 
 - OpenAI 兼容接口（OpenAI / DeepSeek / GLM / Ollama / vLLM 等），SSE 流式输出
-- 以 shell 为核心的工具体系：模型可直接执行 shell 命令（自动适配平台：Linux/macOS bash/sh/ash，Windows pwsh；`shell` 配置可指定任意 shell）；命令前后保存/复原控制终端状态（常规命令复原 termios；备用屏/鼠标等模式复位只在 pty 桥接路径做，且不发送会移动光标的 `CSI r`），被超时强杀的交互程序不会留下坏终端
+- 以 shell 为核心的工具体系：模型可直接执行 shell 命令（自动适配平台：Linux/macOS bash/sh/ash，Windows pwsh/powershell；`shell` 配置可指定任意 shell）；命令前后保存/复原控制终端状态（常规命令复原 termios；备用屏/鼠标等模式复位只在 pty 桥接路径做，且不发送会移动光标的 `CSI r`），被超时强杀的交互程序不会留下坏终端
 - 内置轻量工具：`get_time` / `get_env` / `calc`
 - 模型可运行时自调与自省：`agent_custom` 按 `key` 读写（可写 `model`、`reasoning_effort`；只读 `models`、`usage`、`stat`、`sessions`），`get sessions` 给出会话列表与 jsonl 文件路径（仅本次会话有效，不写配置文件）
 - 会话持久化与恢复（JSONL，记录完整历史，system 快照随会话冻结）
@@ -44,7 +44,7 @@ model: deepseek-v4-flash
 
 `api_protocol` 配置项（env `TANYA_API_PROTOCOL`）选择 API 协议：`responses`（默认，OpenAI Responses API 兼容格式，思维链明文回传）或 `chat`（Chat Completions 兼容协议）。端点路径为 `/responses` 时用 `responses`；仅提供 `/chat/completions` 的端点遇 404 时请切换为 `chat`。
 
-`shell` 配置项（env `TANYA_SHELL`）指定 run_shell 使用的 shell，支持名字或绝对路径（如 `zsh`、`/usr/bin/fish`）；缺省自动探测：Windows 用 pwsh，Linux/macOS 依次尝试 bash → sh → ash。全部落空（含配置的 shell 不存在）时启动阶段直接报错退出，不进入 REPL。
+`shell` 配置项（env `TANYA_SHELL`）指定 run_shell 使用的 shell，支持名字或绝对路径（如 `zsh`、`/usr/bin/fish`）；缺省自动探测：Windows 依次尝试 pwsh → powershell（Windows PowerShell 5.1 兜底），Linux/macOS 依次尝试 bash → sh → ash。全部落空（含配置的 shell 不存在）时启动阶段直接报错退出，不进入 REPL。
 
 `reasoning_effort` 配置项（env `TANYA_REASONING_EFFORT`）设置思考等级，随请求发送 OpenAI 标准字段（o 系 / gpt-5 及兼容网关支持），可选 `minimal` / `low` / `medium` / `high` / `max`，留空不发送；REPL 内 `/think` 可运行时切换。`responses` 协议下映射为 `reasoning.effort`，`chat` 协议下为 `reasoning_effort`。设置思考等级后请求不再发送 `temperature`（两协议一致），以兼容 o 系 / gpt-5 等仅支持 `temperature=1` 的推理模型。
 
