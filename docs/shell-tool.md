@@ -31,7 +31,6 @@ shell 执行层没有所有者，三条症状同一根因：
 // agent/shelltool.go（新增）
 type shellToolConfig struct {
 	Override  string                      // cfg.Shell
-	GOOS      string                      // runtime.GOOS
 	LookPath  func(string) (string, error)
 	Home      string                      // ~ 展开用，注入
 	Workspace string                      // 相对 cwd 的基准，注入
@@ -65,8 +64,8 @@ func (t *shellTool) invocation() string   // env 段 SHELL 行用
 文件布局：
 
 - `agent/shelltool.go`（新增）：`shellTool` / `shellToolConfig` / `shellRequest` / 构造 / `run` / `resolveCwd` / `toolDesc` / `invocation`
-- `agent/shell.go` 退化为"解析器 + 叶子"：`ShellResult`/`ShellChunk`/`streamCapture`/`writeStream`/`shellArgs`/`shellExitCode`/`waitShell`/`statState`/超时常量 + `shellProfile`/`resolveProfile`/`newProfile`/`probePrograms`（纯构造器，继续收 `goos`/`lookPath` 参数）
-- 平台文件：`shell_proc_linux.go`/`shell_proc_other.go`/`shell_unix.go`/`shell_other.go`（进程组与信号）保持；tty 组（原 `shell_tty_unix.go`/`shell_tty_stub_unix.go`）后随 `ctty` 抽包删除（`docs/ctty.md`）
+- `agent/shell.go` 退化为"解析器 + 叶子"：`ShellResult`/`ShellChunk`/`streamCapture`/`writeStream`/`shellArgs`/`waitShell`/超时常量 + `shellProfile`/`resolveProfile`/`newProfile`/`probePrograms`（纯构造器，只收 `lookPath`；候选链取自平台抽象 `platform.Candidates`，算法 `firstAvailable` 可注入候选）
+- 平台文件收敛为平台抽象：`shell_platform.go`（无 tag，表定义 + 通用兜底 + `ProtectTerminalSignals`）、`shell_platform_posix.go`（`linux || darwin`）、`shell_platform_windows.go`（`windows`）、`shell_platform_stub.go`（其余平台），取代 `shell_unix.go`/`shell_other.go`/`shell_proc_*.go`/`shell_candidates_*.go`；tty 组（原 `shell_tty_unix.go`/`shell_tty_stub_unix.go`）后随 `ctty` 抽包删除（`docs/ctty.md`）
 - `agent/tty_bridge.go`：保留 `TTYBridge` 接口，删包级注入，改 Option
 
 ## 4. 隐式依赖注入表
@@ -75,7 +74,7 @@ func (t *shellTool) invocation() string   // env 段 SHELL 行用
 |---|---|
 | `os.Getwd()`（`RunShell` 包装、`base` 参数） | `shellToolConfig.Workspace`（`agent.New` 读一次） |
 | `os.UserHomeDir()`（`shell.go` 的 `~` 展开） | `shellToolConfig.Home` |
-| `runtime.GOOS`（`resolveShellRuntime`/`resolveProfile`） | `shellToolConfig.GOOS` |
+| `runtime.GOOS`（`resolveShellRuntime`/`resolveProfile`） | 删除：平台差异改由编译 tag 装配的 `shellPlatform` 表提供，不再进 config |
 | `exec.LookPath`（包级 `shellLookPath` 变量） | `shellToolConfig.LookPath` |
 | 包级 `shellRuntime`/`shellRuntimeMu/Cur/Set/Err` | 删除，取值全部来自 config |
 | 包级 `ttyBridgeCur`/`ttyBridgeMu` | `shellToolConfig.Bridge`（来自 `WithTTYBridge` Option） |
@@ -103,7 +102,7 @@ func (t *shellTool) invocation() string   // env 段 SHELL 行用
 cwd, err := os.Getwd()                       // 装配点读一次
 home, _ := os.UserHomeDir()                  // 装配点读一次
 tool, err := newShellTool(shellToolConfig{
-	Override: cfg.Shell, GOOS: runtime.GOOS,
+	Override: cfg.Shell,
 	LookPath: exec.LookPath, Home: home,
 	Workspace: cwd, Bridge: bridge,      // 来自 WithTTYBridge Option
 })
@@ -119,7 +118,7 @@ client := NewClient(cfg, ToolDefs(tool.profile))   // 工具清单随 client 定
 |---|---|---|
 | `dispatch`（`agent.go`） | `RunShellResult(ctx, cmd, timeout, interactive, cwd, a.cwd)` | `a.tool.run(ctx, shellRequest{Command:…, Cwd:…, TimeoutSec:…, Interactive: interactive})` |
 | `envSection`（`envprobe.go`） | 内部读包级 `ShellRuntime().profile` | 签名加 `profile *shellProfile`（保持纯函数）；`runtimePrompt()` 传 `a.tool.profile` |
-| `runShellDesc`（`agent.go`） | 收 `*shellRuntime` | 收 `*shellProfile` + `[]string`（描述还需要可用程序清单） |
+| `runShellDesc`（`agent.go`） | 收 `*shellRuntime` | 收 `*shellProfile` + `[]string`（描述还需要可用程序清单；能力句与清单取自平台抽象 `platform.Capabilities`/`platform.Programs`） |
 | `ToolDefs()`（`agent.go`） | 内部读 `ShellRuntime()` | 纯函数 `ToolDefs(tool *shellTool)`（描述依赖 profile+programs，收组件而非单 profile） |
 | `agent/llm.go` / `agent/llm_responses.go` | 每次请求调包级 `ToolDefs()` | `NewClient(cfg, tools []ToolDef)` 构造期注入，请求组装读 `c.tools` |
 | `main.go` | `agent.InitTTYBridge(readline.NewTTYBridge())` | `agent.New(cfg, agent.NoSave(*noSave), agent.WithTTYBridge(readline.NewTTYBridge()))` |
@@ -130,7 +129,7 @@ client := NewClient(cfg, ToolDefs(tool.profile))   // 工具清单随 client 定
 
 **删除**（已完成，`rg` 归零）：`InitShell`、`ShellRuntime`、`shellRuntime`、`shellRuntimeMu`/`shellRuntimeCur`/`shellRuntimeSet`/`shellRuntimeErr`、`shellLookPath`、`resolveShellRuntime`、`RunShell`、`RunShellResult`、`resolveShellCwd`（→ `shellTool.resolveCwd` 方法）、`InitTTYBridge`/`currentTTYBridge`/`ttyBridgeMu`/`ttyBridgeCur`。
 
-**保留**：`ShellResult`/`String()`/`ShellChunk`/`streamCapture`/`writeStream`/`shellArgs`/`shellExitCode`/`effectiveShellTimeout`/`statState`/`waitShell`；`shellProfile`/`resolveProfile`/`newProfile`/`probePrograms`；进程/信号平台文件；tty 能力常量后迁至 `ctty.Supported`（`docs/ctty.md`）。
+**保留**：`ShellResult`/`String()`/`ShellChunk`/`streamCapture`/`writeStream`/`shellArgs`/`shellExitCode`/`effectiveShellTimeout`/`statState`/`waitShell`；`shellProfile`/`resolveProfile`/`newProfile`/`probePrograms`；进程/信号平台文件（后续收敛为平台抽象 `shell_platform*.go`：`shellExitCode`→`platform.ExitCode`、`statState` 移入 posix 平台文件，见 `docs/design.md`《shell》）；tty 能力常量后迁至 `ctty.Supported`（`docs/ctty.md`）。
 
 **新增**（已完成）：`shellTool`、`shellToolConfig`、`shellRequest`、`Options`、`WithTTYBridge`。
 
@@ -147,7 +146,7 @@ client := NewClient(cfg, ToolDefs(tool.profile))   // 工具清单随 client 定
 
 | 测试类型 | 现状做法 | 改造后 |
 |---|---|---|
-| profile 解析 | 改包级 `shellRuntime`（`withShellRuntime`）+ `InitShell` 缓存语义 | `newShellTool(shellToolConfig{GOOS: "windows", LookPath: stub})`，含错误路径（override 不存在 / 全落空）——已落地（`TestNewShellTool*`） |
+| profile 解析 | 改包级 `shellRuntime`（`withShellRuntime`）+ `InitShell` 缓存语义 | 算法层注入候选（`firstAvailable([]string{"pwsh", "powershell"}, stub)`）覆盖优先级与错误路径，平台候选链由 tag 化用例断言（`shell_platform_{posix,windows}_test.go`），表完整性由无 tag 用例守卫（`TestPlatformComplete`）——已落地（`TestFirstAvailable*`/`TestResolveProfileUsesPlatformCandidates`/`TestNewShellTool*`） |
 | 相对 cwd | 依赖进程 cwd 或 chdir | `Workspace` 注入，**不再需要 chdir**——已落地（`TestShellToolResolveCwdInjected`） |
 | `~` 展开 | 依赖真实 `$HOME` | `Home` 注入，可测成功与失败两条分支——已落地（含 `~user` 不支持、基准缺失） |
 | 桥接路径 | `InitTTYBridge(fake)` + Cleanup 复原 | 构造时注入 fake bridge——已落地（`bridgeTool(t, fake)`，全局桩用例删除） |

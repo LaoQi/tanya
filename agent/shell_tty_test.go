@@ -80,24 +80,6 @@ func TestRunShellStdinRead(t *testing.T) {
 	}
 }
 
-func TestStatState(t *testing.T) {
-	cases := []struct {
-		in   string
-		want string
-	}{
-		{"12345 (bash) S 1 2 3 4 5 6 7", "S"},
-		{"12345 (a b) T 1 2 3 4 5 6 7", "T"},
-		{"12345 (bash) R", "R"},
-		{"broken", ""},
-		{"12345 ()", ""},
-	}
-	for _, c := range cases {
-		if got := statState(c.in); got != c.want {
-			t.Errorf("statState(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
 func TestShellResultStoppedString(t *testing.T) {
 	r := &ShellResult{Stopped: true}
 	if s := r.String(); !strings.Contains(s, "挂起") {

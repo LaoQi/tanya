@@ -26,34 +26,64 @@ func lookPathStub(existing ...string) func(string) (string, error) {
 	}
 }
 
-func TestResolveProfilePosixChain(t *testing.T) {
-	p, err := resolveProfile("", "linux", lookPathStub("bash", "sh"))
+func TestFirstAvailablePosixChain(t *testing.T) {
+	posix := []string{"bash", "sh", "ash"}
+	p, err := firstAvailable(posix, lookPathStub("bash", "sh"))
 	if err != nil || p == nil || p.Name != "bash" || p.Kind != KindPosix || p.arg() != "-c" {
 		t.Errorf("bash 应优先: %+v err=%v", p, err)
 	}
-	p, err = resolveProfile("", "linux", lookPathStub("sh"))
+	p, err = firstAvailable(posix, lookPathStub("sh"))
 	if err != nil || p == nil || p.Name != "sh" {
 		t.Errorf("无 bash 应落 sh: %+v err=%v", p, err)
 	}
-	p, err = resolveProfile("", "linux", lookPathStub("ash"))
+	p, err = firstAvailable(posix, lookPathStub("ash"))
 	if err != nil || p == nil || p.Name != "ash" {
 		t.Errorf("仅 ash 应落 ash: %+v err=%v", p, err)
 	}
-	if p, err := resolveProfile("", "linux", lookPathStub()); err == nil || p != nil {
+	if p, err := firstAvailable(posix, lookPathStub()); err == nil || p != nil {
 		t.Errorf("全落空应报错: %+v err=%v", p, err)
 	}
 }
 
-func TestResolveProfileWindows(t *testing.T) {
-	p, err := resolveProfile("", "windows", lookPathStub("pwsh"))
+func TestFirstAvailablePowerShellChain(t *testing.T) {
+	ps := []string{"pwsh", "powershell"}
+	p, err := firstAvailable(ps, lookPathStub("pwsh"))
 	if err != nil || p == nil || p.Kind != KindPowerShell || p.arg() != "-Command" {
 		t.Fatalf("pwsh: %+v err=%v", p, err)
 	}
 	if strings.Join(p.ExtraArgs, " ") != "-NoProfile -NonInteractive" {
 		t.Errorf("ExtraArgs: %v", p.ExtraArgs)
 	}
-	if p, err := resolveProfile("", "windows", lookPathStub("cmd")); err == nil {
-		t.Errorf("windows 不应回退 cmd: %+v", p)
+	p, err = firstAvailable(ps, lookPathStub("pwsh", "powershell"))
+	if err != nil || p == nil || p.Name != "pwsh" {
+		t.Errorf("pwsh 应优先于 powershell: %+v err=%v", p, err)
+	}
+	p, err = firstAvailable(ps, lookPathStub("powershell"))
+	if err != nil || p == nil || p.Name != "powershell" || p.Kind != KindPowerShell || p.arg() != "-Command" {
+		t.Fatalf("无 pwsh 应兜底 powershell: %+v err=%v", p, err)
+	}
+	if strings.Join(p.ExtraArgs, " ") != "-NoProfile -NonInteractive" {
+		t.Errorf("powershell ExtraArgs: %v", p.ExtraArgs)
+	}
+	if p, err := firstAvailable(ps, lookPathStub("cmd")); err == nil {
+		t.Errorf("候选链不含 cmd: %+v", p)
+	} else if !strings.Contains(err.Error(), "pwsh/powershell") {
+		t.Errorf("报错应列出候选 pwsh/powershell: %v", err)
+	}
+	if p, err := firstAvailable(ps, lookPathStub()); err == nil || p != nil {
+		t.Errorf("全落空应报错: %+v err=%v", p, err)
+	}
+}
+
+func TestResolveProfileUsesPlatformCandidates(t *testing.T) {
+	first := platform.Candidates[0]
+	p, err := resolveProfile("", lookPathStub(first))
+	if err != nil || p == nil || p.Name != first {
+		t.Fatalf("平台首选 %q 应被选中: %+v err=%v", first, p, err)
+	}
+	_, err = resolveProfile("", lookPathStub("tanya-no-such-shell"))
+	if err == nil || !strings.Contains(err.Error(), strings.Join(platform.Candidates, "/")) {
+		t.Errorf("报错应列出平台候选链: %v", err)
 	}
 }
 
@@ -76,17 +106,17 @@ func TestNewProfileKinds(t *testing.T) {
 }
 
 func TestResolveProfileOverride(t *testing.T) {
-	p, err := resolveProfile("/usr/bin/fish", "linux", lookPathStub("fish", "bash"))
+	p, err := resolveProfile("/usr/bin/fish", lookPathStub("fish", "bash"))
 	if err != nil || p == nil || p.Name != "fish" || p.Path != "/usr/bin/fish" {
 		t.Errorf("override 优先: %+v err=%v", p, err)
 	}
-	if p, err := resolveProfile("/no/such/shell", "linux", lookPathStub("bash")); err == nil || p != nil {
+	if p, err := resolveProfile("/no/such/shell", lookPathStub("bash")); err == nil || p != nil {
 		t.Errorf("override 落空应报错: %+v err=%v", p, err)
 	}
 }
 
 func TestProbePrograms(t *testing.T) {
-	got := probePrograms(lookPathStub("ls", "cat", "rg", "python"))
+	got := probePrograms([]string{"ls", "cat", "rg", "python"}, lookPathStub("ls", "cat", "rg", "python"))
 	if strings.Join(got, ", ") != "ls, cat, rg, python" {
 		t.Errorf("probePrograms = %v", got)
 	}

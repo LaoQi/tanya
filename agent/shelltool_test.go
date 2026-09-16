@@ -23,7 +23,7 @@ func testShellTool(t *testing.T, mutate ...func(*shellToolConfig)) *shellTool {
 	if err != nil || home == "" {
 		t.Fatalf("UserHomeDir 不可用: err=%v home=%q", err, home)
 	}
-	cfg := shellToolConfig{GOOS: runtime.GOOS, LookPath: exec.LookPath, Home: home, Workspace: cwd}
+	cfg := shellToolConfig{LookPath: exec.LookPath, Home: home, Workspace: cwd}
 	for _, f := range mutate {
 		f(&cfg)
 	}
@@ -44,7 +44,7 @@ func runShellString(t *testing.T, ctx context.Context, command string, timeoutSe
 }
 
 func TestNewShellToolResolvesProfileAndPrograms(t *testing.T) {
-	tool, err := newShellTool(shellToolConfig{GOOS: "linux", LookPath: lookPathStub("bash", "ls")})
+	tool, err := newShellTool(shellToolConfig{LookPath: lookPathStub("bash", "ls")})
 	if err != nil || tool.profile == nil || tool.profile.Name != "bash" {
 		t.Fatalf("newShellTool: %+v err=%v", tool, err)
 	}
@@ -58,7 +58,6 @@ func TestNewShellToolResolvesProfileAndPrograms(t *testing.T) {
 
 func TestNewShellToolInjectedPrograms(t *testing.T) {
 	tool, err := newShellTool(shellToolConfig{
-		GOOS:     "linux",
 		LookPath: lookPathStub("bash", "ls", "grep"),
 		Programs: []string{"ls"},
 	})
@@ -68,13 +67,13 @@ func TestNewShellToolInjectedPrograms(t *testing.T) {
 }
 
 func TestNewShellToolNoShell(t *testing.T) {
-	if tool, err := newShellTool(shellToolConfig{GOOS: "linux", LookPath: lookPathStub()}); err == nil || tool != nil {
+	if tool, err := newShellTool(shellToolConfig{LookPath: lookPathStub()}); err == nil || tool != nil {
 		t.Errorf("无 shell 应报错: %+v err=%v", tool, err)
 	}
 }
 
 func TestNewShellToolOverrideUnavailable(t *testing.T) {
-	_, err := newShellTool(shellToolConfig{Override: "zsh", GOOS: "linux", LookPath: lookPathStub("bash")})
+	_, err := newShellTool(shellToolConfig{Override: "zsh", LookPath: lookPathStub("bash")})
 	if err == nil || !strings.Contains(err.Error(), "配置的 shell") {
 		t.Fatalf("override 无效应报错: %v", err)
 	}
@@ -176,7 +175,7 @@ func TestNewShellToolEmptyPrograms(t *testing.T) {
 		}
 		return "", errors.New("not found")
 	}
-	tool, err := newShellTool(shellToolConfig{GOOS: "linux", LookPath: lookPath, Programs: []string{}})
+	tool, err := newShellTool(shellToolConfig{LookPath: lookPath, Programs: []string{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,15 +207,51 @@ func TestShellToolInteractiveBadCwdSkipsBridge(t *testing.T) {
 }
 
 func TestShellToolDescGolden(t *testing.T) {
-	tool := &shellTool{
-		profile:  &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix},
-		programs: []string{"ls", "grep"},
-	}
-	want := "在 " + runtime.GOOS + " bash 中执行 shell 命令，返回 stdout/stderr/退出码。读文件、搜索、文本处理等系统操作都用它。" +
+	profile := &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}
+	tool := &shellTool{profile: profile, programs: []string{"ls", "grep"}}
+	want := "在 " + runtime.GOOS + " bash 中执行命令（shell 语法），返回 stdout/stderr/退出码。" +
 		"默认在会话启动目录（进程 cwd）下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。" +
+		platform.Capabilities(profile) +
+		"读文件、搜索、文本处理等系统操作都用它。" +
 		"可用程序: ls, grep"
 	if got := tool.toolDesc(); got != want {
 		t.Errorf("toolDesc 全串不匹配:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestShellToolDescPowerShellFallback(t *testing.T) {
+	tool := &shellTool{profile: &shellProfile{
+		Path: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+		Name: "powershell", Kind: KindPowerShell,
+	}}
+	want := "在 " + runtime.GOOS + " powershell 中执行命令（PowerShell 语法），"
+	if got := tool.toolDesc(); !strings.HasPrefix(got, want) {
+		t.Errorf("描述应使用实际 shell 名:\n got %q\nwant 前缀 %q", got, want)
+	}
+}
+
+func TestDescribeShellCrossPlatform(t *testing.T) {
+	posix := shellPlatform{Capabilities: func(*shellProfile) string { return "平台能力句。" }}
+	cwdLine := "默认在会话启动目录（进程 cwd）下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。"
+	useLine := "读文件、搜索、文本处理等系统操作都用它。"
+	got := describeShell("linux", posix, &shellProfile{Name: "bash", Kind: KindPosix}, []string{"ls", "grep"})
+	want := "在 linux bash 中执行命令（shell 语法），返回 stdout/stderr/退出码。" + cwdLine + "平台能力句。" + useLine + "可用程序: ls, grep"
+	if got != want {
+		t.Errorf("posix 描述不匹配:\n got %q\nwant %q", got, want)
+	}
+
+	empty := shellPlatform{Capabilities: func(*shellProfile) string { return "" }}
+	got = describeShell("plan9", empty, &shellProfile{Name: "sh", Kind: KindPosix}, nil)
+	want = "在 plan9 sh 中执行命令（shell 语法），返回 stdout/stderr/退出码。" + cwdLine + useLine
+	if got != want {
+		t.Errorf("空能力句/空清单应无空洞:\n got %q\nwant %q", got, want)
+	}
+
+	if got := describeShell("windows", posix, &shellProfile{Name: "pwsh", Kind: KindPowerShell}, nil); !strings.HasPrefix(got, "在 windows pwsh 中执行命令（PowerShell 语法），") {
+		t.Errorf("PowerShell 语法提示缺失: %q", got)
+	}
+	if got := describeShell("windows", posix, &shellProfile{Name: "cmd", Kind: KindCmd}, nil); !strings.HasPrefix(got, "在 windows cmd 中执行命令（cmd 语法），") {
+		t.Errorf("cmd 语法提示缺失: %q", got)
 	}
 }
 
