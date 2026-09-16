@@ -20,6 +20,9 @@ func openTerminal() (Terminal, error) {
 }
 
 func openTerminalFile(in *os.File) (*unixTerminal, error) {
+	if os.Getenv("TANYA_NO_RAW_INPUT") != "" {
+		return nil, ErrUnsupported
+	}
 	t := &unixTerminal{in: in}
 	if _, err := ctty.GetTermios(int(in.Fd())); err != nil {
 		return nil, err

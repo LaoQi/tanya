@@ -26,16 +26,27 @@ func Size(fd int) (int, int, bool) {
 	return cols, rows, true
 }
 
-func EnableVT(fd int) bool {
-	h := windows.Handle(fd)
+func ConsoleMode(fd int) (uint32, bool) {
 	var mode uint32
-	if err := windows.GetConsoleMode(h, &mode); err != nil {
+	if err := windows.GetConsoleMode(windows.Handle(fd), &mode); err != nil {
+		return 0, false
+	}
+	return mode, true
+}
+
+func SetConsoleMode(fd int, mode uint32) bool {
+	return windows.SetConsoleMode(windows.Handle(fd), mode) == nil
+}
+
+func EnableVT(fd int) bool {
+	mode, ok := ConsoleMode(fd)
+	if !ok {
 		return false
 	}
 	if mode&windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING != 0 {
 		return true
 	}
-	return windows.SetConsoleMode(h, mode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING) == nil
+	return SetConsoleMode(fd, mode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING)
 }
 
 func ConsoleKind() string {

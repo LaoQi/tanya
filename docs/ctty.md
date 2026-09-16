@@ -48,6 +48,8 @@
 | `Size(fd int) (int, int, bool)` | 终端尺寸：posix `TIOCGWINSZ`、windows `GetConsoleScreenBufferInfo` |
 | `EnableVT(fd int) bool` | 确保 ANSI 输出可用：windows 幂等开 `ENABLE_VIRTUAL_TERMINAL_PROCESSING`，posix 恒真 |
 | `ConsoleKind() string` | 控制台种类诊断串（windows: `WT_SESSION` → windows-terminal、`TERM_PROGRAM` → conpty，其余 console）|
+| `ConsoleMode(fd) (uint32, bool)` | 读 Windows 控制台模式（2026-09-16 增补，windows 专属）|
+| `SetConsoleMode(fd, mode) bool` | 写 Windows 控制台模式 |
 | `Facts` / `Probe()` | 探测结果聚合（StdinTTY/StdoutTTY/Cols/Rows/SizeOK/VT/Kind），`main` 单点调用 |
 | `ResetModes(tty *os.File) bool` | 复位终端模式：SGR、显示光标、自动换行、退出备用屏、关鼠标上报；**不含 `CSI r`（DECSTBM）**——该序列按 VT100/ECMA-48 语义会把光标移到滚动区首行。排除源于调用侧曾依赖 `CSI 1A` + `CR CSI K` 相对寻址（工具块 inline 重绘与 spinner 帧，2026-09-15 追加化后已移除，见 `docs/repl-status-append.md`）；该排除保留，以免未来再引入相对寻址渲染时踩坑 |
 

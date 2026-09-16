@@ -12,7 +12,7 @@
 - token 用量实时显示在提示符（API 实报优先，本地估算兜底），支持显示缓存命中
 - AI 输出 Markdown 渲染（默认开启，stdout 非终端与 plain 输出自动旁路）与内置配色主题（`/theme` 切换）
 - AGENTS.md 项目说明自动注入系统提示（全局 + 工作区双层，会话级快照保证 prompt cache 友好）
-- 平台：Linux 与 Windows 为主（Windows 显示已支持：16 色、状态行、markdown、真实宽度；行编辑与 interactive 命令待实现），macOS 尽力；控制终端原语与终端探测统一在零依赖叶子包 `ctty`，其余平台仅保证可编译
+- 平台：Linux 与 Windows 为主（Windows 显示与行编辑均已支持：16 色、状态行、markdown、真实宽度、行编辑/历史/Tab 补全/ghost，实机验证待做；interactive 命令待实现），macOS 尽力；控制终端原语与终端探测统一在零依赖叶子包 `ctty`，其余平台仅保证可编译
 - 降级粒度独立：显示能力取决于 stdout 是否终端、输入能力取决于 stdin 是否终端，互不连带（支持范围与组合矩阵见 `docs/terminal-caps.md`）
 - 依赖仅 2 个，核心逻辑测试覆盖率 90%+
 

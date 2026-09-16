@@ -17,7 +17,7 @@
 | 平台 | 终端环境 | 显示 | 输入 | run_shell interactive |
 |---|---|---|---|---|
 | Linux | VT 兼容终端（xterm 系、tmux、ssh 会话） | 16 色 + 状态行 + markdown + 真实宽度 | 行编辑/历史/补全/ghost | pty 桥接（现状） |
-| Windows | Windows Terminal、ConPTY 宿主（VS Code 终端等） | 同上 | 阶段 B 后同上 | 继承控制台（阶段 C） |
+| Windows | Windows Terminal、ConPTY 宿主（VS Code 终端等） | 同上 | 同上（VT 输入路径，实机验证待做） | 继承控制台（阶段 C） |
 | macOS | Terminal.app / iTerm2 | 同上（posix 路径） | 同上 | 无 pty（现状，不承诺） |
 
 **不保证**（不写适配分支，出问题不修）：
@@ -87,9 +87,10 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 |---|---|---|
 | S1 | `ctty` 探测原语与 `Facts`（posix / windows / stub 分片 + 单测） | 已实施 |
 | S2 | `main` 单点探测；`term.DetectProfile` 加 vt；`repl` 删除包级懒缓存、改注入 | 已实施 |
-| B | Windows 输入后端：`Raw()` 开 VT input、`ReadKey()` 复用 keyParser、`Size()` 走控制台 API；仅 VT 路径（范围排除了 conhost 与 1809 之前，无需 `ReadConsoleInput` 回退） | 待做 |
-| C | Windows 交互命令：`interactive: true` = 前台执行 + stdin 继承控制台（不做 ConPTY 桥接） | 待做 |
-| D | 编辑器输出切控制终端（解决 #2 盲打与提示符污染） | 待做 |
+| B0 | 抽平台无关的按键状态机 `keySource`（`readline/terminal_io.go`）：分片只提供 `readChunk` 与可选 `hungUp` | 已实施 |
+| B1 | Windows 输入后端（`readline/terminal_windows.go`）：`Raw` 开 `ENABLE_VIRTUAL_TERMINAL_INPUT` 并清 `ECHO/LINE/PROCESSED`、`readChunk` 用 `GetNumberOfConsoleInputEvents` 轮询 5ms + 1s 超时、`Size` 走 `ctty.Size`、`ctty` 加 `ConsoleMode`/`SetConsoleMode`；仅 VT 路径（范围排除 conhost 与 1809 之前，无需 `ReadConsoleInput` 回退）。ghost、补全菜单、历史随 raw 一并生效 | 已实施（实机验证待做） |
+| B2 | Windows 交互命令：`interactive: true` = 前台执行 + stdin 继承控制台（不做 ConPTY 桥接） | 待做 |
+| B3 | 编辑器输出切控制终端（解决 #2 盲打与提示符污染） | 待做 |
 
 ## 7. 决策记录
 
@@ -103,7 +104,16 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 | T6 | `#2` 暂不修行编辑盲打（阶段 D） | 本轮只拉直降级链路；彻底解法与输入后端同批做更省 |
 | T7 | env 段 TTY 行保持 `ctty.Supported` | 该行是 `/dev/tty` 平台文案，不是探测结果 |
 
-## 8. 实测记录（2026-09-16，Linux）
+## 8. Windows 输入后端要点（B1）
+
+- **超时语义**：posix 靠 `VMIN=0/VTIME=1` 让 `readChunk` 周期返回 `(0, nil)`，编辑器借此把孤立 `Esc` 判为 Esc；Windows 无对应 read timeout，故用 `GetNumberOfConsoleInputEvents`（LazyDLL，`x/sys/windows` 未封装）轮询 5ms、1s 截止后返回 `(0, nil)`，与 posix 同义
+- **只走 VT 路径**：`ENABLE_VIRTUAL_TERMINAL_INPUT` 让控制台把按键转成 VT 字节序列，直接复用 `keyParser`；不做 `ReadConsoleInput` 回退（范围排除 conhost 与 1809 之前）
+- **按键编码补充**：`keys.go` 增 `ESC[1~`/`ESC[4~` → Home/End（WT 与部分 xterm 的编码）
+- **逃生开关**：`TANYA_NO_RAW_INPUT=1` 让 `openTerminal` 直接返回 `ErrUnsupported`，回落 Degraded（两平台通用，便于对照与故障退避）
+- **不在范围**：IME 组合串、Alt 组合键、`ESC O`（F1–F4）；粘贴按多字节序列处理（与 posix 同）
+- **实机验证清单（WT 与 ConPTY 宿主各一遍）**：ghost 出现；Tab 多候选菜单（方向键选择、Esc 关闭、收起无残行）；上下键历史；`Ctrl-A/E/B/F/U/K/W/Y/T/L`；左右键与 `Home/End/Delete/Backspace` 编辑；`Ctrl+C` 中断回合、`Ctrl+D` 退出；中文输入；窗口 resize 后菜单与提示符不错位；`TANYA_NO_RAW_INPUT=1` 回落表现为整行读
+
+## 9. 实测记录（2026-09-16，Linux）
 
 用 `script -qec` 造伪终端，跑 `make build` 产出的二进制，统计输出中的 SGR 与其它 CSI：
 
@@ -114,7 +124,7 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 | C stdin tty + stdout 文件 | `printf 'exit\n' \| script -qec './tanya > body' /dev/null` | 0 | 2 | 颜色已关；两处 CSI 为行编辑重绘（阶段 D 缺口）|
 | D 全非 tty | `printf 'exit\n' \| ./tanya > out` | 0 | 0 | 全降级（与拆分前一致）|
 
-## 9. 测试与验收
+## 10. 测试与验收
 
 - `ctty`：`Probe` 字段自洽（无 tty 环境不 panic、`SizeOK=false` 时尺寸为零值）；`IsTerminal`/`Size` 对非法 fd 返回 false；Windows 分片随交叉编译校验
 - `term.DetectProfile`：表驱动补 `vt=false` 用例

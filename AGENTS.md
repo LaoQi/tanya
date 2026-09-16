@@ -28,7 +28,7 @@
 main.go            入口、flag 子命令、ask 单发、init 工作区脚手架
 ctty/              控制终端原语与终端探测：前台组读/写、/dev/tty、SIGTTIN/SIGTTOU 忽略、能力常量 Supported、Facts 探测（isatty/尺寸/VT）；白名单 + stub，零内部依赖
 repl/              REPL 循环与输入分发（对话优先）、斜杠命令、提示符模板、ghost 补全、/load picker、工具块渲染、状态行心跳、统计渲染、UI 文案
-readline/          自研终端输入层：行编辑/历史/Tab 补全菜单、按键解析、raw mode、显示宽度、pty 桥接（linux）、终端状态自愈
+readline/          自研终端输入层：行编辑/历史/Tab 补全菜单、按键解析（keySource 平台无关，posix termios / windows 控制台 VT 输入）、raw mode、显示宽度、pty 桥接（linux）、终端状态自愈
 agent/             核心逻辑：config（配置加载）/ llm + llm_http + llm_responses（双协议 client）/ agent（对话 loop）/ prompt / session / stats / envprobe / init（工作区脚手架）/ event
                    工具与终端：tools（Tool 接口 + allTools 清单）/ shelltool（run_shell 组件）/ shell（叶子）+ shell_platform{,_posix,_linux,_darwin,_windows,_stub}（平台抽象与分片）/ builtin（内置小工具）/ control（agent_custom 自调工具，key 表驱动）/ tty_bridge
 render/            表现层树根：渲染管线（IR → ANSI 的 Renderer、提示符模板 Template）
