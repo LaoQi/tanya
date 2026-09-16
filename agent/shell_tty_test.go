@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanyan/ctty"
+	"github.com/LaoQi/tanya/ctty"
 	"golang.org/x/sys/unix"
 )
 

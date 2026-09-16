@@ -2,11 +2,11 @@ package repl
 
 import (
 	"errors"
-	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanya/render/term"
 	"strings"
 	"testing"
 
-	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanya/agent"
 )
 
 var plainProf = term.Profile{TTY: true, Colors: term.LevelNone}

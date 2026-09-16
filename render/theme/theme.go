@@ -1,6 +1,6 @@
 package theme
 
-import rstyle "github.com/LaoQi/tanyan/render/style"
+import rstyle "github.com/LaoQi/tanya/render/style"
 
 // Semantics 是 UI 语义色集合，对应全局 Dim/Info/Warn/Ok/Error/Accent/Think/Run。
 type Semantics struct {

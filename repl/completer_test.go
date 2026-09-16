@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanya/agent"
 )
 
 func testCompleter(infos []agent.SessionInfo) *completer {

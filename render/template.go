@@ -1,13 +1,13 @@
 package render
 
 import (
-	"github.com/LaoQi/tanyan/render/ir"
-	"github.com/LaoQi/tanyan/render/markup"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/render/ir"
+	"github.com/LaoQi/tanya/render/markup"
+	"github.com/LaoQi/tanya/render/theme"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanya/render/term"
 )
 
 type Template struct {

@@ -3,7 +3,7 @@ package ir
 import (
 	"testing"
 
-	rstyle "github.com/LaoQi/tanyan/render/style"
+	rstyle "github.com/LaoQi/tanya/render/style"
 )
 
 func TestIRSkeleton(t *testing.T) {

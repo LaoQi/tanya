@@ -1,12 +1,12 @@
 package markdown
 
 import (
-	"github.com/LaoQi/tanyan/render/ir"
-	rstyle "github.com/LaoQi/tanyan/render/style"
+	"github.com/LaoQi/tanya/render/ir"
+	rstyle "github.com/LaoQi/tanya/render/style"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanya/render/term"
 )
 
 type groupKind uint8

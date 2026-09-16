@@ -3,7 +3,7 @@ package style
 import (
 	"testing"
 
-	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanya/render/term"
 )
 
 func setTestLevel(l term.ColorLevel) func() {

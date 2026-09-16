@@ -1,12 +1,12 @@
 package repl
 
 import (
-	"github.com/LaoQi/tanyan/render"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/render"
+	"github.com/LaoQi/tanya/render/theme"
 	"strings"
 	"testing"
 
-	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanya/agent"
 )
 
 func promptRender(t *testing.T, tpl string, vars map[string]string) string {

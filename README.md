@@ -18,13 +18,13 @@
 ## 安装
 
 ```bash
-go install github.com/LaoQi/tanyan@latest
+go install github.com/LaoQi/tanya@latest
 ```
 
 或从源码构建：
 
 ```bash
-git clone https://github.com/LaoQi/tanyan.git && cd tanyan
+git clone https://github.com/LaoQi/tanya.git && cd tanyan
 make build
 ```
 

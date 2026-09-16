@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/LaoQi/tanyan/agent"
-	"github.com/LaoQi/tanyan/ctty"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/ctty"
+	"github.com/LaoQi/tanya/render/theme"
 )
 
 func RunInit(st *streams, sem theme.Semantics, cfg *agent.Config) error {

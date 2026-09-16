@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	rstyle "github.com/LaoQi/tanyan/render/style"
+	rstyle "github.com/LaoQi/tanya/render/style"
 )
 
 func mustLookup(t *testing.T, name string) Scheme {

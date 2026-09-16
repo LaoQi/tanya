@@ -1,11 +1,11 @@
 package markup
 
 import (
-	"github.com/LaoQi/tanyan/render/ir"
-	"github.com/LaoQi/tanyan/render/theme"
+	"github.com/LaoQi/tanya/render/ir"
+	"github.com/LaoQi/tanya/render/theme"
 	"testing"
 
-	rstyle "github.com/LaoQi/tanyan/render/style"
+	rstyle "github.com/LaoQi/tanya/render/style"
 )
 
 func testSemantics() theme.Semantics {

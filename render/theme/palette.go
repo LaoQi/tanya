@@ -1,6 +1,6 @@
 package theme
 
-import rstyle "github.com/LaoQi/tanyan/render/style"
+import rstyle "github.com/LaoQi/tanya/render/style"
 
 // Apply 在内置方案语义色之上叠加用户 palette 覆盖，返回新的语义色集合（纯函数）。
 func Apply(base Semantics, m map[string]string) Semantics {

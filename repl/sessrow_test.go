@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanyan/agent"
+	"github.com/LaoQi/tanya/agent"
 )
 
 func newSessTestAgent(t *testing.T, dir string, opts ...agent.Option) *agent.Agent {

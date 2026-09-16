@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LaoQi/tanyan/render"
-	"github.com/LaoQi/tanyan/render/ir"
-	rstyle "github.com/LaoQi/tanyan/render/style"
-	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanya/render"
+	"github.com/LaoQi/tanya/render/ir"
+	rstyle "github.com/LaoQi/tanya/render/style"
+	"github.com/LaoQi/tanya/render/term"
 )
 
 func blocksText(t *testing.T, buf *MarkdownBuf, delta string) string {

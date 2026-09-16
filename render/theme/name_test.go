@@ -3,7 +3,7 @@ package theme
 import (
 	"testing"
 
-	rstyle "github.com/LaoQi/tanyan/render/style"
+	rstyle "github.com/LaoQi/tanya/render/style"
 )
 
 func TestSemanticsByName(t *testing.T) {

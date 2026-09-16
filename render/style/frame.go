@@ -1,6 +1,6 @@
 package style
 
-import "github.com/LaoQi/tanyan/render/term"
+import "github.com/LaoQi/tanya/render/term"
 
 func (s Style) Frame(text string) string {
 	clean := term.Sanitize(text, false)

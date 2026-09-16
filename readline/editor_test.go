@@ -3,8 +3,8 @@ package readline
 import (
 	"bytes"
 	"errors"
-	rstyle "github.com/LaoQi/tanyan/render/style"
-	"github.com/LaoQi/tanyan/render/term"
+	rstyle "github.com/LaoQi/tanya/render/style"
+	"github.com/LaoQi/tanya/render/term"
 	"io"
 	"strings"
 	"testing"

@@ -1,10 +1,10 @@
 package render
 
 import (
-	"github.com/LaoQi/tanyan/render/ir"
+	"github.com/LaoQi/tanya/render/ir"
 	"testing"
 
-	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanya/render/term"
 )
 
 func TestParseTemplateMarkup(t *testing.T) {

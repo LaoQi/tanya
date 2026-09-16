@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/LaoQi/tanyan/render/term"
+	"github.com/LaoQi/tanya/render/term"
 )
 
 type ColorKind uint8
