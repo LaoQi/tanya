@@ -1,7 +1,7 @@
 # style 拆包：终端表现层的四域重组
 
 状态：**已实施**（P0–P9）。基线 commit `0910445`（429 用例全绿），落地后 431 用例全绿 + `-race`。
-相关：`docs/render-pipeline.md`（渲染管线原方案）、`docs/agent-split.md`（同类拆包体例）、`AGENTS.md` 结构段。
+相关：`docs/render-pipeline.md`（渲染管线原方案）、`AGENTS.md` 结构段。
 
 ## 1. 要解决的问题
 

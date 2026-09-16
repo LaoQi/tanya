@@ -48,7 +48,7 @@ render/            表现层树根：渲染管线（IR → ANSI 的 Renderer、�
 - `README.md` 使用说明与配置项
 - `docs/ctty.md` 控制终端抽象与平台收敛；`docs/interactive-tty.md` pty 桥接
 - `docs/style-split.md` 表现层拆包；`docs/render-pipeline.md` 渲染管线；`docs/render-refs-compare.md` 参考项目对比
-- `docs/shell-tool.md` run_shell 组件化；`docs/agent-split.md` agent 接缝重组；`docs/agent-control-tool.md` agent_custom 自调工具
+- `docs/shell-tool.md` run_shell 组件化；`docs/agent-control-tool.md` agent_custom 自调工具
 - `docs/cache-probe.md` prompt cache 探测与量化台阶（供后续设计引用）
 - `docs/repl-output-refactor.md` 输出收敛与双流；`docs/repl-status-append.md` 状态展示追加化；`docs/repl-replay-rendering.md` 回放复用评估（未实施）；`docs/probe-redesign.md` 环境探针重构（归档）
 
