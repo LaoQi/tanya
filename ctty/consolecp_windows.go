@@ -12,14 +12,14 @@ import (
 const cpUTF8 = 65001
 
 var (
-	cpDLL                   = windows.NewLazySystemDLL("kernel32.dll")
-	procGetConsoleCP        = cpDLL.NewProc("GetConsoleCP")
-	procGetConsoleOutputCP  = cpDLL.NewProc("GetConsoleOutputCP")
-	procSetConsoleCP        = cpDLL.NewProc("SetConsoleCP")
-	procSetConsoleOutputCP  = cpDLL.NewProc("SetConsoleOutputCP")
-	procGetOEMCP            = cpDLL.NewProc("GetOEMCP")
-	procMultiByteToWideChar = cpDLL.NewProc("MultiByteToWideChar")
-	procWideCharToMultiByte = cpDLL.NewProc("WideCharToMultiByte")
+	kernel32                = windows.NewLazySystemDLL("kernel32.dll")
+	procGetConsoleCP        = kernel32.NewProc("GetConsoleCP")
+	procGetConsoleOutputCP  = kernel32.NewProc("GetConsoleOutputCP")
+	procSetConsoleCP        = kernel32.NewProc("SetConsoleCP")
+	procSetConsoleOutputCP  = kernel32.NewProc("SetConsoleOutputCP")
+	procGetOEMCP            = kernel32.NewProc("GetOEMCP")
+	procMultiByteToWideChar = kernel32.NewProc("MultiByteToWideChar")
+	procWideCharToMultiByte = kernel32.NewProc("WideCharToMultiByte")
 )
 
 func ConsoleCP() (uint32, bool) {

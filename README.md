@@ -13,7 +13,7 @@
 - AI 输出 Markdown 渲染（默认开启，stdout 非终端与 plain 输出自动旁路）与内置配色主题（`/theme` 切换）
 - 思维链显示（`show_reasoning` 配置或 REPL 内 `/reasoning on`）：思维链以 markdown 渲染并夹在 `─── 思考 ───` / `─── 思考结束 · 3.2s ───` 分隔符之间，同时不再打 `» 思考中` 状态行
 - AGENTS.md 项目说明自动注入系统提示（全局 + 工作区双层，会话级快照保证 prompt cache 友好）
-- 平台：Linux 与 Windows 为主（Windows 显示与行编辑均已支持：16 色、状态行、markdown、真实宽度、行编辑/历史/Tab 补全/ghost，实机验证待做；interactive 命令待实现），macOS 尽力；控制终端原语与终端探测统一在零依赖叶子包 `ctty`，其余平台仅保证可编译
+- 平台：Linux 与 Windows 为主（Windows 显示与行编辑均已支持：16 色、状态行、markdown、真实宽度、行编辑/历史/Tab 补全/ghost；interactive 命令走控制台继承直通，实机验证待做），macOS 尽力；控制终端原语与终端探测统一在零依赖叶子包 `ctty`，其余平台仅保证可编译
 - 降级粒度独立：显示能力取决于 stdout 是否终端、输入能力取决于 stdin 是否终端，互不连带（支持范围与组合矩阵见 `docs/terminal-caps.md`）
 - 依赖仅 2 个，核心逻辑测试覆盖率 90%+
 
@@ -152,7 +152,7 @@ TTY 下的状态展示是**追加式**（不重绘、不移动光标，终端被
 
 普通命令执行期间 shell 进程被移交终端前台进程组（`TIOCSPGRP`，无控制终端时自动跳过），因此 ssh/git 等需要密码的程序可直接在终端应答，不再挂死至超时。
 
-`interactive: true` 的命令改走独立 pty 桥接（仅 Linux 实现）：命令在自己的 pty 中运行，真实 tty 切 raw 由 bridge 双向泵转，提示与输出实时可见；此时无需前台移交，`^C` 经 pty 行规程投递（`^Z` 在桥接下不挂起子进程）。桥接不可用时回退上述前台移交路径。细节见 `docs/interactive-tty.md`。
+`interactive: true` 在 Linux 走独立 pty 桥接：命令在自己的 pty 中运行，真实 tty 切 raw 由 bridge 双向泵转，提示与输出实时可见；此时无需前台移交，`^C` 经 pty 行规程投递（`^Z` 在桥接下不挂起子进程）。桥接不可用时回退上述前台移交路径。Windows 不走 pty：子进程 stdin 继承控制台（`CONIN$`）可直接应答，运行期 tanya 屏蔽自身 `^C`（`Ctrl+Break` 仍可中断），interactive 时去除 PowerShell 的 `-NonInteractive`（Read-Host 可用）；提示写到控制台的程序（ssh 等）实时可见，写到 stdout 的随输出捕获。细节见 `docs/interactive-tty.md` 与 `docs/terminal-caps.md` §8.6。
 
 信号语义：
 

@@ -49,6 +49,20 @@ func EnableVT(fd int) bool {
 	return SetConsoleMode(fd, mode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING)
 }
 
+var procSetConsoleCtrlHandler = kernel32.NewProc("SetConsoleCtrlHandler")
+
+func Open() (*os.File, error) {
+	return os.OpenFile("CONIN$", os.O_RDWR, 0)
+}
+
+func IgnoreCtrlEvents() {
+	procSetConsoleCtrlHandler.Call(0, 1)
+}
+
+func RestoreCtrlEvents() {
+	procSetConsoleCtrlHandler.Call(0, 0)
+}
+
 func ConsoleKind() string {
 	if os.Getenv("WT_SESSION") != "" {
 		return "windows-terminal"
