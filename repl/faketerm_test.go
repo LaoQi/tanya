@@ -78,6 +78,7 @@ type fakeTerm struct {
 	raw   bool
 	inKey bool
 	onKey func()
+	err   error
 }
 
 func newFakeTerm(keys ...readline.KeyEvent) *fakeTerm {
@@ -101,6 +102,9 @@ func (f *fakeTerm) ReadKey() (readline.KeyEvent, error) {
 		f.onKey()
 	}
 	if f.idx >= len(f.keys) {
+		if f.err != nil {
+			return readline.KeyEvent{}, f.err
+		}
 		return readline.KeyEvent{}, io.EOF
 	}
 	ev := f.keys[f.idx]

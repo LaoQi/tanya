@@ -2,6 +2,7 @@ package repl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/LaoQi/tanya/render"
 	"github.com/LaoQi/tanya/render/ir"
@@ -9,12 +10,12 @@ import (
 	"github.com/LaoQi/tanya/render/theme"
 	"io"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/readline"
 )
 
@@ -223,9 +224,8 @@ func (r *REPL) Run() error {
 		if err == readline.ErrInterrupt {
 			continue
 		}
-		if err == io.EOF {
-			r.farewell()
-			return nil
+		if err == io.EOF || errors.Is(err, readline.ErrExited) {
+			return r.quit()
 		}
 		if err != nil {
 			return err
@@ -235,13 +235,11 @@ func (r *REPL) Run() error {
 			continue
 		}
 		if isExitLine(line) {
-			r.farewell()
-			return nil
+			return r.quit()
 		}
 		if isSlashCommand(line) {
 			if r.handleCommand(line) {
-				r.farewell()
-				return nil
+				return r.quit()
 			}
 			r.st.out.emit(KindDecor, turnSep(r.prof, r.sem, 0))
 			continue
@@ -268,16 +266,14 @@ func (r *REPL) ask(q string) {
 
 func InterruptContext() (context.Context, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, os.Interrupt)
+	interrupted := ctty.Interrupted()
 	finished := make(chan struct{})
 	go func() {
 		select {
-		case <-ch:
+		case <-interrupted:
 			cancel()
 		case <-ctx.Done():
 		}
-		signal.Stop(ch)
 		close(finished)
 	}()
 	return ctx, func() {

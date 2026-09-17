@@ -74,6 +74,32 @@
 | `ctty/termios_linux.go` | `linux` | `Termios` 别名 + `TCGETS/TCSETS/TCSETSF` |
 | `ctty/termios_darwin.go` | `darwin` | `Termios` 别名 + `TIOCGETA/TIOCSETA/TIOCSETAF` |
 | `ctty/termios_stub.go` | `!linux && !darwin` | 空 `Termios` + 恒错实现 |
+| `ctty/signals.go` | 无 tag | 运行期信号公共逻辑（`WatchSignals`/`Exit`/`Exiting`/`ExitSignal`/`ExitStatus`/`Interrupted`/分发）|
+| `ctty/signals_posix.go` | `linux \|\| darwin` | 信号清单（SIGTERM/SIGHUP/SIGINT）+ `emergencyRestore` |
+| `ctty/signals_stub.go` | `!linux && !darwin` | 信号清单（SIGTERM/`os.Interrupt`）+ `emergencyRestore` no-op |
+
+## 运行期信号（2026-09-17）
+
+信号监听是终端语义的一部分（与 `/dev/tty`、termios 同层），故收敛进 `ctty`：平台白名单分片只声明清单，无 tag 文件承载公共逻辑，`repl`/`main` 不出现 `os/signal`、不区分退出方式。起因：此前 SIGTERM/SIGHUP 走 Go 默认处置，`pkill tanya` 直接把进程打死在 raw 态——pty 实测（空闲态与 interactive 桥接态各一次）进程被信号 15 终止、`/dev/pts` 的 `ICANON/ECHO/ISIG` 全保持关闭，`defer e.term.Restore()` 在信号路径不执行。
+
+| API | 语义 |
+|---|---|
+| `WatchSignals()` | `sync.Once` 一次性安装监听（清单 = 关闭信号 + 中断信号），由 `main` 单点调用 |
+| `Exit(sig os.Signal)` | 请求退出：首个来源生效（记住信号号）并广播中断，可重复调用 |
+| `Exiting() bool` | 是否已请求退出；`readline` 轮询此值唤醒阻塞输入 |
+| `ExitSignal() os.Signal` | 触发退出的信号（未触发为 nil）|
+| `ExitStatus() int` | 进程退出码：`128 + signum`；无退出请求或来源非 `syscall.Signal` 时为 0 |
+| `Interrupted() <-chan struct{}` | 取当前中断通道快照；广播时关闭并换新通道；**已处于退出态时直接返回已关闭通道**（退出态持久，晚到的订阅者立即感知并取消）|
+| `ProtectJobSignals()` | 作业控制信号防护：`Notify(SIGTSTP)` 吞没 + `IgnoreJobSignals()`（吸收自 `agent.posixProtectSignals`）|
+
+语义与约束：
+
+- 清单：关闭信号 SIGTERM/SIGHUP（`signals_posix.go`）/ `syscall.SIGTERM`（`signals_stub.go`）；中断信号 SIGINT。windows 走 stub 分片且恰好合用——Go runtime 把控制台 CLOSE/LOGOFF/SHUTDOWN 事件折为 **SIGTERM** 递送并阻塞等待 handler 收尾（`runtime/os_windows.go` 的 `ctrlHandler`），落进关闭信号路径；`^C`/`^Break` 折为 SIGINT 走中断。**SIGQUIT 不入清单**，保持 Go 默认全栈转储（与 `docs/design.md`《信号》一致）。
+- 关闭信号 → `Exit(sig)` + 广播中断；中断信号 → 只广播，不置退出态。
+- **重复关闭信号 = 强退**：第二次送达时 `emergencyRestore()`（仅自身为 `/dev/tty` 前台时把 tty 拉回 canonical + `ResetModes`，非前台不动——此时终端归子进程）后 `os.Exit(ExitStatus())`。之所以不做定时兜底：正常取消路径最坏要 `shellWaitDelay`（2s）才收尾，定时器必须显著大于它，反而容易打断正常退出；而重复信号是显式意图，无隐式时序竞争，且顺带解决「`Notify` 之后普通信号不再有默认处置、用户只能 SIGKILL（必然留 raw）」这一固有缺陷。
+- **订阅点必须同步取快照**：`Interrupted()` 取值要在启动等待 goroutine 之前完成（`repl.InterruptContext` 即此写法）。若在 goroutine 内才取，纯中断广播可能落在快照建立之前而被整轮丢失——该竞态在负载下必现（repl 用例在 `go test -race ./...` 下超时、单包串行却通过），是 2026-09-17 实测修掉的第一个坑。丢失窗口只影响瞬时的中断广播：退出态是持久的，快照时 `Exiting()` 为真则直接拿到已关闭通道（review 2026-09-17 补），回合照样立即取消、`Readline` 照样立即返回 `ErrExited`。
+- 唤醒分工：`readline` 靠轮询 `ctty.Exiting()`（raw 下 `VMIN=0/VTIME=1` 每 ~100ms 一轮），命中即返回 `ErrExited`，且优先于已解析的按键队列（退出不被积压输入拖延）；`Degraded`（管道 stdin）阻塞在 `bufio` 上无法唤醒，但该路径本来就不改 termios，无残留代价，等重复信号强退即可。
+- `os.Exit` 只出现在 `WatchSignals` 之后的分发路径，`WatchSignals` 只在 `main` 调用（测试不安装），库的常规使用面不受影响。
 
 ## 迁移
 
