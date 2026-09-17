@@ -128,7 +128,7 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 - **机制**：控制台被子进程继承（与 stdio 无关），提示写到控制台的程序（ssh/sudo/gpg）本就实时可见；缺的只是键盘——`ctty.Open()` 在 windows 返回 `CONIN$`，`runShellForeground` 既有的 `cmd.Stdin = tty` 接线零改动即通。回合期间控制台处于 canonical 模式（`editor.go` 每回合 `Raw()`/`defer Restore()`），子进程行编辑/回显天然可用
 - **^C 归属**：Windows 把控制台 ctrl 事件广播给**所有**附着进程；`runShellForeground` 全程 `IgnoreCtrlEvents()`（`SetConsoleCtrlHandler(NULL, TRUE)`）掩蔽本进程，^C 只达子进程——与 posix 前台组语义对齐。**Ctrl+Break 不受掩蔽**（Go runtime 折为 SIGINT），保留为中断回合/触发 taskkill 的逃生口
 - **`-NonInteractive`**：PowerShell 该模式下 Read-Host 直接抛错（不是读不到 stdin）；interactive 时 `shellArgs` 过滤掉它（`-NoProfile` 保留），非交互运行不受影响
-- **残余取舍**：子进程改乱 CONIN$ 模式后退出，正常路径下回合 `Raw()` 自愈，Degraded（`TANYA_NO_RAW_INPUT`）无 readline 自愈会残留（登记不修）；掩蔽期间关 tab 无 CP 复原收尾（进程随控制台销毁，同 SIGKILL 语义）；写 stdout 的提示（Read-Host 的 prompt 行）进捕获、回合结束后才可见
+- **残余取舍**：子进程改乱 CONIN$ 模式后退出——回合末经 `ctty.SnapshotInput`/`RestoreInput` 复原为快照值，正常路径与 Degraded（`TANYA_NO_RAW_INPUT`，复原在 agent 侧、不依赖 readline）均覆盖（2026-09-17 修复，见 `docs/windows-console-mode-restore.md`）；掩蔽期间关 tab 无 CP 复原收尾（进程随控制台销毁，同 SIGKILL 语义）；写 stdout 的提示（Read-Host 的 prompt 行）进捕获、回合结束后才可见
 
 ## 9. 实测记录（2026-09-16，Linux）
 
