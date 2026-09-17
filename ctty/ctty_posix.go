@@ -32,6 +32,10 @@ func Open() (*os.File, error) {
 	return os.OpenFile("/dev/tty", os.O_RDWR, 0)
 }
 
+func IgnoreCtrlEvents() {}
+
+func RestoreCtrlEvents() {}
+
 func OwnPgrp() int {
 	pgrp, err := unix.Getpgid(0)
 	if err != nil {

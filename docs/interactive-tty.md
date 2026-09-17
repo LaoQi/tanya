@@ -245,5 +245,5 @@ func WithTTYBridge(b TTYBridge) Option // 未注入或 Prepare 失败 → 回退
 2. 受控输入（tanya 接管输入行 + 掩码）的演进，作为 §2 交互形态的次选
 3. 非交互命令 `cmd.Stdin` 是否改绑 `/dev/null`（现状绑 `/dev/tty` 的隐患，超出本次范围）
 4. pinentry-curses 等全屏界面在"原样全量"下噪声较高——已按 §7 豁免，若实际不可读再评估
-5. macOS/BSD 桥接（`TIOCPTY` 系列）与 Windows ConPTY：当前 stub 回退，未排期
+5. macOS/BSD 桥接（`TIOCPTY` 系列）：当前 stub 回退，未排期；Windows 不做 ConPTY 桥接，interactive 走控制台继承直通（B2，见 `docs/terminal-caps.md` §8.6）
 6. 编辑器进 raw 的 `TCSETSF` 会清 typeahead（回合未结束时键入被丢弃，见 §7）：是否改为先 drain 输入缓冲再切 raw

@@ -34,7 +34,8 @@
 | API | 语义 |
 |---|---|
 | `const Supported bool` | 平台能力（linux/darwin 为真）|
-| `Open() (*os.File, error)` | 打开控制终端 `/dev/tty` |
+| `Open() (*os.File, error)` | 打开控制终端：posix `/dev/tty`、windows `CONIN$`（2026-09-17 windows 增补，交互子进程 stdin 直通控制台的入口）|
+| `IgnoreCtrlEvents()` / `RestoreCtrlEvents()` | windows：`SetConsoleCtrlHandler(NULL, TRUE/FALSE)` 让本进程忽略控制台 ^C——交互子进程独占 ^C，与 posix 前台组语义对齐（Ctrl+Break 不受掩蔽，保留为紧急中断逃生口）；posix/stub no-op（2026-09-17 增补）|
 | `OwnPgrp() int` | 自身进程组（`Getpgid(0)`，错误 `-1`）|
 | `ForegroundPgrp(fd int) (int, bool)` | 读前台组 |
 | `SetForeground(fd, pgrp int) bool` | 写前台组 |
@@ -76,9 +77,9 @@
 |---|---|---|
 | `ctty/ctty.go` | 无 tag | `Facts` + `Probe()`（组合各分片原语）|
 | `ctty/ctty_posix.go` | `linux \|\| darwin` | ioctl 实现 + `Supported=true` + 探测原语 |
-| `ctty/ctty_windows.go` | `windows` | `GetConsoleMode`/`GetConsoleScreenBufferInfo`/`SetConsoleMode` 探测原语 |
-| `ctty/ctty_stub.go` | `!linux && !darwin` | 控制终端 no-op + `Supported=false`（含 windows）|
-| `ctty/ctty_probe_stub.go` | `!linux && !darwin && !windows` | 探测原语保守实现（全 false）|
+| `ctty/ctty_windows.go` | `windows` | `GetConsoleMode`/`GetConsoleScreenBufferInfo`/`SetConsoleMode` 探测原语 + `Open`（CONIN$）+ ctrl 掩蔽 |
+| `ctty/ctty_stub.go` | `!linux && !darwin` | 控制终端原语 no-op + `Supported=false`（含 windows；`Open` 与 ctrl 掩蔽在 windows 有专属实现）|
+| `ctty/ctty_probe_stub.go` | `!linux && !darwin && !windows` | 探测原语保守实现（全 false）+ `Open` 恒错 + ctrl 掩蔽 no-op |
 | `ctty/consolecp_windows.go` | `windows` | 代码页原语 + `EnsureUTF8/RestoreUTF8/FallbackCP/DecodeCP`（LazyDLL）|
 | `ctty/consolecp_stub.go` | `!windows` | 代码页 no-op（posix 与其余平台共用一份）|
 | `ctty/termios_linux.go` | `linux` | `Termios` 别名 + `TCGETS/TCSETS/TCSETSF` |
@@ -141,6 +142,6 @@
 
 ## 取舍与遗留
 
-- **Windows**：Win32 无 pgrp / `TIOCSPGRP` 概念，`ctty_stub` 仅降级（`Supported=false`，agent 不接 stdin 到 tty、不移交前台）。将来实现 Windows 交互时需另议接口形状（console ownership 与 pgrp 不同构），当前不预留抽象。
+- **Windows**：Win32 无 pgrp / `TIOCSPGRP` 概念，前台组/termios 原语仍走 stub 降级（`Supported=false`）。交互直通（B2，2026-09-17）不依赖这组抽象：`Open` 返回 `CONIN$` 作子进程 stdin，^C 归属用 ctrl 掩蔽原语解决，控制台模式复原依赖 readline 每回合 `Raw()`/`Restore()` 自愈。
 - **非目标 unix**（freebsd/solaris/aix/android/illumos 等）：从"顺带可用"降级为 stub，换取 tag 集合单一化与可编译性保证。影响不止 ctty 原语 no-op——readline 的 raw mode 同样只剩 stub，这些平台的交互退化为 **Degraded 行输入（失去行编辑/历史/ghost/Tab 补全菜单）**。属明确取舍。
 - **build tag 无法共享常量**：排除表达式仍需在各 stub 文件重复书写，`ctty` 只让"ctty 能力"这一概念有了单一归属，无法根除 tag 字符串层面的重复。

@@ -28,7 +28,7 @@ func TestPlatformWindowsPrograms(t *testing.T) {
 
 func TestPlatformWindowsCapabilities(t *testing.T) {
 	ps := platform.Capabilities(&shellProfile{Name: "pwsh", Kind: KindPowerShell})
-	if !strings.Contains(ps, "管道传递对象而非纯文本") || !strings.Contains(ps, "cmdlet") || !strings.Contains(ps, "无 /dev/tty 概念") || !strings.Contains(ps, "coreutils") {
+	if !strings.Contains(ps, "管道传递对象而非纯文本") || !strings.Contains(ps, "cmdlet") || !strings.Contains(ps, "无 /dev/tty 概念") || !strings.Contains(ps, "coreutils") || !strings.Contains(ps, "stdin 继承控制台") {
 		t.Errorf("PowerShell 能力描述缺项: %q", ps)
 	}
 	cmd := platform.Capabilities(&shellProfile{Name: "cmd", Kind: KindCmd})
@@ -40,8 +40,8 @@ func TestPlatformWindowsCapabilities(t *testing.T) {
 func TestPlatformWindowsDescGolden(t *testing.T) {
 	cwdLine := "默认在会话启动目录（进程 cwd）下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。"
 	useLine := "读文件、搜索、文本处理等系统操作都用它。可用程序: "
-	ps := "命令在 PowerShell 中执行，管道传递对象而非纯文本，路径分隔符为 \\，检索与文本处理优先用 PowerShell cmdlet（Get-ChildItem/Select-String/Where-Object 等）；交互式程序的提示直接在终端可见，无 /dev/tty 概念；unix 工具链（grep/sed/awk 等）需 coreutils、Git for Windows 或 msys2 提供，以「可用程序」清单为准。"
-	cmd := "命令在 cmd.exe 中执行，路径分隔符为 \\，文本处理优先用内建命令（dir/findstr/type 等）或 PowerShell 单行命令；交互式程序的提示直接在终端可见，无 /dev/tty 概念；unix 工具链（grep/sed/awk 等）需 coreutils、Git for Windows 或 msys2 提供，以「可用程序」清单为准。"
+	ps := "命令在 PowerShell 中执行，管道传递对象而非纯文本，路径分隔符为 \\，检索与文本处理优先用 PowerShell cmdlet（Get-ChildItem/Select-String/Where-Object 等）；交互式程序（interactive: true）的 stdin 继承控制台、可在终端直接应答，写控制台的提示（ssh 等）实时可见、写 stdout 的提示随输出捕获，无 /dev/tty 概念；unix 工具链（grep/sed/awk 等）需 coreutils、Git for Windows 或 msys2 提供，以「可用程序」清单为准。"
+	cmd := "命令在 cmd.exe 中执行，路径分隔符为 \\，文本处理优先用内建命令（dir/findstr/type 等）或 PowerShell 单行命令；交互式程序（interactive: true）的 stdin 继承控制台、可在终端直接应答，写控制台的提示（ssh 等）实时可见、写 stdout 的提示随输出捕获，无 /dev/tty 概念；unix 工具链（grep/sed/awk 等）需 coreutils、Git for Windows 或 msys2 提供，以「可用程序」清单为准。"
 
 	got := describeShell(platform, &shellProfile{Name: "pwsh", Kind: KindPowerShell}, []string{"git", "where"})
 	want := "在 windows pwsh 中执行命令（PowerShell 语法），返回 stdout/stderr/退出码。" + cwdLine + ps + useLine + "git, where"

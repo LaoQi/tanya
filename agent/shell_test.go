@@ -142,3 +142,17 @@ func TestLimitedBuffer(t *testing.T) {
 		t.Errorf("空流不应产出 chunk: %+v", chunks3)
 	}
 }
+
+func TestShellArgsInteractive(t *testing.T) {
+	ps := &shellProfile{Path: "pwsh", Name: "pwsh", Kind: KindPowerShell, ExtraArgs: []string{"-NoProfile", "-NonInteractive"}}
+	if got := strings.Join(shellArgs(ps, "echo hi", false), " "); got != "-NoProfile -NonInteractive -Command echo hi" {
+		t.Errorf("非交互应保留 -NonInteractive: %q", got)
+	}
+	if got := strings.Join(shellArgs(ps, "Read-Host x", true), " "); got != "-NoProfile -Command Read-Host x" {
+		t.Errorf("交互应去除 -NonInteractive: %q", got)
+	}
+	cmdProfile := &shellProfile{Path: "cmd", Name: "cmd", Kind: KindCmd, ExtraArgs: []string{"/d", "/s"}}
+	if got := strings.Join(shellArgs(cmdProfile, "dir", true), " "); got != "/d /s /c dir" {
+		t.Errorf("cmd 参数不应受 interactive 影响: %q", got)
+	}
+}

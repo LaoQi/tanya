@@ -103,7 +103,7 @@ func (t *shellTool) run(ctx context.Context, req shellRequest) *ShellResult {
 			return res
 		}
 	}
-	return runShellForeground(ctx, req.Command, timeoutSec, t.profile, dir)
+	return runShellForeground(ctx, req.Command, timeoutSec, t.profile, dir, req.Interactive)
 }
 
 func (t *shellTool) resolveCwd(cwd string) (string, error) {
@@ -163,6 +163,6 @@ func shellSyntaxHint(kind ShellKind) string {
 }
 
 func runShellParams() string {
-	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"cwd":{"type":"string","description":"命令执行目录，默认会话启动目录"},"timeout":{"type":"integer","description":"超时秒数，默认 %d（interactive 时 %d），最大 %d"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令在独立 pty 中运行、终端直通应答，停用等待动画，默认超时放宽"}},"required":["command"]}`,
+	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"cwd":{"type":"string","description":"命令执行目录，默认会话启动目录"},"timeout":{"type":"integer","description":"超时秒数，默认 %d（interactive 时 %d），最大 %d"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令与终端直通、可直接应答（Linux 独立 pty、Windows 继承控制台），停用等待动画，默认超时放宽"}},"required":["command"]}`,
 		shellTimeoutSec, shellInteractiveTimeoutSec, shellTimeoutLimit)
 }

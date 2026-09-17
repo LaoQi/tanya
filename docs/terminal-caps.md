@@ -17,7 +17,7 @@
 | 平台 | 终端环境 | 显示 | 输入 | run_shell interactive |
 |---|---|---|---|---|
 | Linux | VT 兼容终端（xterm 系、tmux、ssh 会话） | 16 色 + 状态行 + markdown + 真实宽度 | 行编辑/历史/补全/ghost | pty 桥接（现状） |
-| Windows | Windows Terminal、ConPTY 宿主（VS Code 终端等） | 同上 | 同上（VT 输入路径，实机验证待做） | 继承控制台（阶段 C） |
+| Windows | Windows Terminal、ConPTY 宿主（VS Code 终端等） | 同上 | 同上（VT 输入路径，实机验证待做） | 继承控制台（B2，实机验证待做） |
 | macOS | Terminal.app / iTerm2 | 同上（posix 路径） | 同上 | 无 pty（现状，不承诺） |
 
 **不保证**（不写适配分支，出问题不修）：
@@ -88,7 +88,7 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 | S2 | `main` 单点探测；`term.DetectProfile` 加 vt；`repl` 删除包级懒缓存、改注入 | 已实施 |
 | B0 | 抽平台无关的按键状态机 `keySource`（`readline/terminal_io.go`）：分片只提供 `readChunk` 与可选 `hungUp` | 已实施 |
 | B1 | Windows 输入后端（`readline/terminal_windows.go`）：`Raw` 开 `ENABLE_VIRTUAL_TERMINAL_INPUT` 并清 `ECHO/LINE/PROCESSED`、`readChunk` 用 `GetNumberOfConsoleInputEvents` 轮询 5ms + 1s 超时、`Size` 走 `ctty.Size`、`ctty` 加 `ConsoleMode`/`SetConsoleMode`；仅 VT 路径（范围排除 conhost 与 1809 之前，无需 `ReadConsoleInput` 回退）。ghost、补全菜单、历史随 raw 一并生效 | 已实施（实机验证待做） |
-| B2 | Windows 交互命令：`interactive: true` = 前台执行 + stdin 继承控制台（不做 ConPTY 桥接） | 待做 |
+| B2 | Windows 交互命令：`interactive: true` = 控制台继承直通——`ctty.Open` 返回 `CONIN$` 作子进程 stdin、运行期 `IgnoreCtrlEvents` 掩蔽本进程 ^C、interactive 时去除 PowerShell `-NonInteractive`；不做 ConPTY 桥接 | 已实施（实机验证待做） |
 | B3 | 编辑器输出切控制终端（解决 #2 盲打与提示符污染） | 待做 |
 | B4 | Windows 编码链路：`ctty` 代码页原语（LazyDLL 补 7 个 proc）+ `main` 启动 `EnsureUTF8` 切 65001、退出/紧急路径复原；run_shell 捕获侧 `utf8.Valid` 直通、非法时按 `ctty.FallbackCP()` 兜底转码（`shellPlatform.DecodeOutput`，posix 恒等） | 已实施（实机验证待做） |
 
@@ -122,6 +122,13 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 - **接缝细节**：`streamCapture` 头尾缓冲字节级截断可能切开多字节序列——middle==0 时头尾是连续片段，拼接为单缓冲整体解码；middle>0 时两者不连续，各自解码、缝上落 U+FFFD
 - **复原**：`main` 以 defer + `exitNow` 收口全部退出路径，紧急强退走 windows 专属 `emergencyRestore`（= `RestoreUTF8`，signals_windows.go）；不复原会导致用户 shell（cmd.exe 缓存代码页）在 tanya 退出后输出错乱
 - **不覆盖**：`interactive: true`（B2）子进程直写控制台不经捕获，靠「代码页已切 + 子进程自适应」自洽；管道喂入的非 UTF-8 stdin 无法判源，不做
+
+## 8.6 Windows 交互直通要点（B2，2026-09-17）
+
+- **机制**：控制台被子进程继承（与 stdio 无关），提示写到控制台的程序（ssh/sudo/gpg）本就实时可见；缺的只是键盘——`ctty.Open()` 在 windows 返回 `CONIN$`，`runShellForeground` 既有的 `cmd.Stdin = tty` 接线零改动即通。回合期间控制台处于 canonical 模式（`editor.go` 每回合 `Raw()`/`defer Restore()`），子进程行编辑/回显天然可用
+- **^C 归属**：Windows 把控制台 ctrl 事件广播给**所有**附着进程；`runShellForeground` 全程 `IgnoreCtrlEvents()`（`SetConsoleCtrlHandler(NULL, TRUE)`）掩蔽本进程，^C 只达子进程——与 posix 前台组语义对齐。**Ctrl+Break 不受掩蔽**（Go runtime 折为 SIGINT），保留为中断回合/触发 taskkill 的逃生口
+- **`-NonInteractive`**：PowerShell 该模式下 Read-Host 直接抛错（不是读不到 stdin）；interactive 时 `shellArgs` 过滤掉它（`-NoProfile` 保留），非交互运行不受影响
+- **残余取舍**：子进程改乱 CONIN$ 模式后退出，正常路径下回合 `Raw()` 自愈，Degraded（`TANYA_NO_RAW_INPUT`）无 readline 自愈会残留（登记不修）；掩蔽期间关 tab 无 CP 复原收尾（进程随控制台销毁，同 SIGKILL 语义）；写 stdout 的提示（Read-Host 的 prompt 行）进捕获、回合结束后才可见
 
 ## 9. 实测记录（2026-09-16，Linux）
 

@@ -221,9 +221,14 @@ func toUTF8(b []byte) string {
 	return decodeStream(b)
 }
 
-func shellArgs(profile *shellProfile, command string) []string {
+func shellArgs(profile *shellProfile, command string, interactive bool) []string {
 	args := make([]string, 0, len(profile.ExtraArgs)+2)
-	args = append(args, profile.ExtraArgs...)
+	for _, a := range profile.ExtraArgs {
+		if interactive && strings.EqualFold(a, "-NonInteractive") {
+			continue
+		}
+		args = append(args, a)
+	}
 	args = append(args, profile.arg(), command)
 	return args
 }
@@ -263,7 +268,7 @@ func waitShell(cmd *exec.Cmd, stopped *bool) error {
 	}
 }
 
-func runShellForeground(ctx context.Context, command string, timeoutSec int, profile *shellProfile, dir string) *ShellResult {
+func runShellForeground(ctx context.Context, command string, timeoutSec int, profile *shellProfile, dir string, interactive bool) *ShellResult {
 	res := &ShellResult{Command: command, Cwd: dir}
 	tty, _ := openTTY()
 	handed := false
@@ -294,8 +299,10 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 	start := time.Now()
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
+	ctty.IgnoreCtrlEvents()
+	defer ctty.RestoreCtrlEvents()
 
-	cmd := exec.CommandContext(runCtx, profile.Path, shellArgs(profile, command)...)
+	cmd := exec.CommandContext(runCtx, profile.Path, shellArgs(profile, command, interactive)...)
 	cmd.Dir = dir
 	platform.ConfigureGroup(cmd)
 	cmd.Cancel = func() error { return platform.KillGroup(cmd) }
@@ -357,7 +364,7 @@ func runShellBridged(ctx context.Context, bridge TTYBridge, command string, time
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, profile.Path, shellArgs(profile, command)...)
+	cmd := exec.CommandContext(runCtx, profile.Path, shellArgs(profile, command, true)...)
 	cmd.Dir = dir
 	cmd.Cancel = func() error { return platform.KillGroup(cmd) }
 	cmd.WaitDelay = shellWaitDelay
