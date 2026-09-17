@@ -273,11 +273,11 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 	tty, _ := openTTY()
 	handed := false
 	anchored := false
-	var saved ctty.Termios
+	var saved ctty.InputModes
 	hasSaved := false
 	if tty != nil {
-		if t, err := ctty.GetTermios(int(tty.Fd())); err == nil {
-			saved, hasSaved = t, true
+		if s, ok := ctty.SnapshotInput(int(tty.Fd())); ok {
+			saved, hasSaved = s, true
 		}
 	}
 	defer func() {
@@ -285,7 +285,7 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 			return
 		}
 		if hasSaved {
-			_ = ctty.SetTermios(int(tty.Fd()), saved)
+			ctty.RestoreInput(int(tty.Fd()), saved)
 		}
 		if handed {
 			ctty.SetForeground(int(tty.Fd()), ctty.OwnPgrp())

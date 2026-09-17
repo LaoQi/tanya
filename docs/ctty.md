@@ -45,6 +45,8 @@
 | `GetTermios(fd) (Termios, error)` | 读 termios |
 | `SetTermios(fd, Termios) error` | 写 termios |
 | `SetTermiosFlush(fd, Termios) error` | 写 termios 并丢弃未读输入（raw 前用）|
+| `type InputModes` | 输入模式快照：posix 包 `Termios`、windows 包 console mode、其余平台空结构（2026-09-17 增补）|
+| `SnapshotInput(fd) (InputModes, bool)` / `RestoreInput(fd, InputModes) bool` | 输入模式快照/复原，posix 转发 `Get/SetTermios`、windows 转发 `Get/SetConsoleMode`——`run_shell` 回合末复原的跨平台入口（2026-09-17 增补）|
 | `IsTerminal(fd int) bool` | 是否终端：posix `GetTermios` 成功、windows `GetConsoleMode` 成功（2026-09-16 增补）|
 | `Size(fd int) (int, int, bool)` | 终端尺寸：posix `TIOCGWINSZ`、windows `GetConsoleScreenBufferInfo` |
 | `EnableVT(fd int) bool` | 确保 ANSI 输出可用：windows 幂等开 `ENABLE_VIRTUAL_TERMINAL_PROCESSING`，posix 恒真 |
@@ -67,7 +69,7 @@
 
 - **以 `fd int` 为原语参数**：readline 的 `secureTerminalFd` 需作用于任意 fd（其单测即作用在 pty slave fd 上），`Open()` 只是便捷入口。
 - **只下沉原语，不下沉策略**：不提供 `Handover/Restore` 组合函数，避免固化"仅前台才移交"这类决策。`agent` 保留三行组合；`readline` 保留启动前台归属与自愈门控。这与 `docs/design.md`《事实归属》"两处前台判定分别采样"的结论一致——共享原语，不合并决策。
-- **termios 原语进 `ctty`（2026-09-15 修订，原结论为"不进"）**：原判断"仅 readline 使用"在 `run_shell` 需要**快照并在子进程结束后复原**控制终端时失效——`agent` 侧持有策略（何时移交、何时复原），原语与 readline 私有实现重复。现由 `ctty` 独占 termios 读写(`Get/Set/SetTermiosFlush`)与模式复位（`ResetModes`），`readline` 删私有 helper 改用 `ctty`，raw mode 的**构造**（flag 组合）仍留各消费方：那是策略，不是原语。
+- **termios 原语进 `ctty`（2026-09-15 修订，原结论为"不进"）**：原判断"仅 readline 使用"在 `run_shell` 需要**快照并在子进程结束后复原**控制终端时失效——`agent` 侧持有策略（何时移交、何时复原），原语与 readline 私有实现重复。现由 `ctty` 独占 termios 读写(`Get/Set/SetTermiosFlush`)与模式复位（`ResetModes`），`readline` 删私有 helper 改用 `ctty`，raw mode 的**构造**（flag 组合）仍留各消费方：那是策略，不是原语。跨平台的输入模式快照/复原另设 `InputModes` + `SnapshotInput`/`RestoreInput`（2026-09-17）：posix 转发 termios、windows 转发 console mode，`agent` 的 run_shell 回合末复原统一走它（windows 侧原为 `run_shell` 空转、污染固化，见 `docs/windows-console-mode-restore.md`）。
 - **统一用 `Getpgid(0)`**：全平台返回 `(int, error)`，消除 `Getpgrp()` 的平台签名差异。
 - **代码页快照态收在 `ctty`（2026-09-17）**：`EnsureUTF8/RestoreUTF8` 看似策略，但快照必须同时供 `main`（切换/复原）与 `agent`（`FallbackCP` 转码源）读取，跨包共享的唯一自然落点就是 `ctty`——与运行期信号的退出态同构：原语 + 一份包级状态，调用时序由消费方保证（`EnsureUTF8` 严格先于任何子进程派生与终端读写）。
 
@@ -85,6 +87,9 @@
 | `ctty/termios_linux.go` | `linux` | `Termios` 别名 + `TCGETS/TCSETS/TCSETSF` |
 | `ctty/termios_darwin.go` | `darwin` | `Termios` 别名 + `TIOCGETA/TIOCSETA/TIOCSETAF` |
 | `ctty/termios_stub.go` | `!linux && !darwin` | 空 `Termios` + 恒错实现 |
+| `ctty/modes_posix.go` | `linux \|\| darwin` | `InputModes` = `Termios` 薄转发（`SnapshotInput`/`RestoreInput`）|
+| `ctty/modes_windows.go` | `windows` | `InputModes` = console mode 薄转发（`ConsoleMode`/`SetConsoleMode`）|
+| `ctty/modes_stub.go` | `!linux && !darwin && !windows` | `InputModes` no-op（恒 false）|
 | `ctty/signals.go` | 无 tag | 运行期信号公共逻辑（`WatchSignals`/`Exit`/`Exiting`/`ExitSignal`/`ExitStatus`/`Interrupted`/分发）|
 | `ctty/signals_posix.go` | `linux \|\| darwin` | 信号清单（SIGTERM/SIGHUP/SIGINT）+ `emergencyRestore` |
 | `ctty/signals_windows.go` | `windows` | 信号清单（SIGTERM/`os.Interrupt`）+ `emergencyRestore` = `RestoreUTF8`（2026-09-17 拆出）|
@@ -119,7 +124,7 @@
 
 **readline**：`secure.go` 的开 tty/Ignore/前台判定改走 `ctty`，`terminalGuardOwns` 与自愈策略保留；`bridge_linux.go` 删 `foregroundTTY`，`Prepare` 改 `ctty.IsForeground`；`secure_stub.go` tag 收敛为 `!linux && !darwin`。删私有 `termios_linux.go`/`termios_darwin.go`，`terminal_posix.go`/`bridge_linux.go`/测试改调 `ctty.GetTermios`/`ctty.SetTermios`/`ctty.SetTermiosFlush`；桥接 `release` 在复原 termios 后追加 `ctty.ResetModes`。
 
-**agent**（2026-09-15 增补，2026-09-16 修订）：`runShellForeground` 在移交前快照 termios、在 defer 中复原（覆盖正常退出、超时 SIGKILL、中断三条路径），归还前台组后、`tty.Close()` 前调用 `ctty.ResetModes`——仅在 `ctty.IsForeground(fd)`（自己确实是终端前台）时发，避免后台运行/前台被抢占时改动别人的终端状态；归还前台（`SetForeground`）的返回值不参与判定，归还失败时同样不写。存档与归位收在同一门控内：`cmd.Start()` 之前（仍在移交前）`SaveCursor` 成功才置内部锚点标记，子进程结束后仅在「存过锚点 && `IsForeground`」时 `ResetModes` + `RestoreCursor`——没存过锚点就不恢复，避免把别人的保存槽值恢复出来。桥接侧对称：`Prepare`（`Attach`/`Start` 之前）存锚点、`release` 复位后归位。自愈范围从 ISIG 扩到 canonical/输出后处理，见 `docs/design.md`《run_shell》。
+**agent**（2026-09-15 增补，2026-09-16 修订，2026-09-17 跨平台化）：`runShellForeground` 在移交前用 `ctty.SnapshotInput` 快照输入模式（posix = termios，windows = console mode，见 `docs/windows-console-mode-restore.md`）、在 defer 中 `ctty.RestoreInput` 复原（覆盖正常退出、超时 SIGKILL、中断三条路径），归还前台组后、`tty.Close()` 前调用 `ctty.ResetModes`——仅在 `ctty.IsForeground(fd)`（自己确实是终端前台）时发，避免后台运行/前台被抢占时改动别人的终端状态；归还前台（`SetForeground`）的返回值不参与判定，归还失败时同样不写。存档与归位收在同一门控内：`cmd.Start()` 之前（仍在移交前）`SaveCursor` 成功才置内部锚点标记，子进程结束后仅在「存过锚点 && `IsForeground`」时 `ResetModes` + `RestoreCursor`——没存过锚点就不恢复，避免把别人的保存槽值恢复出来。桥接侧对称：`Prepare`（`Attach`/`Start` 之前）存锚点、`release` 复位后归位。自愈范围从 ISIG 扩到 canonical/输出后处理，见 `docs/design.md`《run_shell》。
 
 **模式复位的使用面（2026-09-15 引入，2026-09-16 修订）**：`ResetModes` 曾同时被 `agent` 常规路径与 `readline` 桥接 `release` 调用，且串内含裸 `CSI r`；DECSTBM 会把光标移到滚动区首行，而当时工具块靠 `CSI 1A` 相对重绘，症状为「执行 run_shell 时输出错乱」（工具块画到顶上、覆盖欢迎屏）。当时做法是去掉 `CSI r` 并把调用收敛到桥接 release，理由写作「常规路径子进程 stdout/stderr 走管道、不经终端，屏幕模式不会被改」。该理由**已被证伪**：非交互路径把真实 tty 交给子进程作 stdin（`cmd.Stdin = tty`），子进程写 `/dev/tty` 的转义（滚动区、`?7l`、`?25l`、SGR、鼠标上报）照样改屏幕状态。2026-09-16 修订：`CSI r` 回归但被 `DECSC`…`DECRC` 包住、`DECRST 1049` 同理（顺序固定、不可调换，理由见上表），两条路径都发且带前台门控（`ctty.IsForeground`）；串内另补字符集复位（`SI` + G0/G1 回 ASCII），且所有属性类复位都排在 `DECSC` 之前。`scripts/render_audit.py` 的 `clean-tty-scrollregion` / `clean-tty-modes` / `clean-interactive-release` 即该回归门（去掉复位或退回裸串都会变红，实测退回裸串三条均红）。
 
