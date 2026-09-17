@@ -61,6 +61,12 @@ func IgnoreJobSignals() {
 	signal.Ignore(unix.SIGTTIN, unix.SIGTTOU)
 }
 
+func ProtectJobSignals() {
+	ch := make(chan os.Signal, 4)
+	signal.Notify(ch, unix.SIGTSTP)
+	IgnoreJobSignals()
+}
+
 const resetModes = "\x1b[0m" +
 	"\x0f\x1b(B\x1b)B" +
 	"\x1b[?25h\x1b[?7h\x1b[?6l\x1b[?1l" +

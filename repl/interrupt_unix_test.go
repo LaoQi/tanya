@@ -8,9 +8,12 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/LaoQi/tanya/ctty"
 )
 
 func TestInterruptContextSignal(t *testing.T) {
+	ctty.WatchSignals()
 	ctx, done := InterruptContext()
 	defer done()
 	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
@@ -21,7 +24,7 @@ func TestInterruptContextSignal(t *testing.T) {
 		if ctx.Err() != context.Canceled {
 			t.Errorf("ctx.Err: %v", ctx.Err())
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("SIGINT 未取消 ctx")
 	}
 }

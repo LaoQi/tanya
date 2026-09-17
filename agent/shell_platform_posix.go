@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"os/signal"
 	"syscall"
 
 	"github.com/LaoQi/tanya/ctty"
@@ -40,9 +39,7 @@ func posixKillGroup(cmd *exec.Cmd) error {
 }
 
 func posixProtectSignals() {
-	ch := make(chan os.Signal, 4)
-	signal.Notify(ch, syscall.SIGTSTP)
-	ctty.IgnoreJobSignals()
+	ctty.ProtectJobSignals()
 }
 
 func posixExitCode(err error) (int, bool) {

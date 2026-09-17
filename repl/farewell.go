@@ -17,6 +17,11 @@ type farewellInfo struct {
 	noSave   bool
 }
 
+func (r *REPL) quit() error {
+	r.farewell()
+	return nil
+}
+
 func (r *REPL) farewell() {
 	if r.agent == nil {
 		return

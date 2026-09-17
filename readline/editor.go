@@ -63,6 +63,9 @@ func (e *Editor) SetStyles(dim, accent rstyle.Style) {
 func (e *Editor) History() []string { return e.history }
 
 func (e *Editor) Readline(prompt string) (string, error) {
+	if exitRequested() {
+		return "", ErrExited
+	}
 	e.prompt = prompt
 	if !e.raw {
 		fmt.Fprint(e.out, prompt)

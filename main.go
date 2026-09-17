@@ -89,6 +89,7 @@ func main() {
 		}
 	}
 	agent.ProtectTerminalSignals()
+	ctty.WatchSignals()
 	readline.InitTerminalGuard()
 	readline.SecureTerminal()
 	a, err := agent.New(cfg,
@@ -106,10 +107,16 @@ func main() {
 		err := a.Ask(ctx, rest, sink.Handle)
 		done()
 		if err != nil {
+			if ctty.Exiting() {
+				os.Exit(ctty.ExitStatus())
+			}
 			st.Fail("\n"+repl.MsgErrLineFmt+"\n", err)
 			os.Exit(1)
 		}
 		st.End()
+		if code := ctty.ExitStatus(); code != 0 {
+			os.Exit(code)
+		}
 		return
 	}
 
@@ -122,5 +129,8 @@ func main() {
 	if err := r.Run(); err != nil {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
 		os.Exit(1)
+	}
+	if code := ctty.ExitStatus(); code != 0 {
+		os.Exit(code)
 	}
 }

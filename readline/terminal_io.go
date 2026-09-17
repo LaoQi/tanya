@@ -25,6 +25,9 @@ func (k *keySource) reset() {
 }
 
 func (k *keySource) readKey() (KeyEvent, error) {
+	if exitRequested() {
+		return KeyEvent{}, ErrExited
+	}
 	if len(k.queue) > 0 {
 		ev := k.queue[0]
 		k.queue = k.queue[1:]
@@ -32,6 +35,9 @@ func (k *keySource) readKey() (KeyEvent, error) {
 	}
 	buf := make([]byte, 256)
 	for {
+		if exitRequested() {
+			return KeyEvent{}, ErrExited
+		}
 		n, err := k.src.readChunk(buf)
 		if err != nil {
 			if err == syscall.EINTR {
