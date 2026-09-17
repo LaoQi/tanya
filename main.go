@@ -27,12 +27,14 @@ func main() {
 	flag.BoolVar(plain, "plain", false, repl.FlagPlain)
 	verbose := flag.Bool("verbose", false, repl.FlagVerbose)
 	flag.Parse()
+	ctty.EnsureUTF8()
+	defer ctty.RestoreUTF8()
 
 	cmd, rest := repl.ParseCommand(flag.Args())
 	mode, err := repl.ParseMode(*plain, *verbose)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
-		os.Exit(1)
+		exitNow(1)
 	}
 	if cmd == repl.CmdAsk {
 		mode = repl.SingleShot(mode)
@@ -45,11 +47,11 @@ func main() {
 	}
 	if cmd == repl.CmdAsk && rest == "" {
 		st.Fail(repl.MsgAskUsage)
-		os.Exit(1)
+		exitNow(1)
 	}
 	if cmd == repl.CmdInit && rest != "" {
 		st.Fail(repl.MsgInitUsage)
-		os.Exit(1)
+		exitNow(1)
 	}
 
 	repl.Version = version
@@ -58,11 +60,11 @@ func main() {
 	cfg, err := agent.LoadConfig(*configPath)
 	if err != nil {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
-		os.Exit(1)
+		exitNow(1)
 	}
 	if err := repl.ValidateTheme(cfg.Theme); err != nil {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
-		os.Exit(1)
+		exitNow(1)
 	}
 	sem := repl.Semantics(cfg.Theme, cfg.Palette)
 	facts := ctty.Probe()
@@ -85,7 +87,7 @@ func main() {
 	if cmd == repl.CmdInit {
 		if err := repl.RunInit(st, sem, cfg); err != nil {
 			st.Fail(repl.MsgErrLineFmt+"\n", err)
-			os.Exit(1)
+			exitNow(1)
 		}
 	}
 	agent.ProtectTerminalSignals()
@@ -97,7 +99,7 @@ func main() {
 		agent.WithTTYBridge(readline.NewTTYBridge()))
 	if err != nil {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
-		os.Exit(1)
+		exitNow(1)
 	}
 	termFacts := repl.TermFacts{Cols: facts.Cols, ColsOK: facts.SizeOK}
 	sink := repl.NewToolView(st, prof, sem, termFacts.Width, a.ToolOutputLines())
@@ -108,14 +110,14 @@ func main() {
 		done()
 		if err != nil {
 			if ctty.Exiting() {
-				os.Exit(ctty.ExitStatus())
+				exitNow(ctty.ExitStatus())
 			}
 			st.Fail("\n"+repl.MsgErrLineFmt+"\n", err)
-			os.Exit(1)
+			exitNow(1)
 		}
 		st.End()
 		if code := ctty.ExitStatus(); code != 0 {
-			os.Exit(code)
+			exitNow(code)
 		}
 		return
 	}
@@ -123,14 +125,19 @@ func main() {
 	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning))
 	if err != nil {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
-		os.Exit(1)
+		exitNow(1)
 	}
 	defer r.Close()
 	if err := r.Run(); err != nil {
 		st.Fail(repl.MsgErrLineFmt+"\n", err)
-		os.Exit(1)
+		exitNow(1)
 	}
 	if code := ctty.ExitStatus(); code != 0 {
-		os.Exit(code)
+		exitNow(code)
 	}
+}
+
+func exitNow(code int) {
+	ctty.RestoreUTF8()
+	os.Exit(code)
 }

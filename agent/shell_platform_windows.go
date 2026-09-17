@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+
+	"github.com/LaoQi/tanya/ctty"
 )
 
 var platform = fillDefaults(shellPlatform{
@@ -17,7 +19,16 @@ var platform = fillDefaults(shellPlatform{
 		"where", "findstr",
 	},
 	Capabilities: windowsCapabilities,
+	DecodeOutput: windowsDecodeOutput,
 })
+
+func windowsDecodeOutput(b []byte) string {
+	cp := ctty.FallbackCP()
+	if cp == 0 {
+		return string(b)
+	}
+	return string(ctty.DecodeCP(cp, b))
+}
 
 func windowsCapabilities(p *shellProfile) string {
 	if p.Kind == KindPowerShell {

@@ -50,6 +50,13 @@
 | `ConsoleKind() string` | 控制台种类诊断串（windows: `WT_SESSION` → windows-terminal、`TERM_PROGRAM` → conpty，其余 console）|
 | `ConsoleMode(fd) (uint32, bool)` | 读 Windows 控制台模式（2026-09-16 增补，windows 专属）|
 | `SetConsoleMode(fd, mode) bool` | 写 Windows 控制台模式 |
+| `ConsoleCP() (uint32, bool)` / `ConsoleOutputCP() (uint32, bool)` | 读控制台输入/输出代码页（windows 专属，2026-09-17 增补）|
+| `SetConsoleCP(cp) bool` / `SetConsoleOutputCP(cp) bool` | 写代码页（LazyDLL，`x/sys/windows` 未封装这四个 + `GetOEMCP`/`MultiByteToWideChar`/`WideCharToMultiByte`，共 7 个 proc）|
+| `OEMCP() uint32` | 系统 OEM 代码页（`GetOEMCP`，恒成功）|
+| `EnsureUTF8()` | 启动期快照并把控制台双代码页切 65001（输入/输出两侧独立判定：各自探测成功且非 65001 才切，失败侧不动），幂等；由 `main` 在 `flag.Parse` 后单点调用 |
+| `RestoreUTF8()` | 复原快照代码页并清零，幂等；`main` 以 defer + `exitNow` 收口全部退出路径，windows 紧急强退路径经 `emergencyRestore` 同样复原 |
+| `FallbackCP() uint32` | run_shell 兜底转码源：优先启动快照的原输出代码页（子进程管道输出跟随控制台代码页），无快照（本就 65001 或无控制台）回落 `OEMCP()`；posix 恒 0 |
+| `DecodeCP(cp uint32, b []byte) []byte` | 按 cp 转 UTF-8（`MultiByteToWideChar → WideCharToMultiByte(CP_UTF8)`，flags=0 不用 `MB_ERR_INVALID_CHARS`：非法/残缺字节落 U+FFFD 而非整体失败）；cp 为 0、空输入或转换失败原样返回；posix 恒等 |
 | `Facts` / `Probe()` | 探测结果聚合（StdinTTY/StdoutTTY/Cols/Rows/SizeOK/VT/Kind），`main` 单点调用 |
 | `ResetModes(tty *os.File) bool` | 复位终端模式：SGR、字符集（`SI` + G0/G1 回 ASCII）、显示光标、自动换行、origin 模式、普通方向键、鼠标上报、bracketed paste、focus 上报、退出备用屏、复位滚动区。顺序固定为「属性类复位（SGR/字符集/模式）→ `\x1b[?1049l` → `\x1b[r`」；这两条都会动光标（`DECRST 1049` 即使在主屏也按 DECRC 恢复保存槽、`CSI r`/DECSTBM 把光标 home），故**调用方必须先 `SaveCursor`、复位后 `RestoreCursor` 收尾**，串内不得自带 `DECSC`/`DECRC`（会覆盖调用方的存档槽）。2026-09-16 二次修订，取代此前「把会移光标的两条包在 `DECSC`…`DECRC` 内」的做法——实测证明自包只能保住「已被子进程打乱」的位置 |
 | `SaveCursor(tty *os.File) bool` | 写 `DECSC`（`\x1b7`）：交出终端前存光标锚点（2026-09-16 增补）|
@@ -61,6 +68,7 @@
 - **只下沉原语，不下沉策略**：不提供 `Handover/Restore` 组合函数，避免固化"仅前台才移交"这类决策。`agent` 保留三行组合；`readline` 保留启动前台归属与自愈门控。这与 `docs/design.md`《事实归属》"两处前台判定分别采样"的结论一致——共享原语，不合并决策。
 - **termios 原语进 `ctty`（2026-09-15 修订，原结论为"不进"）**：原判断"仅 readline 使用"在 `run_shell` 需要**快照并在子进程结束后复原**控制终端时失效——`agent` 侧持有策略（何时移交、何时复原），原语与 readline 私有实现重复。现由 `ctty` 独占 termios 读写(`Get/Set/SetTermiosFlush`)与模式复位（`ResetModes`），`readline` 删私有 helper 改用 `ctty`，raw mode 的**构造**（flag 组合）仍留各消费方：那是策略，不是原语。
 - **统一用 `Getpgid(0)`**：全平台返回 `(int, error)`，消除 `Getpgrp()` 的平台签名差异。
+- **代码页快照态收在 `ctty`（2026-09-17）**：`EnsureUTF8/RestoreUTF8` 看似策略，但快照必须同时供 `main`（切换/复原）与 `agent`（`FallbackCP` 转码源）读取，跨包共享的唯一自然落点就是 `ctty`——与运行期信号的退出态同构：原语 + 一份包级状态，调用时序由消费方保证（`EnsureUTF8` 严格先于任何子进程派生与终端读写）。
 
 ## 分片
 
@@ -71,12 +79,15 @@
 | `ctty/ctty_windows.go` | `windows` | `GetConsoleMode`/`GetConsoleScreenBufferInfo`/`SetConsoleMode` 探测原语 |
 | `ctty/ctty_stub.go` | `!linux && !darwin` | 控制终端 no-op + `Supported=false`（含 windows）|
 | `ctty/ctty_probe_stub.go` | `!linux && !darwin && !windows` | 探测原语保守实现（全 false）|
+| `ctty/consolecp_windows.go` | `windows` | 代码页原语 + `EnsureUTF8/RestoreUTF8/FallbackCP/DecodeCP`（LazyDLL）|
+| `ctty/consolecp_stub.go` | `!windows` | 代码页 no-op（posix 与其余平台共用一份）|
 | `ctty/termios_linux.go` | `linux` | `Termios` 别名 + `TCGETS/TCSETS/TCSETSF` |
 | `ctty/termios_darwin.go` | `darwin` | `Termios` 别名 + `TIOCGETA/TIOCSETA/TIOCSETAF` |
 | `ctty/termios_stub.go` | `!linux && !darwin` | 空 `Termios` + 恒错实现 |
 | `ctty/signals.go` | 无 tag | 运行期信号公共逻辑（`WatchSignals`/`Exit`/`Exiting`/`ExitSignal`/`ExitStatus`/`Interrupted`/分发）|
 | `ctty/signals_posix.go` | `linux \|\| darwin` | 信号清单（SIGTERM/SIGHUP/SIGINT）+ `emergencyRestore` |
-| `ctty/signals_stub.go` | `!linux && !darwin` | 信号清单（SIGTERM/`os.Interrupt`）+ `emergencyRestore` no-op |
+| `ctty/signals_windows.go` | `windows` | 信号清单（SIGTERM/`os.Interrupt`）+ `emergencyRestore` = `RestoreUTF8`（2026-09-17 拆出）|
+| `ctty/signals_stub.go` | `!linux && !darwin && !windows` | 信号清单（SIGTERM/`os.Interrupt`）+ `emergencyRestore` no-op |
 
 ## 运行期信号（2026-09-17）
 
@@ -94,9 +105,9 @@
 
 语义与约束：
 
-- 清单：关闭信号 SIGTERM/SIGHUP（`signals_posix.go`）/ `syscall.SIGTERM`（`signals_stub.go`）；中断信号 SIGINT。windows 走 stub 分片且恰好合用——Go runtime 把控制台 CLOSE/LOGOFF/SHUTDOWN 事件折为 **SIGTERM** 递送并阻塞等待 handler 收尾（`runtime/os_windows.go` 的 `ctrlHandler`），落进关闭信号路径；`^C`/`^Break` 折为 SIGINT 走中断。**SIGQUIT 不入清单**，保持 Go 默认全栈转储（与 `docs/design.md`《信号》一致）。
+- 清单：关闭信号 SIGTERM/SIGHUP（`signals_posix.go`）/ `syscall.SIGTERM`（`signals_stub.go`）；中断信号 SIGINT。windows 自 2026-09-17 起有专属分片（清单与原 stub 相同）——Go runtime 把控制台 CLOSE/LOGOFF/SHUTDOWN 事件折为 **SIGTERM** 递送并阻塞等待 handler 收尾（`runtime/os_windows.go` 的 `ctrlHandler`），落进关闭信号路径；`^C`/`^Break` 折为 SIGINT 走中断。**SIGQUIT 不入清单**，保持 Go 默认全栈转储（与 `docs/design.md`《信号》一致）。
 - 关闭信号 → `Exit(sig)` + 广播中断；中断信号 → 只广播，不置退出态。
-- **重复关闭信号 = 强退**：第二次送达时 `emergencyRestore()`（仅自身为 `/dev/tty` 前台时把 tty 拉回 canonical + `ResetModes`，非前台不动——此时终端归子进程）后 `os.Exit(ExitStatus())`。之所以不做定时兜底：正常取消路径最坏要 `shellWaitDelay`（2s）才收尾，定时器必须显著大于它，反而容易打断正常退出；而重复信号是显式意图，无隐式时序竞争，且顺带解决「`Notify` 之后普通信号不再有默认处置、用户只能 SIGKILL（必然留 raw）」这一固有缺陷。
+- **重复关闭信号 = 强退**：第二次送达时 `emergencyRestore()`（posix：仅自身为 `/dev/tty` 前台时把 tty 拉回 canonical + `ResetModes`，非前台不动——此时终端归子进程；windows：`RestoreUTF8` 复原控制台代码页）后 `os.Exit(ExitStatus())`。之所以不做定时兜底：正常取消路径最坏要 `shellWaitDelay`（2s）才收尾，定时器必须显著大于它，反而容易打断正常退出；而重复信号是显式意图，无隐式时序竞争，且顺带解决「`Notify` 之后普通信号不再有默认处置、用户只能 SIGKILL（必然留 raw）」这一固有缺陷。
 - **订阅点必须同步取快照**：`Interrupted()` 取值要在启动等待 goroutine 之前完成（`repl.InterruptContext` 即此写法）。若在 goroutine 内才取，纯中断广播可能落在快照建立之前而被整轮丢失——该竞态在负载下必现（repl 用例在 `go test -race ./...` 下超时、单包串行却通过），是 2026-09-17 实测修掉的第一个坑。丢失窗口只影响瞬时的中断广播：退出态是持久的，快照时 `Exiting()` 为真则直接拿到已关闭通道（review 2026-09-17 补），回合照样立即取消、`Readline` 照样立即返回 `ErrExited`。
 - 唤醒分工：`readline` 靠轮询 `ctty.Exiting()`（raw 下 `VMIN=0/VTIME=1` 每 ~100ms 一轮），命中即返回 `ErrExited`，且优先于已解析的按键队列（退出不被积压输入拖延）；`Degraded`（管道 stdin）阻塞在 `bufio` 上无法唤醒，但该路径本来就不改 termios，无残留代价，等重复信号强退即可。
 - `os.Exit` 只出现在 `WatchSignals` 之后的分发路径，`WatchSignals` 只在 `main` 调用（测试不安装），库的常规使用面不受影响。
