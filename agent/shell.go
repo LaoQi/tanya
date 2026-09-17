@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/LaoQi/tanya/ctty"
 )
@@ -198,14 +199,26 @@ func (c *streamCapture) finish() {
 	if c.written == 0 {
 		return
 	}
-	*c.chunks = append(*c.chunks, ShellChunk{Data: string(c.head)})
-	if len(c.tail) > 0 {
-		if c.middle == 0 {
-			(*c.chunks)[0].Data += string(c.tail)
-		} else {
-			*c.chunks = append(*c.chunks, ShellChunk{Data: string(c.tail), Truncated: c.middle})
-		}
+	if c.middle == 0 && len(c.tail) > 0 {
+		joined := make([]byte, 0, len(c.head)+len(c.tail))
+		joined = append(joined, c.head...)
+		joined = append(joined, c.tail...)
+		*c.chunks = append(*c.chunks, ShellChunk{Data: toUTF8(joined)})
+		return
 	}
+	*c.chunks = append(*c.chunks, ShellChunk{Data: toUTF8(c.head)})
+	if len(c.tail) > 0 {
+		*c.chunks = append(*c.chunks, ShellChunk{Data: toUTF8(c.tail), Truncated: c.middle})
+	}
+}
+
+var decodeStream = platform.DecodeOutput
+
+func toUTF8(b []byte) string {
+	if utf8.Valid(b) {
+		return string(b)
+	}
+	return decodeStream(b)
 }
 
 func shellArgs(profile *shellProfile, command string) []string {

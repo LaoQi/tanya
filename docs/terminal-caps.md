@@ -25,7 +25,6 @@
 - 传统 conhost（cmd.exe / 老控制台窗口，无 VT 处理）
 - Windows 10 1809 之前（无 `ENABLE_VIRTUAL_TERMINAL_INPUT`）
 - 第三方终端模拟器（MSYS2 / mintty / ConEmu / Cygwin）
-- 非 UTF-8 代码页（`chcp` 非 65001）
 - 输入法组合串、鼠标事件、括号粘贴等未实现特性
 - macOS / Windows 上 pty 桥接的 interactive 语义（改用继承式替代）
 
@@ -91,6 +90,7 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 | B1 | Windows 输入后端（`readline/terminal_windows.go`）：`Raw` 开 `ENABLE_VIRTUAL_TERMINAL_INPUT` 并清 `ECHO/LINE/PROCESSED`、`readChunk` 用 `GetNumberOfConsoleInputEvents` 轮询 5ms + 1s 超时、`Size` 走 `ctty.Size`、`ctty` 加 `ConsoleMode`/`SetConsoleMode`；仅 VT 路径（范围排除 conhost 与 1809 之前，无需 `ReadConsoleInput` 回退）。ghost、补全菜单、历史随 raw 一并生效 | 已实施（实机验证待做） |
 | B2 | Windows 交互命令：`interactive: true` = 前台执行 + stdin 继承控制台（不做 ConPTY 桥接） | 待做 |
 | B3 | 编辑器输出切控制终端（解决 #2 盲打与提示符污染） | 待做 |
+| B4 | Windows 编码链路：`ctty` 代码页原语（LazyDLL 补 7 个 proc）+ `main` 启动 `EnsureUTF8` 切 65001、退出/紧急路径复原；run_shell 捕获侧 `utf8.Valid` 直通、非法时按 `ctty.FallbackCP()` 兜底转码（`shellPlatform.DecodeOutput`，posix 恒等） | 已实施（实机验证待做） |
 
 ## 7. 决策记录
 
@@ -112,6 +112,16 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 - **逃生开关**：`TANYA_NO_RAW_INPUT=1` 让 `openTerminal` 直接返回 `ErrUnsupported`，回落 Degraded（两平台通用，便于对照与故障退避）
 - **不在范围**：IME 组合串、Alt 组合键、`ESC O`（F1–F4）；粘贴按多字节序列处理（与 posix 同）
 - **实机验证清单（WT 与 ConPTY 宿主各一遍）**：ghost 出现；Tab 多候选菜单（方向键选择、Esc 关闭、收起无残行）；上下键历史；`Ctrl-A/E/B/F/U/K/W/Y/T/L`；左右键与 `Home/End/Delete/Backspace` 编辑；`Ctrl+C` 中断回合、`Ctrl+D` 退出；中文输入；窗口 resize 后菜单与提示符不错位；`TANYA_NO_RAW_INPUT=1` 回落表现为整行读
+
+## 8.5 Windows 编码要点（B4，2026-09-17）
+
+- **问题形态**：① 输入——`ReadFile` 在 `ENABLE_VIRTUAL_TERMINAL_INPUT` 下仍按控制台输入代码页编码交付字节（zh-CN 默认 936/GBK，en-US 默认 437 且无法编码中文），keyParser 按 UTF-8 解析必乱；② 输出——UTF-8 字节被控制台按输出代码页解码渲染，ANSI 序列是 ASCII 不受影响，症状是"颜色正常、唯独文字乱"；③ run_shell 子进程——cmd/PS 5.1 管道输出跟随控制台代码页、pwsh/go/node 写 UTF-8、python/老工具写 locale ANSI，混合编码流被原样送进工具视图与模型上下文
+- **双层策略**：正路 = 启动期把控制台双代码页切 65001（代码页是 per-console 属性，派生子进程查询即得 UTF-8，一处切换三条链路全通）；歧路 = 捕获侧 `finish()` 时 `utf8.Valid` 不通过才按快照代码页兜底转码（覆盖硬编码 OEM/ANSI 的漏网者与混合流）
+- **快照与转码源**：`EnsureUTF8` 快照原代码页；`FallbackCP` 优先原输出代码页（子进程管道跟随它），本就 65001 或无控制台时回落 `GetOEMCP`；zh-CN 下两者一致为 936
+- **容错口径**：转码 flags=0（不用 `MB_ERR_INVALID_CHARS`），截断缝上的半个多字节字符与混合流非法字节落 U+FFFD 而非整体失败；GBK 字节流碰巧整体合法 UTF-8 的概率可忽略（如 `你`= `C4 E3`，`E3` 非 UTF-8 续字节），反方向误转不会发生（合法即直通）；二进制输出会被硬转成垃圾，但二进制进文本视图本就是垃圾，无害
+- **接缝细节**：`streamCapture` 头尾缓冲字节级截断可能切开多字节序列——middle==0 时头尾是连续片段，拼接为单缓冲整体解码；middle>0 时两者不连续，各自解码、缝上落 U+FFFD
+- **复原**：`main` 以 defer + `exitNow` 收口全部退出路径，紧急强退走 windows 专属 `emergencyRestore`（= `RestoreUTF8`，signals_windows.go）；不复原会导致用户 shell（cmd.exe 缓存代码页）在 tanya 退出后输出错乱
+- **不覆盖**：`interactive: true`（B2）子进程直写控制台不经捕获，靠「代码页已切 + 子进程自适应」自洽；管道喂入的非 UTF-8 stdin 无法判源，不做
 
 ## 9. 实测记录（2026-09-16，Linux）
 

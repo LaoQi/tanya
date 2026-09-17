@@ -21,7 +21,8 @@ func TestPlatformComplete(t *testing.T) {
 		}
 	}
 	if platform.ConfigureGroup == nil || platform.KillGroup == nil || platform.ProtectSignals == nil ||
-		platform.ExitCode == nil || platform.ProcessStopped == nil || platform.Capabilities == nil {
+		platform.ExitCode == nil || platform.ProcessStopped == nil || platform.Capabilities == nil ||
+		platform.DecodeOutput == nil {
 		t.Errorf("平台能力存在缺项: %+v", platform)
 	}
 	for _, p := range platform.Programs {
@@ -34,7 +35,8 @@ func TestPlatformComplete(t *testing.T) {
 func TestFillDefaults(t *testing.T) {
 	p := fillDefaults(shellPlatform{})
 	if p.ConfigureGroup == nil || p.KillGroup == nil || p.ProtectSignals == nil ||
-		p.ExitCode == nil || p.ProcessStopped == nil || p.Capabilities == nil {
+		p.ExitCode == nil || p.ProcessStopped == nil || p.Capabilities == nil ||
+		p.DecodeOutput == nil {
 		t.Fatalf("零值表应补全函数字段: %+v", p)
 	}
 	cmd := &exec.Cmd{}

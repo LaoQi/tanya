@@ -18,6 +18,7 @@ type shellPlatform struct {
 	ProcessStopped func(int) bool
 	Programs       []string
 	Capabilities   func(*shellProfile) string
+	DecodeOutput   func([]byte) string
 }
 
 var protectOnce sync.Once
@@ -46,8 +47,13 @@ func fillDefaults(p shellPlatform) shellPlatform {
 	if p.Capabilities == nil {
 		p.Capabilities = noopCapabilities
 	}
+	if p.DecodeOutput == nil {
+		p.DecodeOutput = identityOutput
+	}
 	return p
 }
+
+func identityOutput(b []byte) string { return string(b) }
 
 func noopConfigureGroup(*exec.Cmd) {}
 

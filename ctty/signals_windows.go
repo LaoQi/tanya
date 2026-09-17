@@ -1,4 +1,4 @@
-//go:build !linux && !darwin && !windows
+//go:build windows
 
 package ctty
 
@@ -11,4 +11,4 @@ var exitSignals = []os.Signal{syscall.SIGTERM}
 
 var interruptSignals = []os.Signal{os.Interrupt}
 
-func emergencyRestore() {}
+func emergencyRestore() { RestoreUTF8() }
