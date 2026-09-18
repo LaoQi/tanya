@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"archive/zip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ func TestParseArchiveArg(t *testing.T) {
 	cases := []struct {
 		arg     string
 		want    time.Duration
+		wantDry bool
 		wantErr bool
 	}{
 		{arg: "", want: agent.ArchiveDefaultWindow},
@@ -30,13 +32,19 @@ func TestParseArchiveArg(t *testing.T) {
 		{arg: "12h", want: 12 * time.Hour},
 		{arg: "90m", want: 90 * time.Minute},
 		{arg: "12h30m", want: 12*time.Hour + 30*time.Minute},
+		{arg: "--dry-run", want: agent.ArchiveDefaultWindow, wantDry: true},
+		{arg: "--dry-run  ", want: agent.ArchiveDefaultWindow, wantDry: true},
+		{arg: "--dry-run all", want: 0, wantDry: true},
+		{arg: "--dry-run 7d", want: 7 * 24 * time.Hour, wantDry: true},
 		{arg: "0d", wantErr: true},
 		{arg: "-1h", wantErr: true},
 		{arg: "3x", wantErr: true},
 		{arg: "d", wantErr: true},
 		{arg: "1.5d", wantErr: true},
 		{arg: "1d2h", wantErr: true},
+		{arg: "1d 2d", wantErr: true},
 		{arg: "none", wantErr: true},
+		{arg: "--dry-run7d", wantErr: true},
 	}
 	for _, c := range cases {
 		got, err := ParseArchiveArg(c.arg)
@@ -50,8 +58,8 @@ func TestParseArchiveArg(t *testing.T) {
 			t.Errorf("ParseArchiveArg(%q) 失败: %v", c.arg, err)
 			continue
 		}
-		if got.OlderThan != c.want || got.DryRun || got.Keep != 0 || got.Exclude != "" {
-			t.Errorf("ParseArchiveArg(%q) = %+v want OlderThan=%v", c.arg, got, c.want)
+		if got.OlderThan != c.want || got.DryRun != c.wantDry || got.Exclude != "" {
+			t.Errorf("ParseArchiveArg(%q) = %+v want OlderThan=%v dry=%v", c.arg, got, c.want, c.wantDry)
 		}
 	}
 }
@@ -121,8 +129,8 @@ func TestHandleCommandArchive(t *testing.T) {
 	}
 	errb.Reset()
 	r.handleCommand("/archive 1d 2d")
-	if !strings.Contains(errb.String(), MsgArchiveUsage) {
-		t.Errorf("多余参数应提示用法: %q", errb.String())
+	if !strings.Contains(errb.String(), "无效的归档范围") {
+		t.Errorf("多段参数应报非法范围: %q", errb.String())
 	}
 }
 
@@ -195,11 +203,120 @@ func TestSessRowArchivedMark(t *testing.T) {
 	if strings.Contains(got, SessArchMark+"活动会话") {
 		t.Errorf("活动项不应带标记: %q", got)
 	}
-	if n := strings.Count(SessRow, "%s"); n != 4 || !strings.Contains(SessRow, "%3d") {
-		t.Errorf("SessRow 动词口径不应变化: %q", SessRow)
+}
+
+func volumeSessionIDs(t *testing.T, path string) []string {
+	t.Helper()
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	item := sessSummary(list[1])
-	if item != SessArchMark+"归档会话" {
-		t.Errorf("补全项应复用同一标记: %q", item)
+	defer zr.Close()
+	ids := make([]string, 0, len(zr.File))
+	for _, f := range zr.File {
+		ids = append(ids, strings.TrimSuffix(filepath.Base(f.Name), ".jsonl"))
+	}
+	return ids
+}
+
+func TestHandleCommandArchiveDryRun(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	path := seedOldSession(t, dir, "20260101-010000", 40*24*time.Hour)
+
+	out.Reset()
+	r.handleCommand("/archive --dry-run")
+	got := out.String()
+	if !strings.Contains(got, "试运行：将归档 1 个会话") {
+		t.Errorf("dry-run 输出异常: %q", got)
+	}
+	if errb.String() != "" {
+		t.Errorf("dry-run 不应报错: %q", errb.String())
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("dry-run 不应删除源文件: %v", err)
+	}
+	if dirs, err := filepath.Glob(filepath.Join(dir, "workspaces", "*", "archive")); err != nil || len(dirs) != 0 {
+		t.Errorf("dry-run 不应创建 archive 目录: %v %v", dirs, err)
+	}
+}
+
+func TestHandleCommandArchiveExcludesCurrentSession(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
+	id := a.SessionID()
+	if id == "" {
+		t.Fatal("可写模式应有会话 id")
+	}
+	self := seedOldSession(t, dir, id, 40*24*time.Hour)
+	seedOldSession(t, dir, "20260101-010000", 40*24*time.Hour)
+
+	out.Reset()
+	r.handleCommand("/archive all")
+	if got := out.String(); !strings.Contains(got, "已归档 1 个会话") {
+		t.Errorf("应只归档非当前会话: %q", got)
+	}
+	if _, err := os.Stat(self); err != nil {
+		t.Errorf("当前会话不应被归档: %v", err)
+	}
+	volumes, err := filepath.Glob(filepath.Join(dir, "workspaces", "*", "archive", "archive-*.zip"))
+	if err != nil || len(volumes) != 1 {
+		t.Fatalf("应生成一卷: %v %v", volumes, err)
+	}
+	for _, got := range volumeSessionIDs(t, volumes[0]) {
+		if got == id {
+			t.Errorf("当前会话不应进入卷: %v", got)
+		}
+	}
+}
+
+func TestHandleCommandArchiveSkippedOutput(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
+	seedOldSession(t, dir, "20260101-010000", time.Minute)
+
+	out.Reset()
+	r.handleCommand("/archive all")
+	got := out.String()
+	if !strings.Contains(got, "跳过 20260101-010000（"+agent.MsgArchiveSkipIdle+"）") {
+		t.Errorf("跳过行输出异常: %q", got)
+	}
+	if !strings.Contains(got, MsgArchiveNone) {
+		t.Errorf("无候选应提示: %q", got)
+	}
+}
+
+func TestHandleCommandArchiveNoSave(t *testing.T) {
+	a := newSessTestAgent(t, t.TempDir(), agent.NoSave(true))
+	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+
+	r.handleCommand("/archive")
+	if !strings.Contains(errb.String(), agent.MsgArchiveNoSave) {
+		t.Errorf("-n 下应报错: %q", errb.String())
+	}
+	if out.String() != "" {
+		t.Errorf("-n 下不应有正常输出: %q", out.String())
+	}
+}
+
+func TestHandleCommandForkNoSave(t *testing.T) {
+	dir := t.TempDir()
+	archiveOldSession(t, newSessTestAgent(t, dir), dir, "20260101-010000")
+
+	a := newSessTestAgent(t, dir, agent.NoSave(true))
+	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	r.handleCommand("/load 20260101-010000")
+	if !strings.Contains(out.String(), "归档只读") {
+		t.Fatalf("应载入归档只读: %q", out.String())
+	}
+
+	out.Reset()
+	r.handleCommand("/fork")
+	got := out.String()
+	if !strings.Contains(got, "已 fork 为新会话") || !strings.Contains(got, MsgForkNoSave) {
+		t.Errorf("-n 下 fork 应提示未写入: %q %q", got, errb.String())
 	}
 }

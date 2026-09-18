@@ -222,7 +222,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 卷内 entry 名 `<会话 id>.jsonl`，`Method: Deflate`，`Modified` 取原文件 mtime，**entry 数据为原 jsonl 逐字节**（不裁剪、不重排、不丢 reasoning/tool_calls）：prompt cache 红线在归档路径上的延续
 - entry comment（zip per-entry comment，单行 JSON）：`{"v":1,"msgs":<条数>,"summary":"<首条 user 消息，单行化、≤200 rune>"}`，超长时缩短 summary 并置 `"trunc":true`；**硬上限 4 KiB**——Go 在 comment > 65535 字节时静默写坏中央目录（实测 65536 读回 0 字节），故 marshal 后校验、超限降级
 - 卷级 comment（`zip.Writer.SetComment`）：`{"v":1,"workspace":"<启动目录>","created":"<RFC3339>","sessions":<条数>}`
-- 归档筛选（`agent.ArchiveOptions`）：`OlderThan`（按文件 mtime，0 = 不限）与 `Keep`（保留最新 N 个活动会话）取交集，`Exclude` 恒为当前会话，另加**空闲保护**（mtime 距今 < 5 分钟的文件跳过，防另一实例正在追加）；id 已存在于任一卷则跳过（幂等）
+- 归档筛选（`agent.ArchiveOptions`）：按 id 降序后先按 `Keep`（保留最新 N 个，0 = 不限）截取，再按 `OlderThan`（文件 mtime，0 = 不限）过滤，`Exclude` 恒为当前会话，另加**空闲保护**（mtime 距今 < 5 分钟的文件跳过，防另一实例正在追加）；id 已存在于任一卷则跳过（幂等）；`DryRun` 只出报告（`/archive --dry-run`），不建目录、不落卷、不删源文件
 - 失败语义：「元数据扫描」失败 → 跳过该文件并计入报告；「卷写入」失败 → 放弃整卷（删临时文件）且不删任何源文件并返回错误；卷先写同目录临时文件再 `rename` 落定，**之后**才删除源文件（崩溃最多留双份，列表侧按同 id 取活动去重）
 - 写入前 `MkdirAll(archiveDir)`；0 候选时不建目录、不产生空卷
 - 卷是标准 zip，`unzip -l/-p/-z` 可直接浏览与提取（`unzip` 打印注释时按本地码页转码，可能显示乱码，不影响数据与 tanya 自身读取）
@@ -230,7 +230,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 列表与索引
 
-- `sessionStore.refresh()` 同时扫 `sessions/*.jsonl` 与 `archive/*.zip`（忽略 `*.tmp-*`）；归档侧 `zip.OpenReader` **只读中央目录**，条目元数据取自 header（id、未压缩大小、`Modified`）与 comment（条数、摘要），不解压任何数据（实测 156 条含注释 0.1 ms）
+- `sessionStore.refresh()` 同时扫 `sessions/*.jsonl` 与 `archive/*.zip`（只认 `.zip` 后缀，临时卷 `archive-<ts>.zip.tmp-*` 天然不匹配）；归档侧 `zip.OpenReader` **只读中央目录**，条目元数据取自 header（id、未压缩大小、`Modified`）与 comment（条数、摘要），不解压任何数据（实测 156 条含注释 0.1 ms）
 - 缓存粒度由「文件」扩为「文件 + 卷」，仍以 (mtime,size) 判失效；卷不可变故每卷每进程最多解析一次
 - `SessionInfo` 增加 `Archived bool`、`Size int64`（归档项为 entry 未压缩字节、活动项为文件字节）、`MetaOK bool`（comment 缺失/非法时仍列出条目，`Msgs=0`、摘要为空，picker 行按 `SessRow` 既有格式显示 `0条`）；归档项 `Path` 指所属卷路径，摘要按活动区同口径截断到 30 rune 展示（卷内 comment 仍存 ≤200 rune 原文）
 - `ListSessions` 排序：活动组在前、归档组在后，组内 id 降序；同 id 同时存在于两区时只列活动项
@@ -243,6 +243,14 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 与 `-n` 的差异：`-n` 允许内存内继续对话（不落盘、进程退出即丢），归档只读态不允许——归档原文件已冻结，继续对话会产生「没有落点的历史」
 - `/fork`（仅归档只读态）：`store.rotate()` 取新 id → 清 `frozen` → `prompt.reset()` 重读 AGENTS.md（**当前**快照，fork 即新会话）→ history 原样保留、`stats.reset()` → 立即 `save()` 落一次盘，使新会话文件立刻出现在 `/load` 列表，此后按普通会话增量 append；`-n` 下允许 fork 但不落盘（提示未写入）
 - 载入与 fork 文案区分：`已载入会话 X（归档只读，继续对话请 /fork）`、`已 fork 为新会话 <新 id>`
+
+### 启动自动归档
+
+- 配置三键（仅配置文件，无 env）：`auto_archive`（默认 false）、`auto_archive_threshold`（默认 64）、`auto_archive_keep`（默认 16）；`LoadConfig` 校验 `threshold >= 2` 与 `0 <= keep < threshold`，越界即启动报错（`MsgBadArchiveThreshold`/`MsgBadArchiveKeep`）
+- `Agent.SuggestArchive() (ArchiveSuggestion, bool)`：`auto_archive` 关闭、`-n`（`store.disabled`）、或活跃会话数 < 阈值时返回 false；否则用 `store.list()`（活动组在前、组内 id 降序）算出 `Threshold/Keep/Active/Candidates/Bytes`——候选计算与 `archive()` 同序镜像：活动会话按 id 降序先占满 `Keep` 个保留名额，余下的再剔除当前会话后计数（对应 `Exclude` 在 Keep 截断之后过滤），故提示的 `Candidates/Bytes` 与实际归档严格一致；`Keep=0` 即除当前会话外全部入选
+- REPL 在欢迎屏之后、进循环之前调 `autoArchivePrompt()`：纯文本模式（`-p`、ask 的 plain 档）或 `ctty.Probe().StdoutTTY` 为假（stdout 重定向/管道）时静默返回——两者都在开终端之前判完，管道场景既不污染 stdout 也不阻塞在 `/dev/tty`；然后取建议（不满足即静默返回），再 `ctty.Open()` 取控制终端——拿不到即静默跳过，提示从 `/dev/tty` 读一行，`y`/`yes` 归档、其它（含空行）跳过并打 `MsgAutoArchiveSkip`
+- 归档执行复用 `ArchiveSessions(ArchiveOptions{Keep, Exclude: 当前会话})`（一卷落定、删源文件），报告经 `formatArchiveReport` 输出，与 `/archive` 同一格式
+- `n` 不做「不再询问」记忆，下次启动仍会问；归档写入触发点因此有两个：REPL 启动自动归档、`/archive` 手动
 
 ## 系统提示与缓存友好
 
@@ -375,7 +383,7 @@ pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（�
 
 输出侧渲染审计（`scripts/render_audit.py`，先 `make build`）：内置 mock LLM（responses 协议 SSE，事件形态对齐 `agent/mock_test.go`）+ pty 驱动真实二进制 + VT 回放（DECSTBM / 自动换行 / 光标可见性 / 备用屏 47·1047·1049 / 保存槽按屏索引 / SGR 状态与 DECRC 属性恢复；DECSTBM 按真终端实测建模——光标一律 home 到绝对 (1,1)，比 xterm 的「夹到上边界」更狠）+ 不变量断言，全量约 15s、无网络依赖。不变量：`overwrite`（写入非空白单元格）、`region_scroll`（只在滚动区内滚动）、`cu_clamped`（相对上移超出光标所在行，会被视口夹到顶行）、结束时 `autowrap_off` / `cursor_hidden` / `margins_set` / `alt_screen_on` / `sgr_open`。场景 want 三档：`clean` 要求不变量全为 0（回归门）、`leak` 断言 `expect` 列出的违反项被复现（已知缺口门，修好后改成 `clean`）、`note` 只报告不断言；`--dump NAME` 打印该场景回放后的屏幕。诊断计数 `cursor_restore`（光标被保存槽恢复且位置确实跳变，**且该槽在本回放中从未被写过**——即陈旧槽值被恢复，裸发 `DECRST 1049` 的典型症状；被 `DECSC`/`1049h` 写过的槽被恢复属预期、不计数）不断言、仅报告，真正的门是 `overwrite` 与结束态不变量。当前 leak 只剩一条待修：`leak-picker-unpaged`（picker 未按屏幕高度分页，`CursorUp(len(items)+1)` 被夹到顶行）；光标锚点类的回归门五条：`clean-tty-scrollregion`（子进程 `printf '\033[20;24r' > /dev/tty` 设滚动区，终端把光标 home 到 (1,1)）、`clean-tty-cup`（子进程 `CSI 3;7H` 直接挪光标）、`clean-alt-screen-exit`（子进程用 `47h` 进备用屏后退出）、`clean-tty-modes`（`?7l`/`?25l` 残留）、`clean-interactive-release`（interactive 密码提示后桥接 release 的 `?1049l` 跳位）——交出终端前 `SaveCursor` 与复位后 `RestoreCursor` 任一步退化成 no-op，这五条连同其余 clean 门都会变红（实测去掉存档得 `overwrite` 44、去掉归位得 `overwrite` 50），故它们是 2026-09-16 光标锚点修复的回归门。note 只剩 `note-partial-line`（子进程直写 `/dev/tty` 的半行残文）
 
-会话归档测试：卷往返（entry 字节与源文件一致、entry comment 的条数与摘要与实读扫描一致）、comment 上限（4 KiB 硬上限、多字节截断降级、`trunc` 标记）、筛选（`OlderThan`/`Keep` 交集、`Exclude`、5 分钟空闲保护、`DryRun` 不落盘、已在卷内 id 去重、0 候选不建空卷）、损坏卷（截断/CRC 错：列表不崩、载入报错且卷不动）、`*.tmp-*` 忽略、同 id 双区取活动、归档只读态不写盘且 `Ask` 报 `ErrArchiveReadOnly`、`Fork` 落盘内容与后续增量、`resolveWorkspaceDirs` 三态推导、`ParseArchiveArg` 表驱动、picker `[归档] ` 标记渲染。
+会话归档测试：卷往返（entry 字节与源文件一致、entry comment 的条数与摘要与实读扫描一致）、comment 上限（4 KiB 硬上限、多字节截断降级、`trunc` 标记）、筛选（`OlderThan`、`Exclude`、5 分钟空闲保护、`DryRun` 不落盘、已在卷内 id 去重、0 候选不建空卷）、列表分组排序（活动前归档后）、`--dry-run` 的 REPL 输出与不落卷、`/archive` 恒排除当前会话、损坏卷（截断/CRC 错：列表不崩、载入报错且卷不动）、`*.tmp-*` 忽略、同 id 双区取活动、归档只读态不写盘且 `Ask` 报 `ErrArchiveReadOnly`、`Fork` 落盘内容与后续增量、`resolveWorkspaceDirs` 三态推导、`ParseArchiveArg` 表驱动、picker `[归档] ` 标记渲染。
 
 ## 环境段（envprobe）
 

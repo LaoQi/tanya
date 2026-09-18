@@ -321,7 +321,7 @@ func (s *sessionStore) refreshVolumes() error {
 	seen := map[string]bool{}
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, archiveVolumeSuffix) || strings.Contains(name, archiveTempSuffix) {
+		if e.IsDir() || !strings.HasSuffix(name, archiveVolumeSuffix) {
 			continue
 		}
 		info, err := e.Info()

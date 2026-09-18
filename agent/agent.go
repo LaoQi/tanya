@@ -134,6 +134,47 @@ func (a *Agent) ArchiveSessions(opt ArchiveOptions) (ArchiveReport, error) {
 	return a.store.archive(opt)
 }
 
+type ArchiveSuggestion struct {
+	Threshold  int
+	Keep       int
+	Active     int
+	Candidates int
+	Bytes      int64
+}
+
+func (a *Agent) SuggestArchive() (ArchiveSuggestion, bool) {
+	sug := ArchiveSuggestion{Threshold: a.cfg.ArchiveThreshold, Keep: a.cfg.ArchiveKeep}
+	if !a.cfg.AutoArchive || a.store.disabled {
+		return sug, false
+	}
+	list, err := a.store.list()
+	if err != nil {
+		return sug, false
+	}
+	cur := a.SessionID()
+	active, kept := 0, 0
+	for _, si := range list {
+		if si.Archived {
+			continue
+		}
+		active++
+		if kept < a.cfg.ArchiveKeep {
+			kept++
+			continue
+		}
+		if si.ID == cur {
+			continue
+		}
+		sug.Candidates++
+		sug.Bytes += si.Size
+	}
+	if active < a.cfg.ArchiveThreshold {
+		return sug, false
+	}
+	sug.Active = active
+	return sug, true
+}
+
 func (a *Agent) ArchiveReadOnly() (string, bool) { return a.store.archivedID() }
 
 func (a *Agent) Fork() (string, error) {

@@ -219,6 +219,7 @@ func (r *REPL) noSaveWarn() string {
 func (r *REPL) Run() error {
 	r.started = time.Now()
 	r.st.out.emit(KindDecor, welcomeText()+r.noSaveWarn())
+	r.autoArchivePrompt()
 	for {
 		prompt := r.prompt.Render(r.resolveVars())
 		line, err := r.ed.Readline(prompt)
@@ -375,15 +376,7 @@ func (r *REPL) loadNotice(id string) string {
 }
 
 func (r *REPL) handleArchive(args []string) {
-	if len(args) > 1 {
-		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt, MsgArchiveUsage)+"\n")
-		return
-	}
-	arg := ""
-	if len(args) == 1 {
-		arg = args[0]
-	}
-	opt, err := ParseArchiveArg(arg)
+	opt, err := ParseArchiveArg(strings.Join(args, " "))
 	if err != nil {
 		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
 		return
@@ -394,12 +387,17 @@ func (r *REPL) handleArchive(args []string) {
 		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
 		return
 	}
+	r.st.out.emit(KindNotice, formatArchiveReport(rep))
+}
+
+func formatArchiveReport(rep agent.ArchiveReport) string {
 	var b strings.Builder
-	if len(rep.Sessions) > 0 {
-		fmt.Fprintf(&b, MsgArchiveDone, len(rep.Sessions), filepath.Base(rep.Volume), formatBytes(rep.RawBytes), formatBytes(rep.VolumeBytes))
-	} else if rep.DryRun {
+	switch {
+	case rep.DryRun:
 		fmt.Fprintf(&b, MsgArchiveDryRun, len(rep.Sessions), formatBytes(rep.RawBytes))
-	} else {
+	case len(rep.Sessions) > 0:
+		fmt.Fprintf(&b, MsgArchiveDone, len(rep.Sessions), filepath.Base(rep.Volume), formatBytes(rep.RawBytes), formatBytes(rep.VolumeBytes))
+	default:
 		b.WriteString(MsgArchiveNone)
 	}
 	for _, s := range rep.Skipped {
@@ -408,7 +406,7 @@ func (r *REPL) handleArchive(args []string) {
 	for _, f := range rep.Failed {
 		fmt.Fprintf(&b, MsgArchiveFailFmt, f.ID, f.Err)
 	}
-	r.st.out.emit(KindNotice, b.String())
+	return b.String()
 }
 
 func (r *REPL) handleFork() {

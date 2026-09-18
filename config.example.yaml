@@ -20,6 +20,13 @@ user_agent: "pi/0.85.0 (linux; node/v22.14.0; x64)"
 data_dir: ~/.local/share/tanya
 # 会话存储模式：auto（默认，存在 .tanya/ 则 local）/ local / global
 session_mode: auto
+# 启动自动归档（仅 REPL 且需控制终端确认，ask 单发与非交互一律不问；仅配置文件，无 env）
+# 开启后启动时若活跃会话数达到阈值，提示是否归档较早的会话（y/yes 归档，其它输入跳过）
+# auto_archive: false
+# 触发阈值：活跃会话数达到该值才提示，需 >= 2（默认 64）
+# auto_archive_threshold: 64
+# 归档后保留的最近活跃会话数，需 >= 0 且小于阈值（默认 16；0 = 除当前会话外全部归档）
+# auto_archive_keep: 16
 
 # 终端配色：auto（默认，跟随终端能力与 NO_COLOR）/ on（强制开色）/ off（强制纯文本）
 # colors: auto

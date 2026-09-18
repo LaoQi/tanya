@@ -11,22 +11,25 @@ import (
 )
 
 type Config struct {
-	BaseURL         string            `yaml:"base_url"`
-	APIKey          string            `yaml:"api_key"`
-	Model           string            `yaml:"model"`
-	Temperature     float64           `yaml:"temperature"`
-	ReasoningEffort string            `yaml:"reasoning_effort"`
-	ShowReasoning   bool              `yaml:"show_reasoning"`
-	Path            string            `yaml:"-"`
-	ApiProtocol     string            `yaml:"api_protocol"`
-	UserAgent       string            `yaml:"user_agent"`
-	DataDir         string            `yaml:"data_dir"`
-	SessionMode     string            `yaml:"session_mode"`
-	ToolOutputLines int               `yaml:"tool_output_lines"`
-	Shell           string            `yaml:"shell"`
-	Colors          string            `yaml:"colors"`
-	Theme           string            `yaml:"theme"`
-	Palette         map[string]string `yaml:"palette"`
+	BaseURL          string            `yaml:"base_url"`
+	APIKey           string            `yaml:"api_key"`
+	Model            string            `yaml:"model"`
+	Temperature      float64           `yaml:"temperature"`
+	ReasoningEffort  string            `yaml:"reasoning_effort"`
+	ShowReasoning    bool              `yaml:"show_reasoning"`
+	Path             string            `yaml:"-"`
+	ApiProtocol      string            `yaml:"api_protocol"`
+	UserAgent        string            `yaml:"user_agent"`
+	DataDir          string            `yaml:"data_dir"`
+	SessionMode      string            `yaml:"session_mode"`
+	ToolOutputLines  int               `yaml:"tool_output_lines"`
+	AutoArchive      bool              `yaml:"auto_archive"`
+	ArchiveThreshold int               `yaml:"auto_archive_threshold"`
+	ArchiveKeep      int               `yaml:"auto_archive_keep"`
+	Shell            string            `yaml:"shell"`
+	Colors           string            `yaml:"colors"`
+	Theme            string            `yaml:"theme"`
+	Palette          map[string]string `yaml:"palette"`
 }
 
 var EffortLevels = []string{"minimal", "low", "medium", "high", "max"}
@@ -75,15 +78,17 @@ func normalizeConfigPath(p string) string {
 
 func defaultConfig() *Config {
 	return &Config{
-		Path:            defaultConfigPath(),
-		BaseURL:         "https://api.openai.com/v1",
-		Model:           "deepseek-v4-flash",
-		Temperature:     0.7,
-		ApiProtocol:     "responses",
-		Theme:           "nord",
-		UserAgent:       DefaultUserAgent,
-		DataDir:         defaultDataDir(),
-		ToolOutputLines: 20,
+		Path:             defaultConfigPath(),
+		BaseURL:          "https://api.openai.com/v1",
+		Model:            "deepseek-v4-flash",
+		Temperature:      0.7,
+		ApiProtocol:      "responses",
+		Theme:            "nord",
+		UserAgent:        DefaultUserAgent,
+		DataDir:          defaultDataDir(),
+		ToolOutputLines:  20,
+		ArchiveThreshold: DefaultArchiveThreshold,
+		ArchiveKeep:      DefaultArchiveKeep,
 	}
 }
 
@@ -160,6 +165,12 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.DataDir = expandHome(cfg.DataDir)
 	if cfg.DataDir == "" {
 		cfg.DataDir = defaultDataDir()
+	}
+	if cfg.ArchiveThreshold < 2 {
+		return nil, fmt.Errorf(MsgBadArchiveThreshold, cfg.ArchiveThreshold)
+	}
+	if cfg.ArchiveKeep < 0 || cfg.ArchiveKeep >= cfg.ArchiveThreshold {
+		return nil, fmt.Errorf(MsgBadArchiveKeep, cfg.ArchiveKeep, cfg.ArchiveThreshold)
 	}
 	return cfg, nil
 }

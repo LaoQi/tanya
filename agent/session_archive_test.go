@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -220,8 +221,12 @@ func TestArchiveEntryCommentLimits(t *testing.T) {
 		t.Errorf("降级后仍应保留条数: %q", tiny)
 	}
 	plain := archiveEntryCommentJSON(3, "短摘要")
-	if plain != `{"v":1,"msgs":3,"summary":"短摘要"}` {
-		t.Errorf("普通注释串: %q", plain)
+	var pc archiveEntryComment
+	if err := json.Unmarshal([]byte(plain), &pc); err != nil {
+		t.Fatalf("普通注释不可解析: %q %v", plain, err)
+	}
+	if pc.V != archiveCommentV || pc.Msgs != 3 || pc.Summary != "短摘要" || pc.Trunc {
+		t.Errorf("普通注释字段异常: %+v", pc)
 	}
 }
 
@@ -247,6 +252,23 @@ func TestArchiveFilterMatrix(t *testing.T) {
 		}
 	})
 
+	t.Run("Keep", func(t *testing.T) {
+		s, dir, _ := newArchiveStore(t)
+		for _, id := range []string{"20260101-010000", "20260101-020000", "20260101-030000"} {
+			seedSession(t, dir, id, sampleSession, old)
+		}
+		rep, err := s.archive(ArchiveOptions{Keep: 1, Now: now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := archiveIDs(rep); len(got) != 2 || got[0] != "20260101-020000" || got[1] != "20260101-010000" {
+			t.Errorf("Keep=1 应归档除最新外的全部: %v", got)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "20260101-030000.jsonl")); err != nil {
+			t.Errorf("保留的最新会话应原样留活动区: %v", err)
+		}
+	})
+
 	t.Run("IdleGuard", func(t *testing.T) {
 		s, dir, _ := newArchiveStore(t)
 		seedSession(t, dir, "20260101-010000", sampleSession, now.Add(-time.Minute))
@@ -260,20 +282,6 @@ func TestArchiveFilterMatrix(t *testing.T) {
 		}
 		if r := skipIDs(rep)["20260101-010000"]; r != MsgArchiveSkipIdle {
 			t.Errorf("应记空闲跳过原因: %v", skipIDs(rep))
-		}
-	})
-
-	t.Run("Keep", func(t *testing.T) {
-		s, dir, _ := newArchiveStore(t)
-		for _, id := range []string{"20260101-010000", "20260101-020000", "20260101-030000"} {
-			seedSession(t, dir, id, sampleSession, old)
-		}
-		rep, err := s.archive(ArchiveOptions{Keep: 1, Now: now})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := archiveIDs(rep); len(got) != 2 || got[0] != "20260101-020000" || got[1] != "20260101-010000" {
-			t.Errorf("Keep=1 应归档除最新外的全部: %v", got)
 		}
 	})
 
@@ -362,8 +370,20 @@ func TestArchiveTempVolumeIgnored(t *testing.T) {
 	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.CreateHeader(&zip.FileHeader{Name: "20260101-090000.jsonl", Method: zip.Deflate, Comment: archiveEntryCommentJSON(1, "半成品")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte(`{"role":"user","content":"半成品"}` + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
 	tmp := filepath.Join(archiveDir, "archive-20260101-000000.zip.tmp-123456")
-	if err := os.WriteFile(tmp, []byte("not a zip"), 0o644); err != nil {
+	if err := os.WriteFile(tmp, buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	seedSession(t, dir, "20260101-010000", sampleSession, time.Now().Add(-time.Hour))
@@ -371,8 +391,57 @@ func TestArchiveTempVolumeIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("临时卷不应影响列表: %v", err)
 	}
-	if len(list) != 1 || list[0].Archived {
-		t.Errorf("列表异常: %+v", list)
+	if len(list) != 1 || list[0].ID != "20260101-010000" || list[0].Archived {
+		t.Errorf("临时卷是合法 zip，也不应被列入: %+v", list)
+	}
+	if _, _, err := s.load("20260101-090000"); err == nil {
+		t.Error("临时卷不应可载入")
+	}
+}
+
+func TestListOrderActiveBeforeArchived(t *testing.T) {
+	s, dir, _ := newArchiveStore(t)
+	now := time.Now().Truncate(2 * time.Second)
+	old := now.Add(-72 * time.Hour)
+	for _, id := range []string{"20260101-010000", "20260101-020000", "20260101-030000"} {
+		seedSession(t, dir, id, sampleSession, old)
+	}
+	if _, err := s.archive(ArchiveOptions{Exclude: "20260101-020000", Now: now}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"20260101-020000", "20260101-030000", "20260101-010000"}
+	if len(list) != len(want) {
+		t.Fatalf("列表条数异常: %+v", list)
+	}
+	for i, id := range want {
+		if list[i].ID != id {
+			t.Errorf("第 %d 项应为 %s（活动组在前、组内 id 降序）: %+v", i, id, list)
+			break
+		}
+	}
+}
+
+func TestArchivedSummaryTruncatedForList(t *testing.T) {
+	s, dir, _ := newArchiveStore(t)
+	now := time.Now().Truncate(2 * time.Second)
+	long := strings.Repeat("长", 60)
+	seedSession(t, dir, "20260101-010000", `{"role":"user","content":"`+long+`"}`+"\n", now.Add(-48*time.Hour))
+	if _, err := s.archive(ArchiveOptions{Now: now}); err != nil {
+		t.Fatal(err)
+	}
+	got := listIDs(t, s)["20260101-010000"]
+	if !got.Archived {
+		t.Fatalf("应为归档项: %+v", got)
+	}
+	if want := strings.Repeat("长", sessionSummaryRunes) + "..."; got.Summary != want {
+		t.Errorf("归档项摘要应按展示口径截断：runes=%d %q", len([]rune(got.Summary)), got.Summary)
+	}
+	if got.Msgs != 1 {
+		t.Errorf("归档项条数异常: %+v", got)
 	}
 }
 
@@ -394,8 +463,6 @@ func TestArchiveCorruptVolume(t *testing.T) {
 		if err := os.WriteFile(rep.Volume, data[:len(data)/2], 0o644); err != nil {
 			t.Fatal(err)
 		}
-		s.volStat = map[string]sessionFileStat{}
-		s.volumes = map[string][]SessionInfo{}
 		list, err := s.list()
 		if err != nil {
 			t.Fatalf("截断卷不应让列表报错: %v", err)
@@ -648,4 +715,126 @@ func TestForkRejectedWhenNotArchived(t *testing.T) {
 	if a.store.path() != before {
 		t.Error("被拒的 fork 不应切换会话文件")
 	}
+}
+
+func TestSuggestArchive(t *testing.T) {
+	newAgent := func(t *testing.T, enabled bool, threshold, keep, sessions int, opts ...Option) *Agent {
+		t.Helper()
+		isolatePromptEnv(t)
+		cfg := defaultConfig()
+		cfg.DataDir = t.TempDir()
+		cfg.AutoArchive = enabled
+		cfg.ArchiveThreshold = threshold
+		cfg.ArchiveKeep = keep
+		a, err := New(cfg, opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(a.store.dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		mtime := time.Now().Add(-48 * time.Hour)
+		for i := 0; i < sessions; i++ {
+			seedSession(t, a.store.dir, fmt.Sprintf("202601%02d-000000", i), sampleSession, mtime)
+		}
+		return a
+	}
+
+	t.Run("BelowThreshold", func(t *testing.T) {
+		a := newAgent(t, true, 4, 2, 3)
+		if sug, ok := a.SuggestArchive(); ok {
+			t.Errorf("未达阈值不应建议归档: %+v", sug)
+		}
+	})
+
+	t.Run("AtThreshold", func(t *testing.T) {
+		a := newAgent(t, true, 4, 2, 4)
+		sug, ok := a.SuggestArchive()
+		if !ok {
+			t.Fatal("达到阈值应建议归档")
+		}
+		if sug.Threshold != 4 || sug.Keep != 2 || sug.Active != 4 || sug.Candidates != 2 || sug.Bytes <= 0 {
+			t.Errorf("建议内容异常: %+v", sug)
+		}
+		rep, err := a.ArchiveSessions(ArchiveOptions{Keep: sug.Keep, Exclude: a.SessionID()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rep.Sessions) != 2 {
+			t.Errorf("应归档 2 个会话: %+v", rep.Sessions)
+		}
+		active, archived := 0, 0
+		list, err := a.ListSessions()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, si := range list {
+			if si.Archived {
+				archived++
+			} else {
+				active++
+			}
+		}
+		if active != 2 || archived != 2 {
+			t.Errorf("归档后应保留 2 个活跃: active=%d archived=%d", active, archived)
+		}
+	})
+
+	t.Run("DisabledByConfig", func(t *testing.T) {
+		a := newAgent(t, false, 4, 2, 8)
+		if sug, ok := a.SuggestArchive(); ok {
+			t.Errorf("auto_archive 关闭时不应建议: %+v", sug)
+		}
+	})
+
+	t.Run("NoSaveMode", func(t *testing.T) {
+		a := newAgent(t, true, 4, 2, 8, NoSave(true))
+		if sug, ok := a.SuggestArchive(); ok {
+			t.Errorf("-n 下不应建议归档: %+v", sug)
+		}
+	})
+
+	t.Run("CurrentExcludedFromCandidates", func(t *testing.T) {
+		a := newAgent(t, true, 3, 1, 0)
+		cur := a.SessionID()
+		if cur == "" {
+			t.Fatal("可写模式应有会话 id")
+		}
+		mtime := time.Now().Add(-48 * time.Hour)
+		seedSession(t, a.store.dir, "99999999-999999", sampleSession, mtime)
+		seedSession(t, a.store.dir, cur, sampleSession, mtime)
+		seedSession(t, a.store.dir, "00000000-000000", sampleSession, mtime)
+		sug, ok := a.SuggestArchive()
+		if !ok {
+			t.Fatal("达到阈值应建议归档")
+		}
+		if sug.Active != 3 || sug.Candidates != 1 {
+			t.Errorf("当前会话在最旧一侧应占 keep 名额后从候选剔除: %+v", sug)
+		}
+		rep, err := a.ArchiveSessions(ArchiveOptions{Keep: 1, Exclude: cur})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rep.Sessions) != 1 || rep.Sessions[0].ID != "00000000-000000" {
+			t.Errorf("应只归档非当前的最旧会话: %+v", rep.Sessions)
+		}
+	})
+
+	t.Run("KeepZero", func(t *testing.T) {
+		a := newAgent(t, true, 3, 0, 3)
+		sug, ok := a.SuggestArchive()
+		if !ok {
+			t.Fatal("达到阈值应建议归档")
+		}
+		if sug.Candidates != 3 {
+			t.Errorf("keep=0 应全部入选: %+v", sug)
+		}
+		rep, err := a.ArchiveSessions(ArchiveOptions{Keep: 0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rep.Sessions) != 3 {
+			t.Errorf("keep=0 应归档全部: %+v", rep.Sessions)
+		}
+	})
 }

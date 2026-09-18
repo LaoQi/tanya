@@ -358,3 +358,52 @@ func TestLoadConfigShowReasoning(t *testing.T) {
 		t.Errorf("显式关闭应生效: %v %v", cfg.ShowReasoning, err)
 	}
 }
+
+func TestLoadConfigAutoArchive(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		wantErr bool
+	}{
+		{name: "默认关闭", content: "model: m"},
+		{name: "阈值过小", content: "auto_archive_threshold: 1\n", wantErr: true},
+		{name: "阈值过小且保留数合法", content: "auto_archive_threshold: 1\nauto_archive_keep: 0\n", wantErr: true},
+		{name: "保留数为负", content: "auto_archive_keep: -1\n", wantErr: true},
+		{name: "保留数不小于阈值", content: "auto_archive_threshold: 4\nauto_archive_keep: 4\n", wantErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(c.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := LoadConfig(path)
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("应报错: %+v", cfg)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.ArchiveThreshold != DefaultArchiveThreshold || cfg.ArchiveKeep != DefaultArchiveKeep {
+				t.Errorf("默认阈值/保留数异常: %+v", cfg)
+			}
+		})
+	}
+}
+
+func TestLoadConfigAutoArchiveValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("auto_archive: true\nauto_archive_threshold: 8\nauto_archive_keep: 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AutoArchive || cfg.ArchiveThreshold != 8 || cfg.ArchiveKeep != 3 {
+		t.Errorf("yaml 覆盖失败: %+v", cfg)
+	}
+}
