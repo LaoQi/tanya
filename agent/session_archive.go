@@ -25,6 +25,9 @@ const (
 	archiveSummaryMin    = 80
 	archiveIdleGuard     = 5 * time.Minute
 	ArchiveDefaultWindow = 30 * 24 * time.Hour
+
+	DefaultArchiveThreshold = 64
+	DefaultArchiveKeep      = 16
 )
 
 type ArchiveOptions struct {

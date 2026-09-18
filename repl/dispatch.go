@@ -46,6 +46,20 @@ var archiveDayArg = regexp.MustCompile(`^([0-9]+)d$`)
 
 func ParseArchiveArg(arg string) (agent.ArchiveOptions, error) {
 	arg = strings.TrimSpace(arg)
+	dry := false
+	if rest, ok := strings.CutPrefix(arg, ArchiveDryRunFlag); ok && (rest == "" || rest[0] == ' ') {
+		dry = true
+		arg = strings.TrimSpace(rest)
+	}
+	opt, err := parseArchiveWindow(arg)
+	if err != nil {
+		return agent.ArchiveOptions{}, err
+	}
+	opt.DryRun = dry
+	return opt, nil
+}
+
+func parseArchiveWindow(arg string) (agent.ArchiveOptions, error) {
 	switch {
 	case arg == "":
 		return agent.ArchiveOptions{OlderThan: agent.ArchiveDefaultWindow}, nil

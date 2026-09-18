@@ -36,7 +36,7 @@ global  <data_dir>/workspaces/<workspace-id>/            ← workspace 目录
 
 ## 3. 归档卷格式
 
-- 卷名 `archive-<20060102-150405>.zip`（时间取 `ArchiveOptions.Now`，测试可注入）；写入用同目录临时文件 `archive-<ts>.zip.tmp-*`（`os.CreateTemp`），`Close` 后 `os.Rename` 落定；列表扫描忽略 `*.tmp-*`。
+- 卷名 `archive-<20060102-150405>.zip`（时间取 `ArchiveOptions.Now`，测试可注入）；写入用同目录临时文件 `archive-<ts>.zip.tmp-*`（`os.CreateTemp`），`Close` 后 `os.Rename` 落定。临时名不以 `.zip` 结尾，列表扫描按后缀只认 `*.zip`，临时卷天然不入列表。
 - entry：名 `<会话 id>.jsonl`，`Method: zip.Deflate`，`Modified` = 源文件 mtime，数据 = 源文件逐字节。
 - entry comment（单行 JSON）：`{"v":1,"msgs":N,"summary":"…"}`；summary = 首条 user 消息单行化、截断 200 rune；截断时加 `"trunc":true`；marshal 后超过 `zipCommentLimit = 4096` 字节则把 summary 降到 80 rune 再试，仍超则丢弃 summary 只留 `{"v":1,"msgs":N}`。
   - **硬约束**：Go 在 comment > 65535 字节时静默写坏中央目录（实测 65536 → 读回 0 字节），所以上限与降级是必需的，且要有测试。
@@ -63,7 +63,7 @@ type ArchiveOptions struct {
 	OlderThan time.Duration // mtime ≤ Now-OlderThan；0 = 不限
 	Keep      int           // 保留最新 N 个活动会话；0 = 不限
 	Exclude   string        // 当前会话 id，永不归档
-	DryRun    bool
+	DryRun    bool          // 只出报告不落卷（/archive --dry-run）
 	Now       time.Time     // 零值取 time.Now
 }
 
@@ -84,7 +84,7 @@ type ArchiveReport struct {
 func (s *sessionStore) archive(opt ArchiveOptions) (ArchiveReport, error)
 ```
 
-流程：候选筛选（活动区 `*.jsonl`，去 `Exclude`，按 id 降序套 `Keep`，按 mtime 套 `OlderThan` 与空闲保护，已在任一卷内则 `Skipped`）→ `DryRun` 直接返回 → `MkdirAll(archiveDir)` → 建临时卷 → 逐会话 `scanSession` 取元数据 + 流式 copy 数据 → `SetComment` → `Close` + `Rename` → 逐个 `os.Remove` 源文件。
+流程：候选筛选（活动区 `*.jsonl`，按 id 降序套 `Keep`，去 `Exclude`，按 mtime 套 `OlderThan` 与空闲保护，已在任一卷内则 `Skipped`）→ `DryRun` 直接返回 → `MkdirAll(archiveDir)` → 建临时卷 → 逐会话 `scanSession` 取元数据 + 流式 copy 数据 → `SetComment` → `Close` + `Rename` → 逐个 `os.Remove` 源文件。
 失败语义：扫元数据失败 → 记 `Failed` 跳过该文件继续；写 entry 失败 → 删除临时卷、**不删任何源文件**、返回 error（附失败的 id）。`Failed`/`Skipped` 非空不阻断整批。
 
 ### agent/session.go（改造）
@@ -120,7 +120,7 @@ func (s *sessionStore) loadFrom(r io.Reader) ([]Message, string, error) // load(
 func (s *sessionStore) findArchived(id string) (volume string, ok bool)
 ```
 
-`refresh()`：先扫 `dir/*.jsonl`（现有逻辑不动），再扫 `archiveDir/*.zip`（跳过 `*.tmp-*`）：`zip.OpenReader` 读 CD，逐 entry 用 `filepath.Base(f.Name)` 去 `.jsonl` 得 id、`f.UncompressedSize64` 与 `f.Modified` 取大小与时间、解析 `f.Comment` 取 `Msgs`/`Summary`（解析失败 → `MetaOK=false`、`Msgs=0`、`Summary=""`），把条目并入 `cache`（同 id 已有活动项则不覆盖）与 `volumes`。
+`refresh()`：先扫 `dir/*.jsonl`（现有逻辑不动），再扫 `archiveDir/*.zip`（按后缀过滤，临时卷不被匹配）：`zip.OpenReader` 读 CD，逐 entry 用 `filepath.Base(f.Name)` 去 `.jsonl` 得 id、`f.UncompressedSize64` 与 `f.Modified` 取大小与时间、解析 `f.Comment` 取 `Msgs`/`Summary`（解析失败 → `MetaOK=false`、`Msgs=0`、`Summary=""`），把条目并入 `cache`（同 id 已有活动项则不覆盖）与 `volumes`。
 `list()`：活动组按 id 降序、归档组按 id 降序，活动在前。
 `load(id)`：活动区命中走原路径（清 `frozen`）；否则 `findArchived` → `zip.OpenReader` → `loadFrom(entry.Open())` → `frozen=true`、`file=""`、`saved=len(history)`、`systemSaved=true`（system 已在 history 首行分离出来）。
 `append` 首行 `if s.disabled || s.frozen || s.saved >= len(msgs) { return nil }`。
@@ -139,14 +139,15 @@ func (s *sessionStore) findArchived(id string) (volume string, ok bool)
 
 | 位置 | 行为 |
 |---|---|
-| `/archive` | 默认 30 天前的会话；`/archive 7d`、`/archive 12h`、`/archive 12h30m`、`/archive all` |
+| `/archive` | 默认 30 天前的会话；`/archive 7d`、`/archive 12h`、`/archive 12h30m`、`/archive all`；`--dry-run` 前缀只出报告不落卷（`/archive --dry-run 7d`） |
 | `/archive` 输出 | 归档成功 `已归档 N 个会话 → <卷名>（<原大小> → <卷大小>）`；跳过/失败各一行；0 命中 `没有符合条件的历史会话（近 30 天内的会话不归档，用 /archive all 归档全部）` |
-| 解析 | `repl.ParseArchiveArg(arg string) (agent.ArchiveOptions, error)`：空参 → 30d；`all` → `OlderThan=0`；否则 `time.ParseDuration`（仅 `d` 后缀需自行换算：`Nd` → `N*24h`） |
+| 解析 | `repl.ParseArchiveArg(arg string) (agent.ArchiveOptions, error)`：可选前导 `--dry-run`（`ArchiveDryRunFlag`）置 `DryRun`；余下空参 → 30d、`all` → `OlderThan=0`、否则 `time.ParseDuration`（仅 `d` 后缀需自行换算：`Nd` → `N*24h`）；`handleArchive` 把 `parts[1:]` 以空格 join 后传入，多余段落入时长解析报非法范围 |
 | `/load <归档 id>` | `已载入会话 X（归档只读，继续对话请 /fork）`；picker 行摘要前带 `[归档] ` |
 | 只读态对话 | REPL 在对话分支前拦截（含 `:`/`：`）→ `当前为归档只读会话（X）；继续对话请 /fork 开新会话`；`agent.Ask` 兜底 `ErrArchiveReadOnly` |
 | `/fork` | 归档只读态 → `已 fork 为新会话 <新 id>`；非归档态 → `当前会话不是归档只读会话，直接对话即可`；`-n` 下追加一行 `（不落盘模式，未写入）` |
 | `/stat` | 归档只读态显示 `会话: 归档只读 X（未写入）` |
 | 退出收尾 | 归档只读态文件行显示 `会话文件 未写入（不落盘模式）` |
+| 启动自动归档 | 活跃会话数 ≥ `auto_archive_threshold` 时提示 `当前工作区有 N 个活跃会话（阈值 T），建议归档较早的，只保留最近 K 个。\n将归档 C 个会话（约 X）。现在归档？[y/N] `；`y`/`yes` 归档，其它/空行 → `已跳过（配置 auto_archive: false 可关闭此提示，或随时 /archive 手动归档）`。仅 rich 模式且 stdout 为终端时才问：plain（`-p`/ask）与 stdout 非终端在 `ctty.Open` 之前静默返回，无控制终端/`-n` 同样不问；`C/X` 已剔除当前会话（先占 `keep` 名额再剔除，与 `archive()` 同序） |
 
 新增常量：`repl/messages.go`（`MsgArchiveDone` / `MsgArchiveNone` / `MsgArchiveSkipFmt` / `MsgArchiveFailFmt` / `MsgArchiveDryRun` / `MsgForkDone` / `MsgForkNotArchive` / `MsgForkNoSave` / `MsgLoadArchived` / `MsgArchiveReadOnlyFmt` / `SessArchMark` / `slashCommands` 增 `/archive` `/fork` / help 文案），`agent/messages.go`（`ErrArchiveReadOnly` / `ErrForkNotArchive` / `MsgArchiveVolFailFmt` / `MsgControlStatArchive`）。数字与大小格式化归 repl（沿用 `stats.go` 既有缩写口径）。
 
@@ -165,7 +166,7 @@ func (s *sessionStore) findArchived(id string) (volume string, ok bool)
 风险与对冲：
 
 - **并发追加**：归档排除当前会话 + 5 分钟空闲保护；卷名带时间戳且经 `CreateTemp`，无覆盖竞争；崩溃最多留双份（源未删），列表按同 id 取活动。
-- **半写卷**：只通过临时文件 + `rename` 落地，`*.tmp-*` 被扫描忽略；写失败即弃卷。
+- **半写卷**：只通过临时文件 + `rename` 落地，临时卷名不以 `.zip` 结尾因而不入扫描；写失败即弃卷。
 - **损坏卷**：列表阶段不崩（条目仍在，`MetaOK` 可为 false）；载入阶段 CRC32 报错上抛，卷不动。
 - **长注释**：见上表，硬上限 + 降级 + 测试。
 - **只读态误判**：`frozen` 只在 `load` 归档命中时置位；`NewSession`/活动 `load`/`Fork` 一律清零。
@@ -182,7 +183,7 @@ func (s *sessionStore) findArchived(id string) (volume string, ok bool)
 
 改动：新增 `agent/session_archive.go`；`agent/session.go`（双区 refresh、卷索引、`SessionInfo` 扩展、`loadFrom`、`frozen`、`append` 门、`path()`/`id()`）；`agent/agent.go`（`ArchiveSessions`、`ArchiveReadOnly`、`Ask` 兜底、`SessionFile`）。
 
-测试（`agent/session_archive_test.go`）：卷往返（entry 字节、comment 元数据与 `scanSession` 一致）、comment 上限与多字节截断降级、筛选矩阵（`OlderThan`/`Keep`/交集/`Exclude`/空闲保护/`DryRun`/已归档 id 去重/0 候选不建卷不建目录）、临时卷被忽略、损坏卷（截断与 CRC 篡改）列表不崩载入报错、同 id 双区取活动、只读载入不改卷且不写盘（对比卷 mtime 与目录清单）、`Ask` 返回 `ErrArchiveReadOnly`、`resolveWorkspaceDirs` 三态推导。mtime 用 `os.Chtimes` 造，时间用 `ArchiveOptions.Now` 注入。
+测试（`agent/session_archive_test.go`）：卷往返（entry 字节、comment 元数据与 `scanSession` 一致）、comment 上限与多字节截断降级、筛选矩阵（`OlderThan`/`Keep`/`Exclude`/空闲保护/`DryRun`/已归档 id 去重/0 候选不建卷不建目录）、启动自动归档（`SuggestArchive` 阈值边界与 `-n`/关闭态、接受与拒绝两条路径、配置校验）、临时卷被忽略、损坏卷（截断与 CRC 篡改）列表不崩载入报错、同 id 双区取活动、只读载入不改卷且不写盘（对比卷 mtime 与目录清单）、`Ask` 返回 `ErrArchiveReadOnly`、`resolveWorkspaceDirs` 三态推导。mtime 用 `os.Chtimes` 造，时间用 `ArchiveOptions.Now` 注入。
 
 ### P2 交互（`/archive`、只读拦截、`/fork`）
 
@@ -214,7 +215,7 @@ unzip -l .tanya/archive/archive-*.zip
 
 ## 9. 明确不做
 
-内容裁剪/摘要压缩；卷重写与「解档回活动区」（`CreateRaw`/`OpenRaw`）；gz 单文件归档；CLI `archive`/`migrate` 子命令；`--note`/`--list`；旧布局兼容读取与自动迁移；自动归档/TTL 淘汰；LLM 生成描述；新依赖。
+内容裁剪/摘要压缩；卷重写与「解档回活动区」（`CreateRaw`/`OpenRaw`）；gz 单文件归档；CLI `archive`/`migrate` 子命令；`--note`/`--list`；旧布局兼容读取与自动迁移；TTL 淘汰与自动清理（启动自动归档见 §5 与 `docs/design.md`《启动自动归档》，属用户确认式提示，不做无人值守归档）；LLM 生成描述；新依赖。
 
 ## 10. 进度
 
@@ -224,6 +225,7 @@ unzip -l .tanya/archive/archive-*.zip
 | P1 | 归档卷 + CD 索引 + 只读载入 | 已完成 |
 | P2 | `/archive`、只读拦截、`/fork` | 已完成 |
 | P3 | 文档收尾（README/AGENTS/example/todos） | 已完成 |
+| P4 | 启动自动归档（配置三键 + `SuggestArchive` + REPL 启动提示 y/n） | 已完成 |
 
 验收记录（2026-09-17）：`go build ./... && go vet ./... && go test ./... && go test -race ./agent/ ./repl/` 全绿；`./tanya -m global` 落 `<data_dir>/workspaces/<wid>/sessions/`（`TestNewSessionPerWorkspace`、`TestResolveWorkspaceDirs` 断言）；真实二进制 pty 冒烟（临时工作区、`make build` 产物）三条路径全通：
 - 默认（local）：`/archive`（一卷 3 条目，二次调用提示无候选）→ `/load`（picker `[归档] ` 标记 → 只读载入）→ `你好` 被拦截 → `/stat` 只读行 → `/fork`（立即落盘、继承 11 条历史）→ `/stat` 指向新文件 → `/exit` 收尾显示会话文件；
@@ -238,7 +240,9 @@ unzip -l .tanya/archive/archive-*.zip
 3. 归档项摘要入库即截断：`readVolume` 把 comment 的 ≤200 rune 摘要按活动区口径截到 30 rune 再进 `SessionInfo`，保证 picker/补全行宽与活动项一致（长行折行会破坏 picker 的 `CursorUp` 重绘）；因此 `MetaOK=false` 时按 `SessRow` 既有格式显示 `0条`，未做 `--条`。
 4. `sessionStore` 增 `frozenID string`（文档字段表只列 `frozen bool`）：`path()`/`id()` 需为空，归档 id 只能另存一字段给 UI。
 5. `-n` 下 `/archive` 直接报错 `MsgArchiveNoSave`（文档未规定；`-n` 是全程只读，移动会话文件超出其语义）。
-6. 新增文案常量（超出文档清单）：agent 侧 `MsgArchiveNoSave`、`MsgArchiveSkipIdle`、`MsgArchiveSkipArchived`；repl 侧 `MsgArchiveBadArg`、`MsgArchiveUsage`、`MsgStatSessionArchive`。
+6. 新增文案常量（超出文档清单）：agent 侧 `MsgArchiveNoSave`、`MsgArchiveSkipIdle`、`MsgArchiveSkipArchived`；repl 侧 `MsgArchiveBadArg`、`MsgStatSessionArchive`；P4 增 agent 侧 `MsgBadArchiveThreshold`、`MsgBadArchiveKeep`，repl 侧 `MsgAutoArchiveAsk`、`MsgAutoArchiveSkip`、`ArchiveDryRunFlag`（`MsgArchiveUsage` 已在 P4 随 `/archive` 参数 join 化删除）。
+6b. P4 决策：`auto_archive*` 三键只走配置文件、不加 env（用户明确要求）；`/archive --dry-run` 接线上线后补测发现 repl 判定顺序把试运行误报为「已归档」，改为 `DryRun` 优先判定；原本冗余的 `strings.Contains(name, archiveTempSuffix)` 过滤为死条件（tmp 名不以 `.zip` 结尾）已删。
+6c. P4 review 修复：询问门禁补齐——此前只靠 `ctty.Open()`，`/dev/tty` 在有控制终端时恒可开，`tanya -p`（子代理管道）与 `tanya > log` 会把提示写进 stdout 并阻塞在 `/dev/tty` 读；现 plain 模式与 `ctty.Probe().StdoutTTY` 在开终端之前静默返回。`SuggestArchive` 改为与 `archive()` 同序镜像（id 降序先占 `keep` 名额、再剔当前会话），提示数与实际归档数严格一致；`keep=0` = 除当前会话外全归档落文档。
 7. `loadFrom` 在解码循环后 `io.Copy(io.Discard, r)` 排空：zip reader 的 CRC32 只在读到 entry 末尾时校验，若 JSON 语法错误先中断解码就永远看不到 CRC 错，排空可保证损坏 entry「错误上抛」而不是静默截断历史。
 8. `ArchiveEntry.After` 取卷中央目录的 `CompressedSize64`（写完卷回读一次 CD），`Before` 取源文件字节；报告消费者只用得上卷级 `RawBytes`/`VolumeBytes`。
 9. `/stat` 的归档行文案为 `会话文件: 归档只读 X（未写入）`（与 `/stat` 块内既有「会话文件」标签一致，文档原写「会话: 归档只读 …」）；`agent_custom` 的 `stat` 用文档口径 `会话: 归档只读 X（未写入）`。

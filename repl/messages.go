@@ -63,18 +63,20 @@ const (
 )
 
 const (
+	ArchiveDryRunFlag     = "--dry-run"
 	MsgArchiveDone        = "已归档 %d 个会话 → %s（%s → %s）\n"
 	MsgArchiveNone        = "没有符合条件的历史会话（近 30 天内的会话不归档，用 /archive all 归档全部）\n"
 	MsgArchiveSkipFmt     = "  跳过 %s（%s）\n"
 	MsgArchiveFailFmt     = "  失败 %s（%v）\n"
 	MsgArchiveDryRun      = "试运行：将归档 %d 个会话（%s）\n"
-	MsgArchiveUsage       = "用法: /archive [all|<时长>]，如 /archive 7d、/archive 12h30m、/archive all"
 	MsgArchiveBadArg      = "无效的归档范围 %q（可用 all 或时长，如 7d、12h、12h30m）"
 	MsgForkDone           = "已 fork 为新会话 %s\n"
 	MsgForkNotArchive     = "当前会话不是归档只读会话，直接对话即可\n"
 	MsgForkNoSave         = "（不落盘模式，未写入）\n"
 	MsgLoadArchived       = "已载入会话 %s（归档只读，继续对话请 /fork）\n"
 	MsgArchiveReadOnlyFmt = "当前为归档只读会话（%s）；继续对话请 /fork 开新会话\n"
+	MsgAutoArchiveAsk     = "当前工作区有 %d 个活跃会话（阈值 %d），建议归档较早的，只保留最近 %d 个。\n将归档 %d 个会话（约 %s）。现在归档？[y/N] "
+	MsgAutoArchiveSkip    = "已跳过（配置 auto_archive: false 可关闭此提示，或随时 /archive 手动归档）\n"
 	SessArchMark          = "[归档] "
 )
 
@@ -153,7 +155,7 @@ const helpText = `斜杠命令：
   /help               显示帮助
   /new                开启新会话（当前会话自动保存）
   /load [id]          无参打开会话选择菜单，带 id 直接载入
-  /archive [all|时长] 归档历史会话（无参 = 30 天前的会话，all = 全部）
+  /archive [选项]     归档历史会话（无参 = 30 天前的会话，all = 全部，--dry-run 只看不写）
   /fork               把归档只读会话 fork 成新会话（继承历史）
   /stat               会话统计（工作区/用量/缓存）
   /history [n|all]    无参截断列表，n 查看单条，all 全量显示
