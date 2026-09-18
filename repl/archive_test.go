@@ -164,8 +164,11 @@ func TestHandleCommandArchive(t *testing.T) {
 	dev.rewind()
 	r.handleCommand("/archive")
 	got := out.String()
-	if !strings.Contains(got, "将归档 1 个会话") {
-		t.Errorf("应先出报告: %q", got)
+	if !strings.Contains(got, "当前活跃会话 ") || !strings.Contains(got, "将归档 1 个（约 ") {
+		t.Errorf("应先出预览（含活跃会话数）: %q", got)
+	}
+	if !strings.Contains(got, "保留最近 16 个") {
+		t.Errorf("无参预览应报保留数: %q", got)
 	}
 	if !strings.Contains(got, MsgArchiveConfirm) {
 		t.Errorf("应询问确认: %q", got)
@@ -297,8 +300,8 @@ func TestHandleCommandArchiveCancel(t *testing.T) {
 
 	r.handleCommand("/archive")
 	got := out.String()
-	if !strings.Contains(got, "将归档 1 个会话") {
-		t.Errorf("应先出报告: %q", got)
+	if !strings.Contains(got, "当前活跃会话 ") || !strings.Contains(got, "将归档 1 个（约 ") {
+		t.Errorf("应先出预览（含活跃会话数）: %q", got)
 	}
 	if !strings.Contains(got, MsgArchiveConfirm) {
 		t.Errorf("应询问确认: %q", got)
@@ -338,6 +341,8 @@ func TestHandleCommandArchiveExcludesCurrentSession(t *testing.T) {
 	r.handleCommand("/archive 0")
 	if got := out.String(); !strings.Contains(got, "已归档 1 个会话") {
 		t.Errorf("应只归档非当前会话: %q", got)
+	} else if strings.Contains(got, "保留最近") {
+		t.Errorf("Keep=0 的预览不应报保留数: %q", got)
 	}
 	if _, err := os.Stat(self); err != nil {
 		t.Errorf("当前会话不应被归档: %v", err)

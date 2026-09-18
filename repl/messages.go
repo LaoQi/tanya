@@ -64,7 +64,8 @@ const (
 
 const (
 	MsgArchiveDone        = "已归档 %d 个会话 → %s（%s → %s）\n"
-	MsgArchivePreview     = "将归档 %d 个会话（约 %s）\n"
+	MsgArchivePreview     = "当前活跃会话 %d 个；将归档 %d 个（约 %s%s）。\n"
+	MsgArchiveKeepTail    = "，保留最近 %d 个"
 	MsgArchiveNone        = "没有符合条件的会话\n"
 	MsgArchiveNoneKeep    = "没有需要归档的会话（活跃会话数未超过保留数）\n"
 	MsgArchiveNoneWindow  = "没有早于 %s 未活动的会话\n"
@@ -79,8 +80,6 @@ const (
 	MsgForkNoSave         = "（不落盘模式，未写入）\n"
 	MsgLoadArchived       = "已载入会话 %s（归档只读，继续对话请 /fork）\n"
 	MsgArchiveReadOnlyFmt = "当前为归档只读会话（%s）；继续对话请 /fork 开新会话\n"
-	MsgAutoArchiveAsk     = "当前工作区有 %d 个活跃会话（阈值 %d），建议归档较早的，只保留最近 %d 个。\n将归档 %d 个会话（约 %s）。现在归档？[y/N] "
-	MsgAutoArchiveSkip    = "已跳过（配置 auto_archive: false 可关闭此提示，或随时 /archive 手动归档）\n"
 	SessArchMark          = "[归档] "
 )
 

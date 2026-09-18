@@ -264,6 +264,9 @@ func TestArchiveFilterMatrix(t *testing.T) {
 		if got := archiveIDs(rep); len(got) != 2 || got[0] != "20260101-020000" || got[1] != "20260101-010000" {
 			t.Errorf("Keep=1 应归档除最新外的全部: %v", got)
 		}
+		if rep.Active != 3 {
+			t.Errorf("Active 应为操作前活跃会话总数: %d", rep.Active)
+		}
 		if _, err := os.Stat(filepath.Join(dir, "20260101-030000.jsonl")); err != nil {
 			t.Errorf("保留的最新会话应原样留活动区: %v", err)
 		}
@@ -310,6 +313,9 @@ func TestArchiveFilterMatrix(t *testing.T) {
 		}
 		if !rep.DryRun || len(rep.Sessions) != 1 || rep.Volume != "" || rep.VolumeBytes != 0 {
 			t.Errorf("DryRun 报告异常: %+v", rep)
+		}
+		if rep.Active != 1 {
+			t.Errorf("DryRun 应报操作前活跃会话数: %d", rep.Active)
 		}
 		if _, err := os.Stat(archiveDir); !os.IsNotExist(err) {
 			t.Errorf("DryRun 不应创建归档目录: %v", err)
