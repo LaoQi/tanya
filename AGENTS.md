@@ -16,7 +16,7 @@
 - 工具策略：以 `run_shell` 为核心，新能力优先用 shell 命令组合实现；小型纯计算/查询工具放 `builtin.go`
 - 启动即要求可用 shell：`agent.New` 解析（配置覆盖 > 平台探测）全落空直接报错退出，无降级路径
 - `init` 子命令是新工作区的一次性脚手架（建 `.tanya/sessions/`、按确认建 `.tanya/.gitignore`、缺口时建 AGENTS.md 骨架），三项动作幂等且不覆盖既有文件，**必须在 `agent.New` 之前执行**（`.tanya/` 既是会话落点也是 `session_mode: auto` 判定依据）；不做项目探测、不调模型，见 `docs/design.md`《init 模式》
-- 启动自动归档（配置 `auto_archive` / `auto_archive_threshold`(64) / `auto_archive_keep`(16)，只走配置文件、无 env）：REPL 启动时活跃会话数达阈值即提示 y/n，`y` 归档成卷并只保留最近 `keep` 个，`ask`/`-p`/stdout 非终端/非控制终端/`-n` 一律不问（plain 模式与 stdout 非终端在 `ctty.Open` 之前静默返回）；归档写入触发点只有「启动自动归档」与 `/archive` 两处，见 `docs/design.md`《启动自动归档》
+- 启动自动归档（配置 `auto_archive`(默认 true) / `auto_archive_threshold`(64) / `auto_archive_keep`(16)，只走配置文件、无 env）：REPL 启动时活跃会话数达阈值即提示 y/n，`y` 归档成卷并只保留最近 `keep` 个，`ask`/`-p`/stdout 非终端/非控制终端/`-n` 一律不问（门禁统一为 `archiveInteractive()`）；归档写入触发点只有「启动自动归档」与 `/archive` 两处，两处共用 `REPL.archiveFlow`（预览含活跃总数 `ArchiveReport.Active`、确认走 `readConfirm`），见 `docs/design.md`《启动自动归档》
 - 会话归档（`/archive`）：只在完整交互环境启用（rich + 终端），先出报告再 `y/N` 确认；参数 = 保留数量（纯数字，`0` 为除当前会话外全部）或未活动时长（`7d`），无参取 `auto_archive_keep`；活动会话打包成 zip 卷落 `<workspace>/archive/`（entry 数据逐字节无损、写入后不可变、不做解档回活动区），列表只读 zip 中央目录即可列会话；归档会话 `/load` 为只读（`sessionStore.frozen`，与 `-n` 的 `disabled` 正交），继续对话一律 `/fork`（新 id + 当前 system 快照），见 `docs/session-archive.md`
 - REPL 输入分发（`repl/dispatch.go`）：`/` 白名单斜杠命令、`exit`/`quit` 内建退出、`:`/`：` 等价显式对话前缀、其余直接与 LLM 对话；进程 cwd 恒为启动目录（全程不 `os.Chdir`），`run_shell` 默认在此执行并可用 `cwd` 参数指定单次目录
 - LLM 协议双通道 `api_protocol`（yaml/env `TANYA_API_PROTOCOL`，默认 `responses`，非法值启动报错）：`responses` 走 `/responses`（reasoning 明文捕获/原样回传、固定 `store: false`）；`chat` 走 `/chat/completions`（思维链经 `reasoning_content` 捕获与回传，wire 上不出现 `reasoning_items`），见 `docs/design.md`《LLM 接入》

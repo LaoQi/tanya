@@ -246,11 +246,13 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 启动自动归档
 
-- 配置三键（仅配置文件，无 env）：`auto_archive`（默认 false）、`auto_archive_threshold`（默认 64）、`auto_archive_keep`（默认 16）；`LoadConfig` 校验 `threshold >= 2` 与 `0 <= keep < threshold`，越界即启动报错（`MsgBadArchiveThreshold`/`MsgBadArchiveKeep`）
+- 配置三键（仅配置文件，无 env）：`auto_archive`（默认 true）、`auto_archive_threshold`（默认 64）、`auto_archive_keep`（默认 16）；`auto_archive` 是唯一「默认开」的归档开关，`defaultConfig()` 里显式置 true，yaml 写 `auto_archive: false` 即覆盖关闭；`LoadConfig` 校验 `threshold >= 2` 与 `0 <= keep < threshold`，越界即启动报错（`MsgBadArchiveThreshold`/`MsgBadArchiveKeep`）
 - `Agent.SuggestArchive() (ArchiveSuggestion, bool)`：`auto_archive` 关闭、`-n`（`store.disabled`）、或活跃会话数 < 阈值时返回 false；否则用 `store.list()`（活动组在前、组内 id 降序）算出 `Threshold/Keep/Active/Candidates/Bytes`——候选计算与 `archive()` 同序镜像：活动会话按 id 降序先占满 `Keep` 个保留名额，余下的再剔除当前会话后计数（对应 `Exclude` 在 Keep 截断之后过滤），故提示的 `Candidates/Bytes` 与实际归档严格一致；`Keep=0` 即除当前会话外全部入选
-- REPL 在欢迎屏之后、进循环之前调 `autoArchivePrompt()`：纯文本模式（`-p`、ask 的 plain 档）或 `ctty.Probe().StdoutTTY` 为假（stdout 重定向/管道）时静默返回——两者都在开终端之前判完，管道场景既不污染 stdout 也不阻塞在 `/dev/tty`；然后取建议（不满足即静默返回），再 `ctty.Open()` 取控制终端——拿不到即静默跳过，提示从 `/dev/tty` 读一行，`y`/`yes` 归档、其它（含空行）跳过并打 `MsgAutoArchiveSkip`
-- 归档执行复用 `ArchiveSessions(ArchiveOptions{Keep, Exclude: 当前会话})`（一卷落定、删源文件），报告经 `formatArchiveReport` 输出，与 `/archive` 同一格式
-- `n` 不做「不再询问」记忆，下次启动仍会问；归档写入触发点因此有两个：REPL 启动自动归档（`y/N` 提示）、`/archive` 手动（预览报告 + `y/N` 确认）
+- REPL 在欢迎屏之后、进循环之前调 `autoArchivePrompt()`：门禁与 `/archive` 同一判据 `archiveInteractive()`（rich 输出 + `r.raw` + `r.prof.TTY`），纯文本模式（`-p`/ask 的 plain 档）、stdout 非终端（管道/重定向）、无控制终端（`/dev/tty` 打不开 → readline 降级档）一律静默返回，管道场景既不污染 stdout 也不阻塞；随后取建议——`auto_archive` 关闭、`-n`（`store.disabled`）、活跃会话数 < 阈值任一成立即静默返回，命中才进共用流程
+- 两条入口共用一条线路 `REPL.archiveFlow(opt, noneArg)`（`repl/archive_flow.go`）：先 `DryRun` 取 `ArchiveReport` → 0 命中按口径给 none 文案 + 跳过/失败行 → 出预览 → `readConfirm` 读一行 → `y`/`yes` 去 `DryRun` 真跑并出报告，其它（含空行、EOF）打 `MsgArchiveCancel`；预览文案 `当前活跃会话 A 个；将归档 C 个（约 X[，保留最近 K 个]）。`，其中 `A` = `ArchiveReport.Active`（操作前活跃会话总数，`archive()` 在 Keep 截断前记下未归档会话数）、`K` 段仅 `Keep > 0` 时出现（时长窗口口径无保留数概念）
+- 自动归档传 `agent.ArchiveOptions{Keep: auto_archive_keep}`、`/archive` 无参传同一个 `Keep`（`Agent.AutoArchiveKeep()`），故两者除触发条件（`auto_archive` + 阈值）外行为完全一致；确认读与 `/archive` 同走 `readConfirm`（readline + `SetHistoryFilter` 全拒），启动期不再另开 `/dev/tty` 直读
+- 归档执行复用 `ArchiveSessions(ArchiveOptions{Keep|OlderThan, Exclude: 当前会话})`（一卷落定、删源文件），报告经 `formatArchiveReport` 输出，两条入口同一格式
+- `n` 不做「不再询问」记忆，下次启动仍会问；关闭启动询问设 `auto_archive: false`（说明落在 README 与配置注释，不再在跳过文案里回显）
 
 ## 系统提示与缓存友好
 
@@ -303,7 +305,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 白名单（`slashCommands`，同时驱动 Tab 补全）即分发契约：`Run` 先用 `isSlashCommand` 过滤，未命中的 `/` 开头输入按对话内容处理，因此 `handleCommand` 的 switch 不再有 `default` 分支（原先的 `MsgUnknownCmd` 不可达，已删）。白名单与 case 必须一一对应，`TestSlashCommandsAllHandled` 覆盖该不变量（`/load` 走 stdin 交互路径，单独测试）。
 
-- `/archive [n|<dur>]` 把历史会话打包成归档卷：纯数字 `n` 为保留的最近会话数（`0` = 除当前会话外全部），`<dur>` 形如 `7d`/`12h`，仅接受单段单单位（`d`/`h`/`m`/`s`）按未活动时长筛选，无参取 `auto_archive_keep`；恒排除当前会话；只在完整交互环境（rich 输出 + `r.raw` + `r.prof.TTY`）启用，`-p`/ask/管道/非终端只提示 `MsgArchiveOnlyTTY`；先出预览报告再 `现在归档？[y/N]` 确认（确认读走 `readConfirm`，挂 `SetHistoryFilter` 全拒、答案不进输入历史）；只做无损压缩，之后可用 `/load` 只读载入（见《会话归档与 fork》）
+- `/archive [n|<dur>]` 把历史会话打包成归档卷：纯数字 `n` 为保留的最近会话数（`0` = 除当前会话外全部），`<dur>` 形如 `7d`/`12h`，仅接受单段单单位（`d`/`h`/`m`/`s`）按未活动时长筛选，无参取 `auto_archive_keep`；恒排除当前会话；只在完整交互环境（rich 输出 + `r.raw` + `r.prof.TTY`）启用，`-p`/ask/管道/非终端只提示 `MsgArchiveOnlyTTY`；与启动自动归档共用 `archiveFlow`（预览含活跃会话总数、`y/N` 确认读走 `readConfirm` 且挂 `SetHistoryFilter` 全拒、答案不进输入历史）；只做无损压缩，之后可用 `/load` 只读载入（见《会话归档与 fork》）
 - `/fork` 仅归档只读态可用：把当前归档会话的 history 作为新会话起点并立即落盘（新 id、当前 system 快照、继承历史）
 
 - `/history` 无参截断列表（`term.OneLine` 先剥离 ANSI 转义与控制字符、压成单行，再按 120 rune 截断，避免 `\r`/`\x1b[K` 覆盖已打印行与未闭合 SGR 泄漏）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染、并按角色着色（user 用 `Ok` 绿、其余用 `Warn` 黄；`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 stdout 是否终端与输出模式约束：stdout 非终端、plain 一并旁路），user/tool 消息与工具参数原样

@@ -87,6 +87,7 @@ func defaultConfig() *Config {
 		UserAgent:        DefaultUserAgent,
 		DataDir:          defaultDataDir(),
 		ToolOutputLines:  20,
+		AutoArchive:      true,
 		ArchiveThreshold: DefaultArchiveThreshold,
 		ArchiveKeep:      DefaultArchiveKeep,
 	}

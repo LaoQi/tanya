@@ -361,11 +361,13 @@ func TestLoadConfigShowReasoning(t *testing.T) {
 
 func TestLoadConfigAutoArchive(t *testing.T) {
 	cases := []struct {
-		name    string
-		content string
-		wantErr bool
+		name     string
+		content  string
+		wantAuto bool
+		wantErr  bool
 	}{
-		{name: "默认关闭", content: "model: m"},
+		{name: "默认开启", content: "model: m", wantAuto: true},
+		{name: "显式关闭", content: "auto_archive: false\n"},
 		{name: "阈值过小", content: "auto_archive_threshold: 1\n", wantErr: true},
 		{name: "阈值过小且保留数合法", content: "auto_archive_threshold: 1\nauto_archive_keep: 0\n", wantErr: true},
 		{name: "保留数为负", content: "auto_archive_keep: -1\n", wantErr: true},
@@ -389,6 +391,9 @@ func TestLoadConfigAutoArchive(t *testing.T) {
 			}
 			if cfg.ArchiveThreshold != DefaultArchiveThreshold || cfg.ArchiveKeep != DefaultArchiveKeep {
 				t.Errorf("默认阈值/保留数异常: %+v", cfg)
+			}
+			if cfg.AutoArchive != c.wantAuto {
+				t.Errorf("开关默认值异常: AutoArchive=%v want %v", cfg.AutoArchive, c.wantAuto)
 			}
 		})
 	}

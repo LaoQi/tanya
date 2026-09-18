@@ -56,6 +56,7 @@ type ArchiveFail struct {
 type ArchiveReport struct {
 	Volume      string
 	DryRun      bool
+	Active      int
 	Sessions    []ArchiveEntry
 	Skipped     []ArchiveSkip
 	Failed      []ArchiveFail
@@ -96,6 +97,7 @@ func (s *sessionStore) archive(opt ArchiveOptions) (ArchiveReport, error) {
 		}
 	}
 	sort.Slice(cands, func(i, j int) bool { return cands[i].ID > cands[j].ID })
+	rep.Active = len(cands)
 	if opt.Keep > 0 && len(cands) > opt.Keep {
 		cands = cands[opt.Keep:]
 	}
