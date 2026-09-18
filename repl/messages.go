@@ -63,13 +63,17 @@ const (
 )
 
 const (
-	ArchiveDryRunFlag     = "--dry-run"
 	MsgArchiveDone        = "已归档 %d 个会话 → %s（%s → %s）\n"
-	MsgArchiveNone        = "没有符合条件的历史会话（近 30 天内的会话不归档，用 /archive all 归档全部）\n"
+	MsgArchivePreview     = "将归档 %d 个会话（约 %s）\n"
+	MsgArchiveNone        = "没有符合条件的会话\n"
+	MsgArchiveNoneKeep    = "没有需要归档的会话（活跃会话数未超过保留数）\n"
+	MsgArchiveNoneWindow  = "没有早于 %s 未活动的会话\n"
+	MsgArchiveConfirm     = "现在归档？[y/N] "
+	MsgArchiveCancel      = "已取消，未归档\n"
+	MsgArchiveOnlyTTY     = "归档仅在交互终端下可用（当前为非交互或纯文本模式）\n"
 	MsgArchiveSkipFmt     = "  跳过 %s（%s）\n"
 	MsgArchiveFailFmt     = "  失败 %s（%v）\n"
-	MsgArchiveDryRun      = "试运行：将归档 %d 个会话（%s）\n"
-	MsgArchiveBadArg      = "无效的归档范围 %q（可用 all 或时长，如 7d、12h、12h30m）"
+	MsgArchiveBadArg      = "无效的归档参数 %q（保留数量如 20、0，或时长如 7d、12h）"
 	MsgForkDone           = "已 fork 为新会话 %s\n"
 	MsgForkNotArchive     = "当前会话不是归档只读会话，直接对话即可\n"
 	MsgForkNoSave         = "（不落盘模式，未写入）\n"
@@ -155,7 +159,7 @@ const helpText = `斜杠命令：
   /help               显示帮助
   /new                开启新会话（当前会话自动保存）
   /load [id]          无参打开会话选择菜单，带 id 直接载入
-  /archive [选项]     归档历史会话（无参 = 30 天前的会话，all = 全部，--dry-run 只看不写）
+  /archive [n|<时长>] 归档历史会话（先出报告再确认；无参 = 保留 auto_archive_keep 个，纯数字 = 保留 n 个（0 = 全部），7d/12h = 按未活动时长）
   /fork               把归档只读会话 fork 成新会话（继承历史）
   /stat               会话统计（工作区/用量/缓存）
   /history [n|all]    无参截断列表，n 查看单条，all 全量显示

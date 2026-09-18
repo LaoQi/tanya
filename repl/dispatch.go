@@ -42,46 +42,47 @@ func dialogueText(line string) (string, bool) {
 	return strings.TrimSpace(line[size:]), true
 }
 
-var archiveDayArg = regexp.MustCompile(`^([0-9]+)d$`)
+var (
+	archiveDurArg   = regexp.MustCompile(`^([0-9]+)([dhms])$`)
+	archiveCountArg = regexp.MustCompile(`^[0-9]+$`)
+)
 
-func ParseArchiveArg(arg string) (agent.ArchiveOptions, error) {
-	arg = strings.TrimSpace(arg)
-	dry := false
-	if rest, ok := strings.CutPrefix(arg, ArchiveDryRunFlag); ok && (rest == "" || rest[0] == ' ') {
-		dry = true
-		arg = strings.TrimSpace(rest)
-	}
-	opt, err := parseArchiveWindow(arg)
-	if err != nil {
-		return agent.ArchiveOptions{}, err
-	}
-	opt.DryRun = dry
-	return opt, nil
+var archiveUnit = map[byte]time.Duration{
+	'd': 24 * time.Hour,
+	'h': time.Hour,
+	'm': time.Minute,
+	's': time.Second,
 }
 
-func parseArchiveWindow(arg string) (agent.ArchiveOptions, error) {
+func ParseArchiveArg(arg string, defaultKeep int) (agent.ArchiveOptions, error) {
+	arg = strings.TrimSpace(arg)
 	switch {
 	case arg == "":
-		return agent.ArchiveOptions{OlderThan: agent.ArchiveDefaultWindow}, nil
-	case strings.EqualFold(arg, "all"):
-		return agent.ArchiveOptions{}, nil
+		return agent.ArchiveOptions{Keep: defaultKeep}, nil
+	case archiveCountArg.MatchString(arg):
+		n, err := strconv.Atoi(arg)
+		if err != nil {
+			return agent.ArchiveOptions{}, fmt.Errorf(MsgArchiveBadArg, arg)
+		}
+		return agent.ArchiveOptions{Keep: n}, nil
 	}
-	d, err := parseArchiveDuration(arg)
-	if err != nil || d <= 0 {
+	d, ok := parseArchiveDuration(arg)
+	if !ok || d <= 0 {
 		return agent.ArchiveOptions{}, fmt.Errorf(MsgArchiveBadArg, arg)
 	}
 	return agent.ArchiveOptions{OlderThan: d}, nil
 }
 
-func parseArchiveDuration(arg string) (time.Duration, error) {
-	if m := archiveDayArg.FindStringSubmatch(arg); m != nil {
-		n, err := strconv.Atoi(m[1])
-		if err != nil {
-			return 0, err
-		}
-		return time.Duration(n) * 24 * time.Hour, nil
+func parseArchiveDuration(arg string) (time.Duration, bool) {
+	m := archiveDurArg.FindStringSubmatch(arg)
+	if m == nil {
+		return 0, false
 	}
-	return time.ParseDuration(arg)
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, false
+	}
+	return time.Duration(n) * archiveUnit[m[2][0]], true
 }
 
 func (r *REPL) cwdLabel() string {

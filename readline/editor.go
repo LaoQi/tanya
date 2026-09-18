@@ -26,24 +26,25 @@ func (c Completion) display() string {
 }
 
 type Editor struct {
-	term      Terminal
-	raw       bool
-	history   []string
-	draft     string
-	histIdx   int
-	complete  func(line string) []Completion
-	ghostFn   func(line string) string
-	ghost     string
-	out       io.Writer
-	buf       []rune
-	pos       int
-	prompt    string
-	kill      string
-	cursorRow int
-	menu      []Completion
-	menuIdx   int
-	dim       rstyle.Style
-	accent    rstyle.Style
+	term          Terminal
+	raw           bool
+	history       []string
+	draft         string
+	histIdx       int
+	complete      func(line string) []Completion
+	ghostFn       func(line string) string
+	historyFilter func(string) bool
+	ghost         string
+	out           io.Writer
+	buf           []rune
+	pos           int
+	prompt        string
+	kill          string
+	cursorRow     int
+	menu          []Completion
+	menuIdx       int
+	dim           rstyle.Style
+	accent        rstyle.Style
 }
 
 func NewEditor(term Terminal, raw bool) *Editor {
@@ -53,6 +54,8 @@ func NewEditor(term Terminal, raw bool) *Editor {
 func (e *Editor) SetComplete(fn func(string) []Completion) { e.complete = fn }
 
 func (e *Editor) SetGhost(fn func(string) string) { e.ghostFn = fn }
+
+func (e *Editor) SetHistoryFilter(fn func(string) bool) { e.historyFilter = fn }
 
 func (e *Editor) SetOutput(w io.Writer) { e.out = w }
 
@@ -145,7 +148,7 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 		line := string(e.buf)
 		fmt.Fprint(e.out, "\r\n")
 		e.cursorRow = 0
-		if strings.TrimSpace(line) != "" {
+		if strings.TrimSpace(line) != "" && e.keepHistory(line) {
 			e.history = append(e.history, line)
 		}
 		return true, line, nil
@@ -225,6 +228,13 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 	e.refreshGhost()
 	e.render("")
 	return false, "", nil
+}
+
+func (e *Editor) keepHistory(line string) bool {
+	if e.historyFilter != nil {
+		return e.historyFilter(line)
+	}
+	return true
 }
 
 func (e *Editor) clearKeepHistory() {

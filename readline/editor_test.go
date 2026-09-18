@@ -325,3 +325,32 @@ func TestEditorCtrlLSizeUnavailable(t *testing.T) {
 		t.Errorf("Size 不可用时不应推空行: %q", o)
 	}
 }
+
+func TestEditorHistoryFilter(t *testing.T) {
+	ed, _, _ := newFakeEditor(append(runes("y"), KeyEvent{Code: KeyEnter})...)
+	ed.SetHistoryFilter(func(string) bool { return false })
+	if line, err := ed.Readline("? "); err != nil || line != "y" {
+		t.Fatalf("line=%q err=%v", line, err)
+	}
+	if len(ed.History()) != 0 {
+		t.Errorf("被过滤的行不应入史: %v", ed.History())
+	}
+
+	ed2, _, _ := newFakeEditor(append(runes("keep"), KeyEvent{Code: KeyEnter})...)
+	ed2.SetHistoryFilter(func(line string) bool { return line != "skip" })
+	if _, err := ed2.Readline("? "); err != nil {
+		t.Fatal(err)
+	}
+	if len(ed2.History()) != 1 || ed2.History()[0] != "keep" {
+		t.Errorf("谓词放行的行应入史: %v", ed2.History())
+	}
+
+	ed2.SetHistoryFilter(nil)
+	ed2.term.(*fakeTerm).events = append(runes("after"), KeyEvent{Code: KeyEnter})
+	if _, err := ed2.Readline("? "); err != nil {
+		t.Fatal(err)
+	}
+	if got := ed2.History(); len(got) != 2 || got[1] != "after" {
+		t.Errorf("清空过滤器后恢复默认入史: %v", got)
+	}
+}

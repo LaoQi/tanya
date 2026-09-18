@@ -95,6 +95,17 @@ func (f *fakeTerm) Restore() { f.raw = false }
 
 func (f *fakeTerm) Size() (readline.Size, bool) { return readline.Size{Cols: 80, Rows: 24}, true }
 
+// typed 生成 raw 模式下的一行输入按键序列（逐字符 + 回车）。
+func typed(s string) []readline.KeyEvent {
+	evs := make([]readline.KeyEvent, 0, len(s)+1)
+	for _, r := range s {
+		evs = append(evs, readline.KeyEvent{Code: readline.KeyRune, Rune: r})
+	}
+	return append(evs, readline.KeyEvent{Code: readline.KeyEnter})
+}
+
+func (f *fakeTerm) rewind() { f.idx = 0 }
+
 func (f *fakeTerm) ReadKey() (readline.KeyEvent, error) {
 	f.inKey = true
 	defer func() { f.inKey = false }()

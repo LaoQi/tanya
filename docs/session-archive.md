@@ -63,7 +63,7 @@ type ArchiveOptions struct {
 	OlderThan time.Duration // mtime ≤ Now-OlderThan；0 = 不限
 	Keep      int           // 保留最新 N 个活动会话；0 = 不限
 	Exclude   string        // 当前会话 id，永不归档
-	DryRun    bool          // 只出报告不落卷（/archive --dry-run）
+	DryRun    bool          // 只出报告不落卷（/archive 的预览阶段）
 	Now       time.Time     // 零值取 time.Now
 }
 
@@ -139,9 +139,9 @@ func (s *sessionStore) findArchived(id string) (volume string, ok bool)
 
 | 位置 | 行为 |
 |---|---|
-| `/archive` | 默认 30 天前的会话；`/archive 7d`、`/archive 12h`、`/archive 12h30m`、`/archive all`；`--dry-run` 前缀只出报告不落卷（`/archive --dry-run 7d`） |
-| `/archive` 输出 | 归档成功 `已归档 N 个会话 → <卷名>（<原大小> → <卷大小>）`；跳过/失败各一行；0 命中 `没有符合条件的历史会话（近 30 天内的会话不归档，用 /archive all 归档全部）` |
-| 解析 | `repl.ParseArchiveArg(arg string) (agent.ArchiveOptions, error)`：可选前导 `--dry-run`（`ArchiveDryRunFlag`）置 `DryRun`；余下空参 → 30d、`all` → `OlderThan=0`、否则 `time.ParseDuration`（仅 `d` 后缀需自行换算：`Nd` → `N*24h`）；`handleArchive` 把 `parts[1:]` 以空格 join 后传入，多余段落入时长解析报非法范围 |
+| `/archive` | 仅完整交互环境（rich 输出 + `r.raw` + `r.prof.TTY`）启用，其余环境只提示 `MsgArchiveOnlyTTY`；无参 = `Keep=auto_archive_keep`、纯数字 = `Keep=n`（`0` = 除当前会话外全部）、带单位（`7d`/`12h`，单段单单位 `d`/`h`/`m`/`s`）= `OlderThan` |
+| `/archive` 输出 | 两阶段：预览 `将归档 N 个会话（约 X）` + 跳过/失败行 → `现在归档？[y/N] `，`y`/`yes` 后 `已归档 N 个会话 → <卷名>（<原大小> → <卷大小>）`，其它输入 `已取消，未归档`；0 命中按口径给 `MsgArchiveNoneKeep` / `MsgArchiveNoneWindow`（窗口文案直接回显原参数；`Keep=0` 用通用 `没有符合条件的会话`）；确认答案经 `readConfirm` 不入输入历史 |
+| 解析 | `repl.ParseArchiveArg(arg string, defaultKeep int) (agent.ArchiveOptions, error)`：空参 → `Keep=defaultKeep`、纯数字（`^[0-9]+$`）→ `Keep=n`、单段单单位（`^([0-9]+)(d|h|m|s)$`，`d` 按 24h 换算）→ `OlderThan`，其余（复合时长如 `12h30m`、多段、数值 ≤ 0、溢出）报非法参数；`handleArchive` 把 `parts[1:]` 以空格 join 后传入 |
 | `/load <归档 id>` | `已载入会话 X（归档只读，继续对话请 /fork）`；picker 行摘要前带 `[归档] ` |
 | 只读态对话 | REPL 在对话分支前拦截（含 `:`/`：`）→ `当前为归档只读会话（X）；继续对话请 /fork 开新会话`；`agent.Ask` 兜底 `ErrArchiveReadOnly` |
 | `/fork` | 归档只读态 → `已 fork 为新会话 <新 id>`；非归档态 → `当前会话不是归档只读会话，直接对话即可`；`-n` 下追加一行 `（不落盘模式，未写入）` |
@@ -149,7 +149,7 @@ func (s *sessionStore) findArchived(id string) (volume string, ok bool)
 | 退出收尾 | 归档只读态文件行显示 `会话文件 未写入（不落盘模式）` |
 | 启动自动归档 | 活跃会话数 ≥ `auto_archive_threshold` 时提示 `当前工作区有 N 个活跃会话（阈值 T），建议归档较早的，只保留最近 K 个。\n将归档 C 个会话（约 X）。现在归档？[y/N] `；`y`/`yes` 归档，其它/空行 → `已跳过（配置 auto_archive: false 可关闭此提示，或随时 /archive 手动归档）`。仅 rich 模式且 stdout 为终端时才问：plain（`-p`/ask）与 stdout 非终端在 `ctty.Open` 之前静默返回，无控制终端/`-n` 同样不问；`C/X` 已剔除当前会话（先占 `keep` 名额再剔除，与 `archive()` 同序） |
 
-新增常量：`repl/messages.go`（`MsgArchiveDone` / `MsgArchiveNone` / `MsgArchiveSkipFmt` / `MsgArchiveFailFmt` / `MsgArchiveDryRun` / `MsgForkDone` / `MsgForkNotArchive` / `MsgForkNoSave` / `MsgLoadArchived` / `MsgArchiveReadOnlyFmt` / `SessArchMark` / `slashCommands` 增 `/archive` `/fork` / help 文案），`agent/messages.go`（`ErrArchiveReadOnly` / `ErrForkNotArchive` / `MsgArchiveVolFailFmt` / `MsgControlStatArchive`）。数字与大小格式化归 repl（沿用 `stats.go` 既有缩写口径）。
+新增常量：`repl/messages.go`（`MsgArchiveDone` / `MsgArchiveNone` / `MsgArchiveSkipFmt` / `MsgArchiveFailFmt` / `MsgArchivePreview` / `MsgForkDone` / `MsgForkNotArchive` / `MsgForkNoSave` / `MsgLoadArchived` / `MsgArchiveReadOnlyFmt` / `SessArchMark` / `slashCommands` 增 `/archive` `/fork` / help 文案），`agent/messages.go`（`ErrArchiveReadOnly` / `ErrForkNotArchive` / `MsgArchiveVolFailFmt` / `MsgControlStatArchive`）。数字与大小格式化归 repl（沿用 `stats.go` 既有缩写口径）。
 
 ## 6. 实测数据与风险
 
@@ -189,7 +189,7 @@ func (s *sessionStore) findArchived(id string) (volume string, ok bool)
 
 改动：`repl/dispatch.go`（`ParseArchiveArg`、两个新命令分发、只读拦截）、`repl/repl.go`（`handleCommand` 分支、`loadSessionInteractive` 文案）、`repl/completer.go`（`slashCommands` 增项、`/archive` 参数补全可选）、`repl/picker.go`（`SessArchMark`）、`repl/messages.go`、`agent/messages.go`、`agent/agent.go`（`Fork`）、`agent/control.go`（`MsgControlStatArchive`）、`repl/stats.go`（归档只读态显示）。
 
-测试：`TestParseArchiveArg` 表驱动（空/`all`/`7d`/`12h`/`90m`/非法）、`TestForkFromArchived`（新文件内容、条数、后续 append 增量、system 取当前快照）、`TestForkRejectedWhenNotArchived`、`TestArchiveReadOnlyBlocksDialogue`（含 `:` 前缀）、`TestSessRowArchivedMark`、`TestHandleCommandArchiveFork`；P2 收口跑 `go test -race ./...`。
+测试：`TestParseArchiveArg` 表驱动（空/纯数字/`7d`/`12h`/`90m`/非法）、`TestForkFromArchived`（新文件内容、条数、后续 append 增量、system 取当前快照）、`TestForkRejectedWhenNotArchived`、`TestArchiveReadOnlyBlocksDialogue`（含 `:` 前缀）、`TestSessRowArchivedMark`、`TestHandleCommandArchiveFork`；P2 收口跑 `go test -race ./...`。
 
 ### P3 文档与收尾
 
@@ -200,8 +200,9 @@ func (s *sessionStore) findArchived(id string) (volume string, ok bool)
 ```bash
 make build
 ./tanya                       # 造几条会话（随便问几轮）
-/archive                      # 默认 30 天：多为 0 命中，看提示文案
-/archive all                  # 归档除当前会话外的全部
+/archive                      # 保留 auto_archive_keep 个：先出报告，输入 n 取消
+/archive 0                    # 报告后输 y：除当前会话外全部归档
+/archive 7d                   # 按未活动时长筛选
 unzip -l .tanya/archive/archive-*.zip
 /load                         # picker 里归档项带 [归档] 前缀
 /load <归档 id>               # 只读载入 → 提示 /fork
@@ -247,3 +248,5 @@ unzip -l .tanya/archive/archive-*.zip
 8. `ArchiveEntry.After` 取卷中央目录的 `CompressedSize64`（写完卷回读一次 CD），`Before` 取源文件字节；报告消费者只用得上卷级 `RawBytes`/`VolumeBytes`。
 9. `/stat` 的归档行文案为 `会话文件: 归档只读 X（未写入）`（与 `/stat` 块内既有「会话文件」标签一致，文档原写「会话: 归档只读 …」）；`agent_custom` 的 `stat` 用文档口径 `会话: 归档只读 X（未写入）`。
 10. 卷写入前的元数据扫描失败记 `Failed` 并跳过该文件（不建该 entry）；全部候选都失败时不建目录、不建空卷。
+11. 2026-09-18 `/archive` 参数语义重做（用户要求）：删 `--dry-run` 与 `all`，改为「先出报告 + `y/N` 确认」的一步式交互，且仅在完整交互环境（rich 输出 + `r.raw` + `r.prof.TTY`）启用，`-p`/ask/管道/非终端一律只提示 `MsgArchiveOnlyTTY`（不出报告、不落卷）。参数口径改为：无参 = `Keep=auto_archive_keep`（新访问器 `Agent.AutoArchiveKeep()`）、纯数字 = `Keep=n`（`0` = 除当前会话外全部）、带单位 = `OlderThan`；`ParseArchiveArg` 增 `defaultKeep` 形参；`agent.ArchiveDefaultWindow` 与 30 天默认窗口一并删除。`MsgArchiveDryRun` → `MsgArchivePreview`，新增 `MsgArchiveConfirm`/`MsgArchiveCancel`/`MsgArchiveOnlyTTY`/`MsgArchiveNoneKeep`/`MsgArchiveNoneWindow`，`MsgArchiveNone` 退为通用 0 命中文案（启动自动归档路径复用）。
+12. 同日 review 修复（用户要求）：时长参数收窄为单段单单位（`Nd`/`Nh`/`Nm`/`Ns`，正则 `^([0-9]+)(d|h|m|s)$` + 单位表，不再走 `time.ParseDuration`，复合时长如 `12h30m` 报非法）；0 命中的窗口文案（`MsgArchiveNoneWindow`）改为直接回显原参数，删掉按 `Duration` 反解格式化的 `archiveWindowText`（`TrimSuffix("0s")` 会把秒位为 0 的时长截坏，如 `30s`→`3`）；readline `Editor` 新增 `SetHistoryFilter(func(string) bool)`（默认行为不变，谓词拒绝始终不入史），`/archive` 确认读挂全拒过滤器、`y`/`n` 不进输入历史。
