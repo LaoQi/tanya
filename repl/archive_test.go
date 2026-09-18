@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/readline"
+	"github.com/LaoQi/tanya/render/term"
 )
 
 const replSampleSession = `{"role":"system","content":"sys"}
@@ -17,37 +19,40 @@ const replSampleSession = `{"role":"system","content":"sys"}
 `
 
 func TestParseArchiveArg(t *testing.T) {
+	const def = 16
 	cases := []struct {
-		arg     string
-		want    time.Duration
-		wantDry bool
-		wantErr bool
+		arg      string
+		wantKeep int
+		wantWin  time.Duration
+		wantErr  bool
 	}{
-		{arg: "", want: agent.ArchiveDefaultWindow},
-		{arg: "  ", want: agent.ArchiveDefaultWindow},
-		{arg: "all", want: 0},
-		{arg: "ALL", want: 0},
-		{arg: "7d", want: 7 * 24 * time.Hour},
-		{arg: "30d", want: 30 * 24 * time.Hour},
-		{arg: "12h", want: 12 * time.Hour},
-		{arg: "90m", want: 90 * time.Minute},
-		{arg: "12h30m", want: 12*time.Hour + 30*time.Minute},
-		{arg: "--dry-run", want: agent.ArchiveDefaultWindow, wantDry: true},
-		{arg: "--dry-run  ", want: agent.ArchiveDefaultWindow, wantDry: true},
-		{arg: "--dry-run all", want: 0, wantDry: true},
-		{arg: "--dry-run 7d", want: 7 * 24 * time.Hour, wantDry: true},
+		{arg: "", wantKeep: def},
+		{arg: "  ", wantKeep: def},
+		{arg: "20", wantKeep: 20},
+		{arg: "1", wantKeep: 1},
+		{arg: "0", wantKeep: 0},
+		{arg: "7d", wantWin: 7 * 24 * time.Hour},
+		{arg: "30d", wantWin: 30 * 24 * time.Hour},
+		{arg: "12h", wantWin: 12 * time.Hour},
+		{arg: "90m", wantWin: 90 * time.Minute},
+		{arg: "45s", wantWin: 45 * time.Second},
+		{arg: "12h30m", wantErr: true},
+		{arg: "99999999999999999999", wantErr: true},
+		{arg: "all", wantErr: true},
+		{arg: "--dry-run", wantErr: true},
 		{arg: "0d", wantErr: true},
 		{arg: "-1h", wantErr: true},
+		{arg: "-1", wantErr: true},
 		{arg: "3x", wantErr: true},
 		{arg: "d", wantErr: true},
 		{arg: "1.5d", wantErr: true},
+		{arg: "12.5", wantErr: true},
 		{arg: "1d2h", wantErr: true},
 		{arg: "1d 2d", wantErr: true},
 		{arg: "none", wantErr: true},
-		{arg: "--dry-run7d", wantErr: true},
 	}
 	for _, c := range cases {
-		got, err := ParseArchiveArg(c.arg)
+		got, err := ParseArchiveArg(c.arg, def)
 		if c.wantErr {
 			if err == nil {
 				t.Errorf("ParseArchiveArg(%q) 应报错，得到 %+v", c.arg, got)
@@ -58,12 +63,11 @@ func TestParseArchiveArg(t *testing.T) {
 			t.Errorf("ParseArchiveArg(%q) 失败: %v", c.arg, err)
 			continue
 		}
-		if got.OlderThan != c.want || got.DryRun != c.wantDry || got.Exclude != "" {
-			t.Errorf("ParseArchiveArg(%q) = %+v want OlderThan=%v dry=%v", c.arg, got, c.want, c.wantDry)
+		if got.Keep != c.wantKeep || got.OlderThan != c.wantWin || got.DryRun || got.Exclude != "" {
+			t.Errorf("ParseArchiveArg(%q) = %+v want keep=%d win=%v", c.arg, got, c.wantKeep, c.wantWin)
 		}
 	}
 }
-
 func seedOldSession(t *testing.T, dataDir, id string, age time.Duration) string {
 	t.Helper()
 	path := seedIntoSessionDir(t, dataDir, id+".jsonl", replSampleSession)
@@ -87,22 +91,90 @@ func archiveOldSession(t *testing.T, a *agent.Agent, dataDir, id string) string 
 	return rep.Volume
 }
 
+func newArchiveREPL(t *testing.T, a *agent.Agent, keys ...readline.KeyEvent) (*REPL, *fakeTerm, *syncBuf, *syncBuf) {
+	t.Helper()
+	ttyProfile(t, term.Profile{TTY: true, Colors: term.LevelNone})
+	dev := newFakeTerm(keys...)
+	out, errb := &syncBuf{}, &syncBuf{}
+	r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, modeRich)), WithTerminal(dev, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r, dev, out, errb
+}
+
+func TestHandleCommandArchiveNonInteractive(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	path := seedOldSession(t, dir, "20260101-010000", 40*24*time.Hour)
+
+	check := func(t *testing.T, r *REPL, out *syncBuf) {
+		t.Helper()
+		r.handleCommand("/archive")
+		if !strings.Contains(out.String(), MsgArchiveOnlyTTY) {
+			t.Errorf("非交互环境应提示不可用: %q", out.String())
+		}
+		if strings.Contains(out.String(), MsgArchiveConfirm) {
+			t.Errorf("非交互环境不应询问: %q", out.String())
+		}
+	}
+
+	cases := []struct {
+		name string
+		prof term.Profile
+		mode outMode
+		raw  bool
+	}{
+		{"非 raw 输入", term.Profile{TTY: true, Colors: term.LevelNone}, modeRich, false},
+		{"纯文本模式", term.Profile{TTY: true, Colors: term.LevelNone}, modePlain, true},
+		{"非终端输出", term.Profile{TTY: false, Colors: term.LevelNone}, modeRich, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ttyProfile(t, c.prof)
+			out, errb := &syncBuf{}, &syncBuf{}
+			r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, c.mode)), WithTerminal(newFakeTerm(line("y")), c.raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			check(t, r, out)
+		})
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("未启用时不应删除源文件: %v", err)
+	}
+	if dirs, err := filepath.Glob(filepath.Join(dir, "workspaces", "*", "archive")); err != nil || len(dirs) != 0 {
+		t.Errorf("未启用时不应创建 archive 目录: %v %v", dirs, err)
+	}
+}
+
 func TestHandleCommandArchive(t *testing.T) {
 	dir := t.TempDir()
 	a := newSessTestAgent(t, dir)
-	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	r, dev, out, errb := newArchiveREPL(t, a, typed("y")...)
 
 	r.handleCommand("/archive")
-	if !strings.Contains(out.String(), MsgArchiveNone) {
+	if !strings.Contains(out.String(), MsgArchiveNoneKeep) {
 		t.Errorf("空目录应提示无候选: %q", out.String())
 	}
 
 	seedOldSession(t, dir, "20260101-010000", 40*24*time.Hour)
 	out.Reset()
+	dev.rewind()
 	r.handleCommand("/archive")
 	got := out.String()
+	if !strings.Contains(got, "将归档 1 个会话") {
+		t.Errorf("应先出报告: %q", got)
+	}
+	if !strings.Contains(got, MsgArchiveConfirm) {
+		t.Errorf("应询问确认: %q", got)
+	}
 	if !strings.Contains(got, "已归档 1 个会话") {
-		t.Errorf("归档输出异常: %q", got)
+		t.Errorf("确认后应归档: %q", got)
+	}
+	if len(r.ed.History()) != 0 {
+		t.Errorf("确认答案不应进入输入历史: %v", r.ed.History())
 	}
 	volumes, err := filepath.Glob(filepath.Join(dir, "workspaces", "*", "archive", "archive-*.zip"))
 	if err != nil || len(volumes) != 1 {
@@ -117,23 +189,21 @@ func TestHandleCommandArchive(t *testing.T) {
 
 	out.Reset()
 	r.handleCommand("/archive")
-	if !strings.Contains(out.String(), MsgArchiveNone) {
+	if !strings.Contains(out.String(), MsgArchiveNoneKeep) {
 		t.Errorf("已归档的会话不应重复归档: %q", out.String())
 	}
 
-	out.Reset()
 	errb.Reset()
 	r.handleCommand("/archive 3x")
-	if !strings.Contains(errb.String(), "无效的归档范围") {
+	if !strings.Contains(errb.String(), "无效的归档参数") {
 		t.Errorf("非法参数应报错: %q", errb.String())
 	}
 	errb.Reset()
 	r.handleCommand("/archive 1d 2d")
-	if !strings.Contains(errb.String(), "无效的归档范围") {
-		t.Errorf("多段参数应报非法范围: %q", errb.String())
+	if !strings.Contains(errb.String(), "无效的归档参数") {
+		t.Errorf("多段参数应报非法参数: %q", errb.String())
 	}
 }
-
 func TestArchiveReadOnlyBlocksDialogue(t *testing.T) {
 	dir := t.TempDir()
 	a := newSessTestAgent(t, dir)
@@ -219,33 +289,43 @@ func volumeSessionIDs(t *testing.T, path string) []string {
 	return ids
 }
 
-func TestHandleCommandArchiveDryRun(t *testing.T) {
+func TestHandleCommandArchiveCancel(t *testing.T) {
 	dir := t.TempDir()
 	a := newSessTestAgent(t, dir)
-	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	r, _, out, errb := newArchiveREPL(t, a, typed("n")...)
 	path := seedOldSession(t, dir, "20260101-010000", 40*24*time.Hour)
 
-	out.Reset()
-	r.handleCommand("/archive --dry-run")
+	r.handleCommand("/archive")
 	got := out.String()
-	if !strings.Contains(got, "试运行：将归档 1 个会话") {
-		t.Errorf("dry-run 输出异常: %q", got)
+	if !strings.Contains(got, "将归档 1 个会话") {
+		t.Errorf("应先出报告: %q", got)
+	}
+	if !strings.Contains(got, MsgArchiveConfirm) {
+		t.Errorf("应询问确认: %q", got)
+	}
+	if !strings.Contains(got, MsgArchiveCancel) {
+		t.Errorf("拒绝后应提示取消: %q", got)
+	}
+	if strings.Contains(got, "已归档") {
+		t.Errorf("拒绝后不应归档: %q", got)
+	}
+	if len(r.ed.History()) != 0 {
+		t.Errorf("确认答案不应进入输入历史: %v", r.ed.History())
 	}
 	if errb.String() != "" {
-		t.Errorf("dry-run 不应报错: %q", errb.String())
+		t.Errorf("取消不应报错: %q", errb.String())
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Errorf("dry-run 不应删除源文件: %v", err)
+		t.Errorf("取消不应删除源文件: %v", err)
 	}
 	if dirs, err := filepath.Glob(filepath.Join(dir, "workspaces", "*", "archive")); err != nil || len(dirs) != 0 {
-		t.Errorf("dry-run 不应创建 archive 目录: %v %v", dirs, err)
+		t.Errorf("取消不应创建 archive 目录: %v %v", dirs, err)
 	}
 }
-
 func TestHandleCommandArchiveExcludesCurrentSession(t *testing.T) {
 	dir := t.TempDir()
 	a := newSessTestAgent(t, dir)
-	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
+	r, dev, out, _ := newArchiveREPL(t, a, typed("y")...)
 	id := a.SessionID()
 	if id == "" {
 		t.Fatal("可写模式应有会话 id")
@@ -254,7 +334,8 @@ func TestHandleCommandArchiveExcludesCurrentSession(t *testing.T) {
 	seedOldSession(t, dir, "20260101-010000", 40*24*time.Hour)
 
 	out.Reset()
-	r.handleCommand("/archive all")
+	dev.rewind()
+	r.handleCommand("/archive 0")
 	if got := out.String(); !strings.Contains(got, "已归档 1 个会话") {
 		t.Errorf("应只归档非当前会话: %q", got)
 	}
@@ -271,15 +352,14 @@ func TestHandleCommandArchiveExcludesCurrentSession(t *testing.T) {
 		}
 	}
 }
-
 func TestHandleCommandArchiveSkippedOutput(t *testing.T) {
 	dir := t.TempDir()
 	a := newSessTestAgent(t, dir)
-	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
+	r, _, out, _ := newArchiveREPL(t, a, typed("y")...)
 	seedOldSession(t, dir, "20260101-010000", time.Minute)
 
 	out.Reset()
-	r.handleCommand("/archive all")
+	r.handleCommand("/archive 0")
 	got := out.String()
 	if !strings.Contains(got, "跳过 20260101-010000（"+agent.MsgArchiveSkipIdle+"）") {
 		t.Errorf("跳过行输出异常: %q", got)
@@ -288,10 +368,9 @@ func TestHandleCommandArchiveSkippedOutput(t *testing.T) {
 		t.Errorf("无候选应提示: %q", got)
 	}
 }
-
 func TestHandleCommandArchiveNoSave(t *testing.T) {
 	a := newSessTestAgent(t, t.TempDir(), agent.NoSave(true))
-	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	r, _, out, errb := newArchiveREPL(t, a)
 
 	r.handleCommand("/archive")
 	if !strings.Contains(errb.String(), agent.MsgArchiveNoSave) {
@@ -301,7 +380,6 @@ func TestHandleCommandArchiveNoSave(t *testing.T) {
 		t.Errorf("-n 下不应有正常输出: %q", out.String())
 	}
 }
-
 func TestHandleCommandForkNoSave(t *testing.T) {
 	dir := t.TempDir()
 	archiveOldSession(t, newSessTestAgent(t, dir), dir, "20260101-010000")
@@ -318,5 +396,33 @@ func TestHandleCommandForkNoSave(t *testing.T) {
 	got := out.String()
 	if !strings.Contains(got, "已 fork 为新会话") || !strings.Contains(got, MsgForkNoSave) {
 		t.Errorf("-n 下 fork 应提示未写入: %q %q", got, errb.String())
+	}
+}
+
+func TestHandleCommandArchiveConfirmEOF(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	r, _, out, errb := newArchiveREPL(t, a)
+	path := seedOldSession(t, dir, "20260101-010000", 40*24*time.Hour)
+
+	r.handleCommand("/archive")
+	got := out.String()
+	if !strings.Contains(got, MsgArchiveConfirm) {
+		t.Errorf("应询问确认: %q", got)
+	}
+	if !strings.Contains(got, MsgArchiveCancel) {
+		t.Errorf("EOF 应按取消处理: %q", got)
+	}
+	if errb.String() != "" {
+		t.Errorf("取消不应报错: %q", errb.String())
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("取消不应删除源文件: %v", err)
+	}
+	if dirs, err := filepath.Glob(filepath.Join(dir, "workspaces", "*", "archive")); err != nil || len(dirs) != 0 {
+		t.Errorf("取消不应创建 archive 目录: %v %v", dirs, err)
+	}
+	if len(r.ed.History()) != 0 {
+		t.Errorf("确认读不应写入历史: %v", r.ed.History())
 	}
 }

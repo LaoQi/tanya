@@ -21,6 +21,9 @@ func newSessTestAgent(t *testing.T, dir string, opts ...agent.Option) *agent.Age
 		DataDir:         dir,
 		SessionMode:     "global",
 		ToolOutputLines: 20,
+
+		ArchiveThreshold: agent.DefaultArchiveThreshold,
+		ArchiveKeep:      agent.DefaultArchiveKeep,
 	}
 	a, err := agent.New(cfg, opts...)
 	if err != nil {

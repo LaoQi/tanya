@@ -26,6 +26,7 @@ session_mode: auto
 # 触发阈值：活跃会话数达到该值才提示，需 >= 2（默认 64）
 # auto_archive_threshold: 64
 # 归档后保留的最近活跃会话数，需 >= 0 且小于阈值（默认 16；0 = 除当前会话外全部归档）
+# 同时作为 /archive 无参时的默认保留数量
 # auto_archive_keep: 16
 
 # 终端配色：auto（默认，跟随终端能力与 NO_COLOR）/ on（强制开色）/ off（强制纯文本）

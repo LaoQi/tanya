@@ -130,6 +130,8 @@ func (a *Agent) LoadSession(id string) error {
 
 func (a *Agent) ListSessions() ([]SessionInfo, error) { return a.store.list() }
 
+func (a *Agent) AutoArchiveKeep() int { return a.cfg.ArchiveKeep }
+
 func (a *Agent) ArchiveSessions(opt ArchiveOptions) (ArchiveReport, error) {
 	return a.store.archive(opt)
 }

@@ -375,31 +375,89 @@ func (r *REPL) loadNotice(id string) string {
 	return fmt.Sprintf(MsgLoadedSess, id)
 }
 
+func (r *REPL) archiveInteractive() bool {
+	return r.agent != nil && r.raw && r.prof.TTY && !r.st.mode.plain()
+}
+
+func (r *REPL) readConfirm(prompt string) (string, error) {
+	r.ed.SetHistoryFilter(func(string) bool { return false })
+	defer r.ed.SetHistoryFilter(nil)
+	return r.ed.Readline(prompt)
+}
+
 func (r *REPL) handleArchive(args []string) {
-	opt, err := ParseArchiveArg(strings.Join(args, " "))
+	if !r.archiveInteractive() {
+		r.st.out.emit(KindNotice, MsgArchiveOnlyTTY)
+		return
+	}
+	arg := strings.TrimSpace(strings.Join(args, " "))
+	opt, err := ParseArchiveArg(arg, r.agent.AutoArchiveKeep())
 	if err != nil {
 		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
 		return
 	}
 	opt.Exclude = r.agent.SessionID()
+	opt.DryRun = true
 	rep, err := r.agent.ArchiveSessions(opt)
 	if err != nil {
+		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+		return
+	}
+	if len(rep.Sessions) == 0 {
+		r.st.out.emit(KindNotice, archiveNoneText(opt, arg)+formatArchiveExtras(rep))
+		return
+	}
+	r.st.out.emit(KindNotice, formatArchiveReport(rep))
+	line, cerr := r.readConfirm(MsgArchiveConfirm)
+	if cerr != nil && strings.TrimSpace(line) == "" {
+		r.st.out.emit(KindDecor, "\n")
+	}
+	if !archiveConfirmed(line) {
+		r.st.out.emit(KindNotice, MsgArchiveCancel)
+		return
+	}
+	opt.DryRun = false
+	if rep, err = r.agent.ArchiveSessions(opt); err != nil {
 		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
 		return
 	}
 	r.st.out.emit(KindNotice, formatArchiveReport(rep))
 }
 
+func archiveConfirmed(line string) bool {
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	}
+	return false
+}
+
+func archiveNoneText(opt agent.ArchiveOptions, arg string) string {
+	switch {
+	case opt.OlderThan > 0:
+		return fmt.Sprintf(MsgArchiveNoneWindow, arg)
+	case opt.Keep > 0:
+		return MsgArchiveNoneKeep
+	}
+	return MsgArchiveNone
+}
+
 func formatArchiveReport(rep agent.ArchiveReport) string {
 	var b strings.Builder
 	switch {
 	case rep.DryRun:
-		fmt.Fprintf(&b, MsgArchiveDryRun, len(rep.Sessions), formatBytes(rep.RawBytes))
+		fmt.Fprintf(&b, MsgArchivePreview, len(rep.Sessions), formatBytes(rep.RawBytes))
 	case len(rep.Sessions) > 0:
 		fmt.Fprintf(&b, MsgArchiveDone, len(rep.Sessions), filepath.Base(rep.Volume), formatBytes(rep.RawBytes), formatBytes(rep.VolumeBytes))
 	default:
 		b.WriteString(MsgArchiveNone)
 	}
+	b.WriteString(formatArchiveExtras(rep))
+	return b.String()
+}
+
+func formatArchiveExtras(rep agent.ArchiveReport) string {
+	var b strings.Builder
 	for _, s := range rep.Skipped {
 		fmt.Fprintf(&b, MsgArchiveSkipFmt, s.ID, s.Reason)
 	}
