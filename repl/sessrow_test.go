@@ -2,6 +2,7 @@ package repl
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,7 @@ func newSessTestAgent(t *testing.T, dir string, opts ...agent.Option) *agent.Age
 		BaseURL:         "http://127.0.0.1:1",
 		Model:           "test-model",
 		UserAgent:       agent.DefaultUserAgent,
-		GlobalSession:   dir,
+		DataDir:         dir,
 		SessionMode:     "global",
 		ToolOutputLines: 20,
 	}
@@ -75,23 +76,25 @@ func TestHandleCommandExit(t *testing.T) {
 	}
 }
 
-func seedIntoSessionDir(t *testing.T, root, name, content string) {
+func seedIntoSessionDir(t *testing.T, root, name, content string) string {
 	t.Helper()
-	var sub string
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			sub = filepath.Join(root, e.Name())
-			break
+	sub := ""
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-	}
+		if d.IsDir() && d.Name() == "sessions" {
+			sub = p
+			return fs.SkipAll
+		}
+		return nil
+	})
 	if sub == "" {
 		t.Fatal("session 子目录不存在")
 	}
-	if err := os.WriteFile(filepath.Join(sub, name), []byte(content), 0o644); err != nil {
+	path := filepath.Join(sub, name)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return path
 }

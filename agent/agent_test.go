@@ -27,7 +27,7 @@ func newTestAgent(t *testing.T) *Agent {
 	t.Helper()
 	isolatePromptEnv(t)
 	cfg := defaultConfig()
-	cfg.GlobalSession = t.TempDir()
+	cfg.DataDir = t.TempDir()
 	a, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -220,41 +220,47 @@ func TestWorkspaceID(t *testing.T) {
 
 func TestNewSessionPerWorkspace(t *testing.T) {
 	a := newTestAgent(t)
-	if a.store.dir == a.cfg.GlobalSession || !strings.HasPrefix(a.store.dir, a.cfg.GlobalSession+string(filepath.Separator)) {
-		t.Errorf("sessionDir 应为 cfg.GlobalSession 下的工作区子目录: %q", a.store.dir)
+	base := filepath.Join(a.cfg.DataDir, "workspaces", workspaceID(a.workspace))
+	if a.store.dir != filepath.Join(base, "sessions") {
+		t.Errorf("sessionDir 应为 <data_dir>/workspaces/<id>/sessions: %q", a.store.dir)
 	}
 	if _, err := os.Stat(a.store.dir); err != nil {
 		t.Errorf("工作区目录未创建: %v", err)
 	}
 }
 
-func TestResolveSessionDir(t *testing.T) {
+func TestResolveWorkspaceDirs(t *testing.T) {
 	root := t.TempDir()
 	cfg := defaultConfig()
-	cfg.GlobalSession = filepath.Join(root, "global")
+	cfg.DataDir = filepath.Join(root, "data")
 
-	if got := resolveSessionDir(cfg, root); got != filepath.Join(cfg.GlobalSession, workspaceID(root)) {
-		t.Errorf("auto 无 .tanya 应走 global: %q", got)
+	globalSessions := filepath.Join(cfg.DataDir, "workspaces", workspaceID(root), "sessions")
+	globalArchive := filepath.Join(cfg.DataDir, "workspaces", workspaceID(root), "archive")
+	sessions, archive := resolveWorkspaceDirs(cfg, root)
+	if sessions != globalSessions || archive != globalArchive {
+		t.Errorf("auto 无 .tanya 应走 global: %q %q", sessions, archive)
 	}
 
 	if err := os.MkdirAll(filepath.Join(root, ".tanya"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	local := filepath.Join(root, ".tanya", "sessions")
-	if got := resolveSessionDir(cfg, root); got != local {
-		t.Errorf("auto 有 .tanya 应走 local: %q", got)
+	localSessions := filepath.Join(root, ".tanya", "sessions")
+	localArchive := filepath.Join(root, ".tanya", "archive")
+	sessions, archive = resolveWorkspaceDirs(cfg, root)
+	if sessions != localSessions || archive != localArchive {
+		t.Errorf("auto 有 .tanya 应走 local: %q %q", sessions, archive)
 	}
 	cfg.SessionMode = "global"
-	if got := resolveSessionDir(cfg, root); got != filepath.Join(cfg.GlobalSession, workspaceID(root)) {
-		t.Errorf("global 显式指定应优先: %q", got)
+	if sessions, archive = resolveWorkspaceDirs(cfg, root); sessions != globalSessions || archive != globalArchive {
+		t.Errorf("global 显式指定应优先: %q %q", sessions, archive)
 	}
 	cfg.SessionMode = "local"
-	if got := resolveSessionDir(cfg, root); got != local {
-		t.Errorf("local 显式指定: %q", got)
+	if sessions, archive = resolveWorkspaceDirs(cfg, root); sessions != localSessions || archive != localArchive {
+		t.Errorf("local 显式指定: %q %q", sessions, archive)
 	}
 	cfg.SessionMode = "bogus"
-	if got := resolveSessionDir(cfg, root); got != local {
-		t.Errorf("未知模式应按 auto 处理: %q", got)
+	if sessions, archive = resolveWorkspaceDirs(cfg, root); sessions != localSessions || archive != localArchive {
+		t.Errorf("未知模式应按 auto 处理: %q %q", sessions, archive)
 	}
 }
 
@@ -265,7 +271,7 @@ func TestNewLocalMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := defaultConfig()
-	cfg.GlobalSession = filepath.Join(tmp, "global")
+	cfg.DataDir = filepath.Join(tmp, "global")
 	cfg.SessionMode = "local"
 	a, err := New(cfg)
 	if err != nil {
@@ -649,7 +655,7 @@ func TestTotalTokensCountsMultipleReasoningItems(t *testing.T) {
 func TestNewWiresTTYBridge(t *testing.T) {
 	isolatePromptEnv(t)
 	cfg := defaultConfig()
-	cfg.GlobalSession = t.TempDir()
+	cfg.DataDir = t.TempDir()
 	f := &fakeTTYBridge{}
 	a, err := New(cfg, WithTTYBridge(f))
 	if err != nil {

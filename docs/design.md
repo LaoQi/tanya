@@ -9,7 +9,7 @@
 ```
 main.go            package main：入口、flag 子命令、ask 单发
 repl/              package repl：REPL 循环、斜杠命令、补全、工具视图渲染、状态行心跳
-agent/             package agent：全部核心逻辑（config / llm / llm_http / agent / tools / prompt / session / stats / shell / builtin）
+agent/             package agent：全部核心逻辑（config / llm / llm_http / agent / tools / prompt / session / session_archive / stats / shell / builtin）
 readline/          package readline：自研终端输入层（editor / keys / terminal），pty 桥接与终端状态自愈
 ctty/              package ctty：控制终端原语（前台组读写、/dev/tty、SIGTTIN/SIGTTOU）与终端探测（Facts：isatty/尺寸/VT），白名单 linux/darwin/windows，零依赖叶子
 render/            package render：渲染管线（IR → ANSI：Renderer、提示符模板），可 import 其下子包
@@ -202,16 +202,47 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 ## 会话
 
 - 每次启动/`/new` 开启新会话，id 为启动时间戳（`20060102-150405`）：`time.Now` 就地取、不做时钟注入（与 shell 执行层同一口径；文件名可用正则断言）
-- 存储模式（CLI `-m` > env `TANYA_SESSION_MODE` > 配置 `session_mode`，默认 auto）：
-  - `auto`：当前目录存在 `.tanya/` → local，否则 global
-  - `local`：`<启动目录>/.tanya/sessions/`（.tanya 本身即项目隔离，不叠加 workspace-id）
-  - `global`：`global_session/<workspace-id>/`，workspace-id 由启动目录派生（可读路径转义 + 短哈希）
-- 只读会话（`-n` / `--no-save`）：由 CLI 经 `agent.New(cfg, agent.NoSave(true))` 传入，`Config` 无对应字段，配置文件与 env 均无法开启；`ask` 单发与 REPL 通用。读路径全部保留（启动预扫描、`ListSessions`、`LoadSession` 照常，既有会话不会被截断或改写），写路径在 `sessionStore.append` 首行（`disabled`）返回 nil 被整体关闭（覆盖成功/中断/错误三条路径）；`MkdirAll(store.dir)` 在只读模式下跳过，目录缺失时 `store.refresh` 按空列表处理不报错。内存 history 照常维护（中断保留语义不变），进程退出即丢。REPL 启动时在欢迎屏下方以语义色 `Warn` 打一行 `MsgNoSaveWarn`（`REPL.noSaveWarn`，agent 为 nil 或可写时不输出），`ask` 静默
+- workspace 目录是会话数据落点，其下固定为并列的 `sessions/`（活动会话）与 `archive/`（归档卷）：
+  - `local`：workspace 目录 = `<启动目录>/.tanya/`（.tanya 本身即项目隔离，不叠加 workspace-id）
+  - `global`：workspace 目录 = `<data_dir>/workspaces/<workspace-id>/`（`data_dir` 默认 `~/.local/share/tanya`），workspace-id 由启动目录派生（可读路径转义 + 8 位短哈希）
+- 存储模式（CLI `-m` > env `TANYA_SESSION_MODE` > 配置 `session_mode`，默认 auto）：`auto` 为「当前目录存在 `.tanya/` → local，否则 global」；两侧落点由 `resolveWorkspaceDirs(cfg, cwd) (sessions, archive)` 单点推导，`agent.New` 只创建 `sessions`（`archive` 由归档动作按需创建）
+- 旧布局不兼容（2026-09-17）：`global_session` 配置项与 `<root>/<workspace-id>/` 目录形态已废弃，代码不含兼容读取/迁移路径，旧目录由用户自行删除
+- 只读会话（`-n` / `--no-save`）：由 CLI 经 `agent.New(cfg, agent.NoSave(true))` 传入，`Config` 无对应字段，配置文件与 env 均无法开启；`ask` 单发与 REPL 通用。读路径全部保留（启动预扫描、`ListSessions`、`LoadSession` 照常，既有会话不会被截断或改写），写路径在 `sessionStore.append` 首行（`disabled`）返回 nil 被整体关闭（覆盖成功/中断/错误三条路径）；`MkdirAll(store.dir)` 在只读模式下跳过，目录缺失时 `store.refresh` 按空列表处理不报错。内存 history 照常维护（中断保留语义不变），进程退出即丢。REPL 启动时在欢迎屏下方以语义色 `Warn` 打一行 `MsgNoSaveWarn`（`REPL.noSaveWarn`，agent 为 nil 或可写时不输出），`ask` 静默；归档只读态（`frozen`）是另一维度的只读，见《会话归档与 fork》
 - 落盘：`<timestamp>.jsonl`，每轮结束追加写入新消息（一行一条 Message JSON），记录完整历史（回放/审计用）；回合因中断/错误保留产出时同样落盘（含终止提示行）
 - 落盘原子性：本批消息先编码进内存缓冲再单次追加写入，写入报错或短写时 `Truncate` 回滚到写入前大小，`saved` 游标与文件内容始终一致（重试不会产生重复行/半行）
 - 首行持久化 system prompt 快照（`systemSaved` 标志防重复），`/load` 还原后前缀与当初逐字节一致；旧格式文件（无 system 首行）回退为载入时快照当前 AGENTS.md，且保持不补写；system 行不计入会话条数与摘要
-- 会话列表扫描：`agent.New` 启动时预扫描填充缓存（只读模式不建目录，目录缺失按空处理）；`ListSessions` 按 (mtime,size) 增量刷新，仅重扫变化的文件；每文件 `bufio` 逐行计数条数、仅解码至首条 user 消息取摘要
-- 会话浏览经 `/load` 无参菜单（`repl/picker.go`，stdin 非终端降级为序号输入），候选带 id、时间、条数、首条 user 摘要；`/load <id>` 直接恢复继续对话；id 校验拒绝路径穿越（`/sessions` 命令已移除，浏览职责由 picker 承接）
+- 会话列表扫描：`agent.New` 启动时预扫描填充缓存（只读模式不建目录，目录缺失按空处理）；`ListSessions` 按 (mtime,size) 增量刷新，仅重扫变化的文件与归档卷；每文件 `bufio` 逐行计数条数、仅解码至首条 user 消息取摘要；归档卷只读中央目录取条目与描述（见《会话归档与 fork》）
+- 会话浏览经 `/load` 无参菜单（`repl/picker.go`，stdin 非终端降级为序号输入），候选带 id、时间、条数、首条 user 摘要；`/load <id>` 直接恢复继续对话（归档条目在摘要列前标注 `[归档] `，载入为只读，见《会话归档与 fork》）；id 校验拒绝路径穿越（`/sessions` 命令已移除，浏览职责由 picker 承接）
+
+## 会话归档与 fork
+
+### 归档卷
+
+- 归档把活动会话打包为标准 zip 卷，落 `<workspace>/archive/archive-<20060102-150405>.zip`；一次 `/archive` 生成一卷、**写入后不可变**（不重写、不删条目、不做「解档回活动区」），继续对话由 `/fork` 承担
+- 卷内 entry 名 `<会话 id>.jsonl`，`Method: Deflate`，`Modified` 取原文件 mtime，**entry 数据为原 jsonl 逐字节**（不裁剪、不重排、不丢 reasoning/tool_calls）：prompt cache 红线在归档路径上的延续
+- entry comment（zip per-entry comment，单行 JSON）：`{"v":1,"msgs":<条数>,"summary":"<首条 user 消息，单行化、≤200 rune>"}`，超长时缩短 summary 并置 `"trunc":true`；**硬上限 4 KiB**——Go 在 comment > 65535 字节时静默写坏中央目录（实测 65536 读回 0 字节），故 marshal 后校验、超限降级
+- 卷级 comment（`zip.Writer.SetComment`）：`{"v":1,"workspace":"<启动目录>","created":"<RFC3339>","sessions":<条数>}`
+- 归档筛选（`agent.ArchiveOptions`）：`OlderThan`（按文件 mtime，0 = 不限）与 `Keep`（保留最新 N 个活动会话）取交集，`Exclude` 恒为当前会话，另加**空闲保护**（mtime 距今 < 5 分钟的文件跳过，防另一实例正在追加）；id 已存在于任一卷则跳过（幂等）
+- 失败语义：「元数据扫描」失败 → 跳过该文件并计入报告；「卷写入」失败 → 放弃整卷（删临时文件）且不删任何源文件并返回错误；卷先写同目录临时文件再 `rename` 落定，**之后**才删除源文件（崩溃最多留双份，列表侧按同 id 取活动去重）
+- 写入前 `MkdirAll(archiveDir)`；0 候选时不建目录、不产生空卷
+- 卷是标准 zip，`unzip -l/-p/-z` 可直接浏览与提取（`unzip` 打印注释时按本地码页转码，可能显示乱码，不影响数据与 tanya 自身读取）
+- 不做：内容裁剪/摘要压缩、卷重写与还原落盘、自动归档/TTL 淘汰、索引文件或清单 entry、多会话打包以外的容器格式；仅用标准库 `archive/zip`，不引新依赖
+
+### 列表与索引
+
+- `sessionStore.refresh()` 同时扫 `sessions/*.jsonl` 与 `archive/*.zip`（忽略 `*.tmp-*`）；归档侧 `zip.OpenReader` **只读中央目录**，条目元数据取自 header（id、未压缩大小、`Modified`）与 comment（条数、摘要），不解压任何数据（实测 156 条含注释 0.1 ms）
+- 缓存粒度由「文件」扩为「文件 + 卷」，仍以 (mtime,size) 判失效；卷不可变故每卷每进程最多解析一次
+- `SessionInfo` 增加 `Archived bool`、`Size int64`（归档项为 entry 未压缩字节、活动项为文件字节）、`MetaOK bool`（comment 缺失/非法时仍列出条目，`Msgs=0`、摘要为空，picker 行按 `SessRow` 既有格式显示 `0条`）；归档项 `Path` 指所属卷路径，摘要按活动区同口径截断到 30 rune 展示（卷内 comment 仍存 ≤200 rune 原文）
+- `ListSessions` 排序：活动组在前、归档组在后，组内 id 降序；同 id 同时存在于两区时只列活动项
+
+### 只读载入与 fork
+
+- `/load <归档 id>`：定位所属卷 → 解压该 entry 的流直接交给 `json.Decoder`（抽出 `loadFrom(io.Reader)`），**不落盘、不改卷**；zip reader 的 CRC32 校验兜底损坏（错误上抛、卷保持原样）
+- 归档只读态以 `sessionStore.frozen` 表示（与 `-n` 的 `disabled` 正交，归档 id 另存 `frozenID`）：`append` 直接返回、`path()`/`id()` 为空、`Agent.SessionFile()` 为空；`Agent.ArchiveReadOnly() (id, ok)` 与 `Stats.Archived` 供 UI 显示（`/stat` 打 `会话文件: 归档只读 X（未写入）`，`agent_custom` 的 `stat` 打 `会话: 归档只读 X（未写入）`）
+- 只读态**拒绝对话**：`agent.Ask` 首行返回 `ErrArchiveReadOnly`（`ask` 单发路径同样受保护），REPL 分发层在对话分支前拦截并提示 `/fork`（`:`/`：` 显式前缀同样拦截）；元命令（`/history`、`/stat`、`/model`、`/new`、`/load`、`/fork`、`/exit`）照常可用
+- 与 `-n` 的差异：`-n` 允许内存内继续对话（不落盘、进程退出即丢），归档只读态不允许——归档原文件已冻结，继续对话会产生「没有落点的历史」
+- `/fork`（仅归档只读态）：`store.rotate()` 取新 id → 清 `frozen` → `prompt.reset()` 重读 AGENTS.md（**当前**快照，fork 即新会话）→ history 原样保留、`stats.reset()` → 立即 `save()` 落一次盘，使新会话文件立刻出现在 `/load` 列表，此后按普通会话增量 append；`-n` 下允许 fork 但不落盘（提示未写入）
+- 载入与 fork 文案区分：`已载入会话 X（归档只读，继续对话请 /fork）`、`已 fork 为新会话 <新 id>`
 
 ## 系统提示与缓存友好
 
@@ -246,9 +277,9 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 - **会话行**：`会话 <id> · 时长 <dur> · 消息 <n> 条`；id 取 `Agent.SessionID()`（会话文件名去 `.jsonl`），只读模式无 id 时该段省略，退化为 `时长 … · 消息 … 条`
 - **用量行**：`用量 <总量>（prompt … / completion …）`，有累计缓存数据时追加 `· 缓存 <命中率>`——分别复用 `totalsText`/`cacheRateTotalText`（与 `/stat`、提示符占位符同源同公式）；无 usage 显示 `无（未收到 API usage）`
-- **文件行**：`会话文件 <homePath>`（只做 home → `~` 前缀替换、**不缩写中间目录**，路径需可直接拿去 `/load` 或查看文件；提示符用的 `shortPath` 会缩写中间目录，不适用于此），仅当 `Agent.SessionFile()` 非空（可写且文件确实存在）时打印；只读模式（`-n`）打印 `会话文件 未写入（不落盘模式）`；本次未产生对话（`sessionStore.append` 在 history 为空时直接返回、不建文件）则整行省略
+- **文件行**：`会话文件 <homePath>`（只做 home → `~` 前缀替换、**不缩写中间目录**，路径需可直接拿去 `/load` 或查看文件；提示符用的 `shortPath` 会缩写中间目录，不适用于此），仅当 `Agent.SessionFile()` 非空（可写且文件确实存在）时打印；只读模式（`-n`）与归档只读态打印 `会话文件 未写入（不落盘模式）`；本次未产生对话（`sessionStore.append` 在 history 为空时直接返回、不建文件）则整行省略
 
-口径与门禁：时长在 `Run` 入口由 `REPL.started` 置位、退出时 `time.Since`（含提示符前的 idle 时间，`/new`/`/load` 不重置），格式化复用 `turnDuration`；`KindDecor` 仅 rich 可见，故 `-p` 与 `-p --verbose` 下退出**完全静默**（此前 plain 面会打「再见」；`MsgBye` 随本次改版删除）；`ask` 单发不经过 `Run`，stdout 契约不变。agent 侧新增只读访问器 `SessionID()`/`SessionFile()`，`store.disabled` 时均返回空串（后者另做 `os.Stat` 存在性判定）；`SessionFile` 与 `/stat` 的「会话文件」（`Stats().Session`，是**预定落点**、只读模式下也非空）刻意不同口径——`/stat` 报落点，退出报已落盘实体。
+口径与门禁：时长在 `Run` 入口由 `REPL.started` 置位、退出时 `time.Since`（含提示符前的 idle 时间，`/new`/`/load` 不重置），格式化复用 `turnDuration`；`KindDecor` 仅 rich 可见，故 `-p` 与 `-p --verbose` 下退出**完全静默**（此前 plain 面会打「再见」；`MsgBye` 随本次改版删除）；`ask` 单发不经过 `Run`，stdout 契约不变。agent 侧新增只读访问器 `SessionID()`/`SessionFile()`，`store.disabled` 或归档只读态时均返回空串（后者另做 `os.Stat` 存在性判定）；`SessionFile` 与 `/stat` 的「会话文件」（`Stats().Session`，是**预定落点**、只读模式下也非空）刻意不同口径——`/stat` 报落点，退出报已落盘实体。
 
 ### 输入分发
 
@@ -260,9 +291,12 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 斜杠命令
 
-`/help` `/new` `/load` `/stat` `/history` `/model` `/think` `/reasoning` `/theme` `/exit`（`/quit` 等价）：
+`/help` `/new` `/load` `/archive` `/fork` `/stat` `/history` `/model` `/think` `/reasoning` `/theme` `/exit`（`/quit` 等价）：
 
 白名单（`slashCommands`，同时驱动 Tab 补全）即分发契约：`Run` 先用 `isSlashCommand` 过滤，未命中的 `/` 开头输入按对话内容处理，因此 `handleCommand` 的 switch 不再有 `default` 分支（原先的 `MsgUnknownCmd` 不可达，已删）。白名单与 case 必须一一对应，`TestSlashCommandsAllHandled` 覆盖该不变量（`/load` 走 stdin 交互路径，单独测试）。
+
+- `/archive [all|<dur>]` 把历史会话打包成归档卷：无参 = 归档 30 天前的会话，`<dur>` 形如 `7d`/`12h`，`all` 不限；恒排除当前会话；只做无损压缩，之后可用 `/load` 只读载入（见《会话归档与 fork》）
+- `/fork` 仅归档只读态可用：把当前归档会话的 history 作为新会话起点并立即落盘（新 id、当前 system 快照、继承历史）
 
 - `/history` 无参截断列表（`term.OneLine` 先剥离 ANSI 转义与控制字符、压成单行，再按 120 rune 截断，避免 `\r`/`\x1b[K` 覆盖已打印行与未闭合 SGR 泄漏）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染、并按角色着色（user 用 `Ok` 绿、其余用 `Warn` 黄；`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 stdout 是否终端与输出模式约束：stdout 非终端、plain 一并旁路），user/tool 消息与工具参数原样
 - `/stat` 显示会话统计：工作区（构造期定格的启动目录）、会话文件、消息条数、本次运行累计 token（prompt/completion）、当前上下文占用（最近一次实报 prompt tokens，无 usage 回落本地估算）、缓存命中量与命中率（累计 hit / 累计 prompt）；数据全部来自 `Agent.Stats()` 单一快照，渲染在 `repl/stats.go`，与提示符占位符同源同公式
@@ -322,12 +356,12 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `theme` | `nord` | 内置配色主题（语义色/提示符/markdown 标题与代码整体切换）：default/minimal/solar/vivid/nord/gruv/dusk，非法值启动报错 |
 | `palette` | 空 | 语义色覆盖（info/warn/ok/error/dim/accent/think/run → 色名），叠加在当前主题之上（切换主题后自动重放） |
 | `user_agent` | `pi/0.85.0 (...)` | 出站 UA 伪装 |
-| `global_session` | `~/.local/share/tanya/sessions` | global 模式会话基础目录，支持 `~` 展开 |
+| `data_dir` | `~/.local/share/tanya` | 数据根：global 模式的 workspace 目录为其下 `workspaces/<workspace-id>/`（其内 `sessions/` 与 `archive/`），支持 `~` 展开 |
 | `session_mode` | `auto` | 会话存储模式 auto/local/global |
 | `tool_output_lines` | 20 | 工具输出最多显示行数（1-1000） |
 | `shell` | 空 | run_shell 使用的 shell（名字或绝对路径）；空则平台探测（linux/darwin bash→sh→ash，windows pwsh→powershell），全部落空启动报错 |
 
-env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_API_PROTOCOL` / `TANYA_SESSION_MODE` / `TANYA_THEME` / `TANYA_USER_AGENT` / `TANYA_SHELL` / `TANYA_TOOL_OUTPUT_LINES`。
+env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_API_PROTOCOL` / `TANYA_DATA_DIR` / `TANYA_SESSION_MODE` / `TANYA_THEME` / `TANYA_USER_AGENT` / `TANYA_SHELL` / `TANYA_TOOL_OUTPUT_LINES`。
 
 配色主题：`render/theme` 内置 `Scheme` 聚合（语义色 + 提示符模板 + markdown 样式集），**无全局可变状态**——`Lookup` 取方案、`Apply(sem, palette)` 纯函数叠加覆盖；REPL 持有当前 `Scheme`/`Semantics`，`/theme [name]` 切换后语义色、渲染器与提示符即时重建（palette 重放），readline 通过 `SetStyles` 注入。默认启动主题取 `theme` 配置，校验由 `repl.ValidateTheme` 承担（agent 不依赖表现层）。
 
@@ -340,6 +374,8 @@ repl 输出侧测试方法（输出收敛方案阶段 0-4 建立）：① **注�
 pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（测试自身分配 pty 充当真实 tty，经 `newBridgeTTY` 注入）断言子进程 `/dev/tty` 可读、`tty` 输出为 pty slave、`GPG_TTY` 覆盖、初始尺寸复制、raw 设置与恢复、子进程退出后 master 收到 EIO（防忘关 slave）、Attach 前预置输入不丢、子进程存活时 `stop()` 及时返回；② `agent/shell_bridge_test.go` 用 fake bridge（os.Pipe 造流）断言桥接全流程、Prepare/Attach 失败回退现状路径、非交互不触桥接；③ 真实 tty E2E（gated，用 `script -qec` 驱动真实 /dev/tty，不参与默认 `go test`）：`TTY_BRIDGE_E2E=1`（readline 单命令）、`TTY_E2E=1`（agent 全链路）、`TTY_E2E_REUSE=1`（同进程连续两次交互命令，覆盖 `ownTTY` 打开/恢复/重开复用路径）。
 
 输出侧渲染审计（`scripts/render_audit.py`，先 `make build`）：内置 mock LLM（responses 协议 SSE，事件形态对齐 `agent/mock_test.go`）+ pty 驱动真实二进制 + VT 回放（DECSTBM / 自动换行 / 光标可见性 / 备用屏 47·1047·1049 / 保存槽按屏索引 / SGR 状态与 DECRC 属性恢复；DECSTBM 按真终端实测建模——光标一律 home 到绝对 (1,1)，比 xterm 的「夹到上边界」更狠）+ 不变量断言，全量约 15s、无网络依赖。不变量：`overwrite`（写入非空白单元格）、`region_scroll`（只在滚动区内滚动）、`cu_clamped`（相对上移超出光标所在行，会被视口夹到顶行）、结束时 `autowrap_off` / `cursor_hidden` / `margins_set` / `alt_screen_on` / `sgr_open`。场景 want 三档：`clean` 要求不变量全为 0（回归门）、`leak` 断言 `expect` 列出的违反项被复现（已知缺口门，修好后改成 `clean`）、`note` 只报告不断言；`--dump NAME` 打印该场景回放后的屏幕。诊断计数 `cursor_restore`（光标被保存槽恢复且位置确实跳变，**且该槽在本回放中从未被写过**——即陈旧槽值被恢复，裸发 `DECRST 1049` 的典型症状；被 `DECSC`/`1049h` 写过的槽被恢复属预期、不计数）不断言、仅报告，真正的门是 `overwrite` 与结束态不变量。当前 leak 只剩一条待修：`leak-picker-unpaged`（picker 未按屏幕高度分页，`CursorUp(len(items)+1)` 被夹到顶行）；光标锚点类的回归门五条：`clean-tty-scrollregion`（子进程 `printf '\033[20;24r' > /dev/tty` 设滚动区，终端把光标 home 到 (1,1)）、`clean-tty-cup`（子进程 `CSI 3;7H` 直接挪光标）、`clean-alt-screen-exit`（子进程用 `47h` 进备用屏后退出）、`clean-tty-modes`（`?7l`/`?25l` 残留）、`clean-interactive-release`（interactive 密码提示后桥接 release 的 `?1049l` 跳位）——交出终端前 `SaveCursor` 与复位后 `RestoreCursor` 任一步退化成 no-op，这五条连同其余 clean 门都会变红（实测去掉存档得 `overwrite` 44、去掉归位得 `overwrite` 50），故它们是 2026-09-16 光标锚点修复的回归门。note 只剩 `note-partial-line`（子进程直写 `/dev/tty` 的半行残文）
+
+会话归档测试：卷往返（entry 字节与源文件一致、entry comment 的条数与摘要与实读扫描一致）、comment 上限（4 KiB 硬上限、多字节截断降级、`trunc` 标记）、筛选（`OlderThan`/`Keep` 交集、`Exclude`、5 分钟空闲保护、`DryRun` 不落盘、已在卷内 id 去重、0 候选不建空卷）、损坏卷（截断/CRC 错：列表不崩、载入报错且卷不动）、`*.tmp-*` 忽略、同 id 双区取活动、归档只读态不写盘且 `Ask` 报 `ErrArchiveReadOnly`、`Fork` 落盘内容与后续增量、`resolveWorkspaceDirs` 三态推导、`ParseArchiveArg` 表驱动、picker `[归档] ` 标记渲染。
 
 ## 环境段（envprobe）
 

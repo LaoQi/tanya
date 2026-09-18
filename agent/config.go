@@ -20,7 +20,7 @@ type Config struct {
 	Path            string            `yaml:"-"`
 	ApiProtocol     string            `yaml:"api_protocol"`
 	UserAgent       string            `yaml:"user_agent"`
-	GlobalSession   string            `yaml:"global_session"`
+	DataDir         string            `yaml:"data_dir"`
 	SessionMode     string            `yaml:"session_mode"`
 	ToolOutputLines int               `yaml:"tool_output_lines"`
 	Shell           string            `yaml:"shell"`
@@ -55,6 +55,11 @@ func normalizeApiProtocol(v string) string {
 
 const DefaultUserAgent = "pi/0.85.0 (linux; node/v22.14.0; x64)"
 
+func defaultDataDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "share", "tanya")
+}
+
 func defaultConfigPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "tanya", "config.yaml")
@@ -69,7 +74,6 @@ func normalizeConfigPath(p string) string {
 }
 
 func defaultConfig() *Config {
-	home, _ := os.UserHomeDir()
 	return &Config{
 		Path:            defaultConfigPath(),
 		BaseURL:         "https://api.openai.com/v1",
@@ -78,7 +82,7 @@ func defaultConfig() *Config {
 		ApiProtocol:     "responses",
 		Theme:           "nord",
 		UserAgent:       DefaultUserAgent,
-		GlobalSession:   filepath.Join(home, ".local", "share", "tanya", "sessions"),
+		DataDir:         defaultDataDir(),
 		ToolOutputLines: 20,
 	}
 }
@@ -121,6 +125,9 @@ func LoadConfig(path string) (*Config, error) {
 	if v := os.Getenv("TANYA_API_PROTOCOL"); v != "" {
 		cfg.ApiProtocol = v
 	}
+	if v := os.Getenv("TANYA_DATA_DIR"); v != "" {
+		cfg.DataDir = v
+	}
 	if v := os.Getenv("TANYA_SESSION_MODE"); v != "" {
 		cfg.SessionMode = v
 	}
@@ -150,7 +157,10 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.ApiProtocol == "" {
 		return nil, fmt.Errorf(MsgBadApiProtocol, rawProtocol)
 	}
-	cfg.GlobalSession = expandHome(cfg.GlobalSession)
+	cfg.DataDir = expandHome(cfg.DataDir)
+	if cfg.DataDir == "" {
+		cfg.DataDir = defaultDataDir()
+	}
 	return cfg, nil
 }
 

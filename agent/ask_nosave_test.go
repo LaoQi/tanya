@@ -25,7 +25,7 @@ func TestNoSaveAskLeavesNoTrace(t *testing.T) {
 	if _, err := os.Stat(a.store.dir); !os.IsNotExist(err) {
 		t.Fatalf("只读模式不应创建会话目录: %v", err)
 	}
-	entries, err := os.ReadDir(cfg.GlobalSession)
+	entries, err := os.ReadDir(cfg.DataDir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -36,6 +36,7 @@ func (s usageStats) view() Stats {
 type Stats struct {
 	Workspace        string
 	Session          string
+	Archived         string
 	Messages         int
 	Est              int
 	ContextTokens    int

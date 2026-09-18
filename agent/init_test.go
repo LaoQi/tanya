@@ -10,7 +10,7 @@ import (
 func initConfig(t *testing.T) *Config {
 	t.Helper()
 	cfg := defaultConfig()
-	cfg.GlobalSession = filepath.Join(t.TempDir(), "global")
+	cfg.DataDir = filepath.Join(t.TempDir(), "global")
 	return cfg
 }
 
@@ -241,7 +241,7 @@ func TestInitExplicitGlobalKeepsMarker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.SessionDir != filepath.Join(cfg.GlobalSession, workspaceID(rep.Workspace)) {
+	if rep.SessionDir != filepath.Join(cfg.DataDir, "workspaces", workspaceID(rep.Workspace), "sessions") {
 		t.Errorf("显式 global 应如实报告落点: %q", rep.SessionDir)
 	}
 	if e := entryOf(t, rep, ".tanya/sessions"); e.Action != InitCreated {

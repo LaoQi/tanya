@@ -42,7 +42,7 @@ api_key: "sk-..."
 model: deepseek-v4-flash
 ```
 
-环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_API_PROTOCOL` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES` / `TANYA_SHELL` / `TANYA_THEME`。
+环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_API_PROTOCOL` / `TANYA_DATA_DIR` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES` / `TANYA_SHELL` / `TANYA_THEME`。
 
 `api_protocol` 配置项（env `TANYA_API_PROTOCOL`）选择 API 协议：`responses`（默认，OpenAI Responses API 兼容格式，思维链明文回传）或 `chat`（Chat Completions 兼容协议）。端点路径为 `/responses` 时用 `responses`；仅提供 `/chat/completions` 的端点遇 404 时请切换为 `chat`。
 
@@ -77,7 +77,9 @@ tanya -v              # 显示版本号
 |---|---|
 | `auto`（默认） | 当前目录存在 `.tanya/` 则用 `<cwd>/.tanya/sessions/`，否则用全局（`tanya init` 建出 `.tanya/` 后即落本地） |
 | `local` | `<启动目录>/.tanya/sessions/` |
-| `global` | `~/.local/share/tanya/sessions/<workspace-id>/` |
+| `global` | `<data_dir>/workspaces/<workspace-id>/sessions/`（`data_dir` 默认 `~/.local/share/tanya`） |
+
+`data_dir` 配置项（env `TANYA_DATA_DIR`，默认 `~/.local/share/tanya`，支持 `~` 展开）是 global 模式的数据根：每个启动目录在其下 `workspaces/<workspace-id>/` 有一个工作区目录，内含并列的 `sessions/`（活动会话）与 `archive/`（归档卷）。**旧布局不兼容**：`global_session` 配置项与 `<global_session>/<workspace-id>/` 目录形态已废弃，旧目录（如 `~/.local/share/tanya/sessions/`）需手工删除。
 
 只读会话（`-n` / `--no-save`，只由命令行开启，配置文件与 env 均无法设置）：`ask` 单发与 REPL 通用。历史会话照常列出与载入，之后的对话只存在于内存、不写入会话文件，也不创建会话目录（REPL 启动时在欢迎屏下方显示黄色警告，`ask` 保持静默）。
 
@@ -106,6 +108,8 @@ REPL 斜杠命令：
 | `/help` | 帮助 |
 | `/new` | 开启新会话（当前会话自动保存） |
 | `/load [id]` | 无参打开会话选择菜单；带 id 直接载入 |
+| `/archive [all\|时长]` | 归档历史会话（无参 = 30 天前的会话，`7d`/`12h30m` 指定窗口，`all` 全部） |
+| `/fork` | 把归档只读会话 fork 成新会话（继承历史，立即落盘） |
 | `/stat` | 查看会话统计（工作区、token 用量、缓存） |
 | `/history [n\|all]` | 无参截断列表；n 全量查看单条；all 全量显示 |
 | `/model [name]` | 查看/切换模型 |
@@ -115,6 +119,16 @@ REPL 斜杠命令：
 | `/exit`（`/quit`、`exit`、`quit`） | 退出 |
 
 会话按启动目录划分工作区（global 模式），`/load` 的会话选择菜单只显示当前项目的会话。
+
+### 会话归档与 fork
+
+`/archive` 把历史会话打包成标准 zip 卷（落 `<workspace>/archive/archive-<时间戳>.zip`），把活动区清出来；**归档只做无损压缩**：卷内 entry 名 `<会话 id>.jsonl`、数据是原 jsonl 逐字节（不裁剪、不重排，思维链与工具调用原样保留），entry 注释与卷注释带条数、首条 user 摘要与来源目录，因此列会话不用解压（只读 zip 中央目录）。一次 `/archive` 生成一卷、写入后不可变，也不提供「解档回活动区」。
+
+- 归档筛选：默认只归档 30 天前的会话；`/archive 7d`、`/archive 12h`、`/archive 12h30m` 指定窗口，`/archive all` 不限；恒排除当前会话，5 分钟内动过的会话跳过（防另一实例正在追加），已在卷内的 id 跳过（幂等）
+- `/load` 的候选里归档项带 `[归档] ` 标记；载入归档会话为**只读**：可查看 `/history`、`/stat`，但对话被拒（提示先 `/fork`），原文件不会重建、卷不会被改写
+- `/fork` 仅在归档只读态可用：以当前历史为起点开新会话（新 id、当前 AGENTS.md 快照），立即落盘，之后按普通会话增量追加；`-n` 下同样可 fork，只是不落盘
+- 卷用 `unzip -l/-p/-z` 即可浏览与提取（`unzip -z` 打印注释时可能因本地码页转换显示乱码，不影响数据）
+- 只读（`-n`）与归档只读是两回事：`-n` 允许继续对话（只存内存），归档只读则必须 `/fork` 才有落点
 
 ## AGENTS.md 注入
 

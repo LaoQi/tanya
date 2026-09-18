@@ -1,9 +1,15 @@
 package repl
 
 import (
+	"fmt"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
+
+	"github.com/LaoQi/tanya/agent"
 )
 
 func firstToken(line string) string {
@@ -34,6 +40,34 @@ func dialogueText(line string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(line[size:]), true
+}
+
+var archiveDayArg = regexp.MustCompile(`^([0-9]+)d$`)
+
+func ParseArchiveArg(arg string) (agent.ArchiveOptions, error) {
+	arg = strings.TrimSpace(arg)
+	switch {
+	case arg == "":
+		return agent.ArchiveOptions{OlderThan: agent.ArchiveDefaultWindow}, nil
+	case strings.EqualFold(arg, "all"):
+		return agent.ArchiveOptions{}, nil
+	}
+	d, err := parseArchiveDuration(arg)
+	if err != nil || d <= 0 {
+		return agent.ArchiveOptions{}, fmt.Errorf(MsgArchiveBadArg, arg)
+	}
+	return agent.ArchiveOptions{OlderThan: d}, nil
+}
+
+func parseArchiveDuration(arg string) (time.Duration, error) {
+	if m := archiveDayArg.FindStringSubmatch(arg); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			return 0, err
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(arg)
 }
 
 func (r *REPL) cwdLabel() string {

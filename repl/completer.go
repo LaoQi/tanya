@@ -9,7 +9,7 @@ import (
 	"github.com/LaoQi/tanya/readline"
 )
 
-var slashCommands = []string{"/help", "/new", "/load", "/stat", "/history", "/model", "/think", "/reasoning", "/theme", "/exit", "/quit"}
+var slashCommands = []string{"/help", "/new", "/load", "/archive", "/fork", "/stat", "/history", "/model", "/think", "/reasoning", "/theme", "/exit", "/quit"}
 
 var onOffCandidates = []string{"on", "off"}
 
@@ -147,7 +147,7 @@ func (c *completer) complete(line string) []readline.Completion {
 			if strings.HasPrefix(s.ID, prefix) {
 				out = append(out, readline.Completion{
 					Insert:  "/load " + s.ID,
-					Display: fmt.Sprintf(PickCompleteItem, s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary),
+					Display: fmt.Sprintf(PickCompleteItem, s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, sessSummary(s)),
 				})
 			}
 		}

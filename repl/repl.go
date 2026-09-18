@@ -10,6 +10,7 @@ import (
 	"github.com/LaoQi/tanya/render/theme"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -249,7 +250,13 @@ func (r *REPL) Run() error {
 				r.st.out.emit(KindNotice, MsgDialogueEmpty)
 				continue
 			}
+			if r.blockArchiveReadOnly() {
+				continue
+			}
 			r.ask(text)
+			continue
+		}
+		if r.blockArchiveReadOnly() {
 			continue
 		}
 		r.ask(line)
@@ -297,12 +304,16 @@ func (r *REPL) handleCommand(line string) bool {
 			if err := r.agent.LoadSession(parts[1]); err != nil {
 				r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
 			} else {
-				r.st.out.emit(KindNotice, fmt.Sprintf(MsgLoadedSess, parts[1]))
+				r.st.out.emit(KindNotice, r.loadNotice(parts[1]))
 				r.warnLegacyPrompt()
 			}
 			break
 		}
 		r.loadSessionInteractive()
+	case "/archive":
+		r.handleArchive(parts[1:])
+	case "/fork":
+		r.handleFork()
 	case "/stat":
 		r.st.out.emit(KindNotice, statInfo(r.agent.Stats())+"\n")
 	case "/history":
@@ -342,6 +353,82 @@ func (r *REPL) handleCommand(line string) bool {
 		r.handleTheme(parts[1:])
 	}
 	return false
+}
+
+func (r *REPL) blockArchiveReadOnly() bool {
+	if r.agent == nil {
+		return false
+	}
+	id, ok := r.agent.ArchiveReadOnly()
+	if !ok {
+		return false
+	}
+	r.st.out.emit(KindNotice, fmt.Sprintf(MsgArchiveReadOnlyFmt, id))
+	return true
+}
+
+func (r *REPL) loadNotice(id string) string {
+	if aid, ok := r.agent.ArchiveReadOnly(); ok && aid == id {
+		return fmt.Sprintf(MsgLoadArchived, id)
+	}
+	return fmt.Sprintf(MsgLoadedSess, id)
+}
+
+func (r *REPL) handleArchive(args []string) {
+	if len(args) > 1 {
+		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt, MsgArchiveUsage)+"\n")
+		return
+	}
+	arg := ""
+	if len(args) == 1 {
+		arg = args[0]
+	}
+	opt, err := ParseArchiveArg(arg)
+	if err != nil {
+		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+		return
+	}
+	opt.Exclude = r.agent.SessionID()
+	rep, err := r.agent.ArchiveSessions(opt)
+	if err != nil {
+		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+		return
+	}
+	var b strings.Builder
+	if len(rep.Sessions) > 0 {
+		fmt.Fprintf(&b, MsgArchiveDone, len(rep.Sessions), filepath.Base(rep.Volume), formatBytes(rep.RawBytes), formatBytes(rep.VolumeBytes))
+	} else if rep.DryRun {
+		fmt.Fprintf(&b, MsgArchiveDryRun, len(rep.Sessions), formatBytes(rep.RawBytes))
+	} else {
+		b.WriteString(MsgArchiveNone)
+	}
+	for _, s := range rep.Skipped {
+		fmt.Fprintf(&b, MsgArchiveSkipFmt, s.ID, s.Reason)
+	}
+	for _, f := range rep.Failed {
+		fmt.Fprintf(&b, MsgArchiveFailFmt, f.ID, f.Err)
+	}
+	r.st.out.emit(KindNotice, b.String())
+}
+
+func (r *REPL) handleFork() {
+	if r.agent == nil {
+		return
+	}
+	id, err := r.agent.Fork()
+	if err != nil {
+		if errors.Is(err, agent.ErrForkNotArchive) {
+			r.st.out.emit(KindNotice, MsgForkNotArchive)
+			return
+		}
+		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+		return
+	}
+	out := fmt.Sprintf(MsgForkDone, id)
+	if r.agent.NoSave() {
+		out += MsgForkNoSave
+	}
+	r.st.out.emit(KindNotice, out)
 }
 
 func (r *REPL) handleTheme(args []string) {
@@ -571,7 +658,7 @@ func (r *REPL) loadSessionInteractive() {
 		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
 		return
 	}
-	r.st.out.emit(KindNotice, fmt.Sprintf(MsgLoadedSess, list[idx].ID))
+	r.st.out.emit(KindNotice, r.loadNotice(list[idx].ID))
 	r.warnLegacyPrompt()
 }
 

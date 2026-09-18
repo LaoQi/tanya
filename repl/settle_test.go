@@ -22,7 +22,7 @@ func newSettleAgent(t *testing.T) *agent.Agent {
 		BaseURL:         "http://127.0.0.1:1",
 		Model:           "test-model",
 		UserAgent:       agent.DefaultUserAgent,
-		GlobalSession:   t.TempDir(),
+		DataDir:         t.TempDir(),
 		SessionMode:     "global",
 		ToolOutputLines: 20,
 	}

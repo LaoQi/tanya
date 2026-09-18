@@ -1,5 +1,7 @@
 package agent
 
+import "errors"
+
 const (
 	MsgErrPrefix           = "error: "
 	MsgErrLine             = MsgErrPrefix + "%s"
@@ -29,12 +31,19 @@ const (
 )
 
 const (
-	MsgBadSessionID     = "非法会话 id"
-	MsgSessionGone      = "会话不存在: %s"
-	MsgNoShellFmt       = "未找到可用 shell（已尝试 %s），请安装或在配置中指定 shell:"
-	MsgShellOverrideFmt = "配置的 shell %q 不可执行，请检查 shell: 或 TANYA_SHELL"
-	MsgBadEffort        = "无效思考等级 %q（可选: minimal/low/medium/high/max/off）"
-	MsgBadApiProtocol   = "无效 api_protocol %q（可选: chat/responses）"
+	MsgArchiveNoSave       = "不落盘模式（-n）下不能归档会话"
+	MsgArchiveSkipIdle     = "近 5 分钟内修改"
+	MsgArchiveSkipArchived = "已在归档卷内"
+	MsgArchiveVolFailFmt   = "写入归档卷失败（%s）: %w"
+	MsgArchiveReadOnly     = "归档只读会话不能继续对话（用 /fork 开新会话）"
+	MsgForkNotArchive      = "当前会话不是归档只读会话"
+	MsgControlStatArchive  = "会话: 归档只读 %s（未写入）"
+	MsgBadSessionID        = "非法会话 id"
+	MsgSessionGone         = "会话不存在: %s"
+	MsgNoShellFmt          = "未找到可用 shell（已尝试 %s），请安装或在配置中指定 shell:"
+	MsgShellOverrideFmt    = "配置的 shell %q 不可执行，请检查 shell: 或 TANYA_SHELL"
+	MsgBadEffort           = "无效思考等级 %q（可选: minimal/low/medium/high/max/off）"
+	MsgBadApiProtocol      = "无效 api_protocol %q（可选: chat/responses）"
 )
 
 const (
@@ -97,4 +106,9 @@ const (
 	MsgCalcUnexpectedEnd = "表达式意外结束"
 	MsgCalcMissingRParen = "缺少右括号"
 	MsgCalcWantNumber    = "第 %d 个字符处应为数字"
+)
+
+var (
+	ErrArchiveReadOnly = errors.New(MsgArchiveReadOnly)
+	ErrForkNotArchive  = errors.New(MsgForkNotArchive)
 )

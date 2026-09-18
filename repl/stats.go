@@ -29,6 +29,18 @@ func formatRate(hit, prompt int) string {
 	return fmt.Sprintf("%.2f%%", rate)
 }
 
+func formatBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1fG", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1fM", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1fk", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%dB", n)
+}
+
 func usageText(st agent.Stats) string {
 	if st.HasContext && st.ContextTokens > 0 {
 		return formatTokens(st.ContextTokens)
@@ -93,7 +105,11 @@ func contextText(st agent.Stats) string {
 func statInfo(st agent.Stats) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, MsgStatWorkspace+"\n", st.Workspace)
-	fmt.Fprintf(&b, MsgStatSession+"\n", st.Session)
+	if st.Archived != "" {
+		fmt.Fprintf(&b, MsgStatSessionArchive+"\n", st.Archived)
+	} else {
+		fmt.Fprintf(&b, MsgStatSession+"\n", st.Session)
+	}
 	fmt.Fprintf(&b, MsgStatMessages+"\n", st.Messages)
 	fmt.Fprintf(&b, MsgStatTotals+"\n", totalsText(st))
 	fmt.Fprintf(&b, MsgStatContext+"\n", contextText(st))
