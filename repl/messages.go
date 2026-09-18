@@ -63,6 +63,22 @@ const (
 )
 
 const (
+	MsgArchiveDone        = "已归档 %d 个会话 → %s（%s → %s）\n"
+	MsgArchiveNone        = "没有符合条件的历史会话（近 30 天内的会话不归档，用 /archive all 归档全部）\n"
+	MsgArchiveSkipFmt     = "  跳过 %s（%s）\n"
+	MsgArchiveFailFmt     = "  失败 %s（%v）\n"
+	MsgArchiveDryRun      = "试运行：将归档 %d 个会话（%s）\n"
+	MsgArchiveUsage       = "用法: /archive [all|<时长>]，如 /archive 7d、/archive 12h30m、/archive all"
+	MsgArchiveBadArg      = "无效的归档范围 %q（可用 all 或时长，如 7d、12h、12h30m）"
+	MsgForkDone           = "已 fork 为新会话 %s\n"
+	MsgForkNotArchive     = "当前会话不是归档只读会话，直接对话即可\n"
+	MsgForkNoSave         = "（不落盘模式，未写入）\n"
+	MsgLoadArchived       = "已载入会话 %s（归档只读，继续对话请 /fork）\n"
+	MsgArchiveReadOnlyFmt = "当前为归档只读会话（%s）；继续对话请 /fork 开新会话\n"
+	SessArchMark          = "[归档] "
+)
+
+const (
 	MsgInvalidIndex = "序号无效（1-%d，或 all）\n"
 	MsgTotalMsgs    = "共 %d 条消息\n"
 	MsgCallLabel    = "[调用 %s]"
@@ -83,18 +99,19 @@ const (
 )
 
 const (
-	MsgStatWorkspace  = "工作区: %s"
-	MsgStatSession    = "会话文件: %s"
-	MsgStatMessages   = "消息: %d 条"
-	MsgStatTotals     = "总用量: %s"
-	MsgStatTotalsFmt  = "%s（prompt %s / completion %s）"
-	MsgStatContext    = "上下文: %s"
-	MsgStatContextAPI = "%s（API 实报）"
-	MsgStatContextEst = "~%s（本地估算）"
-	MsgStatCache      = "缓存: %s"
-	MsgStatHitRate    = "命中率: %s"
-	MsgStatNoUsage    = "无（未收到 API usage）"
-	MsgStatNoCache    = "无数据"
+	MsgStatWorkspace      = "工作区: %s"
+	MsgStatSession        = "会话文件: %s"
+	MsgStatSessionArchive = "会话文件: 归档只读 %s（未写入）"
+	MsgStatMessages       = "消息: %d 条"
+	MsgStatTotals         = "总用量: %s"
+	MsgStatTotalsFmt      = "%s（prompt %s / completion %s）"
+	MsgStatContext        = "上下文: %s"
+	MsgStatContextAPI     = "%s（API 实报）"
+	MsgStatContextEst     = "~%s（本地估算）"
+	MsgStatCache          = "缓存: %s"
+	MsgStatHitRate        = "命中率: %s"
+	MsgStatNoUsage        = "无（未收到 API usage）"
+	MsgStatNoCache        = "无数据"
 )
 
 const (
@@ -133,20 +150,18 @@ const (
 )
 
 const helpText = `斜杠命令：
-  /help            显示帮助
-  /new             开启新会话（当前会话自动保存）
-  /load [id]       无参打开会话选择菜单；带 id 直接载入
-  /stat            显示会话统计（工作区/用量/缓存）
-  /history [n|all] 无参截断列表；n 全量查看单条；all 全量显示
-  /model [name]    无参显示当前模型；带名切换模型
-  /think [level]   无参显示思考等级；设置 minimal/low/medium/high/max，off 关闭
-  /reasoning       无参显示开关；带参 on/off 切换
-  /theme [name]    无参显示当前主题与可用列表；带名切换内置主题
-  /exit            退出
-输入分发：
-  内容 / :内容     与 AI 对话（两种写法等价，全角 ： 亦可）
-  /命令            斜杠命令
-  exit / quit      退出
+  /help               显示帮助
+  /new                开启新会话（当前会话自动保存）
+  /load [id]          无参打开会话选择菜单，带 id 直接载入
+  /archive [all|时长] 归档历史会话（无参 = 30 天前的会话，all = 全部）
+  /fork               把归档只读会话 fork 成新会话（继承历史）
+  /stat               会话统计（工作区/用量/缓存）
+  /history [n|all]    无参截断列表，n 查看单条，all 全量显示
+  /model [name]       显示或切换模型
+  /think [level]      显示或设置思考等级（minimal/low/medium/high/max/off）
+  /reasoning [on|off] 显示或切换思维链回传
+  /theme [name]       显示或切换内置主题
+直接输入内容即可与 AI 对话
 `
 
 const welcomLogo = `

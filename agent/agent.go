@@ -73,13 +73,13 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	sessionDir := resolveSessionDir(cfg, cwd)
+	sessionDir, archiveDir := resolveWorkspaceDirs(cfg, cwd)
 	a := &Agent{
 		cfg:       cfg,
 		workspace: cwd,
 		env:       envSection(cwd, tool.profile),
 		prompt:    newPromptBuilder(cwd, globalAgentsPath(), readAgentsFile),
-		store:     newSessionStore(sessionDir, o.noSave),
+		store:     newSessionStore(sessionDir, archiveDir, o.noSave),
 	}
 	tools := newToolRegistry(allTools(tool, a)...)
 	a.tools = tools
@@ -130,6 +130,25 @@ func (a *Agent) LoadSession(id string) error {
 
 func (a *Agent) ListSessions() ([]SessionInfo, error) { return a.store.list() }
 
+func (a *Agent) ArchiveSessions(opt ArchiveOptions) (ArchiveReport, error) {
+	return a.store.archive(opt)
+}
+
+func (a *Agent) ArchiveReadOnly() (string, bool) { return a.store.archivedID() }
+
+func (a *Agent) Fork() (string, error) {
+	if _, ok := a.ArchiveReadOnly(); !ok {
+		return "", ErrForkNotArchive
+	}
+	a.store.rotate()
+	a.prompt.reset()
+	a.stats.reset()
+	if err := a.save(); err != nil {
+		return "", err
+	}
+	return a.store.id(), nil
+}
+
 const noticeLimit = 200
 
 type InterruptError struct {
@@ -150,6 +169,9 @@ func briefErr(err error) string {
 }
 
 func (a *Agent) Ask(ctx context.Context, input string, sink EventSink) error {
+	if _, ok := a.ArchiveReadOnly(); ok {
+		return ErrArchiveReadOnly
+	}
 	mark := len(a.history)
 	a.history = append(a.history, Message{Role: "user", Content: input})
 	err := a.runTurn(ctx, sink)
@@ -282,6 +304,9 @@ func (a *Agent) Stats() Stats {
 	st := a.stats.view()
 	st.Workspace = a.workspace
 	st.Session = a.store.path()
+	if id, ok := a.ArchiveReadOnly(); ok {
+		st.Archived = id
+	}
 	st.Messages = len(a.history)
 	st.Est = a.totalTokens()
 	return st
@@ -326,7 +351,7 @@ func (a *Agent) SessionID() string {
 }
 
 func (a *Agent) SessionFile() string {
-	if a.store.disabled {
+	if a.store.disabled || a.store.frozen {
 		return ""
 	}
 	p := a.store.path()

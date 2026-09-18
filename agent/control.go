@@ -167,11 +167,14 @@ func (t *agentTool) readUsage() string {
 
 func (t *agentTool) readStat() string {
 	st := t.target.Stats()
-	id := strings.TrimSuffix(filepath.Base(st.Session), ".jsonl")
-	if t.target.NoSave() {
-		id = MsgControlStatNoSave
+	session := fmt.Sprintf(MsgControlStatSession, strings.TrimSuffix(filepath.Base(st.Session), ".jsonl"))
+	switch {
+	case st.Archived != "":
+		session = fmt.Sprintf(MsgControlStatArchive, st.Archived)
+	case t.target.NoSave():
+		session = fmt.Sprintf(MsgControlStatSession, MsgControlStatNoSave)
 	}
-	return fmt.Sprintf(MsgControlStatSession, id) + "\n" +
+	return session + "\n" +
 		fmt.Sprintf(MsgControlMessages, st.Messages) + "\n" +
 		fmt.Sprintf(MsgControlTotals, st.PromptTokens, st.CompletionTokens, st.TotalTokens)
 }

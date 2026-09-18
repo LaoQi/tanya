@@ -12,6 +12,13 @@ import (
 	"github.com/LaoQi/tanya/readline"
 )
 
+func sessSummary(s agent.SessionInfo) string {
+	if s.Archived {
+		return SessArchMark + s.Summary
+	}
+	return s.Summary
+}
+
 type sessionPicker struct {
 	items  []agent.SessionInfo
 	cursor int
@@ -54,7 +61,7 @@ func (p *sessionPicker) render(out io.Writer, first bool) {
 			mark = p.sem.Ok.Sprint("> ")
 		}
 		fmt.Fprintf(out, term.ClearLineHome()+SessRow+term.ClearLine()+"\r\n",
-			mark, s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary)
+			mark, s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, sessSummary(s))
 	}
 }
 
@@ -89,7 +96,7 @@ func pickByNumber(list []agent.SessionInfo, out *output) (int, bool) {
 	var b strings.Builder
 	b.WriteString(PickNumTitle)
 	for i, s := range list {
-		fmt.Fprintf(&b, "  %-3d "+SessRow+"\n", i+1, "", s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, s.Summary)
+		fmt.Fprintf(&b, "  %-3d "+SessRow+"\n", i+1, "", s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, sessSummary(s))
 	}
 	b.WriteString(PickNumPrompt)
 	out.emit(KindNotice, b.String())

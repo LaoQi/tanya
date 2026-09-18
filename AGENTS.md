@@ -16,6 +16,7 @@
 - 工具策略：以 `run_shell` 为核心，新能力优先用 shell 命令组合实现；小型纯计算/查询工具放 `builtin.go`
 - 启动即要求可用 shell：`agent.New` 解析（配置覆盖 > 平台探测）全落空直接报错退出，无降级路径
 - `init` 子命令是新工作区的一次性脚手架（建 `.tanya/sessions/`、按确认建 `.tanya/.gitignore`、缺口时建 AGENTS.md 骨架），三项动作幂等且不覆盖既有文件，**必须在 `agent.New` 之前执行**（`.tanya/` 既是会话落点也是 `session_mode: auto` 判定依据）；不做项目探测、不调模型，见 `docs/design.md`《init 模式》
+- 会话归档（`/archive`）：活动会话打包成 zip 卷落 `<workspace>/archive/`（entry 数据逐字节无损、写入后不可变、不做解档回活动区），列表只读 zip 中央目录即可列会话；归档会话 `/load` 为只读（`sessionStore.frozen`，与 `-n` 的 `disabled` 正交），继续对话一律 `/fork`（新 id + 当前 system 快照），见 `docs/session-archive.md`
 - REPL 输入分发（`repl/dispatch.go`）：`/` 白名单斜杠命令、`exit`/`quit` 内建退出、`:`/`：` 等价显式对话前缀、其余直接与 LLM 对话；进程 cwd 恒为启动目录（全程不 `os.Chdir`），`run_shell` 默认在此执行并可用 `cwd` 参数指定单次目录
 - LLM 协议双通道 `api_protocol`（yaml/env `TANYA_API_PROTOCOL`，默认 `responses`，非法值启动报错）：`responses` 走 `/responses`（reasoning 明文捕获/原样回传、固定 `store: false`）；`chat` 走 `/chat/completions`（思维链经 `reasoning_content` 捕获与回传，wire 上不出现 `reasoning_items`），见 `docs/design.md`《LLM 接入》
 - 思考等级只用标准字段 `reasoning_effort`（minimal/low/medium/high/max，yaml/env `/think` 三处可配），不用厂商私有参数；设置后两协议均不发 `temperature`
@@ -30,7 +31,7 @@ main.go            入口、flag 子命令、ask 单发、init 工作区脚手�
 ctty/              控制终端原语与终端探测（前台组、/dev/tty、termios、Facts）；白名单 + stub，零内部依赖
 repl/              REPL 循环与输入分发、斜杠命令、提示符、ghost 补全、/load picker、工具块渲染、状态行、退出收尾
 readline/          自研终端输入层：行编辑/历史/Tab 补全、按键解析、raw mode、显示宽度、pty 桥接（linux）、状态自愈
-agent/             核心逻辑与工具：config / llm(+http,+responses) / agent loop / prompt / session / stats / envprobe / init / tools / shelltool / shell(+平台分片) / builtin / control / tty_bridge
+agent/             核心逻辑与工具：config / llm(+http,+responses) / agent loop / prompt / session / session_archive / stats / envprobe / init / tools / shelltool / shell(+平台分片) / builtin / control / tty_bridge
 render/            表现层树根（IR → ANSI）；style/ 样式词汇、term/ 终端原语、ir/ 渲染 IR、theme/ 配色、markdown/ 流式解析、markup/ 内联标记
 ```
 
@@ -39,6 +40,7 @@ render/            表现层树根（IR → ANSI）；style/ 样式词汇、term
 ## 文档
 
 - `docs/design.md` 核心设计与各模块行为细节（权威）；`README.md` 使用说明与配置项
+- `docs/session-archive.md` 会话归档（zip 卷）实施文档：分期、接口签名、验收与落地偏差
 - 终端：`docs/ctty.md` 控制终端抽象与平台收敛、`docs/interactive-tty.md` pty 桥接、`docs/terminal-caps.md` 探测与能力降级
 - 表现层：`docs/style-split.md` 拆包、`docs/render-pipeline.md` 渲染管线、`docs/render-refs-compare.md` 参考对比
 - 工具与缓存：`docs/shell-tool.md` run_shell 组件化、`docs/agent-control-tool.md` agent_custom、`docs/cache-probe.md` prompt cache

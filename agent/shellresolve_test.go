@@ -150,7 +150,7 @@ func TestNewRejectsUnavailableShellOverride(t *testing.T) {
 	isolatePromptEnv(t)
 	cfg := defaultConfig()
 	cfg.Shell = "/no/such/shell-tanya"
-	cfg.GlobalSession = t.TempDir()
+	cfg.DataDir = t.TempDir()
 	if _, err := New(cfg); err == nil || !strings.Contains(err.Error(), "配置的 shell") {
 		t.Fatalf("无可用 shell 时 New 应报错: %v", err)
 	}

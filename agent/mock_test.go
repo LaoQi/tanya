@@ -291,7 +291,7 @@ func (m *mockLLM) config() *Config {
 	cfg := defaultConfig()
 	cfg.BaseURL = m.server.URL
 	cfg.APIKey = "test-key"
-	cfg.GlobalSession = m.t.TempDir()
+	cfg.DataDir = m.t.TempDir()
 	cfg.ApiProtocol = "chat"
 	return cfg
 }

@@ -175,7 +175,7 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 （共 12 个，仅列前 20）
 ```
 
-- 范围：**仅当前 `sessionDir`**（当前工作区），不跨 `global_session/<其它 workspace-id>/`。
+- 范围：**仅当前 `sessionDir`**（当前工作区），不跨 `<data_dir>/workspaces/<其它 workspace-id>/`。
 - 上限：列前 20 个（id 倒序，最新在前），超出标注总数。
 - 文件是 **jsonl，每行一条消息**（首行 system 快照）——该提示写在工具说明里，返回不重复。
 - 实现改动：`SessionInfo` 补 `Path string`（`scanSession` 已有 `path` 参数，直接填）；`configTarget` 加 `Sessions() ([]SessionInfo, error)`，`*Agent` 转发 `store.list()`。
@@ -202,7 +202,7 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 
 ## 14. 不做清单（沿用 v1 §8）
 
-`api_key` / `base_url` / `user_agent` / `api_protocol` / system prompt 与 AGENTS.md 注入 / 主题配色 / `session_mode` / `global_session` / 工具清单增删 / 终端原语（`ctty` 不变量）/ 任何「放宽」方向能力（用户确认、沙箱、只读模式）。
+`api_key` / `base_url` / `user_agent` / `api_protocol` / system prompt 与 AGENTS.md 注入 / 主题配色 / `session_mode` / `data_dir` / 工具清单增删 / 终端原语（`ctty` 不变量）/ 任何「放宽」方向能力（用户确认、沙箱、只读模式）。
 
 ## 15. 已定事项
 

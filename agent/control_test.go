@@ -33,7 +33,7 @@ func newControlAgent(t *testing.T, m *mockLLM, protocol string) *Agent {
 	t.Helper()
 	isolatePromptEnv(t)
 	cfg := defaultConfig()
-	cfg.GlobalSession = t.TempDir()
+	cfg.DataDir = t.TempDir()
 	cfg.ApiProtocol = protocol
 	cfg.Model = "old-model"
 	if m != nil {
@@ -202,7 +202,7 @@ func TestAgentToolGetStat(t *testing.T) {
 func TestAgentToolGetStatNoSave(t *testing.T) {
 	isolatePromptEnv(t)
 	cfg := defaultConfig()
-	cfg.GlobalSession = t.TempDir()
+	cfg.DataDir = t.TempDir()
 	cfg.Model = "old-model"
 	a, err := New(cfg, NoSave(true))
 	if err != nil {

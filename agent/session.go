@@ -1,11 +1,13 @@
 package agent
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -22,35 +24,48 @@ type sessionFileStat struct {
 }
 
 type SessionInfo struct {
-	ID      string
-	ModTime time.Time
-	Msgs    int
-	Summary string
-	Path    string
+	ID       string
+	ModTime  time.Time
+	Msgs     int
+	Summary  string
+	Path     string
+	Archived bool
+	Size     int64
+	MetaOK   bool
 }
 
 type sessionStore struct {
 	dir         string
+	archiveDir  string
 	disabled    bool
+	frozen      bool
+	frozenID    string
 	file        string
 	saved       int
 	systemSaved bool
 	cache       map[string]SessionInfo
 	stat        map[string]sessionFileStat
+	volStat     map[string]sessionFileStat
+	volumes     map[string][]SessionInfo
 }
 
-func newSessionStore(dir string, disabled bool) *sessionStore {
+func newSessionStore(dir, archiveDir string, disabled bool) *sessionStore {
 	return &sessionStore{
-		dir:      dir,
-		disabled: disabled,
-		cache:    map[string]SessionInfo{},
-		stat:     map[string]sessionFileStat{},
+		dir:        dir,
+		archiveDir: archiveDir,
+		disabled:   disabled,
+		cache:      map[string]SessionInfo{},
+		stat:       map[string]sessionFileStat{},
+		volStat:    map[string]sessionFileStat{},
+		volumes:    map[string][]SessionInfo{},
 	}
 }
 
 func (s *sessionStore) rotate() {
 	s.saved = 0
 	s.systemSaved = false
+	s.frozen = false
+	s.frozenID = ""
 	s.file = filepath.Join(s.dir, time.Now().Format("20060102-150405")+".jsonl")
 }
 
@@ -64,7 +79,7 @@ func (s *sessionStore) id() string {
 }
 
 func (s *sessionStore) append(msgs []Message, system string) error {
-	if s.disabled || s.saved >= len(msgs) {
+	if s.disabled || s.frozen || s.saved >= len(msgs) {
 		return nil
 	}
 	var buf bytes.Buffer
@@ -107,19 +122,72 @@ func (s *sessionStore) load(id string) ([]Message, string, error) {
 		return nil, "", fmt.Errorf(MsgBadSessionID)
 	}
 	path := filepath.Join(s.dir, id+".jsonl")
-	f, err := os.Open(path)
-	if err != nil {
+	if f, err := os.Open(path); err == nil {
+		history, system, err := loadFrom(f)
+		f.Close()
+		if err != nil {
+			return nil, "", err
+		}
+		s.file = path
+		s.frozen = false
+		s.frozenID = ""
+		s.saved = len(history)
+		s.systemSaved = true
+		return history, system, nil
+	}
+	if err := s.refresh(); err != nil {
+		return nil, "", err
+	}
+	volume, ok := s.findArchived(id)
+	if !ok {
 		return nil, "", fmt.Errorf(MsgSessionGone, id)
 	}
-	defer f.Close()
+	zr, err := zip.OpenReader(volume)
+	if err != nil {
+		return nil, "", err
+	}
+	defer zr.Close()
+	for _, f := range zr.File {
+		if strings.TrimSuffix(filepath.Base(f.Name), ".jsonl") != id {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, "", err
+		}
+		history, system, err := loadFrom(rc)
+		rc.Close()
+		if err != nil {
+			return nil, "", err
+		}
+		s.file = ""
+		s.frozen = true
+		s.frozenID = id
+		s.saved = len(history)
+		s.systemSaved = true
+		return history, system, nil
+	}
+	return nil, "", fmt.Errorf(MsgSessionGone, id)
+}
+
+func loadFrom(r io.Reader) ([]Message, string, error) {
 	var msgs []Message
-	dec := json.NewDecoder(f)
+	dec := json.NewDecoder(r)
 	for {
 		var m Message
-		if err := dec.Decode(&m); err != nil {
-			break
+		switch err := dec.Decode(&m); {
+		case err == io.EOF:
+		case err == nil:
+			msgs = append(msgs, m)
+			continue
+		case tolerantDecodeErr(err):
+		default:
+			return nil, "", err
 		}
-		msgs = append(msgs, m)
+		break
+	}
+	if _, err := io.Copy(io.Discard, r); err != nil {
+		return nil, "", err
 	}
 	var history []Message
 	var system string
@@ -129,28 +197,71 @@ func (s *sessionStore) load(id string) ([]Message, string, error) {
 	} else {
 		history = msgs
 	}
-	s.file = path
-	s.saved = len(history)
-	s.systemSaved = true
 	return history, system, nil
+}
+
+func tolerantDecodeErr(err error) bool {
+	var se *json.SyntaxError
+	var ute *json.UnmarshalTypeError
+	return errors.As(err, &se) || errors.As(err, &ute) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+func (s *sessionStore) archivedID() (string, bool) { return s.frozenID, s.frozen }
+
+func (s *sessionStore) findArchived(id string) (string, bool) {
+	for path, list := range s.volumes {
+		for _, si := range list {
+			if si.ID == id {
+				return path, true
+			}
+		}
+	}
+	return "", false
 }
 
 func (s *sessionStore) list() ([]SessionInfo, error) {
 	if err := s.refresh(); err != nil {
 		return nil, err
 	}
-	list := make([]SessionInfo, 0, len(s.cache))
+	var act, arc []SessionInfo
 	for _, si := range s.cache {
-		list = append(list, si)
+		if si.Archived {
+			arc = append(arc, si)
+		} else {
+			act = append(act, si)
+		}
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].ID > list[j].ID })
-	return list, nil
+	byID := func(list []SessionInfo) {
+		sort.Slice(list, func(i, j int) bool { return list[i].ID > list[j].ID })
+	}
+	byID(act)
+	byID(arc)
+	return append(act, arc...), nil
 }
 
 func (s *sessionStore) refresh() error {
+	if err := s.refreshActive(); err != nil {
+		return err
+	}
+	if err := s.refreshVolumes(); err != nil {
+		return err
+	}
+	s.cache = s.activeCache()
+	for _, list := range s.volumes {
+		for _, si := range list {
+			if _, ok := s.cache[si.ID]; !ok {
+				s.cache[si.ID] = si
+			}
+		}
+	}
+	return nil
+}
+
+func (s *sessionStore) refreshActive() error {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
+			s.stat = map[string]sessionFileStat{}
 			return nil
 		}
 		return err
@@ -168,7 +279,9 @@ func (s *sessionStore) refresh() error {
 		seen[id] = true
 		st := sessionFileStat{mtime: info.ModTime(), size: info.Size()}
 		if old, ok := s.stat[id]; ok && old == st {
-			continue
+			if prev, ok := s.cache[id]; ok && !prev.Archived {
+				continue
+			}
 		}
 		s.stat[id] = st
 		s.cache[id] = scanSession(filepath.Join(s.dir, e.Name()), id, info.ModTime())
@@ -182,13 +295,89 @@ func (s *sessionStore) refresh() error {
 	return nil
 }
 
+func (s *sessionStore) activeCache() map[string]SessionInfo {
+	out := make(map[string]SessionInfo, len(s.stat))
+	for id := range s.stat {
+		if si, ok := s.cache[id]; ok && !si.Archived {
+			out[id] = si
+		}
+	}
+	return out
+}
+
+func (s *sessionStore) refreshVolumes() error {
+	if s.archiveDir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(s.archiveDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.volStat = map[string]sessionFileStat{}
+			s.volumes = map[string][]SessionInfo{}
+			return nil
+		}
+		return err
+	}
+	seen := map[string]bool{}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, archiveVolumeSuffix) || strings.Contains(name, archiveTempSuffix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		path := filepath.Join(s.archiveDir, name)
+		seen[path] = true
+		st := sessionFileStat{mtime: info.ModTime(), size: info.Size()}
+		if old, ok := s.volStat[path]; ok && old == st {
+			if _, ok := s.volumes[path]; ok {
+				continue
+			}
+		}
+		s.volStat[path] = st
+		vol, err := readVolume(path)
+		if err != nil {
+			delete(s.volumes, path)
+			continue
+		}
+		list := make([]SessionInfo, 0, len(vol))
+		for _, e := range vol {
+			list = append(list, e.Info)
+		}
+		s.volumes[path] = list
+	}
+	for path := range s.volumes {
+		if !seen[path] {
+			delete(s.volumes, path)
+		}
+	}
+	for path := range s.volStat {
+		if !seen[path] {
+			delete(s.volStat, path)
+		}
+	}
+	return nil
+}
+
+const sessionSummaryRunes = 30
+
 func scanSession(path, id string, modTime time.Time) SessionInfo {
-	si := SessionInfo{ID: id, ModTime: modTime, Path: path}
+	si, _ := scanSessionFile(path, id, modTime, sessionSummaryRunes)
+	return si
+}
+
+func scanSessionFile(path, id string, modTime time.Time, summaryRunes int) (SessionInfo, error) {
+	si := SessionInfo{ID: id, ModTime: modTime, Path: path, MetaOK: true}
 	f, err := os.Open(path)
 	if err != nil {
-		return si
+		return si, err
 	}
 	defer f.Close()
+	if fi, err := f.Stat(); err == nil {
+		si.Size = fi.Size()
+	}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
@@ -206,33 +395,41 @@ func scanSession(path, id string, modTime time.Time) SessionInfo {
 		}
 		si.Msgs++
 		if si.Summary == "" && m.Role == "user" && m.Content != "" {
-			s := strings.ReplaceAll(m.Content, "\n", " ")
-			if utf8.RuneCountInString(s) > 30 {
-				s = string([]rune(s)[:30]) + "..."
-			}
-			si.Summary = s
+			si.Summary = summarize(m.Content, summaryRunes)
 		}
 	}
-	return si
+	if err := sc.Err(); err != nil {
+		return si, err
+	}
+	return si, nil
 }
 
-func resolveSessionDir(cfg *Config, cwd string) string {
+func summarize(s string, limit int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if utf8.RuneCountInString(s) > limit {
+		return string([]rune(s)[:limit]) + "..."
+	}
+	return s
+}
+
+func resolveWorkspaceDirs(cfg *Config, cwd string) (sessions, archive string) {
 	mode := cfg.SessionMode
 	if mode == "" {
 		mode = "auto"
 	}
 	localBase := filepath.Join(cwd, ".tanya")
+	globalBase := filepath.Join(cfg.DataDir, "workspaces", workspaceID(cwd))
+	base := globalBase
 	switch mode {
 	case "local":
-		return filepath.Join(localBase, "sessions")
+		base = localBase
 	case "global":
-		return filepath.Join(cfg.GlobalSession, workspaceID(cwd))
 	default:
 		if isDir(localBase) {
-			return filepath.Join(localBase, "sessions")
+			base = localBase
 		}
-		return filepath.Join(cfg.GlobalSession, workspaceID(cwd))
 	}
+	return filepath.Join(base, "sessions"), filepath.Join(base, "archive")
 }
 
 func isDir(p string) bool {
