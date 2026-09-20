@@ -3,6 +3,7 @@
 tanya 变更记录。新条目加在最上方的日期分节内（没有当天分节就新建一个）；本文件记变更，AGENTS.md 只保留现行约束。
 
 ## 2026-09-20
+- feat(repl,docs): `/switch` 参数目录补全——ghost 与 Tab 菜单列前缀基准段（`~`/绝对路径/相对按当前工作区）的一级子目录，只取目录（符号链接跟随目标判定，与切换口径一致）、候选带尾 `/` 下钻、裸 `..` 补成 `../`；隐藏目录需敲 `.` 才出现，名字含空白或控制符（含 DEL）跳过；工作区基准 `workspaceDir` 活取、换区即跟随，逐键一次 `ReadDir`、无缓存
 - feat(agent,repl,docs): `/switch <dir>` 切换工作区——`Agent.loadWorkspace` 抽出 `New` 的装配路径，按新目录原子重建 shell 工具/system 提示/会话存储/env 段并放弃当前会话（历史清空、会话轮转，旧文件不动）；`run_shell` 默认目录由进程 cwd 改为当前工作区（显式 `cwd` 才回显），提示符 `{cwd}`/`/stat`/归档卷注释同步跟随，目标非法或等同当前时拒绝且状态不变
 - fix(agent): responses 协议 reasoning 回传补 `summary` 空数组——阿里（dashscope responses 兼容层）等端点要求 input 中 reasoning item 必须携带 summary 列表，缺失时第二轮起 400 Invalid 'summary'；OpenAI 侧该字段本就合法，空数组双向兼容
 

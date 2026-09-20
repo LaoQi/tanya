@@ -2,6 +2,8 @@ package repl
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/LaoQi/tanya/render/term"
@@ -24,12 +26,21 @@ var effortCandidates = func() []string {
 type completer struct {
 	listSessions func() ([]agent.SessionInfo, error)
 	listModels   func() ([]string, error)
+	workspaceDir func() string
 	modelCache   []string
 	modelLoaded  bool
 }
 
 func (c *completer) isCommandContext(line string) bool {
 	return strings.HasPrefix(line, "/") && !strings.Contains(line, " ")
+}
+
+func (c *completer) isSwitchContext(line string) bool {
+	if !strings.HasPrefix(line, "/switch ") {
+		return false
+	}
+	prefix := strings.TrimPrefix(line, "/switch ")
+	return !strings.Contains(prefix, " ")
 }
 
 func (c *completer) isLoadContext(line string) bool {
@@ -98,6 +109,13 @@ func (c *completer) suggest(line string) string {
 				return cmd[len(line):]
 			}
 		}
+	case c.isSwitchContext(line):
+		prefix := strings.TrimPrefix(line, "/switch ")
+		for _, cand := range c.switchCandidates(prefix) {
+			if cand.path != prefix {
+				return cand.path[len(prefix):]
+			}
+		}
 	case c.isLoadContext(line):
 		prefix := strings.TrimPrefix(line, "/load ")
 		for _, s := range c.sessionIDs() {
@@ -145,6 +163,13 @@ func (c *completer) complete(line string) []readline.Completion {
 			if strings.HasPrefix(cmd, line) {
 				out = append(out, readline.Completion{Insert: cmd, Display: cmd})
 			}
+		}
+		return out
+	case c.isSwitchContext(line):
+		prefix := strings.TrimPrefix(line, "/switch ")
+		var out []readline.Completion
+		for _, cand := range c.switchCandidates(prefix) {
+			out = append(out, readline.Completion{Insert: "/switch " + cand.path, Display: cand.label})
 		}
 		return out
 	case c.isLoadContext(line):
@@ -217,4 +242,82 @@ func (c *completer) sessionIDs() []string {
 		ids = append(ids, s.ID)
 	}
 	return ids
+}
+
+type switchCandidate struct {
+	path  string
+	label string
+}
+
+func (c *completer) switchCandidates(prefix string) []switchCandidate {
+	home, _ := os.UserHomeDir()
+	var base, typedRoot, namePart string
+	switch {
+	case prefix == "~":
+		if home == "" {
+			return nil
+		}
+		base, typedRoot, namePart = home, "~/", ""
+	case strings.HasPrefix(prefix, "~"):
+		rest := prefix[1:]
+		if home == "" || !strings.HasPrefix(rest, "/") {
+			return nil
+		}
+		dirPart, name := splitSwitchPath(rest)
+		base, typedRoot, namePart = home+dirPart, "~"+dirPart, name
+	case strings.HasPrefix(prefix, "/"):
+		dirPart, name := splitSwitchPath(prefix)
+		base, typedRoot, namePart = dirPart, dirPart, name
+	default:
+		if c.workspaceDir == nil || c.workspaceDir() == "" {
+			return nil
+		}
+		dirPart, name := splitSwitchPath(prefix)
+		base, typedRoot, namePart = filepath.Join(c.workspaceDir(), dirPart), dirPart, name
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return nil
+	}
+	dot := strings.HasPrefix(namePart, ".")
+	var out []switchCandidate
+	if namePart == ".." {
+		out = append(out, switchCandidate{path: typedRoot + "../", label: "../"})
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !switchDirEntry(base, e) || !safeSwitchName(name) {
+			continue
+		}
+		if strings.HasPrefix(name, ".") && !dot {
+			continue
+		}
+		if !strings.HasPrefix(name, namePart) {
+			continue
+		}
+		out = append(out, switchCandidate{path: typedRoot + name + "/", label: term.OneLine(name + "/")})
+	}
+	return out
+}
+
+func splitSwitchPath(p string) (dirPart, name string) {
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+		return p[:i+1], p[i+1:]
+	}
+	return "", p
+}
+
+func switchDirEntry(base string, e os.DirEntry) bool {
+	if e.IsDir() {
+		return true
+	}
+	if e.Type()&os.ModeSymlink == 0 {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(base, e.Name()))
+	return err == nil && info.IsDir()
+}
+
+func safeSwitchName(name string) bool {
+	return name != "" && !strings.ContainsFunc(name, func(r rune) bool { return r <= ' ' || r == 0x7f })
 }

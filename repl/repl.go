@@ -101,7 +101,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	}
 	ed := readline.NewEditor(dev, raw)
 	ed.SetOutput(o.st.out)
-	c := &completer{listSessions: a.ListSessions, listModels: a.ListModels}
+	c := &completer{listSessions: a.ListSessions, listModels: a.ListModels, workspaceDir: a.Workspace}
 	ed.SetComplete(c.complete)
 	ed.SetGhost(c.suggest)
 	name := o.themeName
