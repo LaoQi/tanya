@@ -40,6 +40,28 @@ type Quote struct {
 
 type Rule struct{}
 
+type Align uint8
+
+const (
+	AlignLeft Align = iota
+	AlignRight
+	AlignCenter
+)
+
+type TableRow struct {
+	Cells  [][]Inline
+	Header bool
+}
+
+type Table struct {
+	Aligns  []Align
+	Widths  []int
+	Rows    []TableRow
+	Top     bool
+	Bottom  bool
+	Compact bool
+}
+
 type RawText struct {
 	Text string
 }
@@ -62,6 +84,7 @@ func (List) blockNode()      {}
 func (ListItem) blockNode()  {}
 func (Quote) blockNode()     {}
 func (Rule) blockNode()      {}
+func (Table) blockNode()     {}
 func (RawText) blockNode()   {}
 
 func (Span) inlineNode()      {}

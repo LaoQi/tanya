@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/LaoQi/tanya/render/ir"
+	rstyle "github.com/LaoQi/tanya/render/style"
 	"github.com/LaoQi/tanya/render/term"
 )
 
@@ -45,5 +46,93 @@ func TestRenderOrderedStart(t *testing.T) {
 	}})
 	if got != "3. a\n" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func span(t string) []ir.Inline { return []ir.Inline{ir.Span{Text: t}} }
+
+func tableFixture() ir.Table {
+	return ir.Table{
+		Aligns: []ir.Align{ir.AlignLeft, ir.AlignRight},
+		Widths: []int{4, 3},
+		Rows: []ir.TableRow{
+			{Cells: [][]ir.Inline{span("name"), span("qty")}, Header: true},
+			{Cells: [][]ir.Inline{span("a"), span("1")}},
+		},
+		Top:    true,
+		Bottom: true,
+	}
+}
+
+func TestRenderTableBox(t *testing.T) {
+	got := renderBlocks(t, term.Profile{TTY: true, Colors: term.LevelNone}, []ir.Block{tableFixture()})
+	want := "┌──────┬─────┐\n│ name │ qty │\n├──────┼─────┤\n│ a    │   1 │\n└──────┴─────┘\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestRenderTableCompact(t *testing.T) {
+	tab := tableFixture()
+	tab.Compact = true
+	got := renderBlocks(t, term.Profile{TTY: true, Colors: term.LevelNone}, []ir.Block{tab})
+	want := "┌────┬───┐\n│name│qty│\n├────┼───┤\n│a   │  1│\n└────┴───┘\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestRenderTableStreamedContinuation(t *testing.T) {
+	body := ir.Table{
+		Aligns: []ir.Align{ir.AlignLeft},
+		Widths: []int{3},
+		Rows:   []ir.TableRow{{Cells: [][]ir.Inline{span("xyz")}}},
+	}
+	got := renderBlocks(t, term.Profile{TTY: true, Colors: term.LevelNone}, []ir.Block{body})
+	if got != "│ xyz │\n" {
+		t.Errorf("续行块只出行本身: %q", got)
+	}
+	end := ir.Table{Aligns: []ir.Align{ir.AlignLeft}, Widths: []int{3}, Bottom: true}
+	got = renderBlocks(t, term.Profile{TTY: true, Colors: term.LevelNone}, []ir.Block{end})
+	if got != "└─────┘\n" {
+		t.Errorf("收尾块只出下框: %q", got)
+	}
+}
+
+func TestRenderTableOverwideCellUnpadded(t *testing.T) {
+	tab := ir.Table{
+		Aligns: []ir.Align{ir.AlignLeft},
+		Widths: []int{3},
+		Rows:   []ir.TableRow{{Cells: [][]ir.Inline{span("abcdef")}}},
+	}
+	got := renderBlocks(t, term.Profile{TTY: true, Colors: term.LevelNone}, []ir.Block{tab})
+	if got != "│ abcdef │\n" {
+		t.Errorf("超宽单元格应原样: %q", got)
+	}
+}
+
+func TestRenderTableStyled(t *testing.T) {
+	got := renderBlocks(t, term.Profile{TTY: true, Colors: term.Level16}, []ir.Block{tableFixture()})
+	for _, want := range []string{"\x1b[90m┌", "\x1b[96;1mname\x1b[0m", "\x1b[90m│\x1b[0m"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("缺少 %q in %q", want, got)
+		}
+	}
+	if !strings.Contains(got, "\x1b[96;1mname\x1b[0m \x1b[90m│") {
+		t.Errorf("表头样式不应吞掉填充空格: %q", got)
+	}
+}
+
+func TestRenderTableHeaderKeepsInlineStyle(t *testing.T) {
+	tab := ir.Table{
+		Aligns: []ir.Align{ir.AlignLeft},
+		Widths: []int{4},
+		Rows: []ir.TableRow{{Cells: [][]ir.Inline{{
+			ir.Span{Style: rstyle.Style{Attr: rstyle.AttrItalic}, Text: "it"},
+		}}, Header: true}},
+	}
+	got := renderBlocks(t, term.Profile{TTY: true, Colors: term.Level16}, []ir.Block{tab})
+	if !strings.Contains(got, "\x1b[96;1;3mit\x1b[0m") {
+		t.Errorf("单元格自带样式应与表头样式合并: %q", got)
 	}
 }

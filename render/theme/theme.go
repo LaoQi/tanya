@@ -29,6 +29,8 @@ func mdTheme(h1, h2, h3, h4, h5, h6, codeBlock, codeInline rstyle.Style) Theme {
 		QuotePrefix: "▌ ",
 		Bullet:      "• ",
 		Rule:        "────",
+		TableHead:   fgBold(14),
+		TableBorder: fg(8),
 	}
 }
 
@@ -176,6 +178,8 @@ type Theme struct {
 	QuotePrefix string
 	Bullet      string
 	Rule        string
+	TableHead   rstyle.Style
+	TableBorder rstyle.Style
 }
 
 func DefaultTheme() Theme {
@@ -193,6 +197,8 @@ func DefaultTheme() Theme {
 		QuotePrefix: "▌ ",
 		Bullet:      "• ",
 		Rule:        "────",
+		TableHead:   fgBold(14),
+		TableBorder: fg(8),
 	}
 }
 

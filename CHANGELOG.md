@@ -4,6 +4,7 @@ tanya 变更记录。新条目加在最上方的日期分节内（没有当天�
 
 ## 2026-09-20
 
+- feat(render,repl,docs): markdown 表格渲染——IR `Table` 块 + 三行前瞻定列宽（表头/分隔/首数据行）+ 外框与列对齐；列宽不封顶、超宽单元格不截断，终端宽度只用于切紧边距；/theme 样例与 README 补表格展示
 - chore(docs): Windows 验证条目退出 todos 跟踪——todos 删去 B1/B2 验证项，文档口径由「实机验证待做」改为「仅部分实机验证、未全量覆盖、暂不跟踪」（AGENTS/README/terminal-caps/windows-console-mode-restore）
 - feat(agent,repl,docs): /fork 通用化——任何会话可 fork 成新分支（原会话文件不动、可 /load 回切），sessionStore.rotate 同秒重名退 -2/-3 后缀；MsgForkDone 报继承条数
 - chore: AGENTS.md 精简（行为细节收敛到 docs、只留硬不变量），新增 CHANGELOG.md 承接变更记录

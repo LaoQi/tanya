@@ -53,6 +53,11 @@ type turn struct {
 }
 
 func (r *REPL) beginTurn(done func()) *turn {
+	width := r.view.width()
+	md := markdown.NewMarkdownBuf()
+	md.SetWidth(width)
+	reason := markdown.NewMarkdownBuf()
+	reason.SetWidth(width)
 	return &turn{
 		r:     r,
 		start: time.Now(),
@@ -61,10 +66,10 @@ func (r *REPL) beginTurn(done func()) *turn {
 			st:   r.st,
 			prof: r.prof,
 			sem:  r.sem,
-			md:   markdown.NewMarkdownBuf(),
+			md:   md,
 			rend: r.rend,
 		},
-		reasonBuf: markdown.NewMarkdownBuf(),
+		reasonBuf: reason,
 	}
 }
 
@@ -168,8 +173,9 @@ func (t *turn) End(err error) {
 }
 
 // mdBlocks 把整段文本按 markdown 管线解析为块（回放等一次性展示用，不复用回合缓冲）。
-func mdBlocks(text string) []ir.Block {
+func mdBlocks(text string, cols int) []ir.Block {
 	buf := markdown.NewMarkdownBuf()
+	buf.SetWidth(cols)
 	var blks []ir.Block
 	blks = append(blks, buf.Write(text)...)
 	blks = append(blks, buf.Close()...)

@@ -270,3 +270,192 @@ func TestMarkdownFenceByteWatchdog(t *testing.T) {
 		t.Errorf("超限后的行应回到普通段落渲染")
 	}
 }
+
+func plainBlocks(t *testing.T, buf *MarkdownBuf, delta string) string {
+	t.Helper()
+	r := render.NewRenderer(term.Profile{TTY: true, Colors: term.LevelNone})
+	var b strings.Builder
+	for _, blk := range buf.Write(delta) {
+		b.WriteString(r.Block(blk))
+	}
+	return b.String()
+}
+
+func plainClose(t *testing.T, buf *MarkdownBuf) string {
+	t.Helper()
+	r := render.NewRenderer(term.Profile{TTY: true, Colors: term.LevelNone})
+	var b strings.Builder
+	for _, blk := range buf.Close() {
+		b.WriteString(r.Block(blk))
+	}
+	return b.String()
+}
+
+func TestMarkdownTableAlignAndBox(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := plainBlocks(t, buf, "| name | qty |\n|:-----|----:|\n| a | 1 |\n| bb | 22 |\n\n")
+	got += plainClose(t, buf)
+	want := "┌──────┬─────┐\n" +
+		"│ name │ qty │\n" +
+		"├──────┼─────┤\n" +
+		"│ a    │   1 │\n" +
+		"│ bb   │  22 │\n" +
+		"└──────┴─────┘\n\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestMarkdownTableStreamSplit(t *testing.T) {
+	buf := NewMarkdownBuf()
+	if got := plainBlocks(t, buf, "| a | b |\n"); got != "" {
+		t.Errorf("表头未确认不应出块: %q", got)
+	}
+	if got := plainBlocks(t, buf, "|---|---|\n"); got != "" {
+		t.Errorf("列宽未定时不应出块: %q", got)
+	}
+	got := plainBlocks(t, buf, "| 1 | 2 |\n")
+	want := "┌───┬───┐\n│ a │ b │\n├───┼───┤\n│ 1 │ 2 │\n"
+	if got != want {
+		t.Errorf("首数据行应带出表头与上框:\n got %q\nwant %q", got, want)
+	}
+	got = plainBlocks(t, buf, "| 3 | 4 |\n") + plainClose(t, buf)
+	want = "│ 3 │ 4 │\n└───┴───┘\n"
+	if got != want {
+		t.Errorf("续行与下框:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestMarkdownTableCenterAlign(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := plainBlocks(t, buf, "| a | bb |\n|:-:|:-:|\n| 1 | 2 |\n")
+	want := "┌───┬────┐\n│ a │ bb │\n├───┼────┤\n│ 1 │ 2  │\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestMarkdownTableCandidateFallback(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := plainBlocks(t, buf, "a | b\nplain\n") + plainClose(t, buf)
+	if got != "a | b\nplain\n" {
+		t.Errorf("非表格的竖线行应回退为段落: %q", got)
+	}
+}
+
+func TestMarkdownTableShortRowPadsAndExtraDropped(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := plainBlocks(t, buf, "| a | b | c |\n|---|---|---|\n| 1 |\n| 1 | 2 | 3 | 4 |\n")
+	want := "┌───┬───┬───┐\n│ a │ b │ c │\n├───┼───┼───┤\n│ 1 │   │   │\n│ 1 │ 2 │ 3 │\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestMarkdownTableEscapedPipe(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := plainBlocks(t, buf, "| a \\| b | c |\n|---|---|\n| x | y |\n")
+	want := "┌───────┬───┐\n│ a | b │ c │\n├───────┼───┤\n│ x     │ y │\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestMarkdownTableOverwideNotTruncated(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := plainBlocks(t, buf, "| a | b |\n|---|---|\n| 1 | 2 |\n| abcdefghij | y |\n")
+	want := "┌───┬───┐\n│ a │ b │\n├───┼───┤\n│ 1 │ 2 │\n│ abcdefghij │ y │\n"
+	if got != want {
+		t.Errorf("超宽单元格应原样渲染:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestMarkdownTableInlineWidth(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := plainBlocks(t, buf, "| **bold** | x |\n|---|---|\n| 1 | 2 |\n")
+	want := "┌──────┬───┐\n│ bold │ x │\n├──────┼───┤\n│ 1    │ 2 │\n"
+	if got != want {
+		t.Errorf("列宽应按可见宽度计:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestMarkdownTableCompactOnNarrowTerminal(t *testing.T) {
+	buf := NewMarkdownBuf()
+	buf.SetWidth(6)
+	got := plainBlocks(t, buf, "| a | b |\n|---|---|\n| 1 | 2 |\n")
+	want := "┌─┬─┐\n│a│b│\n├─┼─┤\n│1│2│\n"
+	if got != want {
+		t.Errorf("窄终端应切紧边距:\n got %q\nwant %q", got, want)
+	}
+	buf = NewMarkdownBuf()
+	buf.SetWidth(200)
+	got = plainBlocks(t, buf, "| a | b |\n|---|---|\n| 1 | 2 |\n")
+	if !strings.HasPrefix(got, "┌───┬───┐\n") {
+		t.Errorf("宽终端应保留松边距: %q", got)
+	}
+}
+
+func TestMarkdownTableHeaderOnly(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := plainBlocks(t, buf, "| a | b |\n|---|---|\n") + plainClose(t, buf)
+	want := "┌───┬───┐\n│ a │ b │\n├───┼───┤\n└───┴───┘\n"
+	if got != want {
+		t.Errorf("只有表头的表:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestMarkdownTableEndsAndResumes(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := plainBlocks(t, buf, "| a | b |\n|---|---|\n| 1 | 2 |\nafter\n")
+	want := "┌───┬───┐\n│ a │ b │\n├───┼───┤\n│ 1 │ 2 │\n└───┴───┘\nafter\n"
+	if got != want {
+		t.Errorf("表格结束应补下框并恢复普通解析:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestMarkdownTableSeparatorMismatchFallsBack(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := plainBlocks(t, buf, "| a | b |\n|---|\n| 1 | 2 |\n") + plainClose(t, buf)
+	want := "| a | b |\n|---|\n| 1 | 2 |\n"
+	if got != want {
+		t.Errorf("列数不匹配不应进表格: %q", got)
+	}
+}
+
+func TestMarkdownTableQuoteNotTable(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := plainBlocks(t, buf, "> a | b\n")
+	if strings.Contains(got, "┌") {
+		t.Errorf("引用行不应被当作表格: %q", got)
+	}
+}
+
+func TestMarkdownTablePendingFlushCloses(t *testing.T) {
+	buf := NewMarkdownBuf()
+	if got := plainBlocks(t, buf, "| a | b |\n|---|---|\n"); got != "" {
+		t.Errorf("确认后无数据行不应出块: %q", got)
+	}
+	long := strings.Repeat("x", pendingByteLimit+1)
+	got := plainBlocks(t, buf, long)
+	want := "┌───┬───┐\n│ a │ b │\n├───┼───┤\n└───┴───┘\n" + long + "\n"
+	if got != want {
+		t.Errorf("超长无换行应结算表格并降级段落:\n got %q…\nwant %q…", got[:60], want[:60])
+	}
+	if got := plainBlocks(t, buf, "tail\n") + plainClose(t, buf); got != "tail\n" {
+		t.Errorf("降级后应恢复流式解析: %q", got)
+	}
+}
+
+func TestMarkdownTableClosePendingRow(t *testing.T) {
+	buf := NewMarkdownBuf()
+	got := plainBlocks(t, buf, "| a | b |\n|---|---|\n| 1 | 2 |\ntail")
+	want := "┌───┬───┐\n│ a │ b │\n├───┼───┤\n│ 1 │ 2 │\n"
+	if got != want {
+		t.Errorf("残行未换行不应出块: %q", got)
+	}
+	got = plainClose(t, buf)
+	want = "└───┴───┘\ntail\n"
+	if got != want {
+		t.Errorf("Close 应先补下框再出残行:\n got %q\nwant %q", got, want)
+	}
+}

@@ -466,6 +466,16 @@ func (r *REPL) printThemeSample() {
 		ir.Heading{Level: 3, Inlines: line("三级标题")},
 		ir.Paragraph{Inlines: []ir.Inline{ir.Span{Text: "正文段落，"}, ir.CodeSpan{Text: "行内代码"}, ir.Span{Text: "与结尾。"}}},
 		ir.CodeBlock{Lines: []string{"代码块内容"}},
+		ir.Table{
+			Aligns: []ir.Align{ir.AlignLeft, ir.AlignRight},
+			Widths: []int{6, 4},
+			Rows: []ir.TableRow{
+				{Cells: [][]ir.Inline{line("表格头"), line("数值")}, Header: true},
+				{Cells: [][]ir.Inline{line("示例行"), line("42")}},
+			},
+			Top:    true,
+			Bottom: true,
+		},
 	}
 	var b strings.Builder
 	for _, blk := range blocks {
@@ -622,7 +632,7 @@ func (r *REPL) printRendered(text string) {
 		r.st.out.emitText(KindContent, text+"\n")
 		return
 	}
-	for _, blk := range mdBlocks(text) {
+	for _, blk := range mdBlocks(text, r.view.width()) {
 		r.print(r.rend.Block(blk), KindContent)
 	}
 }
