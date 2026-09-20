@@ -90,7 +90,12 @@ func (t *turn) Handle(e agent.Event) {
 	case agent.EventContent:
 		t.flushReason()
 		t.writeContent(e.Text)
-	case agent.EventToolStart, agent.EventResponse:
+	case agent.EventToolStart:
+		t.flushReason()
+		t.settleMd()
+		t.r.view.Handle(e)
+		t.notifyNeedInput(e)
+	case agent.EventResponse:
 		t.flushReason()
 		t.settleMd()
 		t.r.view.Handle(e)
@@ -157,9 +162,10 @@ func (t *turn) End(err error) {
 	if t.done != nil {
 		t.done()
 	}
+	var ie *agent.InterruptError
+	interrupted := errors.As(err, &ie)
 	if err != nil {
-		var ie *agent.InterruptError
-		if errors.As(err, &ie) {
+		if interrupted {
 			if ie.Kept {
 				t.f.st.err.emit(KindError, MsgInterruptKept)
 			} else {
@@ -170,6 +176,18 @@ func (t *turn) End(err error) {
 		}
 	}
 	t.f.emit(KindDecor, turnSep(t.f.prof, t.f.sem, dur))
+	if !interrupted {
+		t.r.notify(Notification{Reason: NotifyTurnDone, Duration: dur, Failed: err != nil})
+	}
+}
+
+// notifyNeedInput 在 run_shell 主动声明 interactive（终端即将移交）时通知：
+// 不探测子进程真实读取 stdin 的时刻，静默阻塞（如 cat）的虚报接受。
+func (t *turn) notifyNeedInput(e agent.Event) {
+	if !e.Interactive {
+		return
+	}
+	t.r.notify(Notification{Reason: NotifyNeedInput, Tool: e.ToolName})
 }
 
 // mdBlocks 把整段文本按 markdown 管线解析为块（回放等一次性展示用，不复用回合缓冲）。

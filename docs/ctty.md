@@ -64,6 +64,7 @@
 | `ResetModes(tty *os.File) bool` | 复位终端模式：SGR、字符集（`SI` + G0/G1 回 ASCII）、显示光标、自动换行、origin 模式、普通方向键、鼠标上报、bracketed paste、focus 上报、退出备用屏、复位滚动区。顺序固定为「属性类复位（SGR/字符集/模式）→ `\x1b[?1049l` → `\x1b[r`」；这两条都会动光标（`DECRST 1049` 即使在主屏也按 DECRC 恢复保存槽、`CSI r`/DECSTBM 把光标 home），故**调用方必须先 `SaveCursor`、复位后 `RestoreCursor` 收尾**，串内不得自带 `DECSC`/`DECRC`（会覆盖调用方的存档槽）。2026-09-16 二次修订，取代此前「把会移光标的两条包在 `DECSC`…`DECRC` 内」的做法——实测证明自包只能保住「已被子进程打乱」的位置 |
 | `SaveCursor(tty *os.File) bool` | 写 `DECSC`（`\x1b7`）：交出终端前存光标锚点（2026-09-16 增补）|
 | `RestoreCursor(tty *os.File) bool` | 写 `DECRC`（`\x1b8`）：`ResetModes` 之后归位到锚点（2026-09-16 增补）|
+| `Bell() error` | 往控制终端写一声 BEL：posix `/dev/tty`、windows `CONOUT$`、其余平台恒错。注意力提示音用，失败由调用方静默忽略（2026-09-21 增补）|
 
 设计原则：
 
@@ -84,6 +85,9 @@
 | `ctty/ctty_probe_stub.go` | `!linux && !darwin && !windows` | 探测原语保守实现（全 false）+ `Open` 恒错 + ctrl 掩蔽 no-op |
 | `ctty/consolecp_windows.go` | `windows` | 代码页原语 + `EnsureUTF8/RestoreUTF8/FallbackCP/DecodeCP`（LazyDLL）|
 | `ctty/consolecp_stub.go` | `!windows` | 代码页 no-op（posix 与其余平台共用一份）|
+| `ctty/bell_posix.go` | `linux \|\| darwin` | `Bell()`：写 BEL 到 `/dev/tty` |
+| `ctty/bell_windows.go` | `windows` | `Bell()`：写 BEL 到 `CONOUT$` |
+| `ctty/bell_stub.go` | `!linux && !darwin && !windows` | `Bell()` 恒错 |
 | `ctty/termios_linux.go` | `linux` | `Termios` 别名 + `TCGETS/TCSETS/TCSETSF` |
 | `ctty/termios_darwin.go` | `darwin` | `Termios` 别名 + `TIOCGETA/TIOCSETA/TIOCSETAF` |
 | `ctty/termios_stub.go` | `!linux && !darwin` | 空 `Termios` + 恒错实现 |

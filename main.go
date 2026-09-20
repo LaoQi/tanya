@@ -122,7 +122,11 @@ func main() {
 		return
 	}
 
-	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning))
+	var notifier repl.Notifier
+	if cfg.Bell {
+		notifier = repl.BellNotifier()
+	}
+	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier))
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)

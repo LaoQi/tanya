@@ -34,6 +34,7 @@ type REPL struct {
 	prompt        render.Template
 	view          *toolView
 	rend          render.Renderer
+	notifier      Notifier
 	started       time.Time
 }
 
@@ -46,6 +47,7 @@ type options struct {
 	themeName string
 	palette   map[string]string
 	reasoning bool
+	notifier  Notifier
 }
 
 type Option func(*options)
@@ -60,6 +62,10 @@ func WithTerminal(dev readline.Terminal, raw bool) Option {
 
 func WithShowReasoning(on bool) Option {
 	return func(o *options) { o.reasoning = on }
+}
+
+func WithNotifier(n Notifier) Option {
+	return func(o *options) { o.notifier = n }
 }
 
 func WithTermFacts(f TermFacts) Option {
@@ -120,7 +126,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &REPL{agent: a, ed: ed, term: dev, raw: raw, showReasoning: o.reasoning, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
+	r := &REPL{agent: a, ed: ed, term: dev, raw: raw, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
 	r.prof = term.GetProfile()
 	r.rend = render.NewThemedRenderer(r.prof, sch.MD)
 	ed.SetStyles(sem.Dim, sem.Accent)
@@ -150,6 +156,15 @@ func (r *REPL) failErr(err error) {
 
 func (r *REPL) failText(s string) {
 	r.st.err.emit(KindError, errLineText(s))
+}
+
+// notify 是注意力通知的唯一出口：门禁（并非交互富档 TTY 会话、未装配行为）之外一律静默，
+// 行为本身由 Notifier 决定，不在这里判 TTY 之外的平台细节。
+func (r *REPL) notify(n Notification) {
+	if r.notifier == nil || !r.prof.TTY || !r.st.decor() {
+		return
+	}
+	r.notifier.Notify(n)
 }
 
 func (r *REPL) mdEnabled() bool {
