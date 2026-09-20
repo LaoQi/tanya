@@ -45,6 +45,9 @@ const (
 	MsgBadApiProtocol      = "无效 api_protocol %q（可选: chat/responses）"
 	MsgBadArchiveThreshold = "无效 auto_archive_threshold %d（需 ≥ 2）"
 	MsgBadArchiveKeep      = "无效 auto_archive_keep %d（需 ≥ 0 且小于 auto_archive_threshold %d）"
+	MsgEmptyWorkspace      = MsgErrPrefix + "未指定工作区目录"
+	MsgBadWorkspace        = MsgErrPrefix + "工作区不存在或不是目录: %s"
+	MsgSameWorkspace       = MsgErrPrefix + "已在该工作区: %s"
 )
 
 const (

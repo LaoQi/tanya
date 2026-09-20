@@ -3,6 +3,7 @@
 tanya 变更记录。新条目加在最上方的日期分节内（没有当天分节就新建一个）；本文件记变更，AGENTS.md 只保留现行约束。
 
 ## 2026-09-20
+- feat(agent,repl,docs): `/switch <dir>` 切换工作区——`Agent.loadWorkspace` 抽出 `New` 的装配路径，按新目录原子重建 shell 工具/system 提示/会话存储/env 段并放弃当前会话（历史清空、会话轮转，旧文件不动）；`run_shell` 默认目录由进程 cwd 改为当前工作区（显式 `cwd` 才回显），提示符 `{cwd}`/`/stat`/归档卷注释同步跟随，目标非法或等同当前时拒绝且状态不变
 - fix(agent): responses 协议 reasoning 回传补 `summary` 空数组——阿里（dashscope responses 兼容层）等端点要求 input 中 reasoning item 必须携带 summary 列表，缺失时第二轮起 400 Invalid 'summary'；OpenAI 侧该字段本就合法，空数组双向兼容
 
 - feat(render,repl,docs): markdown 表格渲染——IR `Table` 块 + 三行前瞻定列宽（表头/分隔/首数据行）+ 外框与列对齐；列宽不封顶、超宽单元格不截断，终端宽度只用于切紧边距；/theme 样例与 README 补表格展示

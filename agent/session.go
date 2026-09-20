@@ -37,6 +37,7 @@ type SessionInfo struct {
 type sessionStore struct {
 	dir         string
 	archiveDir  string
+	workspace   string
 	disabled    bool
 	frozen      bool
 	frozenID    string
@@ -49,10 +50,11 @@ type sessionStore struct {
 	volumes     map[string][]SessionInfo
 }
 
-func newSessionStore(dir, archiveDir string, disabled bool) *sessionStore {
+func newSessionStore(dir, archiveDir, workspace string, disabled bool) *sessionStore {
 	return &sessionStore{
 		dir:        dir,
 		archiveDir: archiveDir,
+		workspace:  workspace,
 		disabled:   disabled,
 		cache:      map[string]SessionInfo{},
 		stat:       map[string]sessionFileStat{},

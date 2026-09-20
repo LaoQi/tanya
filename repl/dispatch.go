@@ -86,6 +86,9 @@ func parseArchiveDuration(arg string) (time.Duration, bool) {
 }
 
 func (r *REPL) cwdLabel() string {
+	if r.agent != nil {
+		return shortPath(r.agent.Workspace())
+	}
 	cwd, _ := os.Getwd()
 	return shortPath(cwd)
 }

@@ -10,7 +10,7 @@ import (
 )
 
 func TestSessionStoreRotateAndAppend(t *testing.T) {
-	s := newSessionStore(t.TempDir(), "", false)
+	s := newSessionStore(t.TempDir(), "", "", false)
 	s.rotate()
 	if !regexp.MustCompile(`^\d{8}-\d{6}\.jsonl$`).MatchString(filepath.Base(s.path())) {
 		t.Fatalf("会话文件名格式: %q", s.path())
@@ -53,7 +53,7 @@ func TestSessionStoreRotateAndAppend(t *testing.T) {
 }
 
 func TestSessionStoreDisabled(t *testing.T) {
-	s := newSessionStore(t.TempDir(), "", true)
+	s := newSessionStore(t.TempDir(), "", "", true)
 	s.rotate()
 	if err := s.append([]Message{{Role: "user", Content: "q"}}, "sys"); err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestSessionStoreLoad(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "20260101-000000.jsonl"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s := newSessionStore(dir, "", false)
+	s := newSessionStore(dir, "", "", false)
 	history, system, err := s.load("20260101-000000")
 	if err != nil || system != "sys" {
 		t.Fatalf("load: %v system=%q", err, system)
@@ -102,7 +102,7 @@ func TestSessionStoreLoadNoSystemLine(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "x.jsonl"), []byte(`{"role":"user","content":"q"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s := newSessionStore(dir, "", false)
+	s := newSessionStore(dir, "", "", false)
 	history, system, err := s.load("x")
 	if err != nil || system != "" || len(history) != 1 {
 		t.Fatalf("无 system 行: history=%+v system=%q err=%v", history, system, err)
@@ -118,7 +118,7 @@ func TestSessionStoreListCache(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"role":"user","content":"标题"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s := newSessionStore(dir, "", false)
+	s := newSessionStore(dir, "", "", false)
 	list, err := s.list()
 	if err != nil || len(list) != 1 || list[0].Summary != "标题" {
 		t.Fatalf("list: %+v %v", list, err)
@@ -152,7 +152,7 @@ func TestSessionStoreListCache(t *testing.T) {
 }
 
 func TestSessionStoreListMissingDir(t *testing.T) {
-	s := newSessionStore(filepath.Join(t.TempDir(), "nope"), "", false)
+	s := newSessionStore(filepath.Join(t.TempDir(), "nope"), "", "", false)
 	list, err := s.list()
 	if err != nil || len(list) != 0 {
 		t.Fatalf("目录不存在应返回空列表: %+v %v", list, err)

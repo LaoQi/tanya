@@ -309,6 +309,8 @@ func (r *REPL) handleCommand(line string) bool {
 	case "/new":
 		r.agent.NewSession()
 		r.st.out.emit(KindNotice, MsgNewSession)
+	case "/switch":
+		r.handleSwitch(parts[1:])
 	case "/load":
 		if len(parts) >= 2 {
 			if err := r.agent.LoadSession(parts[1]); err != nil {
@@ -423,6 +425,27 @@ func (r *REPL) handleFork() {
 		out += MsgForkNoSave
 	}
 	r.st.out.emit(KindNotice, out)
+}
+
+func (r *REPL) handleSwitch(args []string) {
+	if r.agent == nil {
+		return
+	}
+	from := r.agent.Workspace()
+	if len(args) == 0 {
+		r.st.out.emitText(KindNotice, fmt.Sprintf(MsgSwitchUsage, initPath(from)))
+		return
+	}
+	if err := r.agent.SwitchWorkspace(strings.Join(args, " ")); err != nil {
+		r.failErr(err)
+		return
+	}
+	to := r.agent.Workspace()
+	out := fmt.Sprintf(MsgSwitchDone, initPath(from), initPath(to))
+	if dir, ok := r.agent.SessionDir(); ok {
+		out += fmt.Sprintf(MsgSwitchDir, initPath(dir))
+	}
+	r.st.out.emitText(KindNotice, out)
 }
 
 func (r *REPL) handleTheme(args []string) {

@@ -76,6 +76,9 @@ const (
 	MsgArchiveFailFmt     = "  失败 %s（%v）\n"
 	MsgArchiveBadArg      = "无效的归档参数 %q（保留数量如 20、0，或时长如 7d、12h）"
 	MsgForkDone           = "已 fork 为新会话 %s（继承 %d 条历史）\n"
+	MsgSwitchDone         = "已切换工作区：%s → %s（当前会话已放弃）\n"
+	MsgSwitchDir          = "会话目录: %s\n"
+	MsgSwitchUsage        = "用法: /switch <目录>（当前工作区: %s）\n"
 	MsgForkNoSave         = "（不落盘模式，未写入）\n"
 	MsgLoadArchived       = "已载入会话 %s（归档只读，继续对话请 /fork）\n"
 	MsgArchiveReadOnlyFmt = "当前为归档只读会话（%s）；继续对话请 /fork 开新会话\n"
@@ -159,6 +162,7 @@ const helpText = `斜杠命令：
   /load [id]          无参打开会话选择菜单，带 id 直接载入
   /archive [n|<时长>] 归档历史会话（先出报告再确认；无参 = 保留 auto_archive_keep 个，纯数字 = 保留 n 个（0 = 全部），7d/12h = 按未活动时长）
   /fork               以当前上下文另开新会话（继承历史，原会话保留）
+  /switch <dir>       切换工作区（放弃当前会话，重读 AGENTS.md）
   /stat               会话统计（工作区/用量/缓存）
   /history [n|all]    无参截断列表，n 查看单条，all 全量显示
   /model [name]       显示或切换模型

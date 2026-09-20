@@ -209,7 +209,7 @@ func TestShellToolDescGolden(t *testing.T) {
 	profile := &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}
 	tool := &shellTool{profile: profile, programs: []string{"ls", "grep"}}
 	want := "在 " + platform.GOOS + " bash 中执行命令（shell 语法），返回 stdout/stderr/退出码。" +
-		"默认在会话启动目录（进程 cwd）下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。" +
+		"默认在当前工作区下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。" +
 		platform.Capabilities(profile) +
 		"读文件、搜索、文本处理等系统操作都用它。" +
 		"可用程序: ls, grep"
@@ -231,7 +231,7 @@ func TestShellToolDescPowerShellFallback(t *testing.T) {
 
 func TestDescribeShellCrossPlatform(t *testing.T) {
 	posix := shellPlatform{GOOS: "linux", Capabilities: func(*shellProfile) string { return "平台能力句。" }}
-	cwdLine := "默认在会话启动目录（进程 cwd）下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。"
+	cwdLine := "默认在当前工作区下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。"
 	useLine := "读文件、搜索、文本处理等系统操作都用它。"
 	got := describeShell(posix, &shellProfile{Name: "bash", Kind: KindPosix}, []string{"ls", "grep"})
 	want := "在 linux bash 中执行命令（shell 语法），返回 stdout/stderr/退出码。" + cwdLine + "平台能力句。" + useLine + "可用程序: ls, grep"
@@ -257,7 +257,7 @@ func TestDescribeShellCrossPlatform(t *testing.T) {
 }
 
 func TestRunShellParamsGolden(t *testing.T) {
-	want := `{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"cwd":{"type":"string","description":"命令执行目录，默认会话启动目录"},"timeout":{"type":"integer","description":"超时秒数，默认 60（interactive 时 300），最大 900"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令与终端直通、可直接应答（Linux 独立 pty、Windows 继承控制台），停用等待动画，默认超时放宽"}},"required":["command"]}`
+	want := `{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"cwd":{"type":"string","description":"命令执行目录，默认当前工作区"},"timeout":{"type":"integer","description":"超时秒数，默认 60（interactive 时 300），最大 900"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令与终端直通、可直接应答（Linux 独立 pty、Windows 继承控制台），停用等待动画，默认超时放宽"}},"required":["command"]}`
 	if got := runShellParams(); got != want {
 		t.Errorf("runShellParams 全串不匹配:\n got %q\nwant %q", got, want)
 	}
