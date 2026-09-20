@@ -7,7 +7,7 @@
 
 - 极简优先：依赖仅 `gopkg.in/yaml.v3` 与 `golang.org/x/sys`，新增依赖需先讨论
 - package 划分：`main`（仅入口）、`repl`（REPL/输入分发/渲染）、`agent`（核心逻辑）、`readline`（自研终端输入层）、`render`（表现层树）、`ctty`（控制终端原语与探测，零依赖叶子）；根目录只放 main.go 与顶级包
-- 终端输入层自研（raw mode + ANSI 渲染、fish 风格 ghost 置灰建议），不引入 TUI 框架；Windows 仅支持 Windows Terminal（输入后端与 interactive 直通均已实现、实机验证待做），不支持 cmd/老 conhost
+- 终端输入层自研（raw mode + ANSI 渲染、fish 风格 ghost 置灰建议），不引入 TUI 框架；Windows 仅支持 Windows Terminal（输入后端与 interactive 直通均已实现，Windows 侧仅部分实机验证、未全量覆盖，暂不跟踪），不支持 cmd/老 conhost
 - 平台分片一律白名单：`linux`/`darwin`/`windows` 各一个装配文件，posix 共享实现落 `linux || darwin`，其余平台 stub；Linux 为主、macOS 尽力
 - 终端原语（`/dev/tty`、前台组、termios、探测）一律走 `ctty`，移交/夺回/复原策略由 `agent`、`readline` 各自决定；`run_shell` 交终端前快照输入模式与光标、子进程结束后复原，中断不变量与 readline 自愈见 `docs/ctty.md`、`docs/interactive-tty.md` §5.9
 - 运行期信号统一收敛在 `ctty`（SIGTERM/SIGHUP 关闭、SIGINT 中断、SIGQUIT 保持默认转储），业务层（`repl`/`main`）不出现 `os/signal`；退出统一走 `REPL.quit()`，进程退出码取 `ctty.ExitStatus()`，见 `docs/ctty.md`《运行期信号》

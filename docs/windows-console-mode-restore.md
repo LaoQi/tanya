@@ -2,7 +2,7 @@
 
 - 日期：2026-09-17
 - 平台：Windows（Windows Terminal / ConPTY）+ PowerShell 5.1 后端
-- 状态：**已实施**（方案 A，2026-09-17 开发机落地；Windows 实机回归待做，见 §8）
+- 状态：**已实施**（方案 A，2026-09-17 开发机落地；Windows 实机回归仅部分完成（未全量覆盖，暂不跟踪），见 §8）
 - 相关：`docs/terminal-caps.md` §8.6、`docs/interactive-tty.md`、`AGENTS.md`（终端复原不变量）
 
 ## 1. 问题
@@ -147,7 +147,10 @@ if hasSaved { ctty.RestoreInput(int(tty.Fd()), saved) }
 ### 不建议
 
 改 `readline.Raw()` 保存「启动 baseline」：与 posix（保存进入 raw 前的当前值）语义分叉，且会覆盖用户在 tanya 运行期间有意的模式改动。
-## 6. 回归验证（Windows 实机）
+
+## 6. 回归验证（Windows 实机，仅部分完成）
+
+状态：未全量覆盖，暂不跟踪；下列步骤不构成待办。
 
 **(1) 三步法**（无需第三方工具，`-10` = STD_INPUT_HANDLE）
 
@@ -190,7 +193,7 @@ go test -race ./...        # 在 Linux/macOS 开发机上跑 posix 回归
 - `agent/shell.go` 快照/复原改用 `ctty.SnapshotInput`/`RestoreInput`，覆盖 interactive 与非 interactive 两类回合（同一 `runShellForeground` 路径）。
 - 新增 `ctty/modes_windows_test.go`、`ctty/modes_posix_test.go`（非终端 fd 返回 false + 往返一致）。
 - 开发机验证：`GOOS=linux/darwin/windows` 三平台 `go build ./...` + `go vet ./...` 通过；Linux `go test ./...` + `go test -race ./...` 通过（posix 零行为变化的证据）。
-- 待办：Windows 实机跑 §6(1)(2) 三步法/强杀回归 + `go test ./ctty -run Snapshot`；通过后更新本状态行。
+- 不再跟踪：§6(1)(2) 三步法/强杀回归 + `go test ./ctty -run Snapshot` 未全量执行，不再是待办；碰到问题再处理。
 
 ## 附：Windows 实机 `go test ./...` 现状（非功能缺陷，供参考）
 

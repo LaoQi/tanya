@@ -1,6 +1,6 @@
 # 终端探测与能力降级：范围约定与实施
 
-状态：**S1–S2 已实施**（`ctty` 探测原语 + `Facts`；`main` 单点探测，渲染判定改为 stdout、输入判定保留 stdin）；阶段 B（Windows 输入后端）与 C（Windows 交互命令）待做。本文承载支持范围约定、判定口径与分阶段计划。
+状态：**S1–S2 已实施**（`ctty` 探测原语 + `Facts`；`main` 单点探测，渲染判定改为 stdout、输入判定保留 stdin）；阶段 B（Windows 输入后端）与 C（Windows 交互命令）已实施，Windows 侧仅部分实机验证（未全量覆盖，暂不跟踪）。本文承载支持范围约定、判定口径与分阶段计划。
 
 ## 1. 问题
 
@@ -17,7 +17,7 @@
 | 平台 | 终端环境 | 显示 | 输入 | run_shell interactive |
 |---|---|---|---|---|
 | Linux | VT 兼容终端（xterm 系、tmux、ssh 会话） | 16 色 + 状态行 + markdown + 真实宽度 | 行编辑/历史/补全/ghost | pty 桥接（现状） |
-| Windows | Windows Terminal、ConPTY 宿主（VS Code 终端等） | 同上 | 同上（VT 输入路径，实机验证待做） | 继承控制台（B2，实机验证待做） |
+| Windows | Windows Terminal、ConPTY 宿主（VS Code 终端等） | 同上 | 同上（VT 输入路径，部分实机验证） | 继承控制台（B2，部分实机验证） |
 | macOS | Terminal.app / iTerm2 | 同上（posix 路径） | 同上 | 无 pty（现状，不承诺） |
 
 **不保证**（不写适配分支，出问题不修）：
@@ -87,10 +87,10 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 | S1 | `ctty` 探测原语与 `Facts`（posix / windows / stub 分片 + 单测） | 已实施 |
 | S2 | `main` 单点探测；`term.DetectProfile` 加 vt；`repl` 删除包级懒缓存、改注入 | 已实施 |
 | B0 | 抽平台无关的按键状态机 `keySource`（`readline/terminal_io.go`）：分片只提供 `readChunk` 与可选 `hungUp` | 已实施 |
-| B1 | Windows 输入后端（`readline/terminal_windows.go`）：`Raw` 开 `ENABLE_VIRTUAL_TERMINAL_INPUT` 并清 `ECHO/LINE/PROCESSED`、`readChunk` 用 `GetNumberOfConsoleInputEvents` 轮询 5ms + 1s 超时、`Size` 走 `ctty.Size`、`ctty` 加 `ConsoleMode`/`SetConsoleMode`；仅 VT 路径（范围排除 conhost 与 1809 之前，无需 `ReadConsoleInput` 回退）。ghost、补全菜单、历史随 raw 一并生效 | 已实施（实机验证待做） |
-| B2 | Windows 交互命令：`interactive: true` = 控制台继承直通——`ctty.Open` 返回 `CONIN$` 作子进程 stdin、运行期 `IgnoreCtrlEvents` 掩蔽本进程 ^C、interactive 时去除 PowerShell `-NonInteractive`；不做 ConPTY 桥接 | 已实施（实机验证待做） |
+| B1 | Windows 输入后端（`readline/terminal_windows.go`）：`Raw` 开 `ENABLE_VIRTUAL_TERMINAL_INPUT` 并清 `ECHO/LINE/PROCESSED`、`readChunk` 用 `GetNumberOfConsoleInputEvents` 轮询 5ms + 1s 超时、`Size` 走 `ctty.Size`、`ctty` 加 `ConsoleMode`/`SetConsoleMode`；仅 VT 路径（范围排除 conhost 与 1809 之前，无需 `ReadConsoleInput` 回退）。ghost、补全菜单、历史随 raw 一并生效 | 已实施（部分实机验证，未全量覆盖） |
+| B2 | Windows 交互命令：`interactive: true` = 控制台继承直通——`ctty.Open` 返回 `CONIN$` 作子进程 stdin、运行期 `IgnoreCtrlEvents` 掩蔽本进程 ^C、interactive 时去除 PowerShell `-NonInteractive`；不做 ConPTY 桥接 | 已实施（部分实机验证，未全量覆盖） |
 | B3 | 编辑器输出切控制终端（解决 #2 盲打与提示符污染） | 待做 |
-| B4 | Windows 编码链路：`ctty` 代码页原语（LazyDLL 补 7 个 proc）+ `main` 启动 `EnsureUTF8` 切 65001、退出/紧急路径复原；run_shell 捕获侧 `utf8.Valid` 直通、非法时按 `ctty.FallbackCP()` 兜底转码（`shellPlatform.DecodeOutput`，posix 恒等） | 已实施（实机验证待做） |
+| B4 | Windows 编码链路：`ctty` 代码页原语（LazyDLL 补 7 个 proc）+ `main` 启动 `EnsureUTF8` 切 65001、退出/紧急路径复原；run_shell 捕获侧 `utf8.Valid` 直通、非法时按 `ctty.FallbackCP()` 兜底转码（`shellPlatform.DecodeOutput`，posix 恒等） | 已实施（部分实机验证，未全量覆盖） |
 
 ## 7. 决策记录
 
@@ -111,7 +111,7 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 - **按键编码补充**：`keys.go` 增 `ESC[1~`/`ESC[4~` → Home/End（WT 与部分 xterm 的编码）
 - **逃生开关**：`TANYA_NO_RAW_INPUT=1` 让 `openTerminal` 直接返回 `ErrUnsupported`，回落 Degraded（两平台通用，便于对照与故障退避）
 - **不在范围**：IME 组合串、Alt 组合键、`ESC O`（F1–F4）；粘贴按多字节序列处理（与 posix 同）
-- **实机验证清单（WT 与 ConPTY 宿主各一遍）**：ghost 出现；Tab 多候选菜单（方向键选择、Esc 关闭、收起无残行）；上下键历史；`Ctrl-A/E/B/F/U/K/W/Y/T/L`；左右键与 `Home/End/Delete/Backspace` 编辑；`Ctrl+C` 中断回合、`Ctrl+D` 退出；中文输入；窗口 resize 后菜单与提示符不错位；`TANYA_NO_RAW_INPUT=1` 回落表现为整行读
+- **实机验证清单（WT 与 ConPTY 宿主各一遍；仅部分完成，未全量覆盖，暂不跟踪）**：ghost 出现；Tab 多候选菜单（方向键选择、Esc 关闭、收起无残行）；上下键历史；`Ctrl-A/E/B/F/U/K/W/Y/T/L`；左右键与 `Home/End/Delete/Backspace` 编辑；`Ctrl+C` 中断回合、`Ctrl+D` 退出；中文输入；窗口 resize 后菜单与提示符不错位；`TANYA_NO_RAW_INPUT=1` 回落表现为整行读
 
 ## 8.5 Windows 编码要点（B4，2026-09-17）
 
@@ -146,4 +146,4 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 - `ctty`：`Probe` 字段自洽（无 tty 环境不 panic、`SizeOK=false` 时尺寸为零值）；`IsTerminal`/`Size` 对非法 fd 返回 false；Windows 分片随交叉编译校验
 - `term.DetectProfile`：表驱动补 `vt=false` 用例
 - `repl`：`TermFacts.Width()` 兜底（`ColsOK=false` → 80）；现有渲染 golden 全部走显式注入 `term.Profile`，不随探测变化
-- 回归：posix 全量测试 + `-race`；`GOOS=windows/darwin/freebsd` 交叉编译与 `go vet`；Windows 实机验证（WT 与 ConPTY 宿主）列入人工清单
+- 回归：posix 全量测试 + `-race`；`GOOS=windows/darwin/freebsd` 交叉编译与 `go vet`；Windows 实机验证（WT 与 ConPTY 宿主）仅部分完成，未全量覆盖，暂不跟踪
