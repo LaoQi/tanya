@@ -13,7 +13,7 @@
 - AI 输出 Markdown 渲染（默认开启，stdout 非终端与 plain 输出自动旁路）与内置配色主题（`/theme` 切换）
 - 思维链显示（`show_reasoning` 配置或 REPL 内 `/reasoning on`）：思维链以 markdown 渲染并夹在 `─── 思考 ───` / `─── 思考结束 · 3.2s ───` 分隔符之间，同时不再打 `» 思考中` 状态行
 - AGENTS.md 项目说明自动注入系统提示（全局 + 工作区双层，会话级快照保证 prompt cache 友好）
-- 平台：Linux 与 Windows 为主（Windows 显示与行编辑均已支持：16 色、状态行、markdown、真实宽度、行编辑/历史/Tab 补全/ghost；interactive 命令走控制台继承直通，实机验证待做），macOS 尽力；控制终端原语与终端探测统一在零依赖叶子包 `ctty`，其余平台仅保证可编译
+- 平台：Linux 与 Windows 为主（Windows 显示与行编辑均已支持：16 色、状态行、markdown、真实宽度、行编辑/历史/Tab 补全/ghost；interactive 命令走控制台继承直通，Windows 侧仅部分实机验证、未全量覆盖，暂不跟踪），macOS 尽力；控制终端原语与终端探测统一在零依赖叶子包 `ctty`，其余平台仅保证可编译
 - 降级粒度独立：显示能力取决于 stdout 是否终端、输入能力取决于 stdin 是否终端，互不连带（支持范围与组合矩阵见 `docs/terminal-caps.md`）
 - 依赖仅 2 个，核心逻辑测试覆盖率 90%+
 
