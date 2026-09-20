@@ -319,7 +319,7 @@ func (v *toolView) Handle(e agent.Event) {
 	case agent.EventReasoning:
 		v.heart.setPhase(statusThinking)
 	case agent.EventContent:
-		v.Content(KindContent, e.Text)
+		v.Content(KindContent, term.Sanitize(e.Text, false))
 	case agent.EventResponse:
 		v.heart.stop()
 		dirty := v.dirty

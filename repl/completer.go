@@ -2,8 +2,10 @@ package repl
 
 import (
 	"fmt"
-	"github.com/LaoQi/tanya/render/theme"
 	"strings"
+
+	"github.com/LaoQi/tanya/render/term"
+	"github.com/LaoQi/tanya/render/theme"
 
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/readline"
@@ -70,6 +72,8 @@ func (c *completer) isThinkContext(line string) bool {
 	return !strings.Contains(prefix, " ")
 }
 
+// models 装载服务端模型名并清洗为单行：候选 Display、ghost 建议与 Enter 后的 Insert
+// 共用此缓存，三处落屏（菜单行/行内 ghost/进缓冲区逐帧重绘）都不再出现原始转义序列。
 func (c *completer) models() []string {
 	if c.modelLoaded {
 		return c.modelCache
@@ -77,6 +81,9 @@ func (c *completer) models() []string {
 	c.modelLoaded = true
 	if c.listModels != nil {
 		if ids, err := c.listModels(); err == nil {
+			for i, id := range ids {
+				ids[i] = term.OneLine(id)
+			}
 			c.modelCache = ids
 		}
 	}

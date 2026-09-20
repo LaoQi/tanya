@@ -2,7 +2,6 @@ package repl
 
 import (
 	"errors"
-	"fmt"
 	"github.com/LaoQi/tanya/render"
 	"github.com/LaoQi/tanya/render/ir"
 	"github.com/LaoQi/tanya/render/markdown"
@@ -131,7 +130,7 @@ func (t *turn) flushReason() {
 
 func (t *turn) writeContent(s string) {
 	if !t.f.mdEnabled() {
-		t.r.print(s, KindContent)
+		t.r.print(term.Sanitize(s, false), KindContent)
 		return
 	}
 	for _, blk := range t.f.md.Write(s) {
@@ -162,7 +161,7 @@ func (t *turn) End(err error) {
 				t.f.st.err.emit(KindError, MsgInterruptBare)
 			}
 		} else {
-			t.f.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+			t.r.failErr(err)
 		}
 	}
 	t.f.emit(KindDecor, turnSep(t.f.prof, t.f.sem, dur))

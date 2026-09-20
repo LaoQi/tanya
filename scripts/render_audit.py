@@ -514,6 +514,11 @@ def shi(command):
     return json.dumps({"command": command, "interactive": True}, ensure_ascii=False)
 
 
+def sh_raw(command):
+    """构造内层含真控制字符的 arguments：模拟模型把含 ANSI 的内容原样嵌进工具参数（不经内层 JSON 转义）。"""
+    return '{"command": "%s"}' % command
+
+
 SCENARIOS = [
     {
         "name": "clean-markdown",
@@ -578,9 +583,33 @@ SCENARIOS = [
         "screen_has": ["▸ run_shell", "等待终端输入", "len=8", "exit 0"],
     },
     {
-        "name": "leak-picker-unpaged",
-        "want": "leak",
-        "expect": ["cu_clamped"],
+        "name": "clean-history-escape",
+        "want": "clean",
+        "steps": [
+            {"tool_calls": [{"name": "run_shell", "args": sh_raw("echo X\x1b[2JY")}]},
+            {"content": "完成。\n"},
+        ],
+        "inputs": [
+            {"data": "用 run_shell 跑一条命令\n", "wait": 3.5},
+            {"data": "/history 2\n", "wait": 1.5},
+            {"data": "exit\n", "wait": 0.5},
+        ],
+        "screen_has": ["→ run_shell", "echo XY"],
+    },
+    {
+        "name": "clean-picker-escape",
+        "want": "clean",
+        "sessions": 3,
+        "session_evil": True,
+        "inputs": [
+            {"data": "/load\n", "wait": 1.5},
+            {"data": "q", "wait": 1.0},
+        ],
+        "screen_has": ["选择会话", "会话 0 标题"],
+    },
+    {
+        "name": "clean-picker-paged",
+        "want": "clean",
         "sessions": 40,
         "inputs": [
             {"data": "/load\n", "wait": 1.5},
@@ -588,7 +617,7 @@ SCENARIOS = [
             {"data": "\x1b[B", "wait": 0.5},
             {"data": "q", "wait": 1.0},
         ],
-        "screen_has": ["选择会话"],
+        "screen_has": ["选择会话", "3/40", "会话 39"],
     },
     {
         "name": "clean-alt-screen-exit",
@@ -634,13 +663,14 @@ def replay(text, cols, rows):
     return vt
 
 
-def seed_sessions(tmp, count):
+def seed_sessions(tmp, count, evil=False):
     sess = os.path.join(tmp, ".tanya", "sessions")
     os.makedirs(sess, exist_ok=True)
     for i in range(count):
         name = "20260901-%06d.jsonl" % (i * 7)
+        summary = "会话 %d\x1b[2J 标题" % i if evil else "会话 %d 的测试标题" % i
         with open(os.path.join(sess, name), "w", encoding="utf-8") as f:
-            f.write(json.dumps({"role": "user", "content": "会话 %d 的测试标题" % i}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"role": "user", "content": summary}, ensure_ascii=False) + "\n")
             f.write(json.dumps({"role": "assistant", "content": "ok"}, ensure_ascii=False) + "\n")
 
 
@@ -649,7 +679,7 @@ def run_case(binary, case, cols, rows, timeout, dump, raw_dir=""):
     llm = MockLLM(steps)
     tmp = tempfile.mkdtemp(prefix="tanya-audit-")
     if case.get("sessions"):
-        seed_sessions(tmp, case["sessions"])
+        seed_sessions(tmp, case["sessions"], evil=case.get("session_evil", False))
     cfg = os.path.join(tmp, "config.yaml")
     with open(cfg, "w", encoding="utf-8") as f:
         f.write("base_url: http://127.0.0.1:%d/v1\napi_key: probe\napi_protocol: responses\n"

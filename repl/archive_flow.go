@@ -24,7 +24,7 @@ func (r *REPL) archiveFlow(opt agent.ArchiveOptions, noneArg string) {
 	opt.DryRun = true
 	rep, err := r.agent.ArchiveSessions(opt)
 	if err != nil {
-		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+		r.failErr(err)
 		return
 	}
 	if len(rep.Sessions) == 0 {
@@ -42,7 +42,7 @@ func (r *REPL) archiveFlow(opt agent.ArchiveOptions, noneArg string) {
 	}
 	opt.DryRun = false
 	if rep, err = r.agent.ArchiveSessions(opt); err != nil {
-		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+		r.failErr(err)
 		return
 	}
 	r.st.out.emit(KindNotice, formatArchiveReport(rep))
