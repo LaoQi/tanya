@@ -61,7 +61,8 @@ func buildResponsesInput(messages []Message) (string, []any) {
 					continue
 				}
 				item := map[string]any{
-					"type": "reasoning",
+					"type":    "reasoning",
+					"summary": []any{},
 					"content": []responsesContentPart{
 						{Type: "reasoning_text", Text: r.Content},
 					},
