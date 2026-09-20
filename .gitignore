@@ -8,3 +8,13 @@ todos.md
 /refs/
 __pycache__/
 /install.sh
+
+# Go 常见产物：跨平台二进制与 cgo 链接库
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.prof
+go.work
+go.work.sum
