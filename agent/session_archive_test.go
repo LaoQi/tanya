@@ -708,18 +708,86 @@ func TestForkFromArchived(t *testing.T) {
 	}
 }
 
-func TestForkRejectedWhenNotArchived(t *testing.T) {
+func TestForkFromActiveSession(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "回复"})
 	a, err := New(m.config())
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := a.store.path()
-	if id, err := a.Fork(); err != ErrForkNotArchive || id != "" {
-		t.Fatalf("非归档态应拒绝 fork: %q %v", id, err)
+	now := time.Now().Truncate(2 * time.Second)
+	oldPath := seedSession(t, a.store.dir, "20260101-010000", sampleSession, now.Add(-48*time.Hour))
+	if err := a.LoadSession("20260101-010000"); err != nil {
+		t.Fatal(err)
 	}
-	if a.store.path() != before {
-		t.Error("被拒的 fork 不应切换会话文件")
+	before, err := os.ReadFile(oldPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id, err := a.Fork()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == "" || id == "20260101-010000" {
+		t.Fatalf("fork 应产生新 id: %q", id)
+	}
+	if _, ok := a.ArchiveReadOnly(); ok {
+		t.Error("活跃会话 fork 后不应进入归档只读态")
+	}
+	path := a.store.path()
+	if filepath.Base(path) != id+".jsonl" {
+		t.Fatalf("fork 应立即落盘: %q", path)
+	}
+	if lines := readLines(t, path); len(lines) != 6 {
+		t.Fatalf("fork 文件应为 system + 5 条历史: %d", len(lines))
+	}
+	if len(a.History()) != 5 {
+		t.Errorf("fork 应继承历史: %d", len(a.History()))
+	}
+	after, err := os.ReadFile(oldPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("fork 不应改写原会话文件: %q", after)
+	}
+
+	a.history = append(a.history, Message{Role: "user", Content: "继续"})
+	if err := a.save(); err != nil {
+		t.Fatal(err)
+	}
+	lines := readLines(t, path)
+	if len(lines) != 7 || strings.Count(strings.Join(lines, "\n"), `"role":"system"`) != 1 {
+		t.Fatalf("fork 后应增量追加到新文件: %d 行", len(lines))
+	}
+	if n := len(readLines(t, oldPath)); n != 6 {
+		t.Errorf("原会话文件不应被追加: %d 行", n)
+	}
+
+	if err := a.LoadSession("20260101-010000"); err != nil {
+		t.Fatalf("原会话应仍可载入: %v", err)
+	}
+	if len(a.History()) != 5 {
+		t.Errorf("原会话历史应完整: %d", len(a.History()))
+	}
+	if _, ok := a.ArchiveReadOnly(); ok {
+		t.Error("载入活跃会话后不应处于只读态")
+	}
+}
+
+func TestRotateAvoidsExistingSessionFile(t *testing.T) {
+	s, dir, _ := newArchiveStore(t)
+	base := time.Now().Format("20060102-150405")
+	taken := filepath.Join(dir, base+".jsonl")
+	if err := os.WriteFile(taken, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.rotate()
+	if s.path() == taken {
+		t.Fatalf("rotate 不应复用已存在的会话文件: %s", s.path())
+	}
+	if !strings.HasSuffix(s.path(), ".jsonl") || filepath.Dir(s.path()) != dir {
+		t.Fatalf("rotate 路径异常: %s", s.path())
 	}
 }
 

@@ -249,15 +249,27 @@ func TestArchiveReadOnlyBlocksDialogue(t *testing.T) {
 	}
 }
 
-func TestHandleCommandForkNotArchived(t *testing.T) {
-	a := newSessTestAgent(t, t.TempDir())
-	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
-	r.handleCommand("/fork")
-	if !strings.Contains(out.String(), MsgForkNotArchive) {
-		t.Errorf("非归档态 /fork 应提示直接对话: %q", out.String())
+func TestHandleCommandForkActiveSession(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	seedOldSession(t, dir, "20260101-010000", 48*time.Hour)
+	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	r.handleCommand("/load 20260101-010000")
+	if !strings.Contains(out.String(), "已载入会话 20260101-010000") {
+		t.Fatalf("应载入活跃会话: %q", out.String())
 	}
-	if strings.Contains(out.String(), "已 fork") {
-		t.Error("非归档态不应 fork")
+
+	out.Reset()
+	r.handleCommand("/fork")
+	got := out.String()
+	if !strings.Contains(got, "已 fork 为新会话") || !strings.Contains(got, "继承 2 条历史") {
+		t.Errorf("活跃态 /fork 应成功并报继承条数: %q %q", got, errb.String())
+	}
+	if errb.String() != "" {
+		t.Errorf("活跃态 /fork 不应报错: %q", errb.String())
+	}
+	if id := a.SessionID(); id == "" || id == "20260101-010000" {
+		t.Errorf("应切到新会话: %q", id)
 	}
 }
 

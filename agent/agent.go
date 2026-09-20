@@ -180,9 +180,6 @@ func (a *Agent) SuggestArchive() (ArchiveSuggestion, bool) {
 func (a *Agent) ArchiveReadOnly() (string, bool) { return a.store.archivedID() }
 
 func (a *Agent) Fork() (string, error) {
-	if _, ok := a.ArchiveReadOnly(); !ok {
-		return "", ErrForkNotArchive
-	}
 	a.store.rotate()
 	a.prompt.reset()
 	a.stats.reset()

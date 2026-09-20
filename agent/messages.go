@@ -36,7 +36,6 @@ const (
 	MsgArchiveSkipArchived = "已在归档卷内"
 	MsgArchiveVolFailFmt   = "写入归档卷失败（%s）: %w"
 	MsgArchiveReadOnly     = "归档只读会话不能继续对话（用 /fork 开新会话）"
-	MsgForkNotArchive      = "当前会话不是归档只读会话"
 	MsgControlStatArchive  = "会话: 归档只读 %s（未写入）"
 	MsgBadSessionID        = "非法会话 id"
 	MsgSessionGone         = "会话不存在: %s"
@@ -112,5 +111,4 @@ const (
 
 var (
 	ErrArchiveReadOnly = errors.New(MsgArchiveReadOnly)
-	ErrForkNotArchive  = errors.New(MsgForkNotArchive)
 )

@@ -241,8 +241,10 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 归档只读态以 `sessionStore.frozen` 表示（与 `-n` 的 `disabled` 正交，归档 id 另存 `frozenID`）：`append` 直接返回、`path()`/`id()` 为空、`Agent.SessionFile()` 为空；`Agent.ArchiveReadOnly() (id, ok)` 与 `Stats.Archived` 供 UI 显示（`/stat` 打 `会话文件: 归档只读 X（未写入）`，`agent_custom` 的 `stat` 打 `会话: 归档只读 X（未写入）`）
 - 只读态**拒绝对话**：`agent.Ask` 首行返回 `ErrArchiveReadOnly`（`ask` 单发路径同样受保护），REPL 分发层在对话分支前拦截并提示 `/fork`（`:`/`：` 显式前缀同样拦截）；元命令（`/history`、`/stat`、`/model`、`/new`、`/load`、`/fork`、`/exit`）照常可用
 - 与 `-n` 的差异：`-n` 允许内存内继续对话（不落盘、进程退出即丢），归档只读态不允许——归档原文件已冻结，继续对话会产生「没有落点的历史」
-- `/fork`（仅归档只读态）：`store.rotate()` 取新 id → 清 `frozen` → `prompt.reset()` 重读 AGENTS.md（**当前**快照，fork 即新会话）→ history 原样保留、`stats.reset()` → 立即 `save()` 落一次盘，使新会话文件立刻出现在 `/load` 列表，此后按普通会话增量 append；`-n` 下允许 fork 但不落盘（提示未写入）
-- 载入与 fork 文案区分：`已载入会话 X（归档只读，继续对话请 /fork）`、`已 fork 为新会话 <新 id>`
+- `/fork` 是通用命令（不限归档只读态）：以当前上下文另开新会话——`store.rotate()` 取新 id（目标文件名被占则改用 `-2`、`-3`… 后缀）→ 清 `frozen` → `prompt.reset()` 重读 AGENTS.md（**当前**快照）→ history 原样保留、`stats.reset()` → 立即 `save()` 落一次盘，使新会话文件立刻出现在 `/load` 列表，此后按普通会话增量 append；`-n` 下允许 fork 但不落盘（提示未写入）
+- fork 是分支语义、不是重命名：**原会话文件不动**（内容逐字节不变，仍是活动会话），可随时 `/load` 回切，两条分支各自独立追加；空 history 时 `append` 因 `saved >= len(msgs)` 直接返回、不建文件，故等价于 `/new`（归档卷里可能存在 0 条消息的会话，此处不能拦截，否则那类会话没有出口）
+- 归档只读态是 fork 的特例：fork 同时解除只读（`frozen` 清零、切到新的活动文件）
+- 载入与 fork 文案区分：`已载入会话 X（归档只读，继续对话请 /fork）`、`已 fork 为新会话 <新 id>（继承 N 条历史）`（N 由 REPL 在 fork 前取 `len(Agent.History())`）
 
 ### 启动自动归档
 
@@ -308,7 +310,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 白名单（`slashCommands`，同时驱动 Tab 补全）即分发契约：`Run` 先用 `isSlashCommand` 过滤，未命中的 `/` 开头输入按对话内容处理，因此 `handleCommand` 的 switch 不再有 `default` 分支（原先的 `MsgUnknownCmd` 不可达，已删）。白名单与 case 必须一一对应，`TestSlashCommandsAllHandled` 覆盖该不变量（`/load` 走 stdin 交互路径，单独测试）。
 
 - `/archive [n|<dur>]` 把历史会话打包成归档卷：纯数字 `n` 为保留的最近会话数（`0` = 除当前会话外全部），`<dur>` 形如 `7d`/`12h`，仅接受单段单单位（`d`/`h`/`m`/`s`）按未活动时长筛选，无参取 `auto_archive_keep`；恒排除当前会话；只在完整交互环境（rich 输出 + `r.raw` + `r.prof.TTY`）启用，`-p`/ask/管道/非终端只提示 `MsgArchiveOnlyTTY`；与启动自动归档共用 `archiveFlow`（预览含活跃会话总数、`y/N` 确认读走 `readConfirm` 且挂 `SetHistoryFilter` 全拒、答案不进输入历史）；只做无损压缩，之后可用 `/load` 只读载入（见《会话归档与 fork》）
-- `/fork` 仅归档只读态可用：把当前归档会话的 history 作为新会话起点并立即落盘（新 id、当前 system 快照、继承历史）
+- `/fork` 以当前上下文另开新会话：把现有 history 作为新会话起点并立即落盘（新 id、当前 system 快照、继承历史、报继承条数），原会话文件保持原样、可 `/load` 回切；归档只读态用它解除只读
 
 - `/history` 无参截断列表（`term.OneLine` 先剥离 ANSI 转义与控制字符、压成单行，再按 120 rune 截断，避免 `\r`/`\x1b[K` 覆盖已打印行与未闭合 SGR 泄漏）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染、并按角色着色（user 用 `Ok` 绿、其余用 `Warn` 黄；`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 stdout 是否终端与输出模式约束：stdout 非终端、plain 一并旁路；旁路与非 markdown 档下的正文经 `term.Sanitize` 清洗），user/tool 消息正文与 `→ 工具 参数` 行同样清洗控制序列后原样保留文本（模型可经工具参数把转义序列送进回放；工具消息正文另经 `Frame` 清洗）
 - `/stat` 显示会话统计：工作区（构造期定格的启动目录）、会话文件、消息条数、本次运行累计 token（prompt/completion）、当前上下文占用（最近一次实报 prompt tokens，无 usage 回落本地估算）、缓存命中量与命中率（累计 hit / 累计 prompt）；数据全部来自 `Agent.Stats()` 单一快照，渲染在 `repl/stats.go`，与提示符占位符同源同公式
@@ -387,7 +389,7 @@ pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（�
 
 输出侧渲染审计（`scripts/render_audit.py`，先 `make build`）：内置 mock LLM（responses 协议 SSE，事件形态对齐 `agent/mock_test.go`）+ pty 驱动真实二进制 + VT 回放（DECSTBM / 自动换行 / 光标可见性 / 备用屏 47·1047·1049 / 保存槽按屏索引 / SGR 状态与 DECRC 属性恢复；DECSTBM 按真终端实测建模——光标一律 home 到绝对 (1,1)，比 xterm 的「夹到上边界」更狠）+ 不变量断言，全量约 15s、无网络依赖。不变量：`overwrite`（写入非空白单元格）、`region_scroll`（只在滚动区内滚动）、`cu_clamped`（相对上移超出光标所在行，会被视口夹到顶行）、结束时 `autowrap_off` / `cursor_hidden` / `margins_set` / `alt_screen_on` / `sgr_open`。场景 want 三档：`clean` 要求不变量全为 0（回归门）、`leak` 断言 `expect` 列出的违反项被复现（已知缺口门，修好后改成 `clean`）、`note` 只报告不断言；`--dump NAME` 打印该场景回放后的屏幕。诊断计数 `cursor_restore`（光标被保存槽恢复且位置确实跳变，**且该槽在本回放中从未被写过**——即陈旧槽值被恢复，裸发 `DECRST 1049` 的典型症状；被 `DECSC`/`1049h` 写过的槽被恢复属预期、不计数）不断言、仅报告，真正的门是 `overwrite` 与结束态不变量。2026-09-20 起已无 leak 门：原 `leak-picker-unpaged`（picker 未按屏幕高度分页，`CursorUp(len(items)+1)` 被夹到顶行）改为 `clean-picker-paged`（40 个会话 + `--dump` 目视：单块 31 行、无重复残影）——picker 分窗 + 上移量按实际写入行数记账后 `cu_clamped` 归零；同日新增两条转义注入门：`clean-history-escape`（`sh_raw` 构造内层含真 ESC 的 tool_call 参数 → `/history 2` 回放 `→ 工具 参数` 行：清洗缺失时 `CSI 2J` 会清屏、屏幕断言失败）与 `clean-picker-escape`（`session_evil` 让种子会话摘要含 ESC → `/load`：清洗缺失时菜单被清屏），两者都以「去掉清洗即变红」实测过；光标锚点类的回归门五条：`clean-tty-scrollregion`（子进程 `printf '\033[20;24r' > /dev/tty` 设滚动区，终端把光标 home 到 (1,1)）、`clean-tty-cup`（子进程 `CSI 3;7H` 直接挪光标）、`clean-alt-screen-exit`（子进程用 `47h` 进备用屏后退出）、`clean-tty-modes`（`?7l`/`?25l` 残留）、`clean-interactive-release`（interactive 密码提示后桥接 release 的 `?1049l` 跳位）——交出终端前 `SaveCursor` 与复位后 `RestoreCursor` 任一步退化成 no-op，这五条连同其余 clean 门都会变红（实测去掉存档得 `overwrite` 44、去掉归位得 `overwrite` 50），故它们是 2026-09-16 光标锚点修复的回归门。note 只剩 `note-partial-line`（子进程直写 `/dev/tty` 的半行残文）
 
-会话归档测试：卷往返（entry 字节与源文件一致、entry comment 的条数与摘要与实读扫描一致）、comment 上限（4 KiB 硬上限、多字节截断降级、`trunc` 标记）、筛选（`OlderThan`、`Exclude`、5 分钟空闲保护、`DryRun` 不落盘、已在卷内 id 去重、0 候选不建空卷）、列表分组排序（活动前归档后）、`/archive` 的预览/确认/取消/非交互降级（`MsgArchiveOnlyTTY`）与保留数、窗口两种口径、`/archive` 恒排除当前会话、损坏卷（截断/CRC 错：列表不崩、载入报错且卷不动）、`*.tmp-*` 忽略、同 id 双区取活动、归档只读态不写盘且 `Ask` 报 `ErrArchiveReadOnly`、`Fork` 落盘内容与后续增量、`resolveWorkspaceDirs` 三态推导、`ParseArchiveArg` 表驱动、picker `[归档] ` 标记渲染。
+会话归档测试：卷往返（entry 字节与源文件一致、entry comment 的条数与摘要与实读扫描一致）、comment 上限（4 KiB 硬上限、多字节截断降级、`trunc` 标记）、筛选（`OlderThan`、`Exclude`、5 分钟空闲保护、`DryRun` 不落盘、已在卷内 id 去重、0 候选不建空卷）、列表分组排序（活动前归档后）、`/archive` 的预览/确认/取消/非交互降级（`MsgArchiveOnlyTTY`）与保留数、窗口两种口径、`/archive` 恒排除当前会话、损坏卷（截断/CRC 错：列表不崩、载入报错且卷不动）、`*.tmp-*` 忽略、同 id 双区取活动、归档只读态不写盘且 `Ask` 报 `ErrArchiveReadOnly`、`Fork` 从活跃会话与归档会话两条路径的落盘内容/后续增量/原文件不被改写、`rotate` 规避同秒占用名、`resolveWorkspaceDirs` 三态推导、`ParseArchiveArg` 表驱动、picker `[归档] ` 标记渲染。
 
 ## 环境段（envprobe）
 
