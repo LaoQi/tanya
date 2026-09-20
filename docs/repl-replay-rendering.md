@@ -50,7 +50,7 @@
 
 把实时的块结构与状态行样式抽成纯函数（`repl/toolview.go` 已有 `renderToolBlock`/`toolEndBody` 的雏形），回放侧用"从扁平文本反查到的近似结构"调用它：
 
-- 工具块：`▸ 标题` + `  ` 缩进正文 + `↳ 状态`，标题取 `tool_calls.arguments` 的 command（实时已有 `toolArgsDisplay`），正文取 `content` 原文。
+- 工具块：`▸ 标题` + `  ` 缩进正文 + `↳ 状态`，标题取 `tool_calls.arguments` 的 command（实时已有 `toolArgsView`），正文取 `content` 原文。
 - 状态行：回放**不显示**时长/行数（无数据），或显示占位（如 `↳ 历史记录`）。
 - 消息头：抽 `renderMessageHead(n, role)` 供回放专用（实时无消息头，不存在"统一"）。
 - 成本：约 60-100 行改动，不动 `agent`；收益仅是"框线与记号一致"。
