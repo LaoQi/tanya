@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -22,6 +23,8 @@ type Agent struct {
 	client    *Client
 	tools     *toolRegistry
 	workspace string
+	home      string
+	bridge    TTYBridge
 	history   []Message
 	env       string
 	prompt    *promptBuilder
@@ -54,44 +57,94 @@ func WithTTYBridge(b TTYBridge) Option {
 }
 
 func New(cfg *Config, opts ...Option) (*Agent, error) {
+	var o Options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
 	home, _ := os.UserHomeDir()
-	var o Options
-	for _, opt := range opts {
-		opt(&o)
-	}
-	tool, err := newShellTool(shellToolConfig{
-		Override:  cfg.Shell,
-		LookPath:  exec.LookPath,
-		Home:      home,
-		Workspace: cwd,
-		Bridge:    o.bridge,
-	})
-	if err != nil {
+	a := &Agent{cfg: cfg, workspace: cwd, home: home, bridge: o.bridge}
+	if err := a.loadWorkspace(cwd, o.noSave); err != nil {
 		return nil, err
 	}
-	sessionDir, archiveDir := resolveWorkspaceDirs(cfg, cwd)
-	a := &Agent{
-		cfg:       cfg,
-		workspace: cwd,
-		env:       envSection(cwd, tool.profile),
-		prompt:    newPromptBuilder(cwd, globalAgentsPath(), readAgentsFile),
-		store:     newSessionStore(sessionDir, archiveDir, o.noSave),
+	return a, nil
+}
+
+func (a *Agent) loadWorkspace(dir string, noSave bool) error {
+	tool, err := newShellTool(shellToolConfig{
+		Override:  a.cfg.Shell,
+		LookPath:  exec.LookPath,
+		Home:      a.home,
+		Workspace: dir,
+		Bridge:    a.bridge,
+	})
+	if err != nil {
+		return err
 	}
-	tools := newToolRegistry(allTools(tool, a)...)
-	a.tools = tools
-	a.client = NewClient(cfg, tools.defs())
-	if !o.noSave {
+	sessionDir, archiveDir := resolveWorkspaceDirs(a.cfg, dir)
+	if !noSave {
 		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-			return nil, err
+			return err
 		}
 	}
+	a.workspace = dir
+	a.env = envSection(dir, tool.profile)
+	a.prompt = newPromptBuilder(dir, globalAgentsPath(), readAgentsFile)
+	a.store = newSessionStore(sessionDir, archiveDir, dir, noSave)
+	a.tools = newToolRegistry(allTools(tool, a)...)
+	a.client = NewClient(a.cfg, a.tools.defs())
 	a.NewSession()
 	a.store.refresh()
-	return a, nil
+	return nil
+}
+
+func (a *Agent) SwitchWorkspace(dir string) error {
+	target, err := a.resolveWorkspace(dir)
+	if err != nil {
+		return err
+	}
+	if target == a.workspace {
+		return fmt.Errorf(MsgSameWorkspace, shortPath(target))
+	}
+	return a.loadWorkspace(target, a.store.disabled)
+}
+
+func (a *Agent) resolveWorkspace(dir string) (string, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return "", errors.New(MsgEmptyWorkspace)
+	}
+	if dir == "~" || strings.HasPrefix(dir, "~/") {
+		if a.home == "" {
+			return "", fmt.Errorf(MsgBadWorkspace, dir)
+		}
+		if dir == "~" {
+			dir = a.home
+		} else {
+			dir = filepath.Join(a.home, dir[2:])
+		}
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(a.workspace, dir)
+	}
+	dir = filepath.Clean(dir)
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return "", fmt.Errorf(MsgBadWorkspace, dir)
+	}
+	return dir, nil
+}
+
+func (a *Agent) Workspace() string { return a.workspace }
+
+func (a *Agent) SessionDir() (string, bool) {
+	if a.store == nil || a.store.disabled {
+		return "", false
+	}
+	return a.store.dir, true
 }
 
 func (a *Agent) systemPrompt() string {

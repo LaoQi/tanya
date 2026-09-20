@@ -151,7 +151,7 @@ func (s *sessionStore) archive(opt ArchiveOptions) (ArchiveReport, error) {
 		return rep, err
 	}
 	tmpPath := tmp.Name()
-	err = writeVolume(tmp, written, metas)
+	err = writeVolume(tmp, written, metas, s.workspace)
 	tmp.Close()
 	if err == nil {
 		err = os.Rename(tmpPath, volume)
@@ -179,7 +179,7 @@ func (s *sessionStore) archive(opt ArchiveOptions) (ArchiveReport, error) {
 	return rep, nil
 }
 
-func writeVolume(tmp *os.File, picked, metas []SessionInfo) error {
+func writeVolume(tmp *os.File, picked, metas []SessionInfo, workspace string) error {
 	zw := zip.NewWriter(tmp)
 	for i, si := range picked {
 		src, err := os.Open(si.Path)
@@ -201,8 +201,7 @@ func writeVolume(tmp *os.File, picked, metas []SessionInfo) error {
 			return fmt.Errorf(MsgArchiveVolFailFmt, si.ID, err)
 		}
 	}
-	ws, _ := os.Getwd()
-	comment, err := json.Marshal(archiveVolumeComment{V: archiveCommentV, Workspace: ws, Created: time.Now().Format(time.RFC3339), Sessions: len(picked)})
+	comment, err := json.Marshal(archiveVolumeComment{V: archiveCommentV, Workspace: workspace, Created: time.Now().Format(time.RFC3339), Sessions: len(picked)})
 	if err == nil {
 		zw.SetComment(string(comment))
 	}

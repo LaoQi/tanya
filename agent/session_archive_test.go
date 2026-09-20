@@ -22,7 +22,8 @@ func newArchiveStore(t *testing.T) (*sessionStore, string, string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return newSessionStore(dir, archive, false), dir, archive
+	wd, _ := os.Getwd()
+	return newSessionStore(dir, archive, wd, false), dir, archive
 }
 
 func seedSession(t *testing.T, dir, id, content string, mtime time.Time) string {

@@ -31,7 +31,7 @@ render/markup/     内联标记解析
 
 事实归属（不设共享暴露层）——这些结论不再重复讨论：
 
-- **进程事实**：`cwd`、家目录与工作区基准在 `agent.New` 读一次、注入 `shellTool` 构造期定格（旧六参形态与包级 shell 状态已删，见 `docs/shell-tool.md` §14/§16）
+- **进程事实**：`cwd`（启动目录，全程不 `os.Chdir`）、家目录与工作区基准在 `agent.New` 装配一次、注入 `shellTool`（旧六参形态与包级 shell 状态已删，见 `docs/shell-tool.md` §14/§16）；`/switch` 换工作区时由 `Agent.loadWorkspace` 按新目录重建同组派生态（shell 工具、system 提示、会话存储、env 段），进程 cwd 不变
 - **`ctx` 属请求层**：只承担取消/超时，不承载进程事实（`repl.Run()` 不收 ctx；每回合由 `InterruptContext()` 现造，以 `context.Background()` 为根）
 - **tty 与颜色能力由消费方独占**：`term.Profile` 由 `term.DetectProfile` 计算、只有 `term` 保留进程级默认档案（终端能力是名副其实的进程事实）；语义色 `theme.Semantics` 为值传递（repl 持有当前方案、readline 经 `SetStyles` 注入，见 `docs/style-split.md`）；终端尺寸是实时值（`ToolWidth` 以函数传递）；启动前台状态与 `ISIG` 自愈归 readline（`InitTerminalGuard`/`SecureTerminal`）；`ctty.Supported` 是编译期平台常量；前台组读/写、`/dev/tty` 打开、`SIGTTIN/SIGTTOU` 忽略等**控制终端原语**统一在零依赖叶子包 `ctty`（`docs/ctty.md`），`agent`（是否移交前台）与 `readline`（是否夺回前台）各自持有策略，共享原语、不合并决策
 
@@ -110,8 +110,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### run_shell（`agent/shelltool.go` 组件 + `agent/shell.go` 叶子）
 
-- 参数：`command`（必填）、`cwd`（可选，命令执行目录，默认会话启动目录）、`timeout`（默认 60s，上限 900s）、`interactive`（布尔，默认 false）
-- 执行目录：默认继承进程 cwd（= 会话启动目录，进程全程不 `os.Chdir`）；显式 `cwd` 时设 `cmd.Dir`（不改进程 cwd），解析规则为 `~`/`~/x` 展开家目录、相对路径按工作区基准合成（家目录与工作区由 `agent.New` 各读一次注入 `shellTool`，构造后只读；缺基准时相对路径直接失败而非退回环境 cwd），随后 `os.Stat` 校验——不存在或非目录直接快速失败（`MsgBadCwd`，不启动进程）。显式指定时 `ShellResult.Cwd` 填充解析后的绝对路径，`String()` 首行输出 `cwd: <路径>`。桥接与回退两条路径均生效（`TTYBridge.Prepare` 只改 `SysProcAttr`/标准流/`Env`，不覆盖 `cmd.Dir`）
+- 参数：`command`（必填）、`cwd`（可选，命令执行目录，默认当前工作区）、`timeout`（默认 60s，上限 900s）、`interactive`（布尔，默认 false）
+- 执行目录：默认取**当前工作区**（启动时即启动目录，进程全程不 `os.Chdir`；`/switch` 后随工作区变），`cwd` 参数是单次覆盖——显式时设 `cmd.Dir`（不改进程 cwd），解析规则为 `~`/`~/x` 展开家目录、相对路径按工作区基准合成（家目录在 `agent.New` 读一次注入、工作区随 `/switch` 重建；缺基准时相对路径直接失败而非退回环境 cwd），随后 `os.Stat` 校验——不存在或非目录直接快速失败（`MsgBadCwd`，不启动进程）。只有显式指定才回填 `ShellResult.Cwd`（绝对路径）并让 `String()` 首行输出 `cwd: <路径>`，默认目录不改变输出形状。桥接与回退两条路径均生效（`TTYBridge.Prepare` 只改 `SysProcAttr`/标准流/`Env`，不覆盖 `cmd.Dir`）
 - 波浪号边界（不宣传的默认契约）：只处理 `~` 与 `~/x`（`~` 展开家目录，基准由 `agent.New` 注入）；`~user` 与 Windows 风格 `~\x` 一律不展开——按相对路径解析并因不存在直接报 `MsgBadCwd`（快速失败，不误执行）。`run_shell` 工具描述与 `cwd` 参数描述均不提 `~`（避免引导模型使用）；env 段 `CWD:` 行的 `~/...` 只是完整路径的显示缩写，不是路径语法引导
 - 交互模式（`interactive: true`）：仅由模型显式声明，**不做命令文本猜测**（早期版本有 sudo/ssh 关键词兜底，review 后移除）。声明后 repl 侧不发状态行心跳、标题行下打印引导行、结束用追加式渲染（避免 `CursorUp` 擦掉用户输入回显）；`timeout` 缺省时默认放宽至 300s（显式值优先，上限仍 900s）。命令在 **Linux 独立 pty** 中运行（见下条），提示与输出实时可见；非桥接回退路径下命令提示须自行写入 `/dev/tty`，否则被工具捕获不可见；**Windows 走控制台继承直通（B2）**——`ctty.Open` 返回 `CONIN$` 作子进程 stdin 可直接应答，写控制台的提示（ssh 等）实时可见、写 stdout 的提示随输出捕获，运行期 `IgnoreCtrlEvents` 掩蔽本进程 ^C（Ctrl+Break 不受掩蔽，保留为紧急中断），详见 `docs/terminal-caps.md` §8.6
 - 交互式 pty 桥接（`readline/bridge_linux.go` + `agent/tty_bridge.go`，linux 专用；决策与背景见 `docs/interactive-tty.md`）：解决"交互程序拿不到输入"（`/dev/tty` 直通导致 `ttyname(0)` 退化为 `/dev/tty`、pinentry 等无 ctty 程序无法按路径打开）。流程 `Prepare`（分配 pty、`Setsid+Setctty+Ctty=0`、三条标准流全接 slave、`GPG_TTY`/`SSH_TTY` 覆盖为 slave 路径）→ `Attach`（真实 tty 切 raw、初始尺寸复制到 master、启动双向泵）→ `cmd.Start()` → 立即关闭父进程 slave（否则子进程退出后 master 收不到 EIO）→ `waitShell` → `stop()`（恢复 termios、关闭 tty/master、泵收尾 drain 后 `capture.finish()`）
@@ -127,14 +127,14 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 实现：按 `shellProfile` 组装命令（posix `<path> -c`、powershell `<path> -NoProfile -NonInteractive -Command`、cmd `<path> /d /s /c`；interactive: true 时两条交互路径均过滤 powershell 的 `-NonInteractive`——该模式下 Read-Host 直接抛错，非交互运行不受影响），捕获 stdout/stderr/退出码/耗时（`ShellResult` 结构化返回：Command/Cwd/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Stopped/NotStarted/Duration）
 - 中断语义：运行中被 ctx 取消 → `Interrupted`，结果追加 `error: 已中断（进程已终止，输出可能不完整）`；ctx 已取消导致命令未能启动 → `Interrupted+NotStarted`，追加 `error: 已中断（命令未执行）`（不再把裸 `context canceled` 交给模型）；toolview 状态行分别为 `已中断`/`未执行`，已捕获的首尾输出照常保留
 - 平台抽象（`shell_platform.go`，无 tag）：`shellPlatform{GOOS, Candidates, ConfigureGroup, KillGroup, ProtectSignals, ExitCode, ProcessStopped, Programs, Capabilities, DecodeOutput}` 一张表承载全部平台差异（候选链、进程/信号/退出码语义、可用程序清单与工具描述的能力句——run_shell 描述随平台切换；Windows 清单同时含 coreutils/Git for Windows/msys2 可能提供的 unix 工具与 Windows 原生程序，仍是探测到才列出，不会暗示不存在的工具链），按可实现目标平台一文件装配——`shell_platform_posix.go`（`linux || darwin`）承载共享实现（候选链、程序清单、能力句、进程组、信号防护、退出码），`shell_platform_linux.go`（`linux`，`/proc` 挂起探测）与 `shell_platform_darwin.go`（`darwin`，`sysctl` 挂起探测）各自装配表与平台差异、`shell_platform_windows.go`（`windows`）、`shell_platform_stub.go`（其余平台，仅保证可编译）；各分片一律经无 tag 文件的 `fillDefaults` 装配，nil 函数字段落到安全默认（no-op 进程组配置、默认杀进程、默认退出码、恒 false 挂起探测、空能力句、恒等 `DecodeOutput`——windows 分片填入代码页兜底转码，见《输出捕获》），`GOOS` 空则填 `runtime.GOOS`（平台名的唯一引用点，分片不再各自声明），漏字段不再等到调用点才崩；`ProtectTerminalSignals`（`sync.Once` 包装）同在无 tag 文件，`TestPlatformComplete` 继续守卫候选链非空与程序清单无空串（这两个字段不做兜底：候选链空即启动报错，程序清单空即无清单）。取代原先按方法散落的 `shell_unix`/`shell_other`/`shell_proc_*`/`shell_candidates_*` 七文件与三套 tag 口径
-- 工具描述拼装（`shellTool.toolDesc` → `describeShell(plat, profile, programs)`，与平台无关、可注入任意平台值）：平台名取自 `plat.GOOS`（不再单独传 `runtime.GOOS`，与能力句、程序清单同源同一张表；`TestPlatformComplete` 断言其等于运行时 GOOS）：`在 <GOOS> <name> 中执行命令（<语法提示>），返回 stdout/stderr/退出码。` + cwd 契约句（会话启动目录执行、无需 `cd`、需要其它目录用 `cwd` 参数，2026-09-16 前移至能力句之前） + 平台能力句（`platform.Capabilities`，按平台与 `shellProfile.Kind` 给差异：posix 的文本工具链/`/dev/tty` 交互提示/`128+signum` 退出码；windows 的 PowerShell 对象管道或 cmd 内建/无 `/dev/tty`/unix 工具链以「可用程序」清单为准——coreutils、Git for Windows 或 msys2 装上就有，探测不到就不提）+ 用途句（系统操作首选）+ `可用程序: ...`
+- 工具描述拼装（`shellTool.toolDesc` → `describeShell(plat, profile, programs)`，与平台无关、可注入任意平台值）：平台名取自 `plat.GOOS`（不再单独传 `runtime.GOOS`，与能力句、程序清单同源同一张表；`TestPlatformComplete` 断言其等于运行时 GOOS）：`在 <GOOS> <name> 中执行命令（<语法提示>），返回 stdout/stderr/退出码。` + cwd 契约句（当前工作区执行、无需 `cd`、需要其它目录用 `cwd` 参数，2026-09-16 前移至能力句之前） + 平台能力句（`platform.Capabilities`，按平台与 `shellProfile.Kind` 给差异：posix 的文本工具链/`/dev/tty` 交互提示/`128+signum` 退出码；windows 的 PowerShell 对象管道或 cmd 内建/无 `/dev/tty`/unix 工具链以「可用程序」清单为准——coreutils、Git for Windows 或 msys2 装上就有，探测不到就不提）+ 用途句（系统操作首选）+ `可用程序: ...`
 - shell 解析（`newShellTool`，Agent 构造时一次性解析并定格）：
   - 优先级：配置覆盖（`config.yaml shell:` / env `TANYA_SHELL`，名字或绝对路径，任意 shell 名允许，未知 basename 按 posix `-c` 处理）> 平台自动探测
   - 自动探测：候选链取自平台抽象 `platform.Candidates`（posix = `bash` → `sh` → `ash`；windows = `pwsh` → `powershell`；stub 平台保底同一 posix 链），遍历算法 `firstAvailable` 平台无关、候选可注入，测试不必依赖当前 GOOS；windows 无 PowerShell 7 时兜底 Windows PowerShell 5.1（不回退 cmd，两者均按 `-NoProfile -NonInteractive -Command` 调用）
   - 全部落空（含配置的 shell 不存在）：解析返回错误（`MsgNoShellFmt`/`MsgShellOverrideFmt`，含候选清单与配置提示），`agent.New` 立即透传，`main.go` 打印后以 1 退出——无降级路径，`shellTool.profile` 在其后恒非 nil，profile 的非空成为不变量（`run_shell` 恒定注册、env 段恒定输出 SHELL/TIMEOUT/OUTPUT 行、system prompt 恒为 `DefaultSystemPrompt`）
 - 程序探测：profile 就绪后对 `platform.Programs` 逐个 LookPath（posix：ls/cat/head/tail/grep/rg/fd/sed/awk/find/sort/wc/cut/tr/xargs/git/curl/wget/go/node/python；windows：ls/cat/head/tail/grep/sed/awk/wc/cut/tr/xargs/diff/tee/uniq＋rg/fd/git/curl/wget/tar/ssh/go/node/python＋where/findstr；stub 平台为空；windows 清单刻意不含 `find`/`sort`——System32 同名程序是字符串搜索/代码页排序，语义与 GNU 版不同，探测到会误导模型），存在的拼入 run_shell 工具描述 `可用程序: ...`，仅在工具描述出现，不重复注入 env 段
 - 输出捕获：stdout/stderr 各保留头 30000 字节 + 尾 30000 字节（`streamCapture` 滚动窗口），中间字节计数丢弃，模型仍可见首尾内容；`finish()` 时经 `toUTF8` 出仓——字节整体是合法 UTF-8 即原样直通（posix 恒等、零开销），否则路由到 `platform.DecodeOutput` 兜底转码（windows：按 `ctty.FallbackCP()` 给出的快照代码页经 `MultiByteToWideChar → WideCharToMultiByte(CP_UTF8)` 转换，截断缝上的半个多字节字符落 U+FFFD 而非整体失败；背景与策略见 `docs/terminal-caps.md` B4）。middle==0 的头尾连续片段拼接为单缓冲后整体解码，避免多字节序列被 head/tail 边界切断
-- 组件化（`docs/shell-tool.md`）：`shellTool` 是 shell 执行层唯一所有者，`profile`/`programs`/`workspace`/`home`/`bridge` 在构造期定格、之后只读，`run` 每调用状态全在栈上（可重入）；唯一可变字段是终端租约 `ttyMu`——真实终端进程内只有一份，桥接与前台移交两条路径都在锁内。组件内不读环境（无 `os.Getwd`/`os.UserHomeDir`/`exec.LookPath`/`runtime.GOOS`），`agent.New` 装配点各读一次注入。包级可变状态（`shellRuntime*`/`shellLookPath`/`ttyBridgeMu`+`ttyBridgeCur`）已删除；`envSection`/`describeShell`/`runShellParams` 为纯函数（组件内不读 GOOS：平台名来自构造期定格的平台表）；工具清单由 `allTools()` 显式组装、经 `toolRegistry.defs()` 在 `NewClient` 构造期注入 client（请求组装不再伸手读包级清单）
+- 组件化（`docs/shell-tool.md`）：`shellTool` 是 shell 执行层唯一所有者，`profile`/`programs`/`workspace`/`home`/`bridge` 在装配期定格、之后只读（`workspace` 随 `/switch` 由 `Agent.loadWorkspace` 换新实例），`run` 每调用状态全在栈上（可重入）；唯一可变字段是终端租约 `ttyMu`——真实终端进程内只有一份，桥接与前台移交两条路径都在锁内。组件内不读环境（无 `os.Getwd`/`os.UserHomeDir`/`exec.LookPath`/`runtime.GOOS`），`agent.New` 装配点各读一次注入。包级可变状态（`shellRuntime*`/`shellLookPath`/`ttyBridgeMu`+`ttyBridgeCur`）已删除；`envSection`/`describeShell`/`runShellParams` 为纯函数（组件内不读 GOOS：平台名来自构造期定格的平台表）；工具清单由 `allTools()` 显式组装、经 `toolRegistry.defs()` 在 `NewClient` 构造期注入 client（请求组装不再伸手读包级清单）
 - 实测契约（sudo 两模式对照）：`sudo` 默认模式自开 `/dev/tty` 完成提示与密码输入——前台移交后提示实时可见、密码不回显，仅最终错误走 stderr 回流；`sudo -S` 强制从 stdin 读密码时提示改写 stderr（被捕获，等待期间不可见），交互命令应避免 `-S` 类强制 stdin 选项
 - 终端前台移交（原语在 `ctty`，见 `docs/ctty.md`；前台组/termios 原语缺失的平台自动跳过对应步骤）：执行前经 `ctty.Open` 打开控制终端，仅当自身进程组已是前台（`ctty.IsForeground`）时 `ctty.SetForeground` 移交子进程组，子进程结束后以 `handed` 门控归还（避免从未交接时抢占 shell 的前台）；无控制终端 / 非前台（嵌套、后台运行）自动跳过，行为与旧版一致。移交前台的同时将 `cmd.Stdin` 接到控制终端（打开成功时），子进程 stdin 直通用户终端，可直接在终端应答 ssh/git/sudo 等密码与确认提示，不再静默挂死至超时；无 tty 时 stdin 保持原状（/dev/null）。windows（B2，2026-09-17）：`ctty.Open` 返回 `CONIN$`，`cmd.Stdin` 同样直通控制台（非交互与交互一致），posix 的 termios 快照/前台交接/屏幕模式复位在 windows 走 stub 跳过，输入模式另由 `ctty.SnapshotInput`/`RestoreInput`（console mode）在回合末复原，^C 归属由 `IgnoreCtrlEvents` 掩蔽解决
 - **终端状态保存与复原（2026-09-15 增补，2026-09-16 修订，2026-09-17 跨平台化）**：`runShellForeground` 在移交前用 `ctty.SnapshotInput` 快照控制终端输入模式（posix 转发 `ctty.GetTermios`；windows 转发 `GetConsoleMode`，修复子进程污染被固化，见 `docs/windows-console-mode-restore.md`），在 defer 中 `ctty.RestoreInput` 复原（覆盖正常退出、超时 SIGKILL、Ctrl+C 中断三条路径，故任何被强杀的子进程都不会把 `-opost`/`-icanon`/`-echo` 留在终端上），并在归还前台组后、关 tty 前调用 `ctty.ResetModes` 复位屏幕模式——**仅当 `ctty.IsForeground(fd)`**（自己确实是前台）时发，`SetForeground` 归还失败也不例外。修订缘由：此前两次结论（「常规路径只复原 termios，因为子进程 stdout/stderr 走管道」「ResetModes 只在桥接 release 发且不含 `CSI r`」）基于一个被证伪的前提——非交互路径把真实 tty 作为子进程 stdin，子进程写 `/dev/tty` 的转义照样改屏幕状态（探针 `clean-tty-scrollregion`/`clean-tty-modes`）；而 `DECRST 1049` 在主屏也会按 DECRC 恢复保存槽，使桥接 release 后工具块正文从屏幕顶部开始画、覆盖旧数据（探针 `clean-interactive-release`，用户实测于 interactive 密码提示）。**光标锚点（2026-09-16 二次修订）**：复位串一度把会移光标的 `?1049l`/`CSI r` 包在 `DECSC`…`DECRC` 内，实测证明那只保住了「已被子进程打乱」的位置——子进程写 `DECSTBM` 时终端把光标 home 到绝对 (1,1)（51×75 SSH 终端 DSR 逐点实测，区外下方/区内/区外上方三种起点一致），前导 `\x1b7` 存的正是这个坏位置。现改为**调用方锚点**：`cmd.Start()` 前 `ctty.SaveCursor`、复位后 `ctty.RestoreCursor`（桥接侧 `Prepare` 存、`release` 归位），`resetModes` 内不再含 `DECSC`/`DECRC`（含则覆盖该槽，归位退化为「恢复到陈旧槽」）；两条路径都带前台门控，且没存过锚点就不恢复。快照失败（无 tty / 非 tty fd / 非前台）不阻断执行；已知限制：子进程写 `/dev/tty` 的**内容**（密码提示、半行残文）既不进采集（模型看不到）也无人清洗（探针 `note-partial-line`），子进程自行 `DECSC` 后不 `DECRC` 会夺走保存槽、归位目标由它决定
@@ -201,11 +201,11 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## 会话
 
-- 每次启动/`/new` 开启新会话，id 为启动时间戳（`20060102-150405`）：`time.Now` 就地取、不做时钟注入（与 shell 执行层同一口径；文件名可用正则断言）
+- 每次启动/`/new`/`/switch`/`/fork` 开启新会话，id 为启动时间戳（`20060102-150405`）：`time.Now` 就地取、不做时钟注入（与 shell 执行层同一口径；文件名可用正则断言）
 - workspace 目录是会话数据落点，其下固定为并列的 `sessions/`（活动会话）与 `archive/`（归档卷）：
-  - `local`：workspace 目录 = `<启动目录>/.tanya/`（.tanya 本身即项目隔离，不叠加 workspace-id）
-  - `global`：workspace 目录 = `<data_dir>/workspaces/<workspace-id>/`（`data_dir` 默认 `~/.local/share/tanya`），workspace-id 由启动目录派生（可读路径转义 + 8 位短哈希）
-- 存储模式（CLI `-m` > env `TANYA_SESSION_MODE` > 配置 `session_mode`，默认 auto）：`auto` 为「当前目录存在 `.tanya/` → local，否则 global」；两侧落点由 `resolveWorkspaceDirs(cfg, cwd) (sessions, archive)` 单点推导，`agent.New` 只创建 `sessions`（`archive` 由归档动作按需创建）
+  - `local`：workspace 目录 = `<工作区>/.tanya/`（.tanya 本身即项目隔离，不叠加 workspace-id）
+  - `global`：workspace 目录 = `<data_dir>/workspaces/<workspace-id>/`（`data_dir` 默认 `~/.local/share/tanya`），workspace-id 由工作区路径派生（可读路径转义 + 8 位短哈希）
+- 存储模式（CLI `-m` > env `TANYA_SESSION_MODE` > 配置 `session_mode`，默认 auto）：`auto` 为「工作区存在 `.tanya/` → local，否则 global」；两侧落点由 `resolveWorkspaceDirs(cfg, 工作区) (sessions, archive)` 单点推导，`agent.New`/`SwitchWorkspace`（工作区装配）只创建 `sessions`（`archive` 由归档动作按需创建）
 - 旧布局不兼容（2026-09-17）：`global_session` 配置项与 `<root>/<workspace-id>/` 目录形态已废弃，代码不含兼容读取/迁移路径，旧目录由用户自行删除
 - 只读会话（`-n` / `--no-save`）：由 CLI 经 `agent.New(cfg, agent.NoSave(true))` 传入，`Config` 无对应字段，配置文件与 env 均无法开启；`ask` 单发与 REPL 通用。读路径全部保留（启动预扫描、`ListSessions`、`LoadSession` 照常，既有会话不会被截断或改写），写路径在 `sessionStore.append` 首行（`disabled`）返回 nil 被整体关闭（覆盖成功/中断/错误三条路径）；`MkdirAll(store.dir)` 在只读模式下跳过，目录缺失时 `store.refresh` 按空列表处理不报错。内存 history 照常维护（中断保留语义不变），进程退出即丢。REPL 启动时在欢迎屏下方以语义色 `Warn` 打一行 `MsgNoSaveWarn`（`REPL.noSaveWarn`，agent 为 nil 或可写时不输出），`ask` 静默；归档只读态（`frozen`）是另一维度的只读，见《会话归档与 fork》
 - 落盘：`<timestamp>.jsonl`，每轮结束追加写入新消息（一行一条 Message JSON），记录完整历史（回放/审计用）；回合因中断/错误保留产出时同样落盘（含终止提示行）
@@ -221,7 +221,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 归档把活动会话打包为标准 zip 卷，落 `<workspace>/archive/archive-<20060102-150405>.zip`；一次 `/archive` 生成一卷、**写入后不可变**（不重写、不删条目、不做「解档回活动区」），继续对话由 `/fork` 承担
 - 卷内 entry 名 `<会话 id>.jsonl`，`Method: Deflate`，`Modified` 取原文件 mtime，**entry 数据为原 jsonl 逐字节**（不裁剪、不重排、不丢 reasoning/tool_calls）：prompt cache 红线在归档路径上的延续
 - entry comment（zip per-entry comment，单行 JSON）：`{"v":1,"msgs":<条数>,"summary":"<首条 user 消息，单行化、≤200 rune>"}`，超长时缩短 summary 并置 `"trunc":true`；**硬上限 4 KiB**——Go 在 comment > 65535 字节时静默写坏中央目录（实测 65536 读回 0 字节），故 marshal 后校验、超限降级
-- 卷级 comment（`zip.Writer.SetComment`）：`{"v":1,"workspace":"<启动目录>","created":"<RFC3339>","sessions":<条数>}`
+- 卷级 comment（`zip.Writer.SetComment`）：`{"v":1,"workspace":"<工作区>","created":"<RFC3339>","sessions":<条数>}`
 - 归档筛选（`agent.ArchiveOptions`）：按 id 降序后先按 `Keep`（保留最新 N 个，0 = 不限）截取，再按 `OlderThan`（文件 mtime，0 = 不限）过滤，`Exclude` 恒为当前会话，另加**空闲保护**（mtime 距今 < 5 分钟的文件跳过，防另一实例正在追加）；id 已存在于任一卷则跳过（幂等）；`DryRun` 只出报告（`/archive` 的预览阶段），不建目录、不落卷、不删源文件
 - 失败语义：「元数据扫描」失败 → 跳过该文件并计入报告；「卷写入」失败 → 放弃整卷（删临时文件）且不删任何源文件并返回错误；卷先写同目录临时文件再 `rename` 落定，**之后**才删除源文件（崩溃最多留双份，列表侧按同 id 取活动去重）
 - 写入前 `MkdirAll(archiveDir)`；0 候选时不建目录、不产生空卷
@@ -261,7 +261,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 组装规则：`DefaultSystemPrompt`（内置，固定不可配，`system_prompt` 配置项已移除）+ 全局 `~/.config/tanya/AGENTS.md`（存在时）+ 工作区 `./AGENTS.md`（存在时），各段以 `# 全局说明`/`# 项目说明` 标题分隔，文件缺失/空白跳过
 - 规则与事实分离：persistPrompt（上述规则）在 `/new`/`/load` 时组装并冻结进会话首行；每次请求的 system = persistPrompt + 空行 + `Agent.env`（环境事实在 `agent.New` 构造期算一次、冻结进内存，既不持久化也不再重算）
 - 快照机制：`/new` 与 `/load` 时刻读取 AGENTS.md 组装快照；会话进行中零文件 IO，快照冻结；旧格式会话（system 首行含历史环境段）原样保留并标记，`/load` 时提示 `/new`
-- 缓存收益：history 全程 append-only，system 两段（规则快照 + 环境段）在本进程内逐字节恒定，同一会话内请求前缀不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中。env 段自 2026-09-14 起在构造期定格（此前的 `WORKSPACE` 行是 system 内唯一会自行变化的输入，已随本次收口删除）
+- 缓存收益：history 全程 append-only，system 两段（规则快照 + 环境段）在本进程内逐字节恒定，同一会话内请求前缀不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中。env 段自 2026-09-14 起在装配期定格（此前的 `WORKSPACE` 行是 system 内唯一会自行变化的输入，已随本次收口删除）；`/switch` 换工作区时 env 段与工具描述一并随新工作区重建，本就不复用的缓存前缀随之作废
 - 缓存命中捕获（DeepSeek `prompt_cache_hit_tokens` / OpenAI `prompt_tokens_details.cached_tokens`）经 `Agent.Stats()` 的累计字段供提示符占位符显示
 - 缓存机制的实测结论（64-token 块粒度、tools 段在序列化尾部的代价台阶、各后端写入延迟差异）见 `docs/cache-probe.md`
 
@@ -305,19 +305,20 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 直通 shell 执行面（归档）
 
-原「其余输入在本目录直通执行 shell 命令」执行面已归档（2026-09）：体感作用有限——agent 侧已有 `run_shell` 工具，直通面与之重复且绕过上下文/契约。末态完整实现见 commit 60bc02e：执行四件套 `runShellLine`/`suppressInterrupt`/`waitShellCmd`/`reportShellExit`、cd 拦截切面 `repl/localcmd.go`（`tryLocalCommand` 单入口 + `dirChangeCommands` 表）、常量 `MsgShellExitCode`/`MsgShellSuspended`/`MsgKillFailFmt`/`MsgCdBlocked`、`agent.NewShellCmd`/`ProcessStopped` 导出包装。恢复步骤：自 60bc02e 取回上述文件与常量 → `Run()` 末分支 `r.ask(line)` 改回 `r.runShellLine(line)`。归档后进程 cwd 恒为启动目录（全程不 `os.Chdir`）；`run_shell` 默认即在此执行，另可用 `cwd` 参数为单次命令指定目录（设 `cmd.Dir`，进程 cwd 不变）。
+原「其余输入在本目录直通执行 shell 命令」执行面已归档（2026-09）：体感作用有限——agent 侧已有 `run_shell` 工具，直通面与之重复且绕过上下文/契约。末态完整实现见 commit 60bc02e：执行四件套 `runShellLine`/`suppressInterrupt`/`waitShellCmd`/`reportShellExit`、cd 拦截切面 `repl/localcmd.go`（`tryLocalCommand` 单入口 + `dirChangeCommands` 表）、常量 `MsgShellExitCode`/`MsgShellSuspended`/`MsgKillFailFmt`/`MsgCdBlocked`、`agent.NewShellCmd`/`ProcessStopped` 导出包装。恢复步骤：自 60bc02e 取回上述文件与常量 → `Run()` 末分支 `r.ask(line)` 改回 `r.runShellLine(line)`。归档后进程 cwd 恒为启动目录（全程不 `os.Chdir`）；`run_shell` 默认在**当前工作区**执行（启动时即启动目录，`/switch` 后随工作区变），另可用 `cwd` 参数为单次命令指定目录（设 `cmd.Dir`，进程 cwd 不变）。
 
 ### 斜杠命令
 
-`/help` `/new` `/load` `/archive` `/fork` `/stat` `/history` `/model` `/think` `/reasoning` `/theme` `/exit`（`/quit` 等价）：
+`/help` `/new` `/switch` `/load` `/archive` `/fork` `/stat` `/history` `/model` `/think` `/reasoning` `/theme` `/exit`（`/quit` 等价）：
 
 白名单（`slashCommands`，同时驱动 Tab 补全）即分发契约：`Run` 先用 `isSlashCommand` 过滤，未命中的 `/` 开头输入按对话内容处理，因此 `handleCommand` 的 switch 不再有 `default` 分支（原先的 `MsgUnknownCmd` 不可达，已删）。白名单与 case 必须一一对应，`TestSlashCommandsAllHandled` 覆盖该不变量（`/load` 走 stdin 交互路径，单独测试）。
 
 - `/archive [n|<dur>]` 把历史会话打包成归档卷：纯数字 `n` 为保留的最近会话数（`0` = 除当前会话外全部），`<dur>` 形如 `7d`/`12h`，仅接受单段单单位（`d`/`h`/`m`/`s`）按未活动时长筛选，无参取 `auto_archive_keep`；恒排除当前会话；只在完整交互环境（rich 输出 + `r.raw` + `r.prof.TTY`）启用，`-p`/ask/管道/非终端只提示 `MsgArchiveOnlyTTY`；与启动自动归档共用 `archiveFlow`（预览含活跃会话总数、`y/N` 确认读走 `readConfirm` 且挂 `SetHistoryFilter` 全拒、答案不进输入历史）；只做无损压缩，之后可用 `/load` 只读载入（见《会话归档与 fork》）
 - `/fork` 以当前上下文另开新会话：把现有 history 作为新会话起点并立即落盘（新 id、当前 system 快照、继承历史、报继承条数），原会话文件保持原样、可 `/load` 回切；归档只读态用它解除只读
+- `/switch <目录>` 切换工作区并**放弃当前会话**（不 fork、不询问，旧会话文件保持原样，append-only 不删不裁）：`Agent.SwitchWorkspace` 先把目标解析为绝对路径（`~`/`~/x` 展开家目录、相对路径按**当前**工作区合成、`os.Stat` 必须是已存在目录；空参数与非目录报错），再按新目录重建派生态——`run_shell`（`shellTool.workspace` 与默认执行目录）、system 提示（重读 `<新工作区>/AGENTS.md`）、会话存储（`resolveWorkspaceDirs(cfg, 新目录)`，`auto` 依新目录的 `.tanya/` 判定 local/global）、env 段（`CWD:` 行）；全部构建成功后才整体替换并 `NewSession()`（历史清空、stats 归零、会话轮转），任一步失败旧工作区与原会话原样保留。目标等于当前工作区（含 `sub/` 这类等价写法）直接拒绝（`MsgSameWorkspace`），避免误丢会话；无参打印用法与当前工作区。归档卷注释里的 workspace 也改取自 `sessionStore.workspace`（不再读进程 cwd），保证卷内记录的是会话所属工作区。归档只读态下同样可用（切走即离开只读：新工作区的 sessionStore 是全新实例，`frozen` 不继承）。运行期设置（`/model` `/think` `/reasoning` `/theme`）与清屏都不动，进程 cwd 全程不变，提示符 `{cwd}`、`/stat` 工作区行与 `/load` 列表随后即反映新工作区
 
 - `/history` 无参截断列表（`term.OneLine` 先剥离 ANSI 转义与控制字符、压成单行，再按 120 rune 截断，避免 `\r`/`\x1b[K` 覆盖已打印行与未闭合 SGR 泄漏）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染、并按角色着色（user 用 `Ok` 绿、其余用 `Warn` 黄；`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 stdout 是否终端与输出模式约束：stdout 非终端、plain 一并旁路；旁路与非 markdown 档下的正文经 `term.Sanitize` 清洗），user/tool 消息正文与 `→ 工具 参数` 行同样清洗控制序列后原样保留文本（模型可经工具参数把转义序列送进回放；工具消息正文另经 `Frame` 清洗）
-- `/stat` 显示会话统计：工作区（构造期定格的启动目录）、会话文件、消息条数、本次运行累计 token（prompt/completion）、当前上下文占用（最近一次实报 prompt tokens，无 usage 回落本地估算）、缓存命中量与命中率（累计 hit / 累计 prompt）；数据全部来自 `Agent.Stats()` 单一快照，渲染在 `repl/stats.go`，与提示符占位符同源同公式
+- `/stat` 显示会话统计：工作区（当前工作区，`/switch` 后随之变化）、会话文件、消息条数、本次运行累计 token（prompt/completion）、当前上下文占用（最近一次实报 prompt tokens，无 usage 回落本地估算）、缓存命中量与命中率（累计 hit / 累计 prompt）；数据全部来自 `Agent.Stats()` 单一快照，渲染在 `repl/stats.go`，与提示符占位符同源同公式
 - `/model` 无参实时调接口列出可用模型（`*` 标注当前，失败仍显示当前模型），带参直接切换不校验；带尾随空格支持补全（接口列表在 REPL 内首次加载后缓存，失败不重试）
 - `/think` 无参显示当前思考等级（未设置显示"未设置"）；带参 `minimal/low/medium/high/max` 设置，`off` 关闭，非法值报错不变更；带尾随空格补全等级候选（含 off，静态列表）
 - `/reasoning` 无参显示思维链开关（`开`/`关`），带参 `on`/`off` 切换（非法值报错不变更）；带尾随空格补全 on/off 候选；开关是 REPL 局部状态（启动默认取 `show_reasoning` 配置，不落盘、重启回落）；门禁外（plain / 非终端）`/reasoning on` 提示「当前输出档不显示思维链」但记住开关，判定与 `turn.reasonOn` 同源（`reasonVisible`）
@@ -332,7 +333,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 缓存口径二分：**单次**取自最近一次响应（`Stats.ContextTokens`/`ContextHit`），**累计**取自本次运行加总（`Stats.PromptTokens`/`CacheHitTokens`/`TotalTokens`）；提示符变量以 `_total` 后缀区分两者，`/stat` 与响应回显行（`repl.RenderResponseInfo`）分别固定走累计与单次。所有比率经 `cacheRate`/`formatRate` 单一入口计算，「无数据」判定（`hit <= 0 || prompt <= 0`）全库只此一处
 - 统计职责分层：`agent` 只累加与出数——`usageStats` 仅 `record`/`reset`/`view`，对外唯一门面是 `Agent.Stats() Stats`（工作区、会话文件、消息数、估算值加 usage 各项计数，全为数值）；数字缩写（`12.3k`）、百分比、`/stat` 七行文案与全部统计文案常量归 `repl`（`repl/stats.go` + `repl/messages.go`），`agent` 内不含任何格式化代码
 - 默认 `[white]{cwd}[/] [blue]{model}[/] [yellow]{effort}[/] [green]{usage_summary}[/] [white]>[/] `（路径白 / 模型蓝 / 思考黄 / 用量绿 / 提示符白），渲染字节与旧 ANSI 版逐字节一致
-- `{cwd}` 取进程 cwd（恒为启动目录，`os.Chdir` 不参与），短路径规则与原 `shortCwd` 一致（`$HOME` 折叠为 `~`、中间路径段截断为首字符）
+- `{cwd}` 取当前工作区（启动时即启动目录；`/switch` 后随之变化，`os.Chdir` 全程不参与），短路径规则与原 `shortCwd` 一致（`$HOME` 折叠为 `~`、中间路径段截断为首字符）
 
 ### 回合视觉分隔（回合末尾方案）
 
@@ -415,5 +416,5 @@ pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（�
 
 - 事实源单一：SHELL 行取 `shellProfile.Name`（与 `run_shell` 工具描述同源，只报 shell 名、不描述调用形态），TIMEOUT/OUTPUT 两行由 `shell.go` 常量程序化生成（`shellTimeoutSec`/`shellInteractiveTimeoutSec`/`shellTimeoutLimit`/`shellMaxOutput`），TTY 行固定契约文案，无第二份硬编码描述；各行恒定输出（shell 缺失时进程已在启动阶段退出）
 - 平台条件：`TTY:` 行仅在 `ctty.Supported`（linux/darwin）为真时输出，不宣称不存在的 /dev/tty 能力
-- 探测机制：`envSection` 为构造期纯函数，输入全为构造期事实——`runtime` 平台常量、`os.Getwd` 快照（进程全程不 `os.Chdir`）、`shellProfile.invocation()`（`shellTool` 构造期定格）、`shell.go` 执行契约常量；进程内零重复探测、零 exec
+- 探测机制：`envSection` 为构造期纯函数，输入全为装配期事实——`runtime` 平台常量、工作区快照（`agent.New`/`/switch` 时定格，进程全程不 `os.Chdir`）、`shellProfile.invocation()`（`shellTool` 构造期定格）、`shell.go` 执行契约常量；进程内零重复探测、零 exec
 - 可测性：分层测试——persistPrompt 只含规则 / envSection 直接断言渲染（全串 golden） / runtimePrompt 拼接 / 同参数两次渲染字节相等 / **会话期间冻结守卫**（构建后改动目录内容不得改变 `runtimePrompt`）

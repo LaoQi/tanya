@@ -11,7 +11,7 @@ shell 执行层没有所有者，三条症状同一根因：
 - 包级可变状态三组：`shellRuntime`（`InitShell` 缓存 + 懒解析 + mutex）、`shellLookPath`、`ttyBridgeCur`
 - LLM client 伸手读包级工具清单：`agent/llm.go` 与 `agent/llm_responses.go` 的请求组装调 `ToolDefs()`，而 `ToolDefs()` 内部读 `ShellRuntime()`
 
-组件化的目标不是"多一个类型"，而是给这些状态一个**所有者**：由 `Agent` 在构造期定格，之后只读。
+组件化的目标不是"多一个类型"，而是给这些状态一个**所有者**：由 `Agent` 在装配期定格，之后只读（`workspace` 随 `/switch` 由 `Agent.loadWorkspace` 换新实例）。
 
 ## 2. 定位与四条硬约束
 
@@ -138,7 +138,7 @@ client := NewClient(cfg, ToolDefs(tool.profile))   // 工具清单随 client 定
 1. shell 解析失败 → `New` 报错退出，无 noshell 降级路径
 2. profile 非空不变量：`run_shell` 恒定注册、env 段恒定输出 SHELL/TIMEOUT/OUTPUT 行
 3. 工具清单**顺序与内容字节级不变**（prompt cache 依赖，见 `docs/cache-probe.md`）
-4. 进程 cwd 不变（全程不 `os.Chdir`）；`cwd` 参数只设 `cmd.Dir`，且桥接与回退两条路径都设置
+4. 进程 cwd 不变（全程不 `os.Chdir`）；默认目录取当前工作区（`/switch` 后随工作区变），`cwd` 参数只设 `cmd.Dir`，且桥接与回退两条路径都设置
 5. bridge 未注入或 `Prepare` 失败 → 回退 foreground
 6. 输出头尾截断、超时（60/300/900）、`128 + signum`、中断与挂起标记语义不变
 

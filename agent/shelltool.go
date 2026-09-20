@@ -92,18 +92,29 @@ func (t *shellTool) Invoke(ctx context.Context, argsJSON string) ToolResult {
 
 func (t *shellTool) run(ctx context.Context, req shellRequest) *ShellResult {
 	timeoutSec := effectiveShellTimeout(req.TimeoutSec, req.Interactive)
+	explicit := req.Cwd != ""
 	dir, err := t.resolveCwd(req.Cwd)
 	if err != nil {
 		return &ShellResult{Command: req.Command, Err: err.Error()}
+	}
+	if !explicit {
+		dir = t.workspace
 	}
 	t.ttyMu.Lock()
 	defer t.ttyMu.Unlock()
 	if req.Interactive {
 		if res, ok := runShellBridged(ctx, t.bridge, req.Command, timeoutSec, t.profile, dir); ok {
-			return res
+			return defaultCwd(res, explicit)
 		}
 	}
-	return runShellForeground(ctx, req.Command, timeoutSec, t.profile, dir, req.Interactive)
+	return defaultCwd(runShellForeground(ctx, req.Command, timeoutSec, t.profile, dir, req.Interactive), explicit)
+}
+
+func defaultCwd(res *ShellResult, explicit bool) *ShellResult {
+	if !explicit {
+		res.Cwd = ""
+	}
+	return res
 }
 
 func (t *shellTool) resolveCwd(cwd string) (string, error) {
@@ -142,7 +153,7 @@ func (t *shellTool) toolDesc() string {
 func describeShell(plat shellPlatform, profile *shellProfile, programs []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "在 %s %s 中执行命令（%s），返回 stdout/stderr/退出码。", plat.GOOS, profile.Name, shellSyntaxHint(profile.Kind))
-	b.WriteString("默认在会话启动目录（进程 cwd）下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。")
+	b.WriteString("默认在当前工作区下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。")
 	b.WriteString(plat.Capabilities(profile))
 	b.WriteString("读文件、搜索、文本处理等系统操作都用它。")
 	if len(programs) > 0 {
@@ -163,6 +174,6 @@ func shellSyntaxHint(kind ShellKind) string {
 }
 
 func runShellParams() string {
-	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"cwd":{"type":"string","description":"命令执行目录，默认会话启动目录"},"timeout":{"type":"integer","description":"超时秒数，默认 %d（interactive 时 %d），最大 %d"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令与终端直通、可直接应答（Linux 独立 pty、Windows 继承控制台），停用等待动画，默认超时放宽"}},"required":["command"]}`,
+	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"cwd":{"type":"string","description":"命令执行目录，默认当前工作区"},"timeout":{"type":"integer","description":"超时秒数，默认 %d（interactive 时 %d），最大 %d"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令与终端直通、可直接应答（Linux 独立 pty、Windows 继承控制台），停用等待动画，默认超时放宽"}},"required":["command"]}`,
 		shellTimeoutSec, shellInteractiveTimeoutSec, shellTimeoutLimit)
 }
