@@ -135,6 +135,9 @@ const (
 
 	MsgInteractiveHint = "  ⏎ 等待终端输入，请在下方直接应答\n"
 	MsgCmdOmittedFmt   = "… 省略 %d 行（完整命令见 /history）"
+	MsgArgsOmittedFmt  = "… 省略 %d 行（完整参数见 /history）"
+	MsgArgPairFmt      = "%s: %s"
+	MsgTimeoutSecFmt   = "%ds"
 )
 
 const (

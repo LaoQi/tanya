@@ -469,33 +469,218 @@ func TestRenderToolEndSGRMixedStderr(t *testing.T) {
 	}
 }
 
-func TestToolArgsDisplayKeepsMultiline(t *testing.T) {
-	cwd, cmd := toolArgsDisplay("run_shell", `{"command":"cat > a <<'EOF'\n  line one \n\nline two\nEOF"}`)
-	if cwd != "" {
-		t.Errorf("未指定 cwd 应为空: %q", cwd)
+// TestShellArgsViewKeepsMultiline 多行命令的折行只切不改：正文行去掉 `  $ ` 前缀后拼回原命令。
+func TestShellArgsViewKeepsMultiline(t *testing.T) {
+	args := `{"command":"cat > a <<'EOF'\n  line one \n\nline two\nEOF"}`
+	v := shellArgsView(args, 80)
+	if v.inline != "" {
+		t.Errorf("多行命令不应内联: %q", v.inline)
 	}
-	if want := "cat > a <<'EOF'\n  line one \n\nline two\nEOF"; cmd != want {
-		t.Errorf("多行命令应保留换行与缩进（只去首尾空行）: got %q, want %q", cmd, want)
+	var body []string
+	for _, l := range v.body {
+		body = append(body, strings.TrimPrefix(l, toolCommandPrefix))
+	}
+	if got, want := strings.Join(body, "\n"), "cat > a <<'EOF'\n  line one \n\nline two\nEOF"; got != want {
+		t.Errorf("多行命令应保留换行与缩进（只去首尾空行）: got %q, want %q", got, want)
 	}
 }
 
-func TestToolArgsDisplayCwd(t *testing.T) {
-	cases := []struct{ name, args, wantCwd, wantCmd string }{
-		{"未指定 cwd", `{"command":"ls -la","timeout":60}`, "", "ls -la"},
+func TestShellArgsViewCwd(t *testing.T) {
+	cases := []struct {
+		label, args string
+		wantCwd     string
+		wantCmd     string
+	}{
+		{"未指定 cwd", `{"command":"ls -la"}`, "", "ls -la"},
 		{"显式 cwd 原样", `{"command":"ls","cwd":"/tmp/abc"}`, "/tmp/abc", "ls"},
 		{"cwd 相对路径", `{"command":"ls","cwd":"sub"}`, "sub", "ls"},
 		{"cwd 带空白", `{"command":"ls","cwd":" /tmp/a "}`, "/tmp/a", "ls"},
 		{"cwd 空串", `{"command":"ls","cwd":""}`, "", "ls"},
-		{"坏 JSON", `{bad`, "", "{bad"},
 	}
 	for _, c := range cases {
-		cwd, cmd := toolArgsDisplay("run_shell", c.args)
-		if cwd != c.wantCwd || cmd != c.wantCmd {
-			t.Errorf("%s: got (%q, %q), want (%q, %q)", c.name, cwd, cmd, c.wantCwd, c.wantCmd)
+		v := shellArgsView(c.args, 80)
+		body := strings.Join(v.body, "\n")
+		if c.wantCwd == "" {
+			if strings.Contains(body, "cwd") || strings.Contains(body, "timeout") {
+				t.Errorf("%s: 不应出现 cwd/timeout 行: %q", c.label, body)
+			}
+			if want := "\n▸ run_shell " + c.wantCmd + "\n"; v.inline != c.wantCmd {
+				t.Errorf("%s: 应内联命令: got %q, want %q", c.label, v.inline, want)
+			}
+			continue
+		}
+		want := toolCwdPrefix + c.wantCwd + "\n" + toolCommandPrefix + c.wantCmd
+		if body != want || v.inline != "" {
+			t.Errorf("%s: got (%q, %q), want (%q, 内联为空)", c.label, body, v.inline, want)
 		}
 	}
-	if cwd, cmd := toolArgsDisplay("get_time", `{"cwd":"/tmp","command":"x"}`); cwd != "" || cmd != "" {
-		t.Errorf("非 run_shell 不应显示参数: (%q, %q)", cwd, cmd)
+	bad := shellArgsView(`{bad`, 80)
+	if bad.inline != `{bad` || len(bad.body) != 1 || bad.body[0] != toolCommandPrefix+`{bad` {
+		t.Errorf("坏 JSON 应原样展示: %+v", bad)
+	}
+	if empty := shellArgsView(`{}`, 80); empty.inline != "" || len(empty.body) != 0 {
+		t.Errorf("空参数不应产生任何行: %+v", empty)
+	}
+}
+
+// TestRenderToolStartTimeout 锁住 timeout 行：显式指定才显示，且与 cwd 一样把命令挤进块形态。
+func TestRenderToolStartTimeout(t *testing.T) {
+	cases := []struct {
+		label string
+		args  string
+		want  string
+	}{
+		{"显式 timeout 转块", `{"command":"sleep 5","timeout":90}`, "\n▸ run_shell\n  timeout: 90s\n  $ sleep 5\n"},
+		{"cwd 与 timeout 各一行", `{"command":"ls","cwd":"/tmp","timeout":30}`, "\n▸ run_shell\n  cwd: /tmp\n  timeout: 30s\n  $ ls\n"},
+		{"零值 timeout 不显示", `{"command":"ls -la","timeout":0}`, "\n▸ run_shell ls -la\n"},
+		{"默认省略保持内联", `{"command":"ls -la"}`, "\n▸ run_shell ls -la\n"},
+	}
+	for _, c := range cases {
+		if got := RenderToolStart("run_shell", c.args, 80); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.label, got, c.want)
+		}
+	}
+}
+
+// TestRenderToolStartNonShellArgs 锁住通用键值参数区：内联 `key: value`、多参数 ` · ` 连接、块形态逐项一行。
+func TestRenderToolStartNonShellArgs(t *testing.T) {
+	cases := []struct {
+		label, name, args, want string
+	}{
+		{"空参数只显示工具名", "get_time", `{}`, "\n▸ get_time\n"},
+		{"单参数内联", "calc", `{"expression":"(1+2)*3/4"}`, "\n▸ calc expression: (1+2)*3/4\n"},
+		{"多参数内联", "agent_custom", `{"action":"set","key":"model","value":"gpt-5"}`, "\n▸ agent_custom action: set · key: model · value: gpt-5\n"},
+		{"数组值顿号连接", "get_env", `{"names":["HOME","PATH"]}`, "\n▸ get_env names: HOME, PATH\n"},
+		{"空串值显式", "calc", `{"expression":""}`, "\n▸ calc expression: \"\"\n"},
+		{"对象值紧凑 JSON", "calc", `{"expression":{"a":1}}`, "\n▸ calc expression: {\"a\":1}\n"},
+		{"布尔与数字原样", "agent_custom", `{"action":"get","flag":true,"n":3}`, "\n▸ agent_custom action: get · flag: true · n: 3\n"},
+	}
+	for _, c := range cases {
+		if got := RenderToolStart(c.name, c.args, 80); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.label, got, c.want)
+		}
+	}
+
+	// 超宽内联候选转块：首行工具名、其后每个参数一行（值本身超出时再按宽度折行）。
+	long := `{"action":"set","key":"model","value":"` + strings.Repeat("m", 80) + `"}`
+	got := term.Strip(RenderToolStart("agent_custom", long, 80))
+	lines := strings.Split(strings.Trim(got, "\n"), "\n")
+	if len(lines) < 3 || lines[0] != "▸ agent_custom" || !strings.HasPrefix(lines[1], toolArgsPrefix+"action: set") {
+		t.Fatalf("超宽参数应转块形态逐项一行: %q", lines)
+	}
+	joined := ""
+	for _, l := range lines[1:] {
+		joined += strings.TrimPrefix(l, toolArgsPrefix)
+	}
+	if want := "action: setkey: modelvalue: " + strings.Repeat("m", 80); joined != want {
+		t.Errorf("折行只切不改: got %q, want %q", joined, want)
+	}
+	for _, l := range lines {
+		if w := term.Width(l); w > 80 {
+			t.Errorf("行宽 %d 越界 80: %q", w, l)
+		}
+	}
+}
+
+// TestRenderToolStartNonShellMultiline 多行值转块形态：逐行折行、只切不改，且每行不超终端宽度。
+func TestRenderToolStartNonShellMultiline(t *testing.T) {
+	got := term.Strip(RenderToolStart("agent_custom", `{"key":"a\nb"}`, 80))
+	if want := "\n▸ agent_custom\n  key: a\n  b\n"; got != want {
+		t.Errorf("多行值应转块形态: got %q, want %q", got, want)
+	}
+	long := `{"expression":"` + strings.Repeat("中", 200) + `"}`
+	lines := strings.Split(strings.Trim(RenderToolStart("calc", long, 40), "\n"), "\n")
+	if len(lines) < 3 || lines[0] != "▸ calc" {
+		t.Fatalf("超长值应折行成块形态: %q", lines)
+	}
+	for _, l := range lines[1:] {
+		if w := term.Width(l); w > 40 {
+			t.Errorf("行宽 %d 越界 40: %q", w, l)
+		}
+		if !strings.HasPrefix(l, toolArgsPrefix) {
+			t.Errorf("正文行应带 %q 前缀: %q", toolArgsPrefix, l)
+		}
+	}
+}
+
+// TestRenderToolStartNonShellBadJSON 坏 JSON 回退原样展示（不静默丢参数），且内联/块形态都不越界。
+func TestRenderToolStartNonShellBadJSON(t *testing.T) {
+	if got := RenderToolStart("calc", `{bad`, 80); got != "\n▸ calc {bad\n" {
+		t.Errorf("坏 JSON 应原样内联: %q", got)
+	}
+	long := "{" + strings.Repeat("z", 120)
+	lines := strings.Split(strings.Trim(RenderToolStart("calc", long, 40), "\n"), "\n")
+	for _, l := range lines {
+		if w := term.Width(l); w > 40 {
+			t.Errorf("行宽 %d 越界 40: %q", w, l)
+		}
+	}
+}
+
+// TestRenderToolStartNonShellArgsOmitted 通用参数行数上限：保留头尾、中段换成参数专用省略文案。
+func TestRenderToolStartNonShellArgsOmitted(t *testing.T) {
+	// 反引号里的 \n 是字面两字符，恰为 JSON 转义换行：值解析后是 20 行，走 generic 键值渲染的省略路径。
+	args := `{"key":"` + strings.Repeat(`x\n`, 20) + `"}`
+	got := term.Strip(RenderToolStart("agent_custom", args, 80))
+	body := strings.Split(strings.Trim(got, "\n"), "\n")[1:]
+	if len(body) != toolCommandMaxLines {
+		t.Fatalf("参数行数应为上限 %d，实际 %d: %q", toolCommandMaxLines, len(body), body)
+	}
+	want := toolArgsPrefix + fmt.Sprintf(MsgArgsOmittedFmt, 20-toolCommandHeadLines-toolCommandTailLines)
+	if body[toolCommandHeadLines] != want {
+		t.Errorf("省略行 = %q, want %q", body[toolCommandHeadLines], want)
+	}
+	if !strings.Contains(got, "完整参数见 /history") {
+		t.Errorf("非 shell 工具应提示完整参数: %q", got)
+	}
+
+	// 窄终端下省略行同样按可用宽截断：加前缀后不越终端（回归：曾按终端总宽截断，越界 2 列）。
+	narrow := strings.Split(strings.Trim(term.Strip(RenderToolStart("agent_custom", args, 26)), "\n"), "\n")
+	if len(narrow) < 2 {
+		t.Fatalf("窄终端应仍有标题与省略行: %q", narrow)
+	}
+	for _, l := range narrow {
+		if w := term.Width(l); w > 26 {
+			t.Errorf("窄终端行宽 %d 越界 26: %q", w, l)
+		}
+	}
+
+	// 坏 JSON 走 plainArgsView 兜底：省略行同样不越界。
+	bad := "{" + strings.Repeat("z\n", 20)
+	for _, l := range strings.Split(strings.Trim(term.Strip(RenderToolStart("calc", bad, 26)), "\n"), "\n") {
+		if w := term.Width(l); w > 26 {
+			t.Errorf("坏 JSON 窄终端行宽 %d 越界 26: %q", w, l)
+		}
+	}
+	if !strings.Contains(term.Strip(RenderToolStart("calc", bad, 80)), "完整参数见 /history") {
+		t.Error("坏 JSON 的省略行应使用参数专用文案")
+	}
+}
+
+// TestParseArgPairsKeepsOrder 键序按模型给的原顺序（map 会按字母序重排）。
+func TestParseArgPairsKeepsOrder(t *testing.T) {
+	pairs, ok := parseArgPairs(`{"zeta":1,"alpha":2,"mid":"x"}`)
+	if !ok {
+		t.Fatal("合法 JSON 应解析成功")
+	}
+	var keys []string
+	for _, p := range pairs {
+		keys = append(keys, p.key)
+	}
+	if strings.Join(keys, ",") != "zeta,alpha,mid" {
+		t.Errorf("键序应保持原文顺序: %q", keys)
+	}
+	if pairs[2].value != "x" {
+		t.Errorf("值应解出: %q", pairs[2].value)
+	}
+	if _, ok := parseArgPairs(`[1,2]`); ok {
+		t.Error("顶层非对象应判失败")
+	}
+	if _, ok := parseArgPairs(`{bad`); ok {
+		t.Error("坏 JSON 应判失败")
+	}
+	if _, ok := parseArgPairs(`{"a":1} 尾随内容`); ok {
+		t.Error("收尾 } 后还有内容应判失败（与 Unmarshal 口径一致，避免显示正常而执行报错）")
 	}
 }
 

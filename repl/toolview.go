@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/LaoQi/tanya/render/term"
@@ -22,6 +23,9 @@ const (
 
 	toolCommandPrefix = "  $ "
 	toolCwdPrefix     = "  cwd: "
+	toolTimeoutPrefix = "  timeout: "
+	toolArgsPrefix    = "  "
+	toolArgsSep       = " · "
 	toolTabWidth      = 4
 )
 
@@ -40,24 +44,102 @@ func RenderToolStart(name, args string, width int) string {
 	return b.String()
 }
 
-// toolTitleLines 组装标题区：命令短到能与工具名同行时内联单行（`▸ run_shell ls -la`，与旧版逐字节一致），
-// 否则转块形态——首行工具名，其后是 cwd 行（显式指定时）与折行的命令区（`  $ ` 前缀，与输出区区分）。
-// 命令行数超上限时省略中段并提示 /history，见 commandLines。width 是终端总列数，各前缀宽度在此扣除。
+// toolTitleLines 组装标题区：参数短到能与工具名同行时内联单行（`▸ run_shell ls -la`、`▸ calc expression: 6*7`），
+// 放不下或参数多行/多值时转块形态——首行工具名，其后是参数区（run_shell 为 cwd/timeout 行加 `  $ ` 命令行，
+// 其余工具为 `  key: value` 行）。width 是终端总列数，各前缀宽度在此扣除。
 func toolTitleLines(name, args string, width int) []string {
-	cwd, cmd := toolArgsDisplay(name, args)
-	if cwd == "" && cmd != "" {
-		if inner := width - 3 - term.Width(name) - 1; inner > 0 && !strings.Contains(cmd, "\n") && term.Width(cmd) <= inner {
-			return []string{term.Truncate(name+" "+cmd, width-3)}
+	v := toolArgsView(name, args, width)
+	if v.inline != "" {
+		if inner := width - 3 - term.Width(name) - 1; inner > 0 && term.Width(v.inline) <= inner {
+			return []string{term.Truncate(name+" "+v.inline, width-3)}
 		}
 	}
-	lines := []string{term.Truncate(name, width-3)}
+	return append([]string{term.Truncate(name, width-3)}, v.body...)
+}
+
+// argsView 是参数视图：inline 为可与工具名同行的单行候选（空串表示不可内联），body 为块形态的正文行（已带前缀）。
+type argsView struct {
+	inline string
+	body   []string
+}
+
+// toolArgsView 按工具名分派参数视图：run_shell 认识 command/cwd/timeout（命令语义、`  $ ` 前缀与命令省略文案），
+// 其余工具（含未来的新工具）走通用键值渲染。JSON 解析失败一律退回原样展示，参数为空则只显示工具名。
+func toolArgsView(name, args string, width int) argsView {
+	if name == "run_shell" {
+		return shellArgsView(args, width)
+	}
+	return genericArgsView(args, width)
+}
+
+// shellArgsView 渲染 run_shell：cwd 行（显式指定时）、timeout 行（显式指定时）与折行的命令区。
+// 内联只在「无 cwd、无 timeout、命令单行且非空」时成立，其余情形转块形态——附加参数是块形态的判据。
+func shellArgsView(args string, width int) argsView {
+	var a struct {
+		Command string `json:"command"`
+		Cwd     string `json:"cwd"`
+		Timeout int    `json:"timeout"`
+	}
+	if err := json.Unmarshal([]byte(args), &a); err != nil {
+		return plainArgsView(trimBlankEdges(args), toolCommandPrefix, MsgCmdOmittedFmt, width)
+	}
+	cwd := strings.TrimSpace(a.Cwd)
+	cmd := expandTabs(trimBlankEdges(a.Command))
+	var opts []string
 	if cwd != "" {
-		lines = append(lines, term.Truncate(toolCwdPrefix+cwd, width-2))
+		opts = append(opts, term.Truncate(toolCwdPrefix+cwd, width-2))
 	}
-	for _, l := range commandLines(cmd, width-len(toolCommandPrefix)) {
-		lines = append(lines, toolCommandPrefix+l)
+	if a.Timeout > 0 {
+		opts = append(opts, term.Truncate(toolTimeoutPrefix+fmt.Sprintf(MsgTimeoutSecFmt, a.Timeout), width-2))
 	}
-	return lines
+	v := argsView{body: append(opts, prefixed(commandLines(cmd, width-len(toolCommandPrefix)), toolCommandPrefix)...)}
+	if cwd == "" && a.Timeout <= 0 && cmd != "" && !strings.Contains(cmd, "\n") {
+		v.inline = cmd
+	}
+	return v
+}
+
+// genericArgsView 渲染非 shell 工具的参数：按模型给出的键序逐项 `key: value`，内联用 ` · ` 连接，
+// 放不下或多行时转块形态（每项一行、按宽度折行）。
+func genericArgsView(args string, width int) argsView {
+	pairs, ok := parseArgPairs(args)
+	if !ok {
+		return plainArgsView(trimBlankEdges(args), toolArgsPrefix, MsgArgsOmittedFmt, width)
+	}
+	if len(pairs) == 0 {
+		return argsView{}
+	}
+	parts := make([]string, len(pairs))
+	var wrapped []string
+	for i, p := range pairs {
+		parts[i] = fmt.Sprintf(MsgArgPairFmt, p.key, p.value)
+		wrapped = append(wrapped, term.Wrap(parts[i], width-len(toolArgsPrefix))...)
+	}
+	v := argsView{body: prefixed(capLines(wrapped, width-len(toolArgsPrefix), MsgArgsOmittedFmt), toolArgsPrefix)}
+	if inline := strings.Join(parts, toolArgsSep); !strings.Contains(inline, "\n") {
+		v.inline = inline
+	}
+	return v
+}
+
+// plainArgsView 原样展示参数文本：单行可内联，否则按前缀折行（坏 JSON 的兜底通道）。
+func plainArgsView(text, prefix, omitFmt string, width int) argsView {
+	if text == "" {
+		return argsView{}
+	}
+	v := argsView{body: prefixed(capLines(term.Wrap(text, width-len(prefix)), width-len(prefix), omitFmt), prefix)}
+	if !strings.Contains(text, "\n") {
+		v.inline = text
+	}
+	return v
+}
+
+func prefixed(lines []string, prefix string) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = prefix + l
+	}
+	return out
 }
 
 // commandLines 把命令折成显示行（制表符已摊平、保留原换行结构）；超过上限时保留头尾，
@@ -66,14 +148,19 @@ func commandLines(cmd string, width int) []string {
 	if cmd == "" {
 		return nil
 	}
-	lines := term.Wrap(cmd, width)
+	return capLines(term.Wrap(cmd, width), width, MsgCmdOmittedFmt)
+}
+
+// capLines 行数超上限时保留头 6 行 + 省略行 + 尾 1 行；命令与通用参数共用，省略文案由调用方给出。
+// width 是不含前缀的可用正文宽（省略行同样在此宽度内截断，加前缀后不越终端）。
+func capLines(lines []string, width int, omitFmt string) []string {
 	if len(lines) <= toolCommandMaxLines {
 		return lines
 	}
 	omitted := len(lines) - toolCommandHeadLines - toolCommandTailLines
 	out := make([]string, 0, toolCommandMaxLines)
 	out = append(out, lines[:toolCommandHeadLines]...)
-	out = append(out, term.Truncate(fmt.Sprintf(MsgCmdOmittedFmt, omitted), width))
+	out = append(out, term.Truncate(fmt.Sprintf(omitFmt, omitted), width))
 	return append(out, lines[len(lines)-toolCommandTailLines:]...)
 }
 
@@ -153,18 +240,89 @@ func respDuration(d time.Duration) string {
 	return fmt.Sprintf("%dms", d.Milliseconds())
 }
 
-func toolArgsDisplay(name, args string) (string, string) {
-	if name != "run_shell" {
-		return "", ""
+type argPair struct {
+	key   string
+	value string
+}
+
+// parseArgPairs 按 JSON 原文顺序取出顶层键值（Unmarshal 到 map 会按字母序重排，模型给的 schema 顺序更可读）。
+// 非对象或解析失败时返回 ok=false。
+func parseArgPairs(args string) ([]argPair, bool) {
+	dec := json.NewDecoder(strings.NewReader(args))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, false
 	}
-	var a struct {
-		Command string `json:"command"`
-		Cwd     string `json:"cwd"`
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return nil, false
 	}
-	if err := json.Unmarshal([]byte(args), &a); err != nil || strings.TrimSpace(a.Command) == "" {
-		return "", trimBlankEdges(args)
+	var out []argPair
+	for dec.More() {
+		kt, err := dec.Token()
+		if err != nil {
+			return nil, false
+		}
+		key, ok := kt.(string)
+		if !ok {
+			return nil, false
+		}
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return nil, false
+		}
+		out = append(out, argPair{key: key, value: argDisplayValue(raw)})
 	}
-	return strings.TrimSpace(a.Cwd), expandTabs(trimBlankEdges(a.Command))
+	if _, err := dec.Token(); err != nil {
+		return nil, false
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, false
+	}
+	return out, true
+}
+
+// argDisplayValue 把参数值转成展示文本：字符串原样（含多行、制表符摊平）、标量数组顿号连接、
+// 对象与嵌套结构压成紧凑 JSON、null 显式写出。
+func argDisplayValue(raw json.RawMessage) string {
+	t := strings.TrimSpace(string(raw))
+	switch {
+	case t == "":
+		return ""
+	case t == "null":
+		return "null"
+	case t[0] == '"':
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return compactJSON(raw)
+		}
+		if s == "" {
+			return `""`
+		}
+		return expandTabs(trimBlankEdges(s))
+	case t[0] == '[':
+		var list []json.RawMessage
+		if err := json.Unmarshal(raw, &list); err != nil || len(list) == 0 {
+			return compactJSON(raw)
+		}
+		parts := make([]string, 0, len(list))
+		for _, e := range list {
+			et := strings.TrimSpace(string(e))
+			if et == "" || et[0] == '{' || et[0] == '[' {
+				return compactJSON(raw)
+			}
+			parts = append(parts, argDisplayValue(e))
+		}
+		return strings.Join(parts, ", ")
+	}
+	return compactJSON(raw)
+}
+
+func compactJSON(raw json.RawMessage) string {
+	var b bytes.Buffer
+	if err := json.Compact(&b, raw); err != nil {
+		return strings.TrimSpace(string(raw))
+	}
+	return b.String()
 }
 
 // trimBlankEdges 去掉首尾空行但保留行首缩进——heredoc/多行脚本的缩进是命令结构的一部分。

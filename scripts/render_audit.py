@@ -528,6 +528,17 @@ SCENARIOS = [
         "screen_has": ["标题", "第一项", "第二项", "fmt.Println"],
     },
     {
+        "name": "clean-tool-timeout",
+        "want": "clean",
+        "prompt": "用 run_shell 跑一条命令并显式指定超时\n",
+        "steps": [
+            {"tool_calls": [{"name": "run_shell",
+                             "args": json.dumps({"command": "echo timeout-demo", "timeout": 90}, ensure_ascii=False)}]},
+            {"content": "命令已执行。\n"},
+        ],
+        "screen_has": ["▸ run_shell", "timeout: 90s", "timeout-demo"],
+    },
+    {
         "name": "clean-tool-short",
         "want": "clean",
         "prompt": "用 run_shell 跑一条两条 echo 的命令\n",
@@ -536,6 +547,17 @@ SCENARIOS = [
             {"content": "命令输出 alpha 与 beta 两行。\n"},
         ],
         "screen_has": ["▸ run_shell", "alpha", "beta", "exit 0"],
+    },
+    {
+        "name": "clean-tool-builtin-args",
+        "want": "clean",
+        "prompt": "用 get_env 取几个环境变量，再用 calc 算一道题\n",
+        "steps": [
+            {"tool_calls": [{"name": "get_env", "args": json.dumps({"names": ["HOME", "PATH"]}, ensure_ascii=False)}]},
+            {"tool_calls": [{"name": "calc", "args": json.dumps({"expression": "(1+2)*3/4"}, ensure_ascii=False)}]},
+            {"content": "环境变量与计算结果如上。\n"},
+        ],
+        "screen_has": ["▸ get_env names: HOME, PATH", "▸ calc expression: (1+2)*3/4"],
     },
     {
         "name": "clean-tool-longlines",
