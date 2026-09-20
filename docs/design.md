@@ -283,6 +283,10 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 **动态文本一律走内容通道**（2026-09-20）：外部内容（模型输出、用户输入、工具参数、服务端模型名、错误信息）落屏前清洗控制序列——`output.emitText`（`term.Sanitize`，保留换行与制表符）、`term.OneLine`（必须单行的展示，如 picker 摘要与补全候选）、`errLine`/`errLineText`（错误行）；`emit` 只承载自生成样式文本，因此**不做** emit 级全局 `Strip`（会一并抹掉自产 SGR）。覆盖点：plain 实时正文（`flow.writeContent` 的非 markdown 分支）、`ask` 单发（清洗下沉在 `toolView.Handle` 的 EventContent 分支——该旁路不经 turn 与 markdown 管线，REPL 模式该事件被 turn 拦截不达此处，故下沉即边界设防；结构类事件原样通过，其文本由 toolView 自产的 Frame/Strip 收敛）、`/history` 全量视图（user/其他正文、`→ 工具 参数` 行、非 markdown 下的 assistant 正文）、`/model` 列表与当前模型回显、`/model` 补全候选（`completer.models()` 缓存装载处统一 `OneLine`，候选 Display/ghost 建议/Enter 后 Insert 三处落屏共用此缓存）、`/stat` 与 `MsgModelsFail`、全部 `MsgErrLineFmt` 错误行（repl 内统一动词 `REPL.failErr`/`failText` 与 `errLine`/`errLineText`，main 入口经 `streams.FailErr` 同源清洗——含 ask 失败行，其错误可内嵌服务端返回体）；工具块正文/标题/状态行与 markdown 正文/代码块此前已分别经 `Frame`/`Strip`/`cleanLine` 收敛。流式增量清洗的边界：一条 ESC 序列被 delta 切成两半时，前半丢弃、后半作为字面文本上屏——不驱动终端、文本不丢，接受该降级（不引入跨 chunk pending）。
 
+### markdown 表格（2026-09-20）
+
+模型输出的 GFM 表格在 TTY + rich 档下渲染为带外框的表格（`ir.Table` + `Renderer.table`，`┌┬┐├┼┤└┴┘─│` + `TableHead`/`TableBorder` 两色）。REPL 不做回退重绘，故列宽只能前瞻定死：**表头候选行 + GFM 分隔行 + 首数据行三行**定列数与列宽（逐列 `max(表头, 首行)` 的可见宽度），随后逐行出块，收尾补下框；候选行在下一行不匹配分隔行时回退为普通段落，普通正文零延迟。对齐取分隔行的 `:--`/`--:`/`:-:`。已决取舍：**列宽不封顶、超宽单元格不截断**（内容优先，该行边线错位）；终端宽度只用于在松边距撑破时切紧边距（`MarkdownBuf.SetWidth`，由 `flow`/`mdBlocks` 注入 `r.view.width()`）。非 TTY、plain 档与无色 TTY 的边界（后者去色不去框线）见 `docs/render-pipeline.md` §10《表格》。
+
 ### 退出收尾（repl/farewell.go，2026-09-16）
 
 退出收敛到唯一入口 `REPL.quit()`（`farewell()` + 返回 nil）：`Run` 的 `io.EOF` 分支（Ctrl-D 与终端挂断）、`readline.ErrExited` 分支（外部关闭信号唤醒，2026-09-17 与此前三条并轨）、`isExitLine` 分支（`exit`/`quit`）与 `handleCommand` 返回真之后的 `/exit`/`/quit`——来源不同、路径与表现一致（同一 farewell、同一条返回）。`handleCommand` 自身不再写字节、只返回退出信号（此前命令面自打文案，与 EOF 面重复一份），`Run` 拿到信号后统一收尾。进程退出码由 `main` 取 `ctty.ExitStatus()`（关闭信号触发为 `128+signum`，其余为 0）；`ask` 单发同源：取消源统一为 `repl.InterruptContext()`，内部订阅 `ctty.Interrupted()`（不再自持 `signal.Notify(os.Interrupt)` + `signal.Stop`），故 `^C` 与 SIGTERM/SIGHUP 取消在跑请求走同一条 `context` 取消路径（`run_shell` 的杀组 + termios 复原由既有 ctx 语义承担，agent 侧零改动）。

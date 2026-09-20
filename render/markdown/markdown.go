@@ -22,6 +22,7 @@ const (
 	groupFence
 	groupList
 	groupQuote
+	groupTable
 )
 
 type MarkdownBuf struct {
@@ -32,9 +33,20 @@ type MarkdownBuf struct {
 	fenceBytes  int
 	listOrdered bool
 	closed      []ir.Block
+
+	width        int
+	hasCand      bool
+	candLine     string
+	candCells    []string
+	tableHead    [][]ir.Inline
+	tableAligns  []ir.Align
+	tableWidths  []int
+	tableStarted bool
 }
 
 func NewMarkdownBuf() *MarkdownBuf { return &MarkdownBuf{} }
+
+func (b *MarkdownBuf) SetWidth(cols int) { b.width = cols }
 
 func (b *MarkdownBuf) Reset() { *b = MarkdownBuf{} }
 
@@ -59,7 +71,10 @@ func (b *MarkdownBuf) Close() []ir.Block {
 		b.closed = append(b.closed, b.buildList())
 	case groupQuote:
 		b.closed = append(b.closed, b.buildQuote())
+	case groupTable:
+		b.closeTable()
 	}
+	b.flushCand()
 	b.kind = groupNone
 	b.lines = nil
 	b.fenceLang = ""
@@ -105,6 +120,9 @@ func (b *MarkdownBuf) flushPending(p string) {
 		}
 		return
 	}
+	if b.kind == groupTable {
+		b.closeTable()
+	}
 	b.closeGroup()
 	if line := cleanLine(p); line != "" {
 		b.closed = append(b.closed, ir.Paragraph{Inlines: ParseInline(line)})
@@ -125,6 +143,20 @@ func (b *MarkdownBuf) feedLine(line string) {
 			b.closeFence()
 		}
 		return
+	}
+	if b.hasCand {
+		if aligns, ok := parseTableSep(line); ok && len(aligns) == len(b.candCells) {
+			b.openTable(aligns)
+			return
+		}
+		b.flushCand()
+	}
+	if b.kind == groupTable {
+		if cells, ok := splitRow(line); ok {
+			b.feedTableRow(cellsToInline(cells))
+			return
+		}
+		b.closeTable()
 	}
 	if trimmed == "" {
 		b.closeGroup()
@@ -147,6 +179,15 @@ func (b *MarkdownBuf) feedLine(line string) {
 		b.closeGroup()
 		b.closed = append(b.closed, ir.Rule{})
 		return
+	}
+	if !hasBlockPrefix(line) {
+		if cells, ok := splitRow(line); ok {
+			b.closeGroup()
+			b.hasCand = true
+			b.candLine = line
+			b.candCells = cells
+			return
+		}
 	}
 	if item, ordered, ok := listItem(line); ok {
 		if b.kind != groupList {
@@ -177,6 +218,196 @@ func (b *MarkdownBuf) closeFence() {
 	b.kind = groupNone
 	b.fenceLang = ""
 	b.fenceBytes = 0
+}
+
+func (b *MarkdownBuf) openTable(aligns []ir.Align) {
+	b.kind = groupTable
+	b.tableAligns = aligns
+	b.tableHead = cellsToInline(b.candCells)
+	b.tableWidths = measureCells(b.tableHead)
+	b.tableStarted = false
+	b.hasCand = false
+	b.candLine = ""
+	b.candCells = nil
+}
+
+func (b *MarkdownBuf) closeTable() {
+	if b.kind != groupTable {
+		return
+	}
+	blk := ir.Table{Aligns: b.tableAligns, Widths: b.tableWidths, Compact: b.compact(), Bottom: true}
+	if !b.tableStarted {
+		blk.Top = true
+		blk.Rows = []ir.TableRow{{Cells: b.tableHead, Header: true}}
+	}
+	b.closed = append(b.closed, blk)
+	b.kind = groupNone
+	b.lines = nil
+	b.tableHead = nil
+	b.tableAligns = nil
+	b.tableWidths = nil
+	b.tableStarted = false
+}
+
+func (b *MarkdownBuf) flushCand() {
+	if !b.hasCand {
+		return
+	}
+	line := b.candLine
+	b.hasCand = false
+	b.candLine = ""
+	b.candCells = nil
+	if line != "" {
+		b.closed = append(b.closed, ir.Paragraph{Inlines: ParseInline(line)})
+	}
+}
+
+func (b *MarkdownBuf) feedTableRow(cells [][]ir.Inline) {
+	cells = fitCells(cells, len(b.tableHead))
+	blk := ir.Table{Aligns: b.tableAligns}
+	if b.tableStarted {
+		blk.Rows = []ir.TableRow{{Cells: cells}}
+	} else {
+		b.tableStarted = true
+		b.tableWidths = growWidths(b.tableWidths, cells)
+		blk.Top = true
+		blk.Rows = []ir.TableRow{{Cells: b.tableHead, Header: true}, {Cells: cells}}
+	}
+	blk.Widths = b.tableWidths
+	blk.Compact = b.compact()
+	b.closed = append(b.closed, blk)
+}
+
+func (b *MarkdownBuf) compact() bool {
+	if b.width <= 0 || len(b.tableWidths) == 0 {
+		return false
+	}
+	loose := len(b.tableWidths) + 1 + 2*len(b.tableWidths)
+	for _, w := range b.tableWidths {
+		loose += w
+	}
+	return loose > b.width
+}
+
+func measureCells(cells [][]ir.Inline) []int {
+	w := make([]int, len(cells))
+	for i, c := range cells {
+		w[i] = inlineWidth(c)
+	}
+	return w
+}
+
+func growWidths(widths []int, cells [][]ir.Inline) []int {
+	for i, c := range cells {
+		if i >= len(widths) {
+			break
+		}
+		if n := inlineWidth(c); n > widths[i] {
+			widths[i] = n
+		}
+	}
+	return widths
+}
+
+func inlineWidth(in []ir.Inline) int {
+	n := 0
+	for _, node := range in {
+		switch v := node.(type) {
+		case ir.Span:
+			n += term.Width(v.Text)
+		case ir.CodeSpan:
+			n += term.Width(v.Text)
+		}
+	}
+	return n
+}
+
+func cellsToInline(cells []string) [][]ir.Inline {
+	out := make([][]ir.Inline, len(cells))
+	for i, c := range cells {
+		if c != "" {
+			out[i] = ParseInline(c)
+		}
+	}
+	return out
+}
+
+func fitCells(cells [][]ir.Inline, n int) [][]ir.Inline {
+	if len(cells) == n {
+		return cells
+	}
+	out := make([][]ir.Inline, n)
+	copy(out, cells)
+	return out
+}
+
+func splitRow(line string) ([]string, bool) {
+	s := strings.TrimSpace(line)
+	if !strings.Contains(s, "|") {
+		return nil, false
+	}
+	if strings.HasPrefix(s, "|") {
+		s = s[1:]
+	}
+	if n := len(s); n > 0 && s[n-1] == '|' && (n < 2 || s[n-2] != '\\') {
+		s = s[:n-1]
+	}
+	var cells []string
+	var cur strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) && s[i+1] == '|' {
+			cur.WriteByte('|')
+			i++
+			continue
+		}
+		if s[i] == '|' {
+			cells = append(cells, strings.TrimSpace(cur.String()))
+			cur.Reset()
+			continue
+		}
+		cur.WriteByte(s[i])
+	}
+	cells = append(cells, strings.TrimSpace(cur.String()))
+	if len(cells) == 0 {
+		return nil, false
+	}
+	return cells, true
+}
+
+func parseTableSep(line string) ([]ir.Align, bool) {
+	cells, ok := splitRow(line)
+	if !ok {
+		return nil, false
+	}
+	aligns := make([]ir.Align, len(cells))
+	for i, c := range cells {
+		if c == "" {
+			return nil, false
+		}
+		left := strings.HasPrefix(c, ":")
+		right := strings.HasSuffix(c, ":")
+		body := strings.Trim(c, ":")
+		if body == "" || strings.Trim(body, "-") != "" {
+			return nil, false
+		}
+		switch {
+		case left && right:
+			aligns[i] = ir.AlignCenter
+		case right:
+			aligns[i] = ir.AlignRight
+		default:
+			aligns[i] = ir.AlignLeft
+		}
+	}
+	return aligns, true
+}
+
+func hasBlockPrefix(line string) bool {
+	if strings.HasPrefix(line, ">") {
+		return true
+	}
+	_, _, ok := listItem(line)
+	return ok
 }
 
 func (b *MarkdownBuf) closeGroup() {

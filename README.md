@@ -10,7 +10,7 @@
 - 模型可运行时自调与自省：`agent_custom` 按 `key` 读写（可写 `model`、`reasoning_effort`；只读 `models`、`usage`、`stat`、`sessions`、`config_path`），`get sessions` 给出会话列表与 jsonl 文件路径（仅本次会话有效，不写配置文件），`get config_path` 给出生效配置文件路径（模型据此可读取或修改自身配置，改动需重启生效）
 - 会话持久化与恢复（JSONL，记录完整历史，system 快照随会话冻结）
 - token 用量实时显示在提示符（API 实报优先，本地估算兜底），支持显示缓存命中
-- AI 输出 Markdown 渲染（默认开启，stdout 非终端与 plain 输出自动旁路）与内置配色主题（`/theme` 切换）
+- AI 输出 Markdown 渲染（默认开启，stdout 非终端与 plain 输出自动旁路；表格带外框与列对齐）与内置配色主题（`/theme` 切换）
 - 思维链显示（`show_reasoning` 配置或 REPL 内 `/reasoning on`）：思维链以 markdown 渲染并夹在 `─── 思考 ───` / `─── 思考结束 · 3.2s ───` 分隔符之间，同时不再打 `» 思考中` 状态行
 - AGENTS.md 项目说明自动注入系统提示（全局 + 工作区双层，会话级快照保证 prompt cache 友好）
 - 平台：Linux 与 Windows 为主（Windows 显示与行编辑均已支持：16 色、状态行、markdown、真实宽度、行编辑/历史/Tab 补全/ghost；interactive 命令走控制台继承直通，Windows 侧仅部分实机验证、未全量覆盖，暂不跟踪），macOS 尽力；控制终端原语与终端探测统一在零依赖叶子包 `ctty`，其余平台仅保证可编译
