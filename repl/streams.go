@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"sync"
+
+	"github.com/LaoQi/tanya/render/term"
 )
 
 // outMode 是输出模式：rich 全开；plain 只留正文与命令反馈（供父代理作为子代理调用）；
@@ -106,6 +108,19 @@ func (o *output) Write(p []byte) (int, error) {
 
 func (o *output) allows(kind Kind) bool { return o.vis.has(kind) }
 
+// emitText 是内容通道：插入点文本属外部内容（模型输出、用户输入、服务端数据），
+// 落屏前清洗 ESC 与控制字符。自生成的样式文本仍走 emit —— 清洗会一并抹掉自产 SGR。
+func (o *output) emitText(kind Kind, s string) {
+	o.emit(kind, term.Sanitize(s, false))
+}
+
+// errLine 按标准错误行格式输出，并清洗错误文本：错误信息可能内嵌服务端返回体、路径等外部内容。
+func errLine(err error) string { return errLineText(err.Error()) }
+
+func errLineText(s string) string {
+	return fmt.Sprintf(MsgErrLineFmt+"\n", term.Sanitize(s, false))
+}
+
 func (o *output) emit(kind Kind, s string) {
 	if s == "" || !o.allows(kind) {
 		return
@@ -165,4 +180,10 @@ func (s *streams) End() {
 
 func (s *streams) Fail(format string, args ...any) {
 	s.err.emit(KindError, fmt.Sprintf(format, args...))
+}
+
+// FailErr 按标准错误行格式输出错误并清洗错误文本：错误信息可能内嵌服务端返回体、路径等外部内容。
+// prefix 为自生成前缀（如 ask 失败时补齐半行正文的换行），不参与清洗。
+func (s *streams) FailErr(prefix string, err error) {
+	s.err.emit(KindError, prefix+errLine(err))
 }

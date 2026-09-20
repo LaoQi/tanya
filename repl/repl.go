@@ -142,6 +142,16 @@ func (r *REPL) print(text string, kind Kind) {
 	r.view.Content(kind, text)
 }
 
+// failErr/failText 是标准错误行的唯一动词：错误信息可能内嵌服务端返回体、路径等外部内容，
+// 一律经 errLine/errLineText 清洗，不再出现裸 fmt.Sprintf(MsgErrLineFmt...) 样板。
+func (r *REPL) failErr(err error) {
+	r.st.err.emit(KindError, errLine(err))
+}
+
+func (r *REPL) failText(s string) {
+	r.st.err.emit(KindError, errLineText(s))
+}
+
 func (r *REPL) mdEnabled() bool {
 	return r.prof.TTY && r.st.decor()
 }
@@ -302,7 +312,7 @@ func (r *REPL) handleCommand(line string) bool {
 	case "/load":
 		if len(parts) >= 2 {
 			if err := r.agent.LoadSession(parts[1]); err != nil {
-				r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+				r.failErr(err)
 			} else {
 				r.st.out.emit(KindNotice, r.loadNotice(parts[1]))
 				r.warnLegacyPrompt()
@@ -315,15 +325,15 @@ func (r *REPL) handleCommand(line string) bool {
 	case "/fork":
 		r.handleFork()
 	case "/stat":
-		r.st.out.emit(KindNotice, statInfo(r.agent.Stats())+"\n")
+		r.st.out.emitText(KindNotice, statInfo(r.agent.Stats())+"\n")
 	case "/history":
 		r.showHistory(parts[1:])
 	case "/model":
 		if len(parts) < 2 {
-			r.st.out.emit(KindNotice, fmt.Sprintf(MsgCurModel, r.agent.Model()))
+			r.st.out.emitText(KindNotice, fmt.Sprintf(MsgCurModel, r.agent.Model()))
 			models, err := r.agent.ListModels()
 			if err != nil {
-				r.st.err.emit(KindError, fmt.Sprintf(MsgModelsFail, err))
+				r.st.err.emitText(KindError, fmt.Sprintf(MsgModelsFail, err))
 				break
 			}
 			if len(models) == 0 {
@@ -337,13 +347,13 @@ func (r *REPL) handleCommand(line string) bool {
 				if m == r.agent.Model() {
 					mark = MsgMarkCurrent
 				}
-				fmt.Fprintf(&b, "%s%s\n", mark, m)
+				fmt.Fprintf(&b, "%s%s\n", mark, term.OneLine(m))
 			}
 			r.st.out.emit(KindNotice, b.String())
 			break
 		}
 		if err := r.agent.SetModel(parts[1]); err != nil {
-			r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+			r.failErr(err)
 		}
 	case "/think":
 		r.handleThink(parts[1:])
@@ -392,7 +402,7 @@ func (r *REPL) handleArchive(args []string) {
 	arg := strings.TrimSpace(strings.Join(args, " "))
 	opt, err := ParseArchiveArg(arg, r.agent.AutoArchiveKeep())
 	if err != nil {
-		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+		r.failErr(err)
 		return
 	}
 	r.archiveFlow(opt, arg)
@@ -408,7 +418,7 @@ func (r *REPL) handleFork() {
 			r.st.out.emit(KindNotice, MsgForkNotArchive)
 			return
 		}
-		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+		r.failErr(err)
 		return
 	}
 	out := fmt.Sprintf(MsgForkDone, id)
@@ -438,7 +448,7 @@ func (r *REPL) handleTheme(args []string) {
 	s, ok := theme.Lookup(args[0])
 	if !ok {
 		bad := fmt.Sprintf(MsgBadTheme, args[0], strings.Join(theme.Names(), "/"))
-		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", bad))
+		r.failText(bad)
 		return
 	}
 	r.applyTheme(s)
@@ -504,7 +514,7 @@ func (r *REPL) handleThink(args []string) {
 		return
 	}
 	if err := r.agent.SetReasoningEffort(args[0]); err != nil {
-		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+		r.failErr(err)
 		return
 	}
 	if cur := r.agent.ReasoningEffort(); cur == "" {
@@ -586,11 +596,11 @@ func (r *REPL) printHistoryFull(n int, m agent.Message) {
 		if m.Role == "tool" {
 			r.st.out.emit(KindToolBlock, r.sem.Dim.Frame(text)+"\n")
 		} else {
-			r.st.out.emit(KindNotice, text+"\n")
+			r.st.out.emitText(KindNotice, text+"\n")
 		}
 	}
 	for _, tc := range m.ToolCalls {
-		r.st.out.emit(KindToolBlock, fmt.Sprintf("→ %s %s\n", tc.Function.Name, tc.Function.Arguments))
+		r.st.out.emitText(KindToolBlock, fmt.Sprintf("→ %s %s\n", tc.Function.Name, tc.Function.Arguments))
 	}
 }
 
@@ -612,7 +622,7 @@ func (r *REPL) printHistoryHead(n int, m agent.Message) {
 // printRendered 把整段文本按与 AI 输出一致的管线渲染（TTY + rich 走渲染，其余旁路），供历史回放等一次性展示使用。
 func (r *REPL) printRendered(text string) {
 	if !r.mdEnabled() {
-		r.st.out.emit(KindContent, text+"\n")
+		r.st.out.emitText(KindContent, text+"\n")
 		return
 	}
 	for _, blk := range mdBlocks(text) {
@@ -623,7 +633,7 @@ func (r *REPL) printRendered(text string) {
 func (r *REPL) loadSessionInteractive() {
 	list, err := r.agent.ListSessions()
 	if err != nil {
-		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+		r.failErr(err)
 		return
 	}
 	if len(list) == 0 {
@@ -642,7 +652,7 @@ func (r *REPL) loadSessionInteractive() {
 		return
 	}
 	if err := r.agent.LoadSession(list[idx].ID); err != nil {
-		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", err))
+		r.failErr(err)
 		return
 	}
 	r.st.out.emit(KindNotice, r.loadNotice(list[idx].ID))

@@ -23,6 +23,7 @@
 - 思考等级只用标准字段 `reasoning_effort`（minimal/low/medium/high/max，yaml/env `/think` 三处可配），不用厂商私有参数；设置后两协议均不发 `temperature`
 - 出站请求 UA 伪装（避免厂商风控）：默认 `pi/0.85.0 (linux; node/v22.14.0; x64)`，yaml `user_agent` / env `TANYA_USER_AGENT` 可配
 - 代码不添加注释，除非用户明确要求
+- 输出侧动态文本（模型输出、用户输入、工具参数、服务端数据、错误信息）落屏前一律清洗控制序列：`output.emitText`（多行文本）/`term.OneLine`（必须单行的展示，如 picker 摘要与补全候选）/`errLine`（错误行）；`emit` 只承载自生成样式文本，不做 emit 级全局 `Strip`（会抹掉自产 SGR）；ask 旁路正文在 `toolView.Handle` 的 EventContent 分支下沉清洗（该分支不经 turn 与 markdown 管线）；picker 每帧的上移量按实际写入行数记账、窗口项数不过屏（`rows-2`），见 `docs/design.md`《输出流与 Kind》《斜杠命令》
 - 颜色一律用终端 16 色基本 SGR 码（30-37/90-97），不用 256 色/truecolor
 
 ## 结构

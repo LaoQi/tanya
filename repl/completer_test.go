@@ -196,3 +196,23 @@ func TestSlashCommandsIncludeReasoning(t *testing.T) {
 		t.Error("/reasoning 应在斜杠命令白名单内")
 	}
 }
+
+func TestModelCandidatesSanitized(t *testing.T) {
+	calls := 0
+	c := testModelsCompleter([]string{"glm\x1b[2J-5", "bad\x1b]0;x\x07name"}, nil, &calls)
+	if got := c.suggest("/model glm"); strings.ContainsAny(got, "\x1b\x07") {
+		t.Errorf("ghost 应清洗: %q", got)
+	}
+	if got := c.suggest("/model glm"); got != "-5" {
+		t.Errorf("ghost 文本应保留: %q", got)
+	}
+	cands := c.complete("/model ")
+	for _, cd := range cands {
+		if strings.ContainsAny(cd.Display, "\x1b\x07") || strings.ContainsAny(cd.Insert, "\x1b\x07") {
+			t.Errorf("候选 Display/Insert 应清洗: %+v", cd)
+		}
+	}
+	if len(cands) != 2 || cands[0].Insert != "/model glm-5" {
+		t.Errorf("候选应保留可读文本: %+v", cands)
+	}
+}

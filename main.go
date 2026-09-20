@@ -59,11 +59,11 @@ func main() {
 
 	cfg, err := agent.LoadConfig(*configPath)
 	if err != nil {
-		st.Fail(repl.MsgErrLineFmt+"\n", err)
+		st.FailErr("", err)
 		exitNow(1)
 	}
 	if err := repl.ValidateTheme(cfg.Theme); err != nil {
-		st.Fail(repl.MsgErrLineFmt+"\n", err)
+		st.FailErr("", err)
 		exitNow(1)
 	}
 	sem := repl.Semantics(cfg.Theme, cfg.Palette)
@@ -86,7 +86,7 @@ func main() {
 	}
 	if cmd == repl.CmdInit {
 		if err := repl.RunInit(st, sem, cfg); err != nil {
-			st.Fail(repl.MsgErrLineFmt+"\n", err)
+			st.FailErr("", err)
 			exitNow(1)
 		}
 	}
@@ -98,7 +98,7 @@ func main() {
 		agent.NoSave(*noSave),
 		agent.WithTTYBridge(readline.NewTTYBridge()))
 	if err != nil {
-		st.Fail(repl.MsgErrLineFmt+"\n", err)
+		st.FailErr("", err)
 		exitNow(1)
 	}
 	termFacts := repl.TermFacts{Cols: facts.Cols, ColsOK: facts.SizeOK}
@@ -112,7 +112,7 @@ func main() {
 			if ctty.Exiting() {
 				exitNow(ctty.ExitStatus())
 			}
-			st.Fail("\n"+repl.MsgErrLineFmt+"\n", err)
+			st.FailErr("\n", err)
 			exitNow(1)
 		}
 		st.End()
@@ -124,12 +124,12 @@ func main() {
 
 	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning))
 	if err != nil {
-		st.Fail(repl.MsgErrLineFmt+"\n", err)
+		st.FailErr("", err)
 		exitNow(1)
 	}
 	defer r.Close()
 	if err := r.Run(); err != nil {
-		st.Fail(repl.MsgErrLineFmt+"\n", err)
+		st.FailErr("", err)
 		exitNow(1)
 	}
 	if code := ctty.ExitStatus(); code != 0 {

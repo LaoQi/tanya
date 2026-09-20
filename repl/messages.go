@@ -91,7 +91,7 @@ const (
 )
 
 const (
-	PickTitle        = "选择会话（↑/↓ 移动，Enter 确认，q 取消）:\r\n"
+	PickTitle        = "选择会话（%d/%d，↑/↓ 移动，Enter 确认，q 取消）:"
 	PickNumTitle     = "输入序号选择会话（回车取消）:\n"
 	PickNumPrompt    = "序号: "
 	SessRow          = "%s%s  %s  %3d条  %s"

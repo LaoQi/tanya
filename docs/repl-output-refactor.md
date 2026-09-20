@@ -643,14 +643,19 @@ script -qec "./tanya -p --verbose -n ask '跑一条命令并总结'" /dev/null |
 | 2026-09-16 | 状态行心跳改为行内点累加：`statusTickInterval = 1s`、满 `statusLineSpan = 10` 点换行，行首写一次带墙钟秒数的前缀并以一个空格位收尾（`» 等待响应 0s `），追加的点与行首同色且各自 reset，`stop()` 补 `\n` 收尾当前行；`EventReasoning` 经 `heartbeat.setPhase` 回补 `» 思考中`（收尾当前行 + 新前缀开新行，秒数延续、同相位 no-op）；`turn.End` 调 `toolView.Stop()` 补上"等待期被打断无停止点、心跳写到下一次请求"的漏洞 | `repl/status.go`、`repl/flow.go`、`repl/status_test.go` |
 | 2026-09-16 | 工具标题区命令可读性：`command` 不再用 `; ` 压成单行——短命令保持内联，超宽/多行转块形态（`▸ 工具名` + `cwd` 行 + `  $ ` 命令区），经新增 `render/term.Wrap` 按显示宽度折行（tab 摊平 4 空格、保留缩进与空行、只切分不改写、不做词级折行），上限 8 行、超出省略中段并提示 `/history` | `repl/toolview.go`、`repl/messages.go`、`render/term/text.go`、`README.md`、`docs/design.md` |
 
-### 已知缺口：动态文本的转义清洗（2026-09-15 登记，未做）
+### 动态文本的转义清洗（2026-09-15 登记，2026-09-20 收口）
 
-工具块正文与标题早已收敛（正文 `Dim.Frame` / `Passthrough`，标题 `Dim.Frame`），状态行已在上表条目内补齐；**仍未清洗**的是其余经 `output.emit` 直出的动态文本：
+工具块正文与标题早已收敛（正文 `Dim.Frame` / `Passthrough`，标题 `Dim.Frame`），状态行于 2026-09-15 补齐；当时**仍未清洗**、本次收口的直出路径：
 
-- `repl/picker.go` `sessionPicker.render` 的 `SessRow` 摘要（会话首条 user 消息，用户可粘贴任意含 `\x1b` 的内容）
-- `repl/repl.go` `printHistoryFull`：非 markdown 模式的 user/assistant 正文，以及 `→ <tool> <args>` 工具调用行（`historyLine` 摘要行走 `term.OneLine`，已安全）
-- `/model` 列表：服务端 `/models` 返回的模型名（`/theme` 与其余列表为内置常量，安全）
+| 路径 | 处置 |
+|---|---|
+| `repl/picker.go` `sessionPicker.render` 的 `SessRow` 摘要（会话首条 user 消息）与补全候选 Display | `term.OneLine`（折成单行 + 清洗），随 picker 分窗再按 `cols-1` 截断 |
+| `repl/flow.go` `writeContent` 的非 markdown 分支（plain / 非 TTY / ask 单发实时正文） | `term.Sanitize` |
+| `repl/repl.go` `printHistoryFull`：user/其他正文、`→ 工具 参数` 行 | `output.emitText` |
+| `repl/repl.go` `printRendered` 的非 markdown 旁路 | `output.emitText` |
+| `/model` 列表（服务端模型名）、当前模型回显与补全候选（Display/ghost/Insert 经 `completer.models()` 缓存统一清洗） | `term.OneLine` / `emitText` |
+| 全部 `MsgErrLineFmt` 错误行（错误信息可能内嵌返回体/路径） | `errLine` / `errLineText`；main 入口走 `streams.FailErr`（内部同 `errLine`） |
 
-方向：**在内容插入点清洗**，或给 `output` 增设"内容通道"（只放行自生成的控制序列）；**不要**在 `emit` 施加全局 `Strip`——该决定仍成立，但理由已变：原理由"会废掉工具块上移重绘与 spinner 帧"随 2026-09-15 追加化消失（`emit` 现只承载文本 + SGR + `\n`），改成"全局清洗会一并抹掉自生成的颜色"。
+落地形式：给 `output` 增设**内容通道** `emitText`（+ 错误行 helper），自生成样式文本仍走 `emit`；**不在** `emit` 施加全局 `Strip`——该决定仍成立，理由是会一并抹掉自生成的颜色。增量清洗的已知降级：跨 delta 被切半的 ESC 序列，前半丢弃、后半作为字面文本上屏（不驱动终端、文本不丢），不引入跨 chunk pending。
 
 本附录之前的章节保留历史方案与当时的 `mdLive`/ask 走 rich 的描述，不再随代码同步。

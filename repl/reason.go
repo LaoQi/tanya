@@ -46,6 +46,6 @@ func (r *REPL) handleReasoning(args []string) {
 		r.showReasoning = false
 		r.st.out.emit(KindNotice, MsgReasoningOff)
 	default:
-		r.st.err.emit(KindError, fmt.Sprintf(MsgErrLineFmt+"\n", fmt.Errorf(MsgReasoningBad, args[0])))
+		r.failErr(fmt.Errorf(MsgReasoningBad, args[0]))
 	}
 }
