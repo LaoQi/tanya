@@ -166,6 +166,9 @@ func TestResponsesToolLoopReasoningReplay(t *testing.T) {
 	if _, ok := rs["encrypted_content"]; ok {
 		t.Error("reasoning 回传不应携带 encrypted_content")
 	}
+	if summary, ok := rs["summary"].([]any); !ok || len(summary) != 0 {
+		t.Errorf("reasoning 回传应携带空 summary 数组: %v", rs["summary"])
+	}
 	fc := input[2].(map[string]any)
 	if fc["call_id"] != "call_1" || fc["name"] != "calc" {
 		t.Errorf("function_call 回传: %v", fc)
