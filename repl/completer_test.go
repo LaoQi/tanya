@@ -2,6 +2,8 @@ package repl
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -214,5 +216,241 @@ func TestModelCandidatesSanitized(t *testing.T) {
 	}
 	if len(cands) != 2 || cands[0].Insert != "/model glm-5" {
 		t.Errorf("候选应保留可读文本: %+v", cands)
+	}
+}
+
+func switchCompleter(ws string) *completer {
+	return &completer{workspaceDir: func() string { return ws }}
+}
+
+func TestSuggestSwitchFirstDir(t *testing.T) {
+	ws := t.TempDir()
+	for _, d := range []string{"alpha", "beta"} {
+		if err := os.Mkdir(filepath.Join(ws, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(ws, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := switchCompleter(ws)
+	if got := c.suggest("/switch "); got != "alpha/" {
+		t.Errorf("空前缀 ghost 应为首个目录: got %q want %q", got, "alpha/")
+	}
+	if got := c.suggest("/switch be"); got != "ta/" {
+		t.Errorf("前缀匹配 ghost: got %q want %q", got, "ta/")
+	}
+	if got := c.suggest("/switch alpha"); got != "/" {
+		t.Errorf("精确目录名 ghost 应为尾分隔符: got %q", got)
+	}
+	if got := c.suggest("/switch nope"); got != "" {
+		t.Errorf("无匹配不应有 ghost: got %q", got)
+	}
+}
+
+func TestCompleteSwitchDirsOnly(t *testing.T) {
+	ws := t.TempDir()
+	for _, d := range []string{"alpha", "beta", "with space", ".hid"} {
+		if err := os.Mkdir(filepath.Join(ws, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(ws, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := switchCompleter(ws)
+	got := c.complete("/switch ")
+	if len(got) != 2 {
+		t.Fatalf("应只补目录、跳过文件/空白名/隐藏目录: %+v", got)
+	}
+	if got[0].Insert != "/switch alpha/" || got[0].Display != "alpha/" {
+		t.Errorf("候选 0: %+v", got[0])
+	}
+	if got[1].Insert != "/switch beta/" || got[1].Display != "beta/" {
+		t.Errorf("候选 1: %+v", got[1])
+	}
+}
+
+func TestCompleteSwitchHiddenGating(t *testing.T) {
+	ws := t.TempDir()
+	if err := os.Mkdir(filepath.Join(ws, ".hid"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := switchCompleter(ws)
+	if got := c.complete("/switch "); len(got) != 0 {
+		t.Errorf("空前缀不应出现隐藏目录: %+v", got)
+	}
+	got := c.complete("/switch .")
+	if len(got) != 1 || got[0].Insert != "/switch .hid/" {
+		t.Errorf("敲 . 后应出现隐藏目录: %+v", got)
+	}
+}
+
+func TestCompleteSwitchDrillDown(t *testing.T) {
+	ws := t.TempDir()
+	for _, d := range []string{"a/b1", "a/b2"} {
+		if err := os.MkdirAll(filepath.Join(ws, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := switchCompleter(ws)
+	got := c.complete("/switch a/")
+	if len(got) != 2 || got[0].Insert != "/switch a/b1/" || got[1].Insert != "/switch a/b2/" {
+		t.Errorf("相对子路径下钻: %+v", got)
+	}
+	if g := c.suggest("/switch a/b"); g != "1/" {
+		t.Errorf("下钻 ghost: got %q", g)
+	}
+}
+
+func TestCompleteSwitchTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("无 HOME")
+	}
+	if err := os.Mkdir(filepath.Join(home, "ws-complete-tilde"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := switchCompleter(t.TempDir())
+	got := c.complete("/switch ~/ws-complete-tilde")
+	if len(got) != 1 || got[0].Insert != "/switch ~/ws-complete-tilde/" {
+		t.Errorf("~ 前缀补全: %+v", got)
+	}
+	got = c.complete("/switch ~")
+	found := false
+	for _, x := range got {
+		if x.Insert == "/switch ~/ws-complete-tilde/" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("裸 ~ 应补家目录一级（含新建目录）: %+v", got)
+	}
+	if g := c.suggest("/switch ~/ws-complete-tilde"); g != "/" {
+		t.Errorf("~ 精确目录 ghost 应为尾分隔符: got %q", g)
+	}
+	if got := c.complete("/switch ~user"); got != nil {
+		t.Errorf("~user 不展开应无候选: %+v", got)
+	}
+}
+
+func TestCompleteSwitchAbsolute(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := switchCompleter(t.TempDir())
+	got := c.complete("/switch " + dir + "/s")
+	if len(got) != 1 || got[0].Insert != "/switch "+dir+"/sub/" {
+		t.Errorf("绝对路径补全: %+v", got)
+	}
+}
+
+func TestCompleteSwitchNoWorkspace(t *testing.T) {
+	c := &completer{}
+	if got := c.complete("/switch "); got != nil {
+		t.Errorf("无工作区基准时空前缀应无候选: %+v", got)
+	}
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := c.complete("/switch " + dir + "/")
+	if len(got) != 1 || got[0].Insert != "/switch "+dir+"/sub/" {
+		t.Errorf("无工作区基准时绝对路径仍可补全: %+v", got)
+	}
+}
+
+func TestCompleteSwitchMissingBase(t *testing.T) {
+	ws := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ws, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := switchCompleter(ws)
+	if got := c.complete("/switch missing/"); got != nil {
+		t.Errorf("基准不存在应无候选: %+v", got)
+	}
+	if got := c.complete("/switch f"); got != nil {
+		t.Errorf("文件名前缀应无候选: %+v", got)
+	}
+}
+
+func TestCompleteSwitchSymlinkDir(t *testing.T) {
+	ws := t.TempDir()
+	if err := os.Mkdir(filepath.Join(ws, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(ws, "real"), filepath.Join(ws, "link")); err != nil {
+		t.Skip("无符号链接能力")
+	}
+	c := switchCompleter(ws)
+	got := c.complete("/switch ")
+	if len(got) != 2 || got[0].Insert != "/switch link/" || got[0].Display != "link/" {
+		t.Errorf("符号链接目录应可补全（与切换口径一致）: %+v", got)
+	}
+	if g := c.suggest("/switch lin"); g != "k/" {
+		t.Errorf("符号链接 ghost: got %q", g)
+	}
+	if err := os.Symlink(filepath.Join(ws, "nowhere"), filepath.Join(ws, "broken")); err != nil {
+		t.Skip("无符号链接能力")
+	}
+	if got := c.complete("/switch broken"); got != nil {
+		t.Errorf("断链不应出现候选: %+v", got)
+	}
+}
+
+func TestCompleteSwitchDotDot(t *testing.T) {
+	ws := t.TempDir()
+	if err := os.Mkdir(filepath.Join(ws, "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := switchCompleter(ws)
+	got := c.complete("/switch ..")
+	if len(got) != 1 || got[0].Insert != "/switch ../" || got[0].Display != "../" {
+		t.Errorf("裸 .. 应补 ../: %+v", got)
+	}
+	if g := c.suggest("/switch .."); g != "/" {
+		t.Errorf("裸 .. ghost 应为 /: got %q", g)
+	}
+	got = c.complete("/switch a/..")
+	if len(got) != 1 || got[0].Insert != "/switch a/../" {
+		t.Errorf("下钻段中的 .. 同样应补: %+v", got)
+	}
+	if got := c.complete("/switch ."); got != nil {
+		t.Errorf("裸 . 不应产生 ./ 候选（切换必被拒）: %+v", got)
+	}
+}
+
+func TestCompleteSwitchControlNameSkipped(t *testing.T) {
+	ws := t.TempDir()
+	for _, name := range []string{"a\x7fb", "ok"} {
+		if err := os.Mkdir(filepath.Join(ws, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := switchCompleter(ws)
+	got := c.complete("/switch ")
+	if len(got) != 1 || got[0].Insert != "/switch ok/" {
+		t.Errorf("含 DEL 的目录名应跳过: %+v", got)
+	}
+}
+
+func TestSwitchCandidatesFollowWorkspace(t *testing.T) {
+	ws1 := t.TempDir()
+	ws2 := t.TempDir()
+	for _, d := range []string{filepath.Join(ws1, "subA"), filepath.Join(ws2, "subB")} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var ws string
+	c := &completer{workspaceDir: func() string { return ws }}
+	ws = ws1
+	if got := c.suggest("/switch "); got != "subA/" {
+		t.Errorf("ws1 ghost: got %q", got)
+	}
+	ws = ws2
+	if got := c.suggest("/switch "); got != "subB/" {
+		t.Errorf("ws2 ghost（应跟随 /switch 换区）: got %q", got)
 	}
 }
