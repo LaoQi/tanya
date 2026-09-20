@@ -412,16 +412,13 @@ func (r *REPL) handleFork() {
 	if r.agent == nil {
 		return
 	}
+	inherited := len(r.agent.History())
 	id, err := r.agent.Fork()
 	if err != nil {
-		if errors.Is(err, agent.ErrForkNotArchive) {
-			r.st.out.emit(KindNotice, MsgForkNotArchive)
-			return
-		}
 		r.failErr(err)
 		return
 	}
-	out := fmt.Sprintf(MsgForkDone, id)
+	out := fmt.Sprintf(MsgForkDone, id, inherited)
 	if r.agent.NoSave() {
 		out += MsgForkNoSave
 	}
