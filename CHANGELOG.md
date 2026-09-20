@@ -2,6 +2,11 @@
 
 tanya 变更记录。新条目加在最上方的日期分节内（没有当天分节就新建一个）；本文件记变更，AGENTS.md 只保留现行约束。
 
+## 2026-09-21
+- docs(ctty,design),test(repl): 终端通知收尾——`docs/ctty.md` 补登 `Bell()` 原语与 bell 三份分片（posix/windows/stub）；`docs/design.md` 修正 `ask` 指代（指 CLI 子命令，REPL 内对话回合照常参与通知）与门禁措辞（plain 档与提示可见性一致，`-p --verbose` 有提示但不响）；`repl/notify_test.go` 补分发层用例（斜杠命令、空行经 `Run()` 不通知）并把恒假的 `d < 0` 耗时断言改为「正值且不超过 1 分钟」（负向对照：篡改 start 即报错）
+- feat(repl,ctty,agent,main,docs): 终端提示音与通知抽象——`repl.Notifier`/`Notification`（原因 + 信息：`NotifyTurnDone` 带 `Duration`/`Failed`、`NotifyNeedInput` 带 `Tool`）承接行为，触发语义只两处（`turn.End` 成功与报错、`turn.Handle` 的 `EventToolStart` + `Interactive`），门禁为交互富档 TTY；`BellNotifier()` 是当前唯一实现，经 `ctty.Bell()` 写控制终端 BEL（Windows `CONOUT$`、其余平台 stub），不进 stdout、不沾 `output` 门禁与行首记账；yaml `bell` 默认关闭，opt-in，`ask` 单发不装配也不可达触发点
+- docs(design): 明确 `ask` 的外部调用定位（外部调用向、默认 plain+verbose、刻意不参与交互向注意力反馈），并记录已决取舍：不监听子进程真实读取 stdin 的时刻，只在 `run_shell` 主动声明 `interactive` 时通知
+
 ## 2026-09-20
 - feat(repl,docs): 工具调用参数显示全覆盖——`toolArgsView` 按工具名分派参数视图，非 `run_shell` 工具（`get_env`/`calc`/`agent_custom`）走通用键值渲染（内联 `key: value`、多参数 ` · ` 连接、超宽/多行转块形态逐项一行、键序按 JSON 原文）；数组值逗号连接、对象压紧凑 JSON、空参数只显示工具名、坏 JSON 退回原样；`run_shell` 补显式 `timeout` 行；折行与 8 行上限抽成 `capLines` 共用，通用省略文案 `… 省略 N 行（完整参数见 /history）`
 - feat(repl,docs): `/switch` 参数目录补全——ghost 与 Tab 菜单列前缀基准段（`~`/绝对路径/相对按当前工作区）的一级子目录，只取目录（符号链接跟随目标判定，与切换口径一致）、候选带尾 `/` 下钻、裸 `..` 补成 `../`；隐藏目录需敲 `.` 才出现，名字含空白或控制符（含 DEL）跳过；工作区基准 `workspaceDir` 活取、换区即跟随，逐键一次 `ReadDir`、无缓存

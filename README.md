@@ -12,6 +12,7 @@
 - token 用量实时显示在提示符（API 实报优先，本地估算兜底），支持显示缓存命中
 - AI 输出 Markdown 渲染（默认开启，stdout 非终端与 plain 输出自动旁路；表格带外框与列对齐）与内置配色主题（`/theme` 切换）
 - 思维链显示（`show_reasoning` 配置或 REPL 内 `/reasoning on`）：思维链以 markdown 渲染并夹在 `─── 思考 ───` / `─── 思考结束 · 3.2s ───` 分隔符之间，同时不再打 `» 思考中` 状态行
+- 终端提示音（`bell` 配置，默认关闭）：对话回合结束（成功或报错，`^C` 中断不响）与 `run_shell` 声明 `interactive`、等待终端输入时各响一声；铃声直接写控制终端，不进 stdout，仅 REPL 交互富档生效，`ask` 单发不参与
 - AGENTS.md 项目说明自动注入系统提示（全局 + 工作区双层，会话级快照保证 prompt cache 友好）
 - 平台：Linux 与 Windows 为主（Windows 显示与行编辑均已支持：16 色、状态行、markdown、真实宽度、行编辑/历史/Tab 补全/ghost；interactive 命令走控制台继承直通，Windows 侧仅部分实机验证、未全量覆盖，暂不跟踪），macOS 尽力；控制终端原语与终端探测统一在零依赖叶子包 `ctty`，其余平台仅保证可编译
 - 降级粒度独立：显示能力取决于 stdout 是否终端、输入能力取决于 stdin 是否终端，互不连带（支持范围与组合矩阵见 `docs/terminal-caps.md`）
@@ -51,6 +52,8 @@ model: deepseek-v4-flash
 `reasoning_effort` 配置项（env `TANYA_REASONING_EFFORT`）设置思考等级，随请求发送 OpenAI 标准字段（o 系 / gpt-5 及兼容网关支持），可选 `minimal` / `low` / `medium` / `high` / `max`，留空不发送；REPL 内 `/think` 可运行时切换。`responses` 协议下映射为 `reasoning.effort`，`chat` 协议下为 `reasoning_effort`。设置思考等级后请求不再发送 `temperature`（两协议一致），以兼容 o 系 / gpt-5 等仅支持 `temperature=1` 的推理模型。
 
 `show_reasoning` 配置项（仅 yaml，默认 `false`）让思维链随对话显示：思维链以与正文一致的 markdown 渲染呈现在 `─── 思考 ───` 与 `─── 思考结束 · 3.2s ───` 两条分隔符之间（`Think` 语义色，时长取该段思考耗时），同时不再打印 `» 思考中` 状态行——`» 等待响应` 心跳也在首个思维链片段到达时收尾。仅 REPL 的 rich 输出档生效（stdout 非终端、`-p`、`-p --verbose`、`ask` 一律不显示），REPL 内 `/reasoning on|off` 可运行时切换；门禁外 `/reasoning on` 会提示「当前输出档不显示思维链」（开关记忆仍保留，切回富档即生效）。
+
+`bell` 配置项（仅 yaml，默认 `false`）在需要把人叫回终端时发声：对话回合结束（成功与报错都响，`^C` 中断不响）与 `run_shell` 声明 `interactive`、终端即将移交时各响一声，响声写入控制终端（`/dev/tty`），因此不进 stdout、不受 `-p` 与重定向影响。仅 REPL 的 rich 输出档生效（stdout 非终端、`-p`、`ask` 一律不响）。提示音时点是「工具开始执行」而非「子进程真的在等输入」，且是否真能听见取决于终端设置（部分终端配为静音或闪烁）。设计见 `docs/design.md`《终端通知》。
 
 `theme` 配置项（env `TANYA_THEME`）选择内置配色主题，REPL 内 `/theme` 可运行时切换；`colors`（auto/on/off）控制是否着色；`palette` 可覆盖单个语义色。可用主题与色名见 `config.example.yaml`。
 

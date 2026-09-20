@@ -24,6 +24,7 @@
 - 出站请求 UA 伪装（避免厂商风控）：默认 `pi/0.85.0 (linux; node/v22.14.0; x64)`，yaml `user_agent` / env `TANYA_USER_AGENT` 可配
 - 输出侧动态文本（模型输出、用户输入、工具参数、服务端数据、错误信息）落屏前一律清洗控制序列：多行文本走 `output.emitText`、必须单行的展示走 `term.OneLine`、错误行走 `errLine`；`emit` 只承载自生成样式文本，不做 emit 级全局 Strip；ask 旁路与 picker 记账细节见 `docs/design.md`《输出流与 Kind》《斜杠命令》
 - 颜色一律用终端 16 色基本 SGR 码（30-37/90-97），不用 256 色/truecolor
+- 注意力通知统一走 `repl` 的通知接口：触发语义在 REPL（只读 agent 事件：回合结束 / `interactive` 工具开始）、行为在 `Notifier`（`bell` 只是当前唯一实现，终端写 BEL 走 `ctty.Bell`）、门禁为交互富档 TTY；不得在 `toolView`/`agent` 内直接发声，也不探测子进程真实读取 stdin 的时刻，`ask` 单发不参与，见 `docs/design.md`《终端通知》
 - markdown 表格渲染是尽力而为：三行前瞻（表头/分隔/首数据行）定列宽与对齐，列宽不封顶、超宽单元格不截断（边线可错位），终端宽度只用于撑破时切紧边距；`Table` 块是「IR 无布局」的唯一例外，见 `docs/render-pipeline.md` §10
 - 代码不添加注释，除非用户明确要求
 

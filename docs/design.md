@@ -43,6 +43,10 @@ render/markup/     内联标记解析
 - 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式、`-n` / `--no-save` 只读会话（见《会话与上下文》存储小节）
 - Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）：REPL 与 `ask` 单发统一走 `signal.Notify(SIGINT)`（`repl.InterruptContext`），要求终端 `ISIG` 开启——readline 侧每回合开始前做终端状态自愈保证该项成立（`docs/interactive-tty.md` §5.9）；命令执行期间子进程组持有终端前台，Ctrl+C 由内核直达子进程组（命令优雅退出），再次按下取消回合
 
+### ask 单发（外部调用向）
+
+`ask` 的设计目标是**给机器用**：父代理、脚本、CI 拿它当一次函数调用，输出会被解析而不是给人看。因此它默认降到 plain+verbose 档（无装饰、无状态行与心跳、无光标控制），并**刻意不参与交互向的注意力反馈**——终端提示音只服务于 REPL 对话回合与 `interactive` 工具等待输入（见《终端通知》），CLI `ask` 子命令既不装配通知行为、也不可达其触发点（`main.go` 的 `CmdAsk` 分支直接 `a.Ask`，不构造 `turn`；REPL 内的对话回合不受此限，照常参与通知）。「输出杂音最小化」是硬口径：新增任何「人机对话才需要」的表现层特性都不作用于 `ask`。
+
 ### init 模式（`agent/init.go` + `repl/initflow.go`）
 
 新工作区（通常既无 `.tanya/` 也无 `AGENTS.md`）的一次性脚手架，之后与普通 REPL **完全无二**：不改提示符、不加斜杠命令、不改运行期行为。只作用于启动目录，不做项目探测、不调模型、不碰 `~/.config/tanya/*`。
@@ -346,6 +350,18 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 耗时口径：用户提交 → `Ask` 返回，含本回合全部 LLM 请求与工具执行；`interactive: true` 的 run_shell 期间用户在终端应答的时间也计入（读数偏大属预期）。回合耗时是"提交 → 返回"的汇总层，与 info 行的单次请求耗时（`TTFT/x.xs`）、工具状态行的单工具耗时并列
 - 耗时格式：`<1s` 毫秒（`900ms`）、`<1m` 一位小数秒（`12.4s`）、`<1h` `12m34s`、更长 `1h02m`；独立于 `respDuration`（后者服务于 info 行与工具状态行，避免其口径被改动）
 - 测试：`repl/turnview_test.go`（格式/颜色/前导尾随换行、耗时档位、`turn` 只补一次空行）；交互路径用 `script` + 延时喂入 pty 手工验证（raw 切换会清掉已缓冲输入，输入须在 raw mode 启用后到达）
+
+### 终端通知（2026-09-21）
+
+注意力通知按三层拆分，换行为不动触发点（`repl/notify.go`）：
+
+- **触发语义在 REPL**，只有两处：`turn.End`（对话回合结束，成功与报错都通知；`agent.InterruptError` 不通知——用户就在终端前按的）与 `turn.Handle` 的 `EventToolStart` + `e.Interactive`（`run_shell` 主动声明交互、终端即将移交）。斜杠命令回合（走 `turnSep` 旁路）、空输入、`/load`、CLI `ask` 单发都不产生通知（REPL 内的对话回合照常）。
+- **行为在 `Notifier`**：`repl.Notifier.Notify(Notification)`，载荷 = 原因 + 信息（`NotifyTurnDone` 带 `Duration`/`Failed`，`NotifyNeedInput` 带 `Tool`）。载荷刻意不带命令原文——通知实现要落屏就得自己清洗外部内容，不如不给。当前唯一实现 `BellNotifier()` 忽略全部字段：终端只有一种可发声行为。
+- **终端原语在 `ctty`**：`ctty.Bell()` 打开控制终端写一声 `\a`（Windows 写 `CONOUT$`；其余平台 stub 返回不支持），失败静默。BEL 不进 stdout、不沾 `output` 的 Kind 门禁与行首记账（`emit` 会把尾字节 0x07 记成"非行首"，打歪 `streams.End` 的补换行判定），故 `-p` 与重定向都不会被污染。
+- **门禁**（`REPL.notify`）：`notifier != nil && prof.TTY && st.decor()`。注意力通知只在交互富档 TTY 会话有意义，`-p` 是用户显式要求安静，且 plain 档下 `MsgInteractiveHint` 本来就被 `visSet` 屏蔽——plain 档门禁与提示可见性一致（不会“响了但屏上没提示”）；`-p --verbose` 档提示可见而不响（有提示、无声音），这是刻意的：注意力通知只在 rich 档生效。
+- **开关**：yaml `bell`（默认 `false`，opt-in；无 env、无 REPL 命令）。`main` 只在 REPL 分支按 `cfg.Bell` 装配 `BellNotifier()`，未开启时 notifier 为 nil、判定零开销。响声是否真能听见还取决于终端设置（部分终端配为静音或闪烁）。
+- **已决取舍：不监听真实输入开始**。通知时点是 `run_shell` 声明 `interactive` 的那一瞬（`EventToolStart`，`agent/agent.go` 的 `interactiveOf` 在发事件前已判定），不探测子进程真正读取 stdin 的时刻：pty 首输出钩子只在 Linux 桥接下存在、Windows 控制台直通无此旁路，会造成行为分裂；代价是 `make` 编译两分钟后才提问、`cat` 这类静默阻塞等场景会早响/虚响，接受。两种原因也不做音高区分（BEL 无音高，连响两声在部分终端被合并）。
+- 测试：`repl/notify_test.go` 用 fake `Notifier` 断言触发与门禁（中断 0 次、非 TTY/plain 0 次、非 interactive 工具 0 次、interactive 工具 1 次；未装配路径锁住 notifier 为 nil 且两条触发照常执行；分发层经 `Run()` 锁住「斜杠命令、空行不通知」），`ctty/bell_test.go` 断言无控制终端时返回错误且不 panic。
 
 ### 终端输入（readline 包）
 
