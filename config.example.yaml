@@ -14,10 +14,24 @@ temperature: 0.7
 # 仅 REPL 的 rich 输出档生效（stdout 非终端 / -p / ask 一律不显示），REPL 内 /reasoning on|off 可运行时切换
 # show_reasoning: false
 
-# 终端提示音（仅 yaml，默认关闭）：对话回合结束（成功与报错都响，^C 中断不响）与 run_shell 声明 interactive、
-# 等待终端输入时各响一声；铃声直接写控制终端（/dev/tty），不进 stdout、不受 -p 与重定向影响
-# 仅 REPL 的 rich 输出档生效，ask 单发不参与
+# 注意力通知（全部仅 yaml、默认关闭、可同时开启，仅 REPL 的 rich 输出档生效，ask 单发不参与）：
+# 触发点为对话回合结束（成功与报错都通知，^C 中断不通知）与 run_shell 声明 interactive、等待终端输入时。
+# 一律尽力而为：失败静默、不重试，不保证终端或桌面真的响应；都不走 stdout，不受 -p 与重定向影响。
+# bell: 写一声 BEL 到控制终端（是否听得见取决于终端设置，部分终端配为静音或闪烁）
 # bell: false
+# notify_osc: 写终端原生 OSC 9 通知（iTerm2 / WezTerm / Ghostty / Windows Terminal 系支持；
+#   Terminal.app 与传统 xterm 系不认，tmux/screen 下通常被吞）
+# notify_osc: false
+# notify_cmd: 调用外部程序，命令交给与 run_shell 同一个 shell 执行
+#   占位符只有三个（自带引号，配置里不要再加引号）：
+#     {title}   固定 tanya
+#     {content} 已处理好的单行文本（回合结束 · 12.3s / 回合失败 · 12.3s / run_shell 等待输入）
+#     {kind}    done / failed / input，便于脚本按类别分流
+#   写错占位符、花括号不配对、占位符紧邻引号会在启动时报错
+#   花括号在命令里是保留语法：${VAR}、awk '{print $1}' 等含花括号的写法会被拒绝，复杂逻辑请外置脚本
+# notify_cmd: notify-send -a tanya {title} {content}
+# notify_cmd: osascript -e 'display notification "{content}" with title "{title}"'
+# notify_cmd: /path/to/hook {kind} {title} {content}
 
 # 出站请求 User-Agent（伪装，避免厂商风控）
 user_agent: "pi/0.85.0 (linux; node/v22.14.0; x64)"

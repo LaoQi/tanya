@@ -127,9 +127,10 @@ func main() {
 		return
 	}
 
-	var notifier repl.Notifier
-	if cfg.Bell {
-		notifier = repl.BellNotifier()
+	notifier, err := buildNotifier(cfg)
+	if err != nil {
+		st.FailErr("", err)
+		exitNow(1)
 	}
 	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier))
 	if err != nil {
@@ -144,6 +145,29 @@ func main() {
 	if code := ctty.ExitStatus(); code != 0 {
 		exitNow(code)
 	}
+}
+
+// buildNotifier 按配置组装通知行为（bell / OSC 9 / 外部程序，各自独立开关），全关时为 nil。
+func buildNotifier(cfg *agent.Config) (repl.Notifier, error) {
+	var list []repl.Notifier
+	if cfg.Bell {
+		list = append(list, repl.BellNotifier())
+	}
+	if cfg.NotifyOSC {
+		list = append(list, repl.OSCNotifier())
+	}
+	if cfg.NotifyCmd != "" {
+		inv, err := agent.ResolveShell(cfg)
+		if err != nil {
+			return nil, err
+		}
+		n, err := repl.NewCommandNotifier(inv, cfg.NotifyCmd)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, n)
+	}
+	return repl.Notifiers(list...), nil
 }
 
 func exitNow(code int) {

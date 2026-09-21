@@ -155,3 +155,24 @@ func TestNewRejectsUnavailableShellOverride(t *testing.T) {
 		t.Fatalf("无可用 shell 时 New 应报错: %v", err)
 	}
 }
+
+func TestResolveShell(t *testing.T) {
+	inv, err := ResolveShell(&Config{})
+	if err != nil {
+		t.Skipf("当前环境无可解析 shell: %v", err)
+	}
+	if len(inv.Argv) < 2 {
+		t.Fatalf("argv 应含解释器与执行参数: %q", inv.Argv)
+	}
+	last := inv.Argv[len(inv.Argv)-1]
+	want := map[ShellKind]string{KindPosix: "-c", KindPowerShell: "-Command", KindCmd: "/c"}[inv.Kind]
+	if last != want {
+		t.Errorf("kind %v 的执行参数应为 %q: %q", inv.Kind, want, last)
+	}
+}
+
+func TestResolveShellBadOverride(t *testing.T) {
+	if _, err := ResolveShell(&Config{Shell: "tanya-no-such-shell-xyz"}); err == nil {
+		t.Error("不可用的 shell 覆盖应报错")
+	}
+}

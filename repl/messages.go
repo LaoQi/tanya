@@ -23,6 +23,17 @@ const (
 )
 
 const (
+	NotifyTitle        = "tanya"
+	MsgNotifyDoneFmt   = "回合结束 · %s"
+	MsgNotifyFailedFmt = "回合失败 · %s"
+	MsgNotifyInputFmt  = "%s 等待输入"
+
+	MsgNotifyPlaceholderFmt = "notify_cmd 含未知占位符 %s（可用: {title} {content} {kind}）"
+	MsgNotifyBraceFmt       = "notify_cmd 花括号不配对: %s"
+	MsgNotifyQuotedFmt      = "notify_cmd 的占位符 %s 紧邻引号：占位符自带引号，去掉外层引号"
+)
+
+const (
 	MsgInterruptKept = "已中断，本回合已完成步骤已保留，继续输入可续接\n"
 	MsgInterruptBare = "已中断\n"
 )

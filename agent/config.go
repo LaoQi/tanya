@@ -18,6 +18,8 @@ type Config struct {
 	ReasoningEffort  string            `yaml:"reasoning_effort"`
 	ShowReasoning    bool              `yaml:"show_reasoning"`
 	Bell             bool              `yaml:"bell"`
+	NotifyOSC        bool              `yaml:"notify_osc"`
+	NotifyCmd        string            `yaml:"notify_cmd"`
 	Path             string            `yaml:"-"`
 	ApiProtocol      string            `yaml:"api_protocol"`
 	UserAgent        string            `yaml:"user_agent"`
@@ -158,6 +160,7 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = DefaultUserAgent
 	}
+	cfg.NotifyCmd = strings.TrimSpace(cfg.NotifyCmd)
 	cfg.ReasoningEffort = normalizeEffort(cfg.ReasoningEffort)
 	rawProtocol := cfg.ApiProtocol
 	cfg.ApiProtocol = normalizeApiProtocol(cfg.ApiProtocol)

@@ -12,7 +12,7 @@
 - token 用量实时显示在提示符（API 实报优先，本地估算兜底），支持显示缓存命中
 - AI 输出 Markdown 渲染（默认开启，stdout 非终端与 plain 输出自动旁路；表格带外框与列对齐）与内置配色主题（`/theme` 切换）
 - 思维链显示（`show_reasoning` 配置或 REPL 内 `/reasoning on`）：思维链以 markdown 渲染并夹在 `─── 思考 ───` / `─── 思考结束 · 3.2s ───` 分隔符之间，同时不再打 `» 思考中` 状态行
-- 终端提示音（`bell` 配置，默认关闭）：对话回合结束（成功或报错，`^C` 中断不响）与 `run_shell` 声明 `interactive`、等待终端输入时各响一声；铃声直接写控制终端，不进 stdout，仅 REPL 交互富档生效，`ask` 单发不参与
+- 注意力通知（默认全关，三项独立开关）：`bell` 响一声、`notify_osc` 写终端原生 OSC 9 通知、`notify_cmd` 调外部程序（`notify-send`/`osascript`/自写脚本）——触发点为对话回合结束（成功或报错，`^C` 中断不响）与 `run_shell` 声明 `interactive`、等待终端输入时；一律尽力而为（失败静默、不保证终端或桌面真的响应），且不走 stdout，仅 REPL 交互富档生效，`ask` 单发不参与
 - AGENTS.md 项目说明自动注入系统提示（全局 + 工作区双层，会话级快照保证 prompt cache 友好）
 - 平台：Linux 与 Windows 为主（Windows 显示与行编辑均已支持：16 色、状态行、markdown、真实宽度、行编辑/历史/Tab 补全/ghost；interactive 命令走控制台继承直通，Windows 侧仅部分实机验证、未全量覆盖，暂不跟踪），macOS 尽力；控制终端原语与终端探测统一在零依赖叶子包 `ctty`，其余平台仅保证可编译
 - 降级粒度独立：显示能力取决于 stdout 是否终端、输入能力取决于 stdin 是否终端，互不连带（支持范围与组合矩阵见 `docs/terminal-caps.md`）
@@ -54,6 +54,20 @@ model: deepseek-v4-flash
 `show_reasoning` 配置项（仅 yaml，默认 `false`）让思维链随对话显示：思维链以与正文一致的 markdown 渲染呈现在 `─── 思考 ───` 与 `─── 思考结束 · 3.2s ───` 两条分隔符之间（`Think` 语义色，时长取该段思考耗时），同时不再打印 `» 思考中` 状态行——`» 等待响应` 心跳也在首个思维链片段到达时收尾。仅 REPL 的 rich 输出档生效（stdout 非终端、`-p`、`-p --verbose`、`ask` 一律不显示），REPL 内 `/reasoning on|off` 可运行时切换；门禁外 `/reasoning on` 会提示「当前输出档不显示思维链」（开关记忆仍保留，切回富档即生效）。
 
 `bell` 配置项（仅 yaml，默认 `false`）在需要把人叫回终端时发声：对话回合结束（成功与报错都响，`^C` 中断不响）与 `run_shell` 声明 `interactive`、终端即将移交时各响一声，响声写入控制终端（`/dev/tty`），因此不进 stdout、不受 `-p` 与重定向影响。仅 REPL 的 rich 输出档生效（stdout 非终端、`-p`、`ask` 一律不响）。提示音时点是「工具开始执行」而非「子进程真的在等输入」，且是否真能听见取决于终端设置（部分终端配为静音或闪烁）。设计见 `docs/design.md`《终端通知》。
+
+`notify_osc` 配置项（仅 yaml，默认 `false`）把通知发给终端本身：写一帧 `ESC ] 9 ; 文本 BEL` 到控制终端，由终端决定怎么呈现（iTerm2 / WezTerm / Ghostty / Windows Terminal 系支持，弹系统通知或角标；Terminal.app 与传统 xterm 系不认，写了就是没有效果）。适合终端在别的桌面/分屏、人不在跟前的场景。与 `bell` 同一门禁、同一写入通道（`/dev/tty`），因此同样不进 stdout、不受重定向影响；tmux/screen 下未做透传、通常会被吞掉。无 env、无 REPL 命令。
+
+`notify_cmd` 配置项（仅 yaml，默认空即关闭）调用外部程序发通知，适合要弹桌面通知中心、发到手机、放自定义音效的场合：
+
+```yaml
+notify_cmd: notify-send -a tanya {title} {content}          # Linux
+notify_cmd: osascript -e 'display notification "{content}" with title "{title}"'   # macOS
+notify_cmd: /path/to/hook {kind} {title} {content}          # 自写脚本，按类别分流
+```
+
+命令交给与 `run_shell` 同一个 shell 执行（`shell` 配置或平台探测的结果），所以管道、重定向、多命令都可用。可用的占位符只有三个：`{title}`（固定 `tanya`）、`{content}`（已处理好的单行文本：`回合结束 · 12.3s` / `回合失败 · 12.3s` / `run_shell 等待输入`，剥掉控制序列、压成一行、超长截断）、`{kind}`（`done` / `failed` / `input`，便于脚本分别处理成功与失败）。**占位符自带引号，配置里直接写 `{content}` 即可，不要再自己加引号**——`"{content}"` 会多出一层字面引号（启动时会报错提示）；写错占位符、花括号不配对同样在启动时报错退出。**`notify_cmd` 里的花括号是保留语法**：命令中出现的任何 `{...}` 都必须正好是这三个占位符，因此 `${VAR}`、awk 的 `'{print $1}'`、brace expansion 这类含花括号的 shell 写法会被启动校验拒绝——复杂逻辑放进外部脚本，配置里只写脚本路径。
+
+外部程序异步执行，不阻塞对话；上一次还没结束就丢弃本次通知（避免堆积），3 秒超时后强制结束，stdout/stderr 一律丢弃（不会污染对话界面），失败静默——程序不存在、没有 D-Bus、没有通知权限都只是"没有效果"。与 `notify_osc` 可以同时开启（各发一份）。设计见 `docs/design.md`《终端通知》。
 
 `theme` 配置项（env `TANYA_THEME`）选择内置配色主题，REPL 内 `/theme` 可运行时切换；`colors`（auto/on/off）控制是否着色；`palette` 可覆盖单个语义色。可用主题与色名见 `config.example.yaml`。
 
