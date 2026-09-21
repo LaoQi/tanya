@@ -42,6 +42,7 @@ render/markup/     内联标记解析
 - `tanya init`：新工作区脚手架，建 `<cwd>/.tanya/sessions/`、询问后建 `<cwd>/.tanya/.gitignore`（内容 `*`）、缺口时建 `<cwd>/AGENTS.md` 骨架，随后与普通模式无异地进入 REPL（见下节）
 - `tanya config`：把内置默认配置示例原样打到 stdout（见下节）
 - 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式、`-n` / `--no-save` 只读会话（见《会话与上下文》存储小节）
+- 用法文本（`-h`/`--help`，选项解析出错时同款）：`repl.UsageHead`（用法行 + 四个入口的模式段 + `选项:` 标题）拼接 flag 包按定义清单生成的选项段，由 `main.writeUsage(w, fs)` 组装（`fs.SetOutput` 用 defer 还原）、`flag.Usage` 在 `flag.Parse` 前指向它（输出仍走 stderr，`-h`/`--help` 由 flag 包以 0 退出）；选项定义抽到 `main.registerFlags(fs)`，`main` 的 `flag.CommandLine` 与用法测试的独立 FlagSet 共用同一份清单。模式段的描述列按**显示宽度**手排（CJK 记 2 列，源码列宽与终端列宽不等），`repl/messages_test.go` 以 `term.Width` 断言四行描述起始列一致、并断言 `ParseCommand` 认识的子命令在用法里都有行；`main_test.go` 断言输出以 `UsageHead` 开头且每个已登记选项名都出现（新增选项不会漏进帮助）。`ask`/`init`/`config` 参数出错时仍只报各自的 `Msg*Usage` 单行，不打印整份用法
 - Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）：REPL 与 `ask` 单发统一走 `signal.Notify(SIGINT)`（`repl.InterruptContext`），要求终端 `ISIG` 开启——readline 侧每回合开始前做终端状态自愈保证该项成立（`docs/interactive-tty.md` §5.9）；命令执行期间子进程组持有终端前台，Ctrl+C 由内核直达子进程组（命令优雅退出），再次按下取消回合
 
 ### ask 单发（外部调用向）

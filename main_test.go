@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"flag"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/repl"
 )
 
 func TestConfigExampleEmbedded(t *testing.T) {
@@ -72,4 +75,27 @@ func expandTilde(p string) string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, p[2:])
+}
+
+func TestUsageStartsWithHead(t *testing.T) {
+	fs := flag.NewFlagSet("tanya", flag.ContinueOnError)
+	registerFlags(fs)
+	var buf bytes.Buffer
+	writeUsage(&buf, fs)
+	if got := buf.String(); !strings.HasPrefix(got, repl.UsageHead) {
+		t.Errorf("用法应以 UsageHead 开头:\n%s", got)
+	}
+}
+
+func TestUsageListsAllFlags(t *testing.T) {
+	fs := flag.NewFlagSet("tanya", flag.ContinueOnError)
+	registerFlags(fs)
+	var buf bytes.Buffer
+	writeUsage(&buf, fs)
+	got := buf.String()
+	fs.VisitAll(func(f *flag.Flag) {
+		if !strings.Contains(got, "-"+f.Name) {
+			t.Errorf("用法应列出选项 -%s:\n%s", f.Name, got)
+		}
+	})
 }

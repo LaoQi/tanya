@@ -87,6 +87,7 @@ tanya -m local        # 会话存到当前目录 .tanya/
 tanya -p              # 纯文本输出：无颜色/状态行/工具块，stdout 只留答案与命令反馈
 tanya -p --verbose    # 纯文本输出但保留工具块与状态行（仍无颜色与光标控制）
 tanya -v              # 显示版本号
+tanya -h              # 用法：四种运行模式与全局选项（--help 同）
 ```
 
 会话存储模式（`-m` 参数 / 配置项 `session_mode` / env `TANYA_SESSION_MODE`，优先级从高到低）：
