@@ -86,6 +86,7 @@ func defaultConfig() *Config {
 		Model:            "deepseek-v4-flash",
 		Temperature:      0.7,
 		ApiProtocol:      "responses",
+		SessionMode:      "auto",
 		Theme:            "nord",
 		UserAgent:        DefaultUserAgent,
 		DataDir:          defaultDataDir(),
@@ -94,6 +95,10 @@ func defaultConfig() *Config {
 		ArchiveThreshold: DefaultArchiveThreshold,
 		ArchiveKeep:      DefaultArchiveKeep,
 	}
+}
+
+func DefaultConfig() *Config {
+	return defaultConfig()
 }
 
 func LoadConfig(path string) (*Config, error) {

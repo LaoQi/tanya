@@ -14,6 +14,8 @@ func TestParseCommand(t *testing.T) {
 		{"ask 单发", []string{"ask", "你好", "世界"}, CmdAsk, "你好 世界"},
 		{"ask 无问题", []string{"ask"}, CmdAsk, ""},
 		{"init", []string{"init"}, CmdInit, ""},
+		{"config", []string{"config"}, CmdConfig, ""},
+		{"config 多余参数", []string{"config", "-o"}, CmdConfig, "-o"},
 		{"init 多余参数", []string{"init", "extra"}, CmdInit, "extra"},
 		{"未知子命令按对话", []string{"Ask", "x"}, CmdREPL, ""},
 	}

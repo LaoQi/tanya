@@ -21,6 +21,9 @@ var (
 //go:embed system_prompt.md
 var systemPromptFile string
 
+//go:embed config.example.yaml
+var configExampleFile string
+
 func main() {
 	showVersion := flag.Bool("v", false, repl.FlagVersion)
 	configPath := flag.String("c", "", repl.FlagConfig)
@@ -47,6 +50,14 @@ func main() {
 
 	if *showVersion {
 		st.Print(fmt.Sprintf("tanya %s\n", version))
+		return
+	}
+	if cmd == repl.CmdConfig {
+		if rest != "" {
+			st.Fail(repl.MsgConfigUsage)
+			exitNow(1)
+		}
+		repl.RunConfig(st, configExampleFile)
 		return
 	}
 	if cmd == repl.CmdAsk && rest == "" {
