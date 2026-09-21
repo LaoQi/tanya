@@ -365,7 +365,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 终端输入（readline 包）
 
-- editor：行编辑/历史，快捷键 Ctrl+A/E/B/F/U/K/W/Y/T/L、Alt+B/F（按空白分词）、Home/End/方向键；render 多行感知（`cursorRow` 精确跟踪光标行，重渲染上移清屏；光标行列由 `layoutCursor` 按终端软换行模型计算——宽字符在行尾放不下时整字换行留空、写满行末的 deferred autowrap，均与终端一致），Size 不可用退化单行；ErrInterrupt 区分 Ctrl+C；Ctrl+L 推屏保历史（一屏减一即 rows-1 个换行——恰把提示符上方内容滚入回滚区、不多滚一行，光标回视口顶部重画提示符，Size 不可用退化 `\x1b[2J` 擦屏），历史保留量受终端 scrollback 容量限制；`SetHistoryFilter` 可挂谓词过滤入史（默认只挡空行，谓词拒绝始终不入），`/archive` 的 y/N 确认读挂全拒过滤器
+- editor：行编辑/历史，快捷键 Ctrl+A/E/B/F/U/K/W/Y/T/L、Alt+B/F（按空白分词）、Home/End/方向键；render 多行感知（`cursorRow` 精确跟踪光标行、`rowsUsed` 记录上一帧占用的物理行数，重渲染先回块首再清掉整块旧行——首行 `\x1b[J`、其余行 `\r\n`+`\x1b[J` 后上移回块首，故内容变矮（ghost 消失、长输入退格变短、菜单关闭）不留尾行，清行数按 `rowsUsed-1` 并以「屏幕高度-1」封顶（块高于屏幕时不再对屏幕外的行发下移——否则每按键把整屏空白推进回滚缓冲，实测滚出量翻倍且多出的全是空白行）；光标行列由 `layoutCursor` 按终端软换行模型计算——宽字符在行尾放不下时整字换行留空、写满行末的 deferred autowrap，均与终端一致），Size 不可用退化单行；Enter/`^C`/`^D`(EOF) 提交或中断前先清 ghost 重绘该行再换行（ghost 只存在于渲染帧、不在 `buf`，否则整行或跨行的置灰文本留在屏上）；ErrInterrupt 区分 Ctrl+C；Ctrl+L 推屏保历史（一屏减一即 rows-1 个换行——恰把提示符上方内容滚入回滚区、不多滚一行，光标回视口顶部重画提示符，Size 不可用退化 `\x1b[2J` 擦屏），历史保留量受终端 scrollback 容量限制；`SetHistoryFilter` 可挂谓词过滤入史（默认只挡空行，谓词拒绝始终不入），`/archive` 的 y/N 确认读挂全拒过滤器
 - Tab 补全菜单：多候选时在输入行下方渲染菜单，选中项反显（`\x1b[7m`）；`↑/↓` 循环选择（菜单打开时不触发历史导航）、`Tab` 循环下一项、`Enter` 仅插入选中项（再次 Enter 提交）、`Esc` 关闭、任意输入关闭菜单正常编辑；单候选直接补全、公共前缀先行扩展的行为不变；候选超 8 行滚动窗口显示
 - keys：ESC 序列/控制键/UTF-8 状态机；width：`term` 薄包装（宽度表/ANSI 剥离/感知截断均由 `render/term` 提供，截断自动复位悬空 SGR 防串色）
 - 终端挂断（pty master 关闭、控制终端消失）：挂断后 `read` 既可能返回 `EIO`，也可能返回 0 字节且无错误——后者与 `VMIN=0/VTIME=1` 的空闲超时（0.1s 后返回 0 字节）在返回值上无法区分。`ReadKey` 以 `poll` 的 `POLLHUP/POLLERR/POLLNVAL` 判挂断、并把 `EIO` 归一为 `io.EOF`，REPL 据此正常退出（修复前挂断后的空闲轮询退化为忙循环：实测约 400 万次 `read`/秒、单核满载、进程永不退出）

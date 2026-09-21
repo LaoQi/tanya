@@ -3,6 +3,7 @@
 tanya 变更记录。新条目加在最上方的日期分节内（没有当天分节就新建一个）；本文件记变更，AGENTS.md 只保留现行约束。
 
 ## 2026-09-21
+- fix(readline,docs): 补全 ghost 提交后残留——`Enter`/`^C`/`^D`(EOF) 先清 ghost 重绘该行再换行（ghost 只活在渲染帧、不在 `buf`，原先回车只移走光标，置灰文本原样留在屏上、跨行时还留到下一物理行）；`Editor.render` 增 `rowsUsed` 记录上一帧占用的物理行数，重渲染先回块首、`\x1b[J` 清首行后逐行 `\r\n`+`\x1b[J` 清完整块再上移回块首——内容变矮（ghost 消失、长输入退格变短、菜单 Esc 关闭）不再留尾行；`Readline` 起始与 `Ctrl+L` 把 `rowsUsed` 复位为 1，避免误清提示符下方已有内容（Ctrl+L 保历史语义不变）；清行数再以「屏幕高度-1」封顶——块高于屏幕（长输入）时不对屏幕外的行发下移，实测该场景滚出屏幕的行数由 1891（其中 940 行空白）压回 951、与修复前基线持平；新增 `readline/vtscreen_test.go`（精简 VT 屏幕模型：`\r \n`、`ESC[J`、`ESC[K`、`ESC[<n>A`、`ESC[<n>C`、SGR 忽略）与屏幕级回归用例（行内 ghost、ghost 跨行、退格收缩、菜单 Esc、`^C` 清空）
 - docs(ctty,design),test(repl): 终端通知收尾——`docs/ctty.md` 补登 `Bell()` 原语与 bell 三份分片（posix/windows/stub）；`docs/design.md` 修正 `ask` 指代（指 CLI 子命令，REPL 内对话回合照常参与通知）与门禁措辞（plain 档与提示可见性一致，`-p --verbose` 有提示但不响）；`repl/notify_test.go` 补分发层用例（斜杠命令、空行经 `Run()` 不通知）并把恒假的 `d < 0` 耗时断言改为「正值且不超过 1 分钟」（负向对照：篡改 start 即报错）
 - feat(repl,ctty,agent,main,docs): 终端提示音与通知抽象——`repl.Notifier`/`Notification`（原因 + 信息：`NotifyTurnDone` 带 `Duration`/`Failed`、`NotifyNeedInput` 带 `Tool`）承接行为，触发语义只两处（`turn.End` 成功与报错、`turn.Handle` 的 `EventToolStart` + `Interactive`），门禁为交互富档 TTY；`BellNotifier()` 是当前唯一实现，经 `ctty.Bell()` 写控制终端 BEL（Windows `CONOUT$`、其余平台 stub），不进 stdout、不沾 `output` 门禁与行首记账；yaml `bell` 默认关闭，opt-in，`ask` 单发不装配也不可达触发点
 - docs(design): 明确 `ask` 的外部调用定位（外部调用向、默认 plain+verbose、刻意不参与交互向注意力反馈），并记录已决取舍：不监听子进程真实读取 stdin 的时刻，只在 `run_shell` 主动声明 `interactive` 时通知

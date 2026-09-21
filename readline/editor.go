@@ -41,6 +41,7 @@ type Editor struct {
 	prompt        string
 	kill          string
 	cursorRow     int
+	rowsUsed      int
 	menu          []Completion
 	menuIdx       int
 	dim           rstyle.Style
@@ -102,6 +103,7 @@ func (e *Editor) Readline(prompt string) (string, error) {
 	e.histIdx = len(e.history)
 	e.draft = ""
 	e.cursorRow = 0
+	e.rowsUsed = 1
 	e.menu = nil
 	e.render("")
 	for {
@@ -146,8 +148,11 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 		e.insert(ev.Rune)
 	case KeyEnter:
 		line := string(e.buf)
+		e.ghost = ""
+		e.render("")
 		fmt.Fprint(e.out, "\r\n")
 		e.cursorRow = 0
+		e.rowsUsed = 1
 		if strings.TrimSpace(line) != "" && e.keepHistory(line) {
 			e.history = append(e.history, line)
 		}
@@ -208,13 +213,19 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 	case KeyCtrlC:
 		e.buf = nil
 		e.pos = 0
+		e.ghost = ""
+		e.render("")
 		fmt.Fprint(e.out, "\r\n")
 		e.cursorRow = 0
+		e.rowsUsed = 1
 		return true, "", ErrInterrupt
 	case KeyCtrlD:
 		if len(e.buf) == 0 {
+			e.ghost = ""
+			e.render("")
 			fmt.Fprint(e.out, "\r\n")
 			e.cursorRow = 0
+			e.rowsUsed = 1
 			return true, "", io.EOF
 		}
 		if e.pos < len(e.buf) {
@@ -242,6 +253,7 @@ func (e *Editor) clearKeepHistory() {
 	if !ok || size.Rows < 1 {
 		fmt.Fprint(e.out, term.ScreenHome())
 		e.cursorRow = 0
+		e.rowsUsed = 1
 		return
 	}
 	var b strings.Builder
@@ -252,6 +264,7 @@ func (e *Editor) clearKeepHistory() {
 	}
 	fmt.Fprint(e.out, b.String())
 	e.cursorRow = 0
+	e.rowsUsed = 1
 }
 
 func (e *Editor) refreshGhost() {
@@ -412,6 +425,7 @@ func (e *Editor) render(extra string) {
 		if cur > 0 {
 			fmt.Fprint(e.out, term.CursorForward(cur))
 		}
+		e.rowsUsed = 1
 		return
 	}
 	cols := size.Cols
@@ -422,6 +436,16 @@ func (e *Editor) render(extra string) {
 		b.WriteString(term.CursorUp(e.cursorRow))
 	}
 	b.WriteString(term.ClearToEOL())
+	clearRows := e.rowsUsed - 1
+	if limit := size.Rows - 1; clearRows > limit {
+		clearRows = limit
+	}
+	for i := 0; i < clearRows; i++ {
+		b.WriteString("\r\n" + term.ClearToEOL())
+	}
+	if clearRows > 0 {
+		b.WriteString(term.CursorUp(clearRows))
+	}
 	b.WriteString(line)
 	menu := e.menuLines(cols)
 	for _, ml := range menu {
@@ -439,5 +463,6 @@ func (e *Editor) render(extra string) {
 		b.WriteString(term.CursorForward(curCol))
 	}
 	e.cursorRow = curRow
+	e.rowsUsed = rows + len(menu)
 	fmt.Fprint(e.out, b.String())
 }
