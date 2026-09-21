@@ -8,6 +8,7 @@ const (
 	CmdREPL Cmd = iota
 	CmdAsk
 	CmdInit
+	CmdConfig
 )
 
 func ParseCommand(args []string) (Cmd, string) {
@@ -19,6 +20,8 @@ func ParseCommand(args []string) (Cmd, string) {
 		return CmdAsk, strings.Join(args[1:], " ")
 	case "init":
 		return CmdInit, strings.Join(args[1:], " ")
+	case "config":
+		return CmdConfig, strings.Join(args[1:], " ")
 	default:
 		return CmdREPL, ""
 	}

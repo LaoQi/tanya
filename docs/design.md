@@ -40,6 +40,7 @@ render/markup/     内联标记解析
 - `tanya`：交互 REPL，维护内存 messages 历史，SSE 逐 token 流式输出
 - `tanya ask "问题"`：单发，输出后退出。单发默认走 plain+verbose 档（`repl.SingleShot` 在 CLI 模式为 rich 时降到 `modePlainVerbose`；显式 `-p` 更窄则保持不动）：无状态行与心跳、无光标控制（工具块追加式）、正文原样直出，颜色仍按终端能力保留，`End()` 按 plain 语义"缺行尾换行才补"
 - `tanya init`：新工作区脚手架，建 `<cwd>/.tanya/sessions/`、询问后建 `<cwd>/.tanya/.gitignore`（内容 `*`）、缺口时建 `<cwd>/AGENTS.md` 骨架，随后与普通模式无异地进入 REPL（见下节）
+- `tanya config`：把内置默认配置示例原样打到 stdout（见下节）
 - 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式、`-n` / `--no-save` 只读会话（见《会话与上下文》存储小节）
 - Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）：REPL 与 `ask` 单发统一走 `signal.Notify(SIGINT)`（`repl.InterruptContext`），要求终端 `ISIG` 开启——readline 侧每回合开始前做终端状态自愈保证该项成立（`docs/interactive-tty.md` §5.9）；命令执行期间子进程组持有终端前台，Ctrl+C 由内核直达子进程组（命令优雅退出），再次按下取消回合
 
@@ -56,7 +57,15 @@ render/markup/     内联标记解析
 - 忽略文件走交互确认：`ctty.Open()` 打开 `/dev/tty` 成功才提问（`是否…？[y/N]`，仅 `y`/`yes` 为真），失败即非交互（管道调用、无控制终端、Windows stub）不提问也不创建，报告里以 `MsgInitSkipNoTTY` 说明并给出手动命令；用户拒绝为 `MsgInitSkipDeclined`。既有 `.gitignore` 时不再提问
 - 报告：`repl.RunInit` 编排（头行 → 询问 → `agent.InitWorkspace` → 条目与会话目录行 + 一行提示），走 `st.Print`（KindNotice，plain 下仍可见），标记着色只用 `sem.Ok`/`sem.Dim`；条目路径相对工作区显示，头行与会话目录经 `initPath` 做 `~` 归约（不用提示符的 `shortPath` 缩写，避免报错路径被压缩）；`SessionDir` 取自 `resolveSessionDir(cfg, cwd)`，与 `agent.New` 同函数同输入，显式 `-m global` 时如实报告 global 落点（`.tanya/` 标记照建）
 - 失败即中止：任一项创建失败（`AGENTS.md` 是目录、`sessions` 是文件、写入出错）返回 `MsgInitFailFmt` 错误，`main` 打印后以 1 退出、不进 REPL；幂等使重试安全
-- CLI：`tanya init` 无参数（带多余参数报 `MsgInitUsage`），`-n` 只读会话与 init 不冲突（骨架照建，会话不写盘）；`repl.ParseCommand` 统一解析 `ask`/`init`，未知首 token 保持旧行为（忽略并进 REPL）
+- CLI：`tanya init` 无参数（带多余参数报 `MsgInitUsage`），`-n` 只读会话与 init 不冲突（骨架照建，会话不写盘）；`repl.ParseCommand` 统一解析 `ask`/`init`/`config`，未知首 token 保持旧行为（忽略并进 REPL）
+
+### config 子命令（`repl/configflow.go`）
+
+默认配置示例原文在仓库根 `config.example.yaml`，`main` 经 `//go:embed` 编译期嵌入（与 `system_prompt.md` 同法，仍是单二进制），`repl.RunConfig` 原样写到 stdout（`st.Print` / KindNotice，rich 与 plain 两档同样可见，文本末缺换行则补一个），**不加任何提示行**——输出与仓库里的示例逐字节一致，`tanya config > ~/.config/tanya/config.yaml` 落盘即是一份带注释的可用配置。
+
+- 执行位置：`main` 在 `-v` 之后、`agent.LoadConfig` 之前分支返回——不读配置文件、不探测终端、不装信号，配置文件损坏或缺失、无控制终端、被重定向时同样可用；无参数（带多余参数报 `MsgConfigUsage`、以 1 退出，对齐 `init`）
+- 不提供写文件开关（覆盖语义与目录创建规则不值当）、不与 `init` 联动自动生成 `config.yaml`、不探测已有配置；需要落盘就是 shell 重定向
+- 示例中的显式键是「文档也是默认值」，由根包 `main_test.go` 与 `agent.DefaultConfig()` 逐项比对守护（全部显式键含 `api_key`，`data_dir` 允许 `~` 写法、比对前展开，另以 `yaml.Node` 取示例顶层键集合断言无漏比对的新增显式键）；示例里注释掉的项（`api_protocol`/`theme`/`auto_archive` 等）保持代码默认值，不参与比对
 
 ## LLM 接入
 
@@ -407,6 +416,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `shell` | 空 | run_shell 使用的 shell（名字或绝对路径）；空则平台探测（linux/darwin bash→sh→ash，windows pwsh→powershell），全部落空启动报错 |
 
 env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_API_PROTOCOL` / `TANYA_DATA_DIR` / `TANYA_SESSION_MODE` / `TANYA_THEME` / `TANYA_USER_AGENT` / `TANYA_SHELL` / `TANYA_TOOL_OUTPUT_LINES`。
+
+完整示例文本（带注释、含全部可配项）经 `//go:embed` 嵌在二进制里，`tanya config` 可直接输出（见《config 子命令》）。
 
 配色主题：`render/theme` 内置 `Scheme` 聚合（语义色 + 提示符模板 + markdown 样式集），**无全局可变状态**——`Lookup` 取方案、`Apply(sem, palette)` 纯函数叠加覆盖；REPL 持有当前 `Scheme`/`Semantics`，`/theme [name]` 切换后语义色、渲染器与提示符即时重建（palette 重放），readline 通过 `SetStyles` 注入。默认启动主题取 `theme` 配置，校验由 `repl.ValidateTheme` 承担（agent 不依赖表现层）。
 

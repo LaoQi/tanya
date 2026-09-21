@@ -20,6 +20,7 @@ const (
 	MsgInitSessionFmt = "  会话目录 %s\n"
 	MsgInitHint       = "提示: 直接描述需求即可开工，可让 AI 读完目录后补全 AGENTS.md\n"
 	MsgInitUsage      = "用法: tanya init\n"
+	MsgConfigUsage    = "用法: tanya config\n"
 )
 
 const (
