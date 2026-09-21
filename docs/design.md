@@ -82,7 +82,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - **usage 映射**：`input_tokens`→PromptTokens、`output_tokens`→CompletionTokens、`input_tokens_details.cached_tokens`→`CacheHit()` 既有通道、`output_tokens_details.reasoning_tokens`→`Usage.ReasoningTokens`。
 - **404 提示**：第三方端点不支持时错误文案附带切换 `api_protocol: chat` 的指引。
 
-**思维链回传与缓存（实现红线）**：reasoning `content` 随会话 jsonl 明文持久化，后续请求**原样回传**（取 `response.completed` 终态、不做任何截断/改写/规范化），以维持 DeepSeek 前缀缓存命中——history 段逐字节稳定即可命中「用户输入结束/模型输出结束」位置的缓存前缀单元；会话经 `/load` 恢复后仅需同目录同环境（env 段在 `agent.New` 构造期定格、进程内逐字节不变）即可命中。jsonl 序列化 HTML 转义（`\u00xx`）只在磁盘表示，读回还原，不影响请求构造。
+**思维链回传（实现红线：内容保真，兼收缓存收益）**：reasoning `content` 随会话 jsonl 明文持久化，后续请求**原样回传**（取 `response.completed` 终态、不做任何截断/改写/规范化），以维持 DeepSeek 前缀缓存命中——history 段逐字节稳定即可命中「用户输入结束/模型输出结束」位置的缓存前缀单元；会话经 `/load` 恢复后仅需同目录同环境（env 段在 `agent.New` 构造期定格、进程内逐字节不变）即可命中。jsonl 序列化 HTML 转义（`\u00xx`）只在磁盘表示，读回还原，不影响请求构造。
 
 ### 协议无关约束
 
@@ -135,7 +135,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - shell 解析（`newShellTool`，Agent 构造时一次性解析并定格）：
   - 优先级：配置覆盖（`config.yaml shell:` / env `TANYA_SHELL`，名字或绝对路径，任意 shell 名允许，未知 basename 按 posix `-c` 处理）> 平台自动探测
   - 自动探测：候选链取自平台抽象 `platform.Candidates`（posix = `bash` → `sh` → `ash`；windows = `pwsh` → `powershell`；stub 平台保底同一 posix 链），遍历算法 `firstAvailable` 平台无关、候选可注入，测试不必依赖当前 GOOS；windows 无 PowerShell 7 时兜底 Windows PowerShell 5.1（不回退 cmd，两者均按 `-NoProfile -NonInteractive -Command` 调用）
-  - 全部落空（含配置的 shell 不存在）：解析返回错误（`MsgNoShellFmt`/`MsgShellOverrideFmt`，含候选清单与配置提示），`agent.New` 立即透传，`main.go` 打印后以 1 退出——无降级路径，`shellTool.profile` 在其后恒非 nil，profile 的非空成为不变量（`run_shell` 恒定注册、env 段恒定输出 SHELL/TIMEOUT/OUTPUT 行、system prompt 恒为 `DefaultSystemPrompt`）
+  - 全部落空（含配置的 shell 不存在）：解析返回错误（`MsgNoShellFmt`/`MsgShellOverrideFmt`，含候选清单与配置提示），`agent.New` 立即透传，`main.go` 打印后以 1 退出——无降级路径，`shellTool.profile` 在其后恒非 nil，profile 的非空成为不变量（`run_shell` 恒定注册、env 段恒定输出 SHELL/TIMEOUT/OUTPUT 行、system prompt 恒定非空——内置提示词由 `main` 注入，见《系统提示与缓存友好》）
 - 程序探测：profile 就绪后对 `platform.Programs` 逐个 LookPath（posix：ls/cat/head/tail/grep/rg/fd/sed/awk/find/sort/wc/cut/tr/xargs/git/curl/wget/go/node/python；windows：ls/cat/head/tail/grep/sed/awk/wc/cut/tr/xargs/diff/tee/uniq＋rg/fd/git/curl/wget/tar/ssh/go/node/python＋where/findstr；stub 平台为空；windows 清单刻意不含 `find`/`sort`——System32 同名程序是字符串搜索/代码页排序，语义与 GNU 版不同，探测到会误导模型），存在的拼入 run_shell 工具描述 `可用程序: ...`，仅在工具描述出现，不重复注入 env 段
 - 输出捕获：stdout/stderr 各保留头 30000 字节 + 尾 30000 字节（`streamCapture` 滚动窗口），中间字节计数丢弃，模型仍可见首尾内容；`finish()` 时经 `toUTF8` 出仓——字节整体是合法 UTF-8 即原样直通（posix 恒等、零开销），否则路由到 `platform.DecodeOutput` 兜底转码（windows：按 `ctty.FallbackCP()` 给出的快照代码页经 `MultiByteToWideChar → WideCharToMultiByte(CP_UTF8)` 转换，截断缝上的半个多字节字符落 U+FFFD 而非整体失败；背景与策略见 `docs/terminal-caps.md` B4）。middle==0 的头尾连续片段拼接为单缓冲后整体解码，避免多字节序列被 head/tail 边界切断
 - 组件化（`docs/shell-tool.md`）：`shellTool` 是 shell 执行层唯一所有者，`profile`/`programs`/`workspace`/`home`/`bridge` 在装配期定格、之后只读（`workspace` 随 `/switch` 由 `Agent.loadWorkspace` 换新实例），`run` 每调用状态全在栈上（可重入）；唯一可变字段是终端租约 `ttyMu`——真实终端进程内只有一份，桥接与前台移交两条路径都在锁内。组件内不读环境（无 `os.Getwd`/`os.UserHomeDir`/`exec.LookPath`/`runtime.GOOS`），`agent.New` 装配点各读一次注入。包级可变状态（`shellRuntime*`/`shellLookPath`/`ttyBridgeMu`+`ttyBridgeCur`）已删除；`envSection`/`describeShell`/`runShellParams` 为纯函数（组件内不读 GOOS：平台名来自构造期定格的平台表）；工具清单由 `allTools()` 显式组装、经 `toolRegistry.defs()` 在 `NewClient` 构造期注入 client（请求组装不再伸手读包级清单）
@@ -225,7 +225,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 ### 归档卷
 
 - 归档把活动会话打包为标准 zip 卷，落 `<workspace>/archive/archive-<20060102-150405>.zip`；一次 `/archive` 生成一卷、**写入后不可变**（不重写、不删条目、不做「解档回活动区」），继续对话由 `/fork` 承担
-- 卷内 entry 名 `<会话 id>.jsonl`，`Method: Deflate`，`Modified` 取原文件 mtime，**entry 数据为原 jsonl 逐字节**（不裁剪、不重排、不丢 reasoning/tool_calls）：prompt cache 红线在归档路径上的延续
+- 卷内 entry 名 `<会话 id>.jsonl`，`Method: Deflate`，`Modified` 取原文件 mtime，**entry 数据为原 jsonl 逐字节**（不裁剪、不重排、不丢 reasoning/tool_calls）：内容保真要求同样覆盖归档路径（顺带对缓存无损）
 - entry comment（zip per-entry comment，单行 JSON）：`{"v":1,"msgs":<条数>,"summary":"<首条 user 消息，单行化、≤200 rune>"}`，超长时缩短 summary 并置 `"trunc":true`；**硬上限 4 KiB**——Go 在 comment > 65535 字节时静默写坏中央目录（实测 65536 读回 0 字节），故 marshal 后校验、超限降级
 - 卷级 comment（`zip.Writer.SetComment`）：`{"v":1,"workspace":"<工作区>","created":"<RFC3339>","sessions":<条数>}`
 - 归档筛选（`agent.ArchiveOptions`）：按 id 降序后先按 `Keep`（保留最新 N 个，0 = 不限）截取，再按 `OlderThan`（文件 mtime，0 = 不限）过滤，`Exclude` 恒为当前会话，另加**空闲保护**（mtime 距今 < 5 分钟的文件跳过，防另一实例正在追加）；id 已存在于任一卷则跳过（幂等）；`DryRun` 只出报告（`/archive` 的预览阶段），不建目录、不落卷、不删源文件
@@ -264,10 +264,11 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## 系统提示与缓存友好
 
-- 组装规则：`DefaultSystemPrompt`（内置，固定不可配，`system_prompt` 配置项已移除）+ 全局 `~/.config/tanya/AGENTS.md`（存在时）+ 工作区 `./AGENTS.md`（存在时），各段以 `# 全局说明`/`# 项目说明` 标题分隔，文件缺失/空白跳过
+- 组装规则：**内置默认提示词**（原文在仓库根 `system_prompt.md`，`main` 经 `//go:embed` 编译期嵌入，构造时经 `agent.WithSystemPrompt` 注入；`agent` 不再内置文本，配置项 `system_prompt` 早已移除，故内容仍不可配、改后需重新编译）+ 全局 `~/.config/tanya/AGENTS.md`（存在时）+ 工作区 `./AGENTS.md`（存在时），各段以 `# 全局说明`/`# 项目说明` 标题分隔，文件缺失/空白跳过，分隔空行仅在前段非空时补（空 base 下首段直接起步、不留前导空行，仅库用法可达）
 - 规则与事实分离：persistPrompt（上述规则）在 `/new`/`/load` 时组装并冻结进会话首行；每次请求的 system = persistPrompt + 空行 + `Agent.env`（环境事实在 `agent.New` 构造期算一次、冻结进内存，既不持久化也不再重算）
-- 快照机制：`/new` 与 `/load` 时刻读取 AGENTS.md 组装快照；会话进行中零文件 IO，快照冻结；旧格式会话（system 首行含历史环境段）原样保留并标记，`/load` 时提示 `/new`
+- 快照机制：注入文本在 `promptBuilder` 构造期归一化（`\r\n`→`\n`、去尾部换行），保证注入字节确定；**快照为空则不写 system 行**（与 `loadFrom` 的「首行 system 且非空才算快照」对称，空提示词的库用法不会在文件里留下空快照行，载入时按当前配置重建）——`/new` 与 `/load` 时刻读取 AGENTS.md 组装快照；会话进行中零文件 IO，快照冻结；旧格式会话（system 首行含历史环境段）原样保留并标记，`/load` 时提示 `/new`
 - 缓存收益：history 全程 append-only，system 两段（规则快照 + 环境段）在本进程内逐字节恒定，同一会话内请求前缀不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中。env 段自 2026-09-14 起在装配期定格（此前的 `WORKSPACE` 行是 system 内唯一会自行变化的输入，已随本次收口删除）；`/switch` 换工作区时 env 段与工具描述一并随新工作区重建，本就不复用的缓存前缀随之作废
+- **不变性的性质与范围**（2026-09-21 补）：本条目的「逐字节不变」是为命中 provider 前缀缓存服务的**优化手段**，不是功能红线，其保证范围限定为「同一二进制 + 会话首行快照未被改写」——同一进程内的多轮交互、以及重新打开刚写过、首行快照原样还原的旧会话（`/load`，provider 侧缓存未过期，实测 TTL ≥ 600s），前缀都仍逐字节相同、照常命中；`/new` 时 AGENTS.md 未变亦跨会话命中。**跨版本不在保证范围内**：二进制更新后默认系统提示词、工具清单或 env 段任一变化，`/load` 旧会话首轮 system 就与当初不同，这是被允许的，代价只是该会话首轮 cache miss（会话照常读写、`/fork` 不受影响，落盘快照不被改写）。要守住的是**进程内**稳定性（同一进程内不因请求期输入改变前缀），而非跨版本的字节相同；改模型侧文案时按 `docs/cache-probe.md` 的台阶估代价、尽量把易变内容放靠后（工具描述尾部最省）即可，不必为字节不变牺牲功能或可读性
 - 缓存命中捕获（DeepSeek `prompt_cache_hit_tokens` / OpenAI `prompt_tokens_details.cached_tokens`）经 `Agent.Stats()` 的累计字段供提示符占位符显示
 - 缓存机制的实测结论（64-token 块粒度、tools 段在序列化尾部的代价台阶、各后端写入延迟差异）见 `docs/cache-probe.md`
 
@@ -418,7 +419,7 @@ pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（�
 
 - 定位：只注入模型无法廉价自探的最小事实集——平台事实与 run_shell 执行契约；工具清单不注入 prompt（function calling 已完整提供），工具版本/分支/目录列表等易变信息模型可按需自探，一律不预注入
 - 组装：`runtimePrompt()` = persistPrompt（规则，冻结）+ 空行 + `Agent.env`；`envSection(cwd, profile)` 在 `agent.New` 调用一次、结果定格进 `Agent.env`，会话期间（含 `/new`、`/load`）不重算；无注入点、无 `probe` 字段（曾有 `envProbeFunc` 注入与 `probe` 配置项，2026-09-14 收口删除）
-- 为何定格：system 位于序列化后的 messages/instructions 之前，其任何字节变化都击穿其后全部 history 与 tools 的缓存前缀（实测量化见 `docs/cache-probe.md`《落实：env 段的动态源》；历史案例 `WORKSPACE` 行增删一行：命中率 96.63% → 3.21%）。定格同时是新增字段的准入红线：只收构造期确定的事实，永不引入请求期/TTL 类输入
+- 为何定格：system 位于序列化后的 messages/instructions 之前，其任何字节变化都击穿其后全部 history 与 tools 的缓存前缀（实测量化见 `docs/cache-probe.md`《落实：env 段的动态源》；历史案例 `WORKSPACE` 行增删一行：命中率 96.63% → 3.21%）。定格同时是新增字段的准入红线：只收构造期确定的事实，永不引入请求期/TTL 类输入（定格是**进程内**稳定性要求，跨版本无此约束，见《系统提示与缓存友好》）
 - 取舍：环境事实定格在进程启动时刻（换目录/换机需重启进程；本进程 cwd 恒定，实际不构成限制）；目录内容、分支、工具版本等项目事实一律不注入，由模型按需自探（`ls`/`git rev-parse` 等）
 - 输出格式（7 行紧凑键值，全部源自构造期事实——`runtime` 平台常量、cwd 快照、`shellProfile`、`shell.go` 契约常量；同 cwd 下字节级确定）：
 

@@ -7,6 +7,7 @@ import (
 )
 
 type promptBuilder struct {
+	base       string
 	cwd        string
 	globalPath string
 	read       func(string) string
@@ -14,10 +15,14 @@ type promptBuilder struct {
 	legacy     bool
 }
 
-func newPromptBuilder(cwd, globalPath string, read func(string) string) *promptBuilder {
-	p := &promptBuilder{cwd: cwd, globalPath: globalPath, read: read}
+func newPromptBuilder(base, cwd, globalPath string, read func(string) string) *promptBuilder {
+	p := &promptBuilder{base: normalizePrompt(base), cwd: cwd, globalPath: globalPath, read: read}
 	p.reset()
 	return p
+}
+
+func normalizePrompt(s string) string {
+	return strings.TrimRight(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
 }
 
 func (p *promptBuilder) reset() {
@@ -26,12 +31,18 @@ func (p *promptBuilder) reset() {
 }
 
 func (p *promptBuilder) build() string {
-	prompt := DefaultSystemPrompt
+	prompt := p.base
 	if global := p.read(p.globalPath); global != "" {
-		prompt += "\n\n# 全局说明（~/.config/tanya/AGENTS.md）\n\n" + global
+		if prompt != "" {
+			prompt += "\n\n"
+		}
+		prompt += "# 全局说明（~/.config/tanya/AGENTS.md）\n\n" + global
 	}
 	if project := p.read(filepath.Join(p.cwd, "AGENTS.md")); project != "" {
-		prompt += "\n\n# 项目说明（AGENTS.md）\n\n" + project
+		if prompt != "" {
+			prompt += "\n\n"
+		}
+		prompt += "# 项目说明（AGENTS.md）\n\n" + project
 	}
 	return prompt
 }
@@ -50,6 +61,9 @@ func (p *promptBuilder) system() string { return p.snapshot }
 func (p *promptBuilder) legacyPrompt() bool { return p.legacy }
 
 func (p *promptBuilder) runtime(env string) string {
+	if p.snapshot == "" {
+		return env
+	}
 	if env == "" {
 		return p.snapshot
 	}

@@ -11,25 +11,19 @@ import (
 	"time"
 )
 
-const DefaultSystemPrompt = `你是 tanya（兼容 Pi/opencode），运行在终端中的极简编码代理。
-通过 run_shell 工具读取文件、执行命令、修改代码，完成用户交给的任务。
-习惯先制定方案：动手前列出实施计划并敲定每个实施细节，仅在用户明确同意后才开始实施。
-回答简洁直接；调用工具前用一句话说明要做什么；操作文件时明确显示路径。
-文件操作（ls、rg、find、cat 等）优先通过 run_shell 执行。
-坚持迭代直到任务完成：修改后主动验证（编译、测试、运行），确认无误再收尾。`
-
 type Agent struct {
-	cfg       *Config
-	client    *Client
-	tools     *toolRegistry
-	workspace string
-	home      string
-	bridge    TTYBridge
-	history   []Message
-	env       string
-	prompt    *promptBuilder
-	store     *sessionStore
-	stats     usageStats
+	cfg        *Config
+	client     *Client
+	tools      *toolRegistry
+	workspace  string
+	home       string
+	bridge     TTYBridge
+	history    []Message
+	env        string
+	basePrompt string
+	prompt     *promptBuilder
+	store      *sessionStore
+	stats      usageStats
 }
 
 type ResponseInfo struct {
@@ -42,8 +36,9 @@ type ResponseInfo struct {
 }
 
 type Options struct {
-	noSave bool
-	bridge TTYBridge
+	noSave       bool
+	bridge       TTYBridge
+	systemPrompt string
 }
 
 type Option func(*Options)
@@ -56,6 +51,10 @@ func WithTTYBridge(b TTYBridge) Option {
 	return func(o *Options) { o.bridge = b }
 }
 
+func WithSystemPrompt(s string) Option {
+	return func(o *Options) { o.systemPrompt = s }
+}
+
 func New(cfg *Config, opts ...Option) (*Agent, error) {
 	var o Options
 	for _, opt := range opts {
@@ -66,7 +65,7 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 		return nil, err
 	}
 	home, _ := os.UserHomeDir()
-	a := &Agent{cfg: cfg, workspace: cwd, home: home, bridge: o.bridge}
+	a := &Agent{cfg: cfg, workspace: cwd, home: home, bridge: o.bridge, basePrompt: o.systemPrompt}
 	if err := a.loadWorkspace(cwd, o.noSave); err != nil {
 		return nil, err
 	}
@@ -92,7 +91,7 @@ func (a *Agent) loadWorkspace(dir string, noSave bool) error {
 	}
 	a.workspace = dir
 	a.env = envSection(dir, tool.profile)
-	a.prompt = newPromptBuilder(dir, globalAgentsPath(), readAgentsFile)
+	a.prompt = newPromptBuilder(a.basePrompt, dir, globalAgentsPath(), readAgentsFile)
 	a.store = newSessionStore(sessionDir, archiveDir, dir, noSave)
 	a.tools = newToolRegistry(allTools(tool, a)...)
 	a.client = NewClient(a.cfg, a.tools.defs())

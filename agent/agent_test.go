@@ -23,12 +23,14 @@ func isolatePromptEnv(t *testing.T) {
 	})
 }
 
+const testBasePrompt = "BASE"
+
 func newTestAgent(t *testing.T) *Agent {
 	t.Helper()
 	isolatePromptEnv(t)
 	cfg := defaultConfig()
 	cfg.DataDir = t.TempDir()
-	a, err := New(cfg)
+	a, err := New(cfg, WithSystemPrompt(testBasePrompt))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,8 +358,8 @@ func writeAgents(t *testing.T, path, content string) {
 
 func TestSystemPromptAgents(t *testing.T) {
 	a := newTestAgent(t)
-	if a.systemPrompt() != DefaultSystemPrompt {
-		t.Errorf("无 AGENTS.md 应仅默认提示: %q", a.systemPrompt())
+	if a.systemPrompt() != testBasePrompt {
+		t.Errorf("无 AGENTS.md 应仅注入的默认提示: %q", a.systemPrompt())
 	}
 
 	cwd, err := os.Getwd()
@@ -366,7 +368,7 @@ func TestSystemPromptAgents(t *testing.T) {
 	}
 	writeAgents(t, filepath.Join(cwd, "AGENTS.md"), "项目规则 A\n")
 	a.NewSession()
-	want := DefaultSystemPrompt + "\n\n# 项目说明（AGENTS.md）\n\n项目规则 A"
+	want := testBasePrompt + "\n\n# 项目说明（AGENTS.md）\n\n项目规则 A"
 	if a.systemPrompt() != want {
 		t.Errorf("工作区注入异常: %q", a.systemPrompt())
 	}
@@ -380,7 +382,7 @@ func TestSystemPromptAgents(t *testing.T) {
 	}
 	writeAgents(t, filepath.Join(home, ".config", "tanya", "AGENTS.md"), "全局规则 G")
 	a.NewSession()
-	want = DefaultSystemPrompt +
+	want = testBasePrompt +
 		"\n\n# 全局说明（~/.config/tanya/AGENTS.md）\n\n全局规则 G" +
 		"\n\n# 项目说明（AGENTS.md）\n\n项目规则 A"
 	if a.systemPrompt() != want {
@@ -396,7 +398,7 @@ func TestSystemPromptBlankFile(t *testing.T) {
 	}
 	writeAgents(t, filepath.Join(cwd, "AGENTS.md"), "  \n\t\n")
 	a.NewSession()
-	if a.systemPrompt() != DefaultSystemPrompt {
+	if a.systemPrompt() != testBasePrompt {
 		t.Errorf("空白文件应视为不存在: %q", a.systemPrompt())
 	}
 }

@@ -711,7 +711,7 @@ func TestForkFromArchived(t *testing.T) {
 
 func TestForkFromActiveSession(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "回复"})
-	a, err := New(m.config())
+	a, err := New(m.config(), WithSystemPrompt(testBasePrompt))
 	if err != nil {
 		t.Fatal(err)
 	}
