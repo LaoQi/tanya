@@ -4,8 +4,10 @@ import (
 	_ "embed"
 	"flag"
 	"fmt"
-	"github.com/LaoQi/tanya/render/term"
+	"io"
 	"os"
+
+	"github.com/LaoQi/tanya/render/term"
 
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/ctty"
@@ -24,21 +26,38 @@ var systemPromptFile string
 //go:embed config.example.yaml
 var configExampleFile string
 
+type cliFlags struct {
+	showVersion *bool
+	configPath  *string
+	sessionMode *string
+	noSave      *bool
+	plain       *bool
+	verbose     *bool
+}
+
+// registerFlags 登记全部命令行选项（main 与用法测试共用同一份定义）。
+func registerFlags(fs *flag.FlagSet) *cliFlags {
+	f := &cliFlags{}
+	f.showVersion = fs.Bool("v", false, repl.FlagVersion)
+	f.configPath = fs.String("c", "", repl.FlagConfig)
+	f.sessionMode = fs.String("m", "", repl.FlagMode)
+	f.noSave = fs.Bool("n", false, repl.FlagNoSave)
+	fs.BoolVar(f.noSave, "no-save", false, repl.FlagNoSave)
+	f.plain = fs.Bool("p", false, repl.FlagPlain)
+	fs.BoolVar(f.plain, "plain", false, repl.FlagPlain)
+	f.verbose = fs.Bool("verbose", false, repl.FlagVerbose)
+	return f
+}
+
 func main() {
-	showVersion := flag.Bool("v", false, repl.FlagVersion)
-	configPath := flag.String("c", "", repl.FlagConfig)
-	sessionMode := flag.String("m", "", repl.FlagMode)
-	noSave := flag.Bool("n", false, repl.FlagNoSave)
-	flag.BoolVar(noSave, "no-save", false, repl.FlagNoSave)
-	plain := flag.Bool("p", false, repl.FlagPlain)
-	flag.BoolVar(plain, "plain", false, repl.FlagPlain)
-	verbose := flag.Bool("verbose", false, repl.FlagVerbose)
+	f := registerFlags(flag.CommandLine)
+	flag.Usage = func() { writeUsage(os.Stderr, flag.CommandLine) }
 	flag.Parse()
 	ctty.EnsureUTF8()
 	defer ctty.RestoreUTF8()
 
 	cmd, rest := repl.ParseCommand(flag.Args())
-	mode, err := repl.ParseMode(*plain, *verbose)
+	mode, err := repl.ParseMode(*f.plain, *f.verbose)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
 		exitNow(1)
@@ -48,7 +67,7 @@ func main() {
 	}
 	st := repl.NewStreams(os.Stdout, os.Stderr, mode)
 
-	if *showVersion {
+	if *f.showVersion {
 		st.Print(fmt.Sprintf("tanya %s\n", version))
 		return
 	}
@@ -72,7 +91,7 @@ func main() {
 	repl.Version = version
 	repl.BuildTime = buildTime
 
-	cfg, err := agent.LoadConfig(*configPath)
+	cfg, err := agent.LoadConfig(*f.configPath)
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
@@ -92,12 +111,12 @@ func main() {
 	case "off":
 		prof.Colors = term.LevelNone
 	}
-	if *plain {
+	if *f.plain {
 		prof.Colors = term.LevelNone
 	}
 	term.SetProfile(prof)
-	if *sessionMode != "" {
-		cfg.SessionMode = *sessionMode
+	if *f.sessionMode != "" {
+		cfg.SessionMode = *f.sessionMode
 	}
 	if cmd == repl.CmdInit {
 		if err := repl.RunInit(st, sem, cfg); err != nil {
@@ -110,7 +129,7 @@ func main() {
 	readline.InitTerminalGuard()
 	readline.SecureTerminal()
 	a, err := agent.New(cfg,
-		agent.NoSave(*noSave),
+		agent.NoSave(*f.noSave),
 		agent.WithTTYBridge(readline.NewTTYBridge()),
 		agent.WithSystemPrompt(systemPromptFile))
 	if err != nil {
@@ -156,6 +175,15 @@ func main() {
 	if code := ctty.ExitStatus(); code != 0 {
 		exitNow(code)
 	}
+}
+
+// writeUsage 打印用法：模式段为固定文案，选项段由 flag 包按定义清单生成。
+func writeUsage(w io.Writer, fs *flag.FlagSet) {
+	fmt.Fprint(w, repl.UsageHead)
+	old := fs.Output()
+	fs.SetOutput(w)
+	defer fs.SetOutput(old)
+	fs.PrintDefaults()
 }
 
 // buildNotifier 按配置组装通知行为（bell / OSC 9 / 外部程序，各自独立开关），全关时为 nil。

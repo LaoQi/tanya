@@ -208,6 +208,17 @@ func welcomeText() string {
 	return welcomLogo + "\n输入 /help 查看命令   " + ver + "\n\n"
 }
 
+const UsageHead = `用法: tanya [模式] [选项]
+
+模式:
+  tanya                交互 REPL（默认）：多轮对话，流式输出，会话落盘
+  tanya ask "问题"     单发提问，输出后退出（默认纯文本 + verbose 档，供父代理解析）
+  tanya init           新工作区脚手架：建 .tanya/ 与 AGENTS.md 骨架，随后进入 REPL
+  tanya config         把内置默认配置示例原样写到 stdout（可重定向为配置文件）
+
+选项:
+`
+
 const (
 	FlagConfig  = "配置文件路径（默认 ~/.config/tanya/config.yaml）"
 	FlagMode    = "会话存储模式 local/global/auto（默认 auto）"
