@@ -412,3 +412,24 @@ func TestLoadConfigAutoArchiveValues(t *testing.T) {
 		t.Errorf("yaml 覆盖失败: %+v", cfg)
 	}
 }
+
+func TestLoadConfigNotify(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := "notify_osc: true\nnotify_cmd: \"  notify-send -a tanya {title} {content}  \"\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.NotifyOSC {
+		t.Error("notify_osc 未生效")
+	}
+	if cfg.NotifyCmd != "notify-send -a tanya {title} {content}" {
+		t.Errorf("notify_cmd 应去空白: %q", cfg.NotifyCmd)
+	}
+	if cfg := defaultConfig(); cfg.NotifyOSC || cfg.NotifyCmd != "" {
+		t.Errorf("通知默认应为关闭: osc=%v cmd=%q", cfg.NotifyOSC, cfg.NotifyCmd)
+	}
+}

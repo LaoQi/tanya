@@ -57,6 +57,25 @@ func resolveProfile(override string, lookPath func(string) (string, error)) (*sh
 	return firstAvailable(platform.Candidates, lookPath)
 }
 
+// ShellInvocation 是一次性旁路执行（终端通知等）复用的 shell 入口：Argv 为解释器路径 + 固定参数，Kind 决定引号规则。
+type ShellInvocation struct {
+	Argv []string
+	Kind ShellKind
+}
+
+// ResolveShell 按 run_shell 同一套解析（cfg.Shell 覆盖 > 平台探测）出 shell 入口，供通知命令等旁路复用。
+func ResolveShell(cfg *Config) (ShellInvocation, error) {
+	profile, err := resolveProfile(cfg.Shell, exec.LookPath)
+	if err != nil {
+		return ShellInvocation{}, err
+	}
+	argv := make([]string, 0, len(profile.ExtraArgs)+2)
+	argv = append(argv, profile.Path)
+	argv = append(argv, profile.ExtraArgs...)
+	argv = append(argv, profile.arg())
+	return ShellInvocation{Argv: argv, Kind: profile.Kind}, nil
+}
+
 func firstAvailable(candidates []string, lookPath func(string) (string, error)) (*shellProfile, error) {
 	for _, name := range candidates {
 		if p, err := lookPath(name); err == nil {

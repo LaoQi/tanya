@@ -65,6 +65,7 @@
 | `SaveCursor(tty *os.File) bool` | 写 `DECSC`（`\x1b7`）：交出终端前存光标锚点（2026-09-16 增补）|
 | `RestoreCursor(tty *os.File) bool` | 写 `DECRC`（`\x1b8`）：`ResetModes` 之后归位到锚点（2026-09-16 增补）|
 | `Bell() error` | 往控制终端写一声 BEL：posix `/dev/tty`、windows `CONOUT$`、其余平台恒错。注意力提示音用，失败由调用方静默忽略（2026-09-21 增补）|
+| `NotifyOSC(text string) error` | 往控制终端写一帧 `ESC ] 9 ; text BEL`（帧拼接由纯函数 `oscFrame` 负责）：通道同 `Bell()`，`text` 须由调用方预处理成单行无控制序列。终端原生通知用，尽力而为、失败静默（2026-09-21 增补）|
 
 设计原则：
 
@@ -85,9 +86,10 @@
 | `ctty/ctty_probe_stub.go` | `!linux && !darwin && !windows` | 探测原语保守实现（全 false）+ `Open` 恒错 + ctrl 掩蔽 no-op |
 | `ctty/consolecp_windows.go` | `windows` | 代码页原语 + `EnsureUTF8/RestoreUTF8/FallbackCP/DecodeCP`（LazyDLL）|
 | `ctty/consolecp_stub.go` | `!windows` | 代码页 no-op（posix 与其余平台共用一份）|
-| `ctty/bell_posix.go` | `linux \|\| darwin` | `Bell()`：写 BEL 到 `/dev/tty` |
-| `ctty/bell_windows.go` | `windows` | `Bell()`：写 BEL 到 `CONOUT$` |
-| `ctty/bell_stub.go` | `!linux && !darwin && !windows` | `Bell()` 恒错 |
+| `ctty/osc.go` | 无 tag | `oscFrame()`：OSC 9 帧拼接（纯函数，可测） |
+| `ctty/write_posix.go` | `linux \|\| darwin` | `writeTTY` 原语（写 `/dev/tty`）+ `Bell()` 写 BEL + `NotifyOSC()` 写 OSC 9 通知 |
+| `ctty/write_windows.go` | `windows` | 同上，写 `CONOUT$` |
+| `ctty/write_stub.go` | `!linux && !darwin && !windows` | `Bell()`/`NotifyOSC()` 恒错 |
 | `ctty/termios_linux.go` | `linux` | `Termios` 别名 + `TCGETS/TCSETS/TCSETSF` |
 | `ctty/termios_darwin.go` | `darwin` | `Termios` 别名 + `TIOCGETA/TIOCSETA/TIOCSETAF` |
 | `ctty/termios_stub.go` | `!linux && !darwin` | 空 `Termios` + 恒错实现 |

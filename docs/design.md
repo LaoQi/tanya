@@ -45,7 +45,7 @@ render/markup/     内联标记解析
 
 ### ask 单发（外部调用向）
 
-`ask` 的设计目标是**给机器用**：父代理、脚本、CI 拿它当一次函数调用，输出会被解析而不是给人看。因此它默认降到 plain+verbose 档（无装饰、无状态行与心跳、无光标控制），并**刻意不参与交互向的注意力反馈**——终端提示音只服务于 REPL 对话回合与 `interactive` 工具等待输入（见《终端通知》），CLI `ask` 子命令既不装配通知行为、也不可达其触发点（`main.go` 的 `CmdAsk` 分支直接 `a.Ask`，不构造 `turn`；REPL 内的对话回合不受此限，照常参与通知）。「输出杂音最小化」是硬口径：新增任何「人机对话才需要」的表现层特性都不作用于 `ask`。
+`ask` 的设计目标是**给机器用**：父代理、脚本、CI 拿它当一次函数调用，输出会被解析而不是给人看。因此它默认降到 plain+verbose 档（无装饰、无状态行与心跳、无光标控制），并**刻意不参与交互向的注意力反馈**——通知只服务于 REPL 对话回合与 `interactive` 工具等待输入（见《终端通知》），CLI `ask` 子命令既不装配通知行为、也不可达其触发点（`main.go` 的 `CmdAsk` 分支直接 `a.Ask`，不构造 `turn`；REPL 内的对话回合不受此限，照常参与通知）。「输出杂音最小化」是硬口径：新增任何「人机对话才需要」的表现层特性都不作用于 `ask`。
 
 ### init 模式（`agent/init.go` + `repl/initflow.go`）
 
@@ -357,12 +357,17 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 注意力通知按三层拆分，换行为不动触发点（`repl/notify.go`）：
 
 - **触发语义在 REPL**，只有两处：`turn.End`（对话回合结束，成功与报错都通知；`agent.InterruptError` 不通知——用户就在终端前按的）与 `turn.Handle` 的 `EventToolStart` + `e.Interactive`（`run_shell` 主动声明交互、终端即将移交）。斜杠命令回合（走 `turnSep` 旁路）、空输入、`/load`、CLI `ask` 单发都不产生通知（REPL 内的对话回合照常）。
-- **行为在 `Notifier`**：`repl.Notifier.Notify(Notification)`，载荷 = 原因 + 信息（`NotifyTurnDone` 带 `Duration`/`Failed`，`NotifyNeedInput` 带 `Tool`）。载荷刻意不带命令原文——通知实现要落屏就得自己清洗外部内容，不如不给。当前唯一实现 `BellNotifier()` 忽略全部字段：终端只有一种可发声行为。
-- **终端原语在 `ctty`**：`ctty.Bell()` 打开控制终端写一声 `\a`（Windows 写 `CONOUT$`；其余平台 stub 返回不支持），失败静默。BEL 不进 stdout、不沾 `output` 的 Kind 门禁与行首记账（`emit` 会把尾字节 0x07 记成"非行首"，打歪 `streams.End` 的补换行判定），故 `-p` 与重定向都不会被污染。
+- **行为在 `Notifier`**：`repl.Notifier.Notify(Notification)`，载荷 = 原因 + 信息（`NotifyTurnDone` 带 `Duration`/`Failed`，`NotifyNeedInput` 带 `Tool`）。载荷刻意不带命令原文——通知实现要落屏就得自己清洗外部内容，不如不给。实现有三个，各自独立开关、可同时生效，经 `repl.Notifiers(...)` 做 fan-out（全 nil 时返回 nil，门禁零开销）：`BellNotifier()`（忽略全部字段，终端只有这一种可发声行为）、`OSCNotifier()`、`NewCommandNotifier()`。
+- **尽力而为是总原则**：通知只是加成——失败静默、不重试、不探测终端/桌面环境、不做 tmux 透传、不做平台特化适配，也不向用户报错。终端不认 OSC、桌面没有通知服务、外部程序不存在，都表现为"没有效果"，不是错误路径。因此新增行为不得引入探测分支，也不得因为"没生效"而返回错误或打提示行。
+- **载荷成品化**：`payloadOf` 是唯一组装点，产出 `(title, content, kind)` 三元组——`title` 固定 `tanya`、`kind` 为 `done`/`failed`/`input`（供外部程序分流）、`content` 是文案模板生成后经 `term.OneLine` 压成单行并截断（标题 40 列、内容 200 列）的成品。行为实现拿到的就是"能直接落屏/直接喂程序"的文本，不再自行清洗；两种原因也不做音高/视觉区分（BEL 无音高，连响两声在部分终端被合并）。
+- **终端原语在 `ctty`**：`ctty.Bell()` 写 `\a`、`ctty.NotifyOSC(text)` 写 `ESC ] 9 ; text BEL`（`oscFrame` 纯函数拼帧），二者共用 `writeTTY`——posix 写 `/dev/tty`、Windows 写 `CONOUT$`、其余平台 stub 恒错；失败静默。都不进 stdout、不沾 `output` 的 Kind 门禁与行首记账（`emit` 会把尾字节 0x07 记成"非行首"，打歪 `streams.End` 的补换行判定），故 `-p` 与重定向都不会被污染。
+- **外部程序行为**（`commandNotifier`）：`notify_cmd` 是单条字符串，启动时经 `agent.ResolveShell(cfg)`（与 `run_shell` 同一套 profile：`cfg.Shell` 覆盖 > 平台探测）解析出的 shell 执行（posix `bash -c`、Windows `pwsh -Command`），命令原样交给 shell，需要管道的人自己写。执行契约：异步（不阻塞 REPL）、**单飞**（上一次未结束就丢弃本次，防堆积）、固定 3s 超时（超时取消上下文、只杀直接子进程，孙进程可能残留——接受）、stdio 接空设备（绝不沾 stdout 与 readline 帧）、错误静默。
+- **占位符与引号契约**：只有 `{title}`、`{content}`、`{kind}` 三个；替换值按目标 shell 的引号规则包成字面量（posix `'…'` 且 `'`→`'\''`、powershell `'…'` 且 `'`→`''`、cmd `"…"` 且 `"`→`""`），**值自带引号，配置里不该再加**（`"{content}"` 会多出一层字面引号）。替换用 `strings.NewReplacer` 单趟完成、不递归（值里出现 `{…}` 不会被二次展开）。启动即校验三项：未知占位符、花括号不配对、占位符紧邻引号——配错在启动时报错退出，不留到静默不响。
 - **门禁**（`REPL.notify`）：`notifier != nil && prof.TTY && st.decor()`。注意力通知只在交互富档 TTY 会话有意义，`-p` 是用户显式要求安静，且 plain 档下 `MsgInteractiveHint` 本来就被 `visSet` 屏蔽——plain 档门禁与提示可见性一致（不会“响了但屏上没提示”）；`-p --verbose` 档提示可见而不响（有提示、无声音），这是刻意的：注意力通知只在 rich 档生效。
-- **开关**：yaml `bell`（默认 `false`，opt-in；无 env、无 REPL 命令）。`main` 只在 REPL 分支按 `cfg.Bell` 装配 `BellNotifier()`，未开启时 notifier 为 nil、判定零开销。响声是否真能听见还取决于终端设置（部分终端配为静音或闪烁）。
-- **已决取舍：不监听真实输入开始**。通知时点是 `run_shell` 声明 `interactive` 的那一瞬（`EventToolStart`，`agent/agent.go` 的 `interactiveOf` 在发事件前已判定），不探测子进程真正读取 stdin 的时刻：pty 首输出钩子只在 Linux 桥接下存在、Windows 控制台直通无此旁路，会造成行为分裂；代价是 `make` 编译两分钟后才提问、`cat` 这类静默阻塞等场景会早响/虚响，接受。两种原因也不做音高区分（BEL 无音高，连响两声在部分终端被合并）。
-- 测试：`repl/notify_test.go` 用 fake `Notifier` 断言触发与门禁（中断 0 次、非 TTY/plain 0 次、非 interactive 工具 0 次、interactive 工具 1 次；未装配路径锁住 notifier 为 nil 且两条触发照常执行；分发层经 `Run()` 锁住「斜杠命令、空行不通知」），`ctty/bell_test.go` 断言无控制终端时返回错误且不 panic。
+- **开关**：yaml `bell`、`notify_osc`（bool）、`notify_cmd`（字符串，空 = 关闭），全部默认关闭、opt-in；无 env、无 REPL 命令。`main` 的 `buildNotifier` 按开关组装，未开启时 notifier 为 nil、判定零开销。`notify_osc` 用 OSC 9（iTerm2 / WezTerm / Ghostty / Windows Terminal 系支持）单帧携带 `title: content`。
+- **已知不生效场景（都接受）**：终端不实现 OSC 9（含 Terminal.app、多数传统 xterm 系，写了就是没有效果）、tmux/screen 未做 DCS 透传故通常被吞、Windows 侧外部程序无 `HideWindow` 可能闪一下窗口、`notify_cmd` 依赖的程序不存在即静默失败。
+- **已决取舍：不监听真实输入开始**。通知时点是 `run_shell` 声明 `interactive` 的那一瞬（`EventToolStart`，`agent/agent.go` 的 `interactiveOf` 在发事件前已判定），不探测子进程真正读取 stdin 的时刻：pty 首输出钩子只在 Linux 桥接下存在、Windows 控制台直通无此旁路，会造成行为分裂；代价是 `make` 编译两分钟后才提问、`cat` 这类静默阻塞等场景会早响/虚响，接受。
+- 测试：`repl/notify_test.go` 用 fake `Notifier` 断言触发与门禁（中断 0 次、非 TTY/plain 0 次、非 interactive 工具 0 次、interactive 工具 1 次；未装配路径锁住 notifier 为 nil 且两条触发照常执行；分发层经 `Run()` 锁住「斜杠命令、空行不通知」），并覆盖载荷清洗与截断、三种 shell 的引号替换、模板校验三类错误、单飞丢弃、超时取消、fan-out 与 OSC 门禁；`ctty/notify_test.go` 断言 OSC 帧字节与无控制终端时 `Bell`/`NotifyOSC` 返回错误且不 panic。
 
 ### 终端输入（readline 包）
 
@@ -388,6 +393,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `temperature` | 0.7 | |
 | `reasoning_effort` | 空 | 思考等级 minimal/low/medium/high/max，非法值忽略；空则请求不带 `reasoning_effort` 字段（运行时可被 `agent_custom` 工具改写，仅本次会话） |
 | `path`（只读，非 yaml 项） | — | 生效配置文件绝对路径，仅经 `agent_custom get config_path` 暴露给模型；默认 `~/.config/tanya/config.yaml`，`-c` 覆盖 |
+| `notify_osc` | `false` | 终端原生 OSC 9 通知（回合结束/等待输入时写控制终端；尽力而为，终端不认即无效果，无 env） |
+| `notify_cmd` | 空 | 调用外部程序发送通知的 shell 命令字符串，支持 `{title}`/`{content}`/`{kind}` 占位符（`kind` 取 done/failed/input；占位符自带引号，配置里不要加；空 = 关闭，无 env） |
 | `show_reasoning` | `false` | 思维链是否随对话显示（markdown 渲染 + `─── 思考 ───` / `─── 思考结束 · 3.2s ───` 分隔；仅 REPL rich 档生效，无 env）；REPL 内 `/reasoning on\|off` 可运行时切换 |
 | `api_protocol` | `responses` | API 协议 responses/chat（见《LLM 接入》），非法值启动报错 |
 | `colors` | `auto` | 终端配色 auto（跟随终端能力与 `NO_COLOR`）/ on（强制开色）/ off（强制纯文本） |
