@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"flag"
 	"fmt"
 	"github.com/LaoQi/tanya/render/term"
@@ -16,6 +17,9 @@ var (
 	version   = "dev"
 	buildTime = ""
 )
+
+//go:embed system_prompt.md
+var systemPromptFile string
 
 func main() {
 	showVersion := flag.Bool("v", false, repl.FlagVersion)
@@ -96,7 +100,8 @@ func main() {
 	readline.SecureTerminal()
 	a, err := agent.New(cfg,
 		agent.NoSave(*noSave),
-		agent.WithTTYBridge(readline.NewTTYBridge()))
+		agent.WithTTYBridge(readline.NewTTYBridge()),
+		agent.WithSystemPrompt(systemPromptFile))
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)

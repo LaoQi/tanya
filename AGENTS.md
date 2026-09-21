@@ -12,7 +12,9 @@
 - 终端原语（`/dev/tty`、前台组、termios、探测）一律走 `ctty`，移交/夺回/复原策略由 `agent`、`readline` 各自决定；`run_shell` 交终端前快照输入模式与光标、子进程结束后复原，中断不变量与 readline 自愈见 `docs/ctty.md`、`docs/interactive-tty.md` §5.9
 - 运行期信号统一收敛在 `ctty`（SIGTERM/SIGHUP 关闭、SIGINT 中断、SIGQUIT 保持默认转储），业务层（`repl`/`main`）不出现 `os/signal`；退出统一走 `REPL.quit()`，进程退出码取 `ctty.ExitStatus()`，见 `docs/ctty.md`《运行期信号》
 - `interactive: true` 的 run_shell 走全 pty 桥接，仅 Linux（失败回退 `/dev/tty` + `TIOCSPGRP`）；Windows 为控制台继承直通，见 `docs/interactive-tty.md`、`docs/terminal-caps.md` §8.6
-- 工具只有编译期显式清单 `allTools()`（`run_shell` + `builtinTools()` + `agent_custom`），不做动态注册/插件；清单顺序即请求顺序，改动会破坏 prompt cache
+- 系统提示词原文放仓库根 `system_prompt.md`（可读可改，纯文本），`main` 用 `//go:embed` 编译期嵌入、构造时经 `agent.WithSystemPrompt` 注入；`agent` 侧无内置文本（未注入即无内置段），改动需重新编译
+- 工具只有编译期显式清单 `allTools()`（`run_shell` + `builtinTools()` + `agent_custom`），不做动态注册/插件；清单顺序即请求顺序，改动会让缓存前缀作废（代价可接受，见下条）
+- 缓存不变性（history append-only、system 快照冻结、`/load` 还原首行）是为命中 provider 前缀缓存服务的**优化手段**，不是功能红线：保证范围仅限「同一二进制 + 会话首行快照未被改写」（进程内多轮、重开快照未变的旧会话都命中）；跨版本无此约束——改了默认系统提示词/工具描述/env 段后 `/load` 旧会话前缀变化属预期，代价只是首轮 cache miss。评估改动时按 `docs/cache-probe.md` 的台阶估代价即可，不必为字节不变放弃功能，见 `docs/design.md`《系统提示与缓存友好》
 - `agent_custom` 供模型运行时自调与自省：key 表驱动，只写内存、不落盘不入会话，`/load` 或重启后回落配置，见 `docs/agent-control-tool.md`
 - 工具策略：以 `run_shell` 为核心，新能力优先用 shell 命令组合实现；小型纯计算/查询工具放 `builtin.go`
 - 启动即要求可用 shell：`agent.New` 解析（配置覆盖 > 平台探测）全落空直接报错退出，无降级路径
@@ -31,7 +33,8 @@
 ## 结构
 
 ```
-main.go            入口、flag 子命令、ask 单发、init 工作区脚手架
+main.go            入口、flag 子命令、ask 单发、init 工作区脚手架（含内置系统提示词的 embed 与注入）
+system_prompt.md   内置系统提示词原文（顶层，编译期嵌入）
 ctty/              控制终端原语与终端探测（前台组、/dev/tty、termios、Facts）；白名单 + stub，零内部依赖
 repl/              REPL 循环与输入分发、斜杠命令、提示符、ghost 补全、/load picker、工具块渲染、状态行、退出收尾
 readline/          自研终端输入层：行编辑/历史/Tab 补全、按键解析、raw mode、显示宽度、pty 桥接（linux）、状态自愈

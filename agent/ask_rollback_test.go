@@ -156,11 +156,16 @@ func TestNoticeTurnPersisted(t *testing.T) {
 		}
 		msgs = append(msgs, msg)
 	}
-	if len(msgs) != 5 {
-		t.Fatalf("会话文件应为 system+4 条消息: %d", len(msgs))
+	if len(msgs) != 4 {
+		t.Fatalf("空提示词下不应落快照行，会话文件应为 4 条消息: %d", len(msgs))
 	}
-	if msgs[4].Content != MsgInterruptNotice {
-		t.Errorf("文件末条应为中断提示: %+v", msgs[4])
+	for _, m := range msgs {
+		if m.Role == "system" {
+			t.Errorf("空提示词不应写入 system 快照行: %+v", m)
+		}
+	}
+	if msgs[3].Content != MsgInterruptNotice {
+		t.Errorf("文件末条应为中断提示: %+v", msgs[3])
 	}
 	a2, err := New(cfg)
 	if err != nil {

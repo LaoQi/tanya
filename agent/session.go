@@ -95,7 +95,7 @@ func (s *sessionStore) append(msgs []Message, system string) error {
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
-	if !s.systemSaved {
+	if !s.systemSaved && system != "" {
 		if err := enc.Encode(Message{Role: "system", Content: system}); err != nil {
 			return err
 		}
