@@ -160,3 +160,123 @@ func TestGhostClearedMidLine(t *testing.T) {
 		t.Errorf("光标不在行尾时不应渲染 ghost: %q", out.String())
 	}
 }
+
+func enteredScreen(t *testing.T, cols int, evs []KeyEvent, ghost func(string) string) *vtScreen {
+	t.Helper()
+	ed, f, out := newFakeEditor(evs...)
+	f.cols = cols
+	ed.SetOutput(out)
+	ed.SetGhost(ghost)
+	if _, err := ed.Readline("> "); err != nil {
+		t.Fatal(err)
+	}
+	scr := newVTScreen(cols, 24)
+	scr.feed(out.String())
+	return scr
+}
+
+func TestGhostClearedAfterEnter(t *testing.T) {
+	scr := enteredScreen(t, 80, append(runes("/h"), KeyEvent{Code: KeyEnter}), func(line string) string {
+		if line == "/h" {
+			return "elp"
+		}
+		return ""
+	})
+	if got := scr.line(0); got != "> /h" {
+		t.Errorf("回车后不应残留 ghost: %q", got)
+	}
+	if got := scr.line(1); got != "" {
+		t.Errorf("回车后光标所在行应为空: %q", got)
+	}
+}
+
+func TestGhostClearedAcrossWrap(t *testing.T) {
+	scr := enteredScreen(t, 20, append(runes("/abcdefghijklmnop"), KeyEvent{Code: KeyEnter}), func(string) string {
+		return "qrstuvwxyz0123456789"
+	})
+	if got := scr.line(0); got != "> /abcdefghijklmnop" {
+		t.Errorf("wrap 场景第一行不应残留 ghost: %q", got)
+	}
+	if got := scr.line(1); got != "" {
+		t.Errorf("wrap 场景溢出的物理行应被清除: %q", got)
+	}
+}
+
+func TestShrinkClearsTailRows(t *testing.T) {
+	evs := runes("abcdefghijklmnopqrstuvwxyz0123")
+	for i := 0; i < 20; i++ {
+		evs = append(evs, KeyEvent{Code: KeyBackspace})
+	}
+	scr := enteredScreen(t, 20, append(evs, KeyEvent{Code: KeyEnter}), nil)
+	if got := scr.line(0); got != "> abcdefghij" {
+		t.Errorf("退格后应重绘为单行: %q", got)
+	}
+	if got := scr.line(1); got != "" {
+		t.Errorf("退格后多余的物理行应被清除: %q", got)
+	}
+}
+
+func TestMenuRowsClearedOnEsc(t *testing.T) {
+	ed, f, out := newFakeEditor(
+		append(runes("/s"), KeyEvent{Code: KeyTab}, KeyEvent{Code: KeyEsc}, KeyEvent{Code: KeyEnter})...,
+	)
+	f.cols = 40
+	ed.SetOutput(out)
+	ed.SetComplete(func(line string) []Completion {
+		return []Completion{{Insert: "/sessions"}, {Insert: "/set"}}
+	})
+	if _, err := ed.Readline("> "); err != nil {
+		t.Fatal(err)
+	}
+	scr := newVTScreen(40, 24)
+	scr.feed(out.String())
+	if got := scr.line(0); got != "> /se" {
+		t.Errorf("Esc 关闭菜单后不应残留候选行: %q", got)
+	}
+	if got := scr.line(1); got != "" {
+		t.Errorf("菜单行应被清除: %q", got)
+	}
+}
+
+func TestCtrlCClearsGhost(t *testing.T) {
+	ed, f, out := newFakeEditor(append(runes("/h"), KeyEvent{Code: KeyCtrlC})...)
+	f.cols = 40
+	ed.SetOutput(out)
+	ed.SetGhost(func(string) string { return "elp" })
+	if _, err := ed.Readline("> "); err != ErrInterrupt {
+		t.Fatalf("^C 应返回 ErrInterrupt: %v", err)
+	}
+	scr := newVTScreen(40, 24)
+	scr.feed(out.String())
+	if got := scr.line(0); got != ">" {
+		t.Errorf("^C 后该行应清空: %q", got)
+	}
+}
+
+func TestLongInputDoesNotFlushBlanks(t *testing.T) {
+	evs := runes(strings.Repeat("x", 300))
+	evs = append(evs,
+		KeyEvent{Code: KeyBackspace},
+		KeyEvent{Code: KeyRune, Rune: 'y'},
+		KeyEvent{Code: KeyEnter},
+	)
+	ed, f, out := newFakeEditor(evs...)
+	f.cols = 20
+	f.rows = 6
+	ed.SetOutput(out)
+	ed.SetGhost(func(string) string { return "" })
+	if _, err := ed.Readline("> "); err != nil {
+		t.Fatal(err)
+	}
+	scr := newVTScreen(20, 6)
+	scr.feed(out.String())
+	blanks := 0
+	for _, l := range scr.scrollback {
+		if l == "" {
+			blanks++
+		}
+	}
+	if blanks > 0 {
+		t.Errorf("块高于屏幕时清行循环不应把空白行推出屏幕: %d 行滚出（共 %d）", blanks, len(scr.scrollback))
+	}
+}
