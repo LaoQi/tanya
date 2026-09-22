@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "embed"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -19,6 +20,8 @@ var (
 	version   = "dev"
 	buildTime = ""
 )
+
+const envAllowRoot = "TANYA_ALLOW_ROOT"
 
 //go:embed system_prompt.md
 var systemPromptFile string
@@ -66,6 +69,11 @@ func main() {
 		mode = repl.SingleShot(mode)
 	}
 	st := repl.NewStreams(os.Stdout, os.Stderr, mode)
+
+	if err := rootRefusal(); err != nil {
+		st.FailErr("", err)
+		exitNow(1)
+	}
 
 	if *f.showVersion {
 		st.Print(fmt.Sprintf("tanya %s\n", version))
@@ -207,6 +215,13 @@ func buildNotifier(cfg *agent.Config) (repl.Notifier, error) {
 		list = append(list, n)
 	}
 	return repl.Notifiers(list...), nil
+}
+
+func rootRefusal() error {
+	if os.Getenv(envAllowRoot) == "1" || !ctty.IsRoot() {
+		return nil
+	}
+	return errors.New(repl.MsgRootRefused)
 }
 
 func exitNow(code int) {

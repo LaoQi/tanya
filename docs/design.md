@@ -35,6 +35,12 @@ render/markup/     内联标记解析
 - **`ctx` 属请求层**：只承担取消/超时，不承载进程事实（`repl.Run()` 不收 ctx；每回合由 `InterruptContext()` 现造，以 `context.Background()` 为根）
 - **tty 与颜色能力由消费方独占**：`term.Profile` 由 `term.DetectProfile` 计算、只有 `term` 保留进程级默认档案（终端能力是名副其实的进程事实）；语义色 `theme.Semantics` 为值传递（repl 持有当前方案、readline 经 `SetStyles` 注入，见 `docs/style-split.md`）；终端尺寸是实时值（`ToolWidth` 以函数传递）；启动前台状态与 `ISIG` 自愈归 readline（`InitTerminalGuard`/`SecureTerminal`）；`ctty.Supported` 是编译期平台常量；前台组读/写、`/dev/tty` 打开、`SIGTTIN/SIGTTOU` 忽略等**控制终端原语**统一在零依赖叶子包 `ctty`（`docs/ctty.md`），`agent`（是否移交前台）与 `readline`（是否夺回前台）各自持有策略，共享原语、不合并决策
 
+## 启动安全检查
+
+启动最前端拒绝以 root 运行：`main` 构造 `repl.Streams` 之后、任何子命令分支（`-v`/`config`/`ask`/`init`/REPL）之前调用 `main.rootRefusal()`，判定 `ctty.IsRoot()`——posix（`linux || darwin`）取 `os.Geteuid() == 0`，故 `sudo` 与 setuid 安装同样被拦；Windows 及其余平台无 uid 语义，恒 false（不检查）。命中时报 `repl.MsgRootRefused` 单行错误并以 1 退出，走 `st.FailErr` 即只落 stderr、stdout 保持干净。策略是**一律拒绝**、不设子命令豁免：拦截点在入口单点，将来新增子命令不会漏（代价是 `-v`/`config` 这类无副作用子命令在 root 下也不可用）。`-h`/`--help` 与非法选项不受影响——`flag.Parse` 在检查之前已分别以 0 / 2 退出。
+
+逃生舱为环境变量 `TANYA_ALLOW_ROOT`，**只认精确值 `1`**（`main.envAllowRoot`，其它值如 `true`/`yes`/非空串均不放行），放行静默、不打提示，也不进配置文件、无 REPL 命令（容器里默认 root 的场合靠它显式松绑）。检查刻意留在 `main` 而非 `agent`：策略只作用于 CLI 入口，把 `agent` 当库用时不做权限判断。
+
 ## 运行模式
 
 - `tanya`：交互 REPL，维护内存 messages 历史，SSE 逐 token 流式输出

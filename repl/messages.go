@@ -2,6 +2,7 @@ package repl
 
 const (
 	MsgErrLineFmt   = "错误: %v"
+	MsgRootRefused  = "拒绝以 root 身份运行（如确需，设 TANYA_ALLOW_ROOT=1）"
 	MsgAskUsage     = "用法: tanya ask \"问题\"\n"
 	MsgNoSessions   = "(无历史会话)\n"
 	MsgNoHistoryMsg = "(当前会话无消息)\n"

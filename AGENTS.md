@@ -18,6 +18,7 @@
 - 缓存不变性（history append-only、system 快照冻结、`/load` 还原首行）是为命中 provider 前缀缓存服务的**优化手段**，不是功能红线：保证范围仅限「同一二进制 + 会话首行快照未被改写」（进程内多轮、重开快照未变的旧会话都命中）；跨版本无此约束——改了默认系统提示词/工具描述/env 段后 `/load` 旧会话前缀变化属预期，代价只是首轮 cache miss。评估改动时按 `docs/cache-probe.md` 的台阶估代价即可，不必为字节不变放弃功能，见 `docs/design.md`《系统提示与缓存友好》
 - `agent_custom` 供模型运行时自调与自省：key 表驱动，只写内存、不落盘不入会话，`/load` 或重启后回落配置，见 `docs/agent-control-tool.md`
 - 工具策略：以 `run_shell` 为核心，新能力优先用 shell 命令组合实现；小型纯计算/查询工具放 `builtin.go`
+- 启动即拒绝 root：`ctty.IsRoot()`（posix 取 `os.Geteuid() == 0`，含 `sudo`/setuid；Windows 及其余平台恒 false）为真则整个入口拒绝（`-v`/`config`/`ask`/`init` 无豁免），逃生舱只认 `TANYA_ALLOW_ROOT=1`；`-h` 与非法选项由 flag 包先行退出、不受影响，判定留在 `main`（`agent` 作库用时不判权限），见 `docs/design.md`《启动安全检查》
 - 启动即要求可用 shell：`agent.New` 解析（配置覆盖 > 平台探测）全落空直接报错退出，无降级路径
 - `init` 子命令是新工作区的一次性脚手架（三项动作幂等、不覆盖既有文件），**必须在 `agent.New` 之前执行**；不做项目探测、不调模型，见 `docs/design.md`《init 模式》
 - 会话归档：写入触发点只有 `/archive` 与启动自动归档两处，共用 `REPL.archiveFlow`（先出报告再确认）；卷逐字节无损、写入后不可变、不做解档；归档会话 `/load` 只读，继续对话一律 `/fork`（通用分支命令，原会话不动），见 `docs/session-archive.md`

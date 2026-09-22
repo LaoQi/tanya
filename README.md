@@ -16,6 +16,7 @@
 - AGENTS.md 项目说明自动注入系统提示（全局 + 工作区双层，会话级快照保证 prompt cache 友好）
 - 平台：Linux 与 Windows 为主（Windows 显示与行编辑均已支持：16 色、状态行、markdown、真实宽度、行编辑/历史/Tab 补全/ghost；interactive 命令走控制台继承直通，Windows 侧仅部分实机验证、未全量覆盖，暂不跟踪），macOS 尽力；控制终端原语与终端探测统一在零依赖叶子包 `ctty`，其余平台仅保证可编译
 - 降级粒度独立：显示能力取决于 stdout 是否终端、输入能力取决于 stdin 是否终端，互不连带（支持范围与组合矩阵见 `docs/terminal-caps.md`）
+- 启动拒绝 root：以 root（euid 0，`sudo` 与 setuid 同样算）运行一律报错退出，`ask`/`init`/`config`/`-v` 一并不放行；容器等确需 root 的场景设 `TANYA_ALLOW_ROOT=1` 放行（只认精确值 `1`）
 - 依赖仅 2 个，核心逻辑测试覆盖率 90%+
 
 ## 安装
@@ -89,6 +90,8 @@ tanya -p --verbose    # 纯文本输出但保留工具块与状态行（仍无�
 tanya -v              # 显示版本号
 tanya -h              # 用法：四种运行模式与全局选项（--help 同）
 ```
+
+启动安全检查：以 root（euid 0）运行直接报错退出（stderr 一行，退出码 1），`ask`/`init`/`config`/`-v` 在 root 下同样被拒；容器等确实需要 root 的场景设 `TANYA_ALLOW_ROOT=1` 放行（只认精确值 `1`，静默放行）。`-h`/`--help` 与用法报错不受影响，Windows 无此检查。
 
 会话存储模式（`-m` 参数 / 配置项 `session_mode` / env `TANYA_SESSION_MODE`，优先级从高到低）：
 

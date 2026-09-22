@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/repl"
 )
 
@@ -98,4 +99,28 @@ func TestUsageListsAllFlags(t *testing.T) {
 			t.Errorf("用法应列出选项 -%s:\n%s", f.Name, got)
 		}
 	})
+}
+
+func TestRootRefusalMatrix(t *testing.T) {
+	refusedByDefault := ctty.IsRoot()
+	cases := []struct {
+		env     string
+		refused bool
+	}{
+		{"", refusedByDefault},
+		{"1", false},
+		{"true", refusedByDefault},
+		{"0", refusedByDefault},
+	}
+	for _, c := range cases {
+		t.Setenv(envAllowRoot, c.env)
+		err := rootRefusal()
+		if (err != nil) != c.refused {
+			t.Errorf("%s=%q: err = %v, want refused=%v", envAllowRoot, c.env, err, c.refused)
+			continue
+		}
+		if err != nil && err.Error() != repl.MsgRootRefused {
+			t.Errorf("%s=%q: 文案 = %q, want %q", envAllowRoot, c.env, err.Error(), repl.MsgRootRefused)
+		}
+	}
 }
