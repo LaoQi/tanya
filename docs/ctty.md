@@ -100,6 +100,8 @@
 | `ctty/signals_posix.go` | `linux \|\| darwin` | 信号清单（SIGTERM/SIGHUP/SIGINT）+ `emergencyRestore` |
 | `ctty/signals_windows.go` | `windows` | 信号清单（SIGTERM/`os.Interrupt`）+ `emergencyRestore` = `RestoreUTF8`（2026-09-17 拆出）|
 | `ctty/signals_stub.go` | `!linux && !darwin && !windows` | 信号清单（SIGTERM/`os.Interrupt`）+ `emergencyRestore` no-op |
+| `ctty/privilege_posix.go` | `linux \|\| darwin` | `IsRoot()`：`os.Geteuid() == 0`（启动 root 门禁，见 `docs/design.md`《启动安全检查》）|
+| `ctty/privilege_stub.go` | `!linux && !darwin` | `IsRoot()` 恒 false（含 windows：无 uid 语义，不做管理员检查）|
 
 ## 运行期信号（2026-09-17）
 
