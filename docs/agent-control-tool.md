@@ -234,12 +234,12 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 
 ## 18. 追加 `config_path`（2026-09-17）
 
-**动机**：模型此前无从得知自己被哪个配置文件驱动，无法"修改自身"（如按用户要求改默认模型、开启思维链显示）。`Config.Path` 记录生效路径（`-c` 优先，否则 `~/.config/tanya/config.yaml`；`~` 展开并绝对化），`agent_custom get config_path` 把它交回模型。
+**动机**：模型此前无从得知自己被哪个配置文件驱动，无法"修改自身"（如按用户要求改默认模型、开启思维链显示）。`Config.ConfigPath` 记录生效路径（`config.Load` 写入，`-c` 优先，否则 `~/.config/tanya/config.yaml`；`~` 展开并绝对化），`agent_custom get config_path` 把它交回模型。
 
 **口径**：
 
 1. **只回路径，不回内容**——配置含 `api_key`，工具不主动读文件；要看内容由模型自己 `run_shell`（与 `get sessions` 只给位置、不读内容同一原则）。
-2. **必须带生效语义**：返回值固定两行，第二行写明"改动需重启 tanya 生效（本次会话可用 agent_custom 调整 model/reasoning_effort）"，避免模型误以为改完即生效（配置在 `LoadConfig` 一次加载，运行期不重载；`model`/`reasoning_effort` 的内存覆盖路径是另一回事）。
+2. **只回路径**：`get config_path` 返回单行 `配置文件: <绝对路径>`；配置在 `config.Load` 一次加载、运行期不重载，故改动自然需重启（`model`/`reasoning_effort` 的内存覆盖路径是另一回事，由各自的 key 承担）。
 3. **按需查询、不做常驻注入**：不写进 system 环境段、不加 `/` 命令、不做运行期 reload——用户拍板"平时使用机会较少，只在需要获取配置时取"。
 4. 只读语义与其他只读 key 一致：`set config_path` 明确报错，不改状态。
 5. **代价**：`key` 的 enum 与描述属于工具 schema 前缀，加值/改文案会打掉一次 prompt cache（见 `AGENTS.md` 的工具清单约束），属一次性预热成本。

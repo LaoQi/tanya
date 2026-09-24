@@ -22,9 +22,13 @@ func newSettleAgent(t *testing.T) *agent.Agent {
 		BaseURL:         "http://127.0.0.1:1",
 		Model:           "test-model",
 		UserAgent:       agent.DefaultUserAgent,
+		ConfigPath:      "/tmp/tanya-test-config.yaml",
+		ApiProtocol:     "chat",
 		DataDir:         t.TempDir(),
 		SessionMode:     "global",
-		ToolOutputLines: 20,
+
+		ArchiveThreshold: agent.DefaultArchiveThreshold,
+		ArchiveKeep:      agent.DefaultArchiveKeep,
 	}
 	a, err := agent.New(cfg)
 	if err != nil {

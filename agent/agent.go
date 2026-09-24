@@ -56,6 +56,9 @@ func WithSystemPrompt(s string) Option {
 }
 
 func New(cfg *Config, opts ...Option) (*Agent, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	var o Options
 	for _, opt := range opts {
 		opt(&o)
@@ -423,7 +426,7 @@ func (a *Agent) SetReasoningEffort(level string) error {
 		a.cfg.ReasoningEffort = ""
 		return nil
 	}
-	v := normalizeEffort(level)
+	v := NormalizeEffort(level)
 	if v == "" {
 		return fmt.Errorf(MsgBadEffort, level)
 	}
@@ -456,15 +459,8 @@ func (a *Agent) SessionFile() string {
 func (a *Agent) ListModels() ([]string, error) { return a.client.ListModels() }
 
 func (a *Agent) ConfigPath() string {
-	if a.cfg.Path == "" {
-		return defaultConfigPath()
+	if a.cfg.ConfigPath == "" {
+		return MsgControlUnset
 	}
-	return a.cfg.Path
-}
-
-func (a *Agent) ToolOutputLines() int {
-	if a.cfg == nil || a.cfg.ToolOutputLines < 1 {
-		return 20
-	}
-	return a.cfg.ToolOutputLines
+	return a.cfg.ConfigPath
 }

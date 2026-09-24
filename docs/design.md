@@ -8,6 +8,7 @@
 
 ```
 main.go            package main：入口、flag 子命令、ask 单发
+config/            package config：CLI 完整配置（agent.Config inline + UI 段 inline + Path），yaml 加载、TANYA_* env 覆盖、值域校验
 repl/              package repl：REPL 循环、斜杠命令、补全、工具视图渲染、状态行心跳
 agent/             package agent：全部核心逻辑（config / llm / llm_http / agent / tools / prompt / session / session_archive / stats / shell / builtin）
 readline/          package readline：自研终端输入层（editor / keys / terminal），pty 桥接与终端状态自愈
@@ -70,9 +71,9 @@ render/markup/     内联标记解析
 
 默认配置示例原文在仓库根 `config.example.yaml`，`main` 经 `//go:embed` 编译期嵌入（与 `system_prompt.md` 同法，仍是单二进制），`repl.RunConfig` 原样写到 stdout（`st.Print` / KindNotice，rich 与 plain 两档同样可见，文本末缺换行则补一个），**不加任何提示行**——输出与仓库里的示例逐字节一致，`tanya config > ~/.config/tanya/config.yaml` 落盘即是一份带注释的可用配置。
 
-- 执行位置：`main` 在 `-v` 之后、`agent.LoadConfig` 之前分支返回——不读配置文件、不探测终端、不装信号，配置文件损坏或缺失、无控制终端、被重定向时同样可用；无参数（带多余参数报 `MsgConfigUsage`、以 1 退出，对齐 `init`）
+- 执行位置：`main` 在 `-v` 之后、`config.Load` 之前分支返回——不读配置文件、不探测终端、不装信号，配置文件损坏或缺失、无控制终端、被重定向时同样可用；无参数（带多余参数报 `MsgConfigUsage`、以 1 退出，对齐 `init`）
 - 不提供写文件开关（覆盖语义与目录创建规则不值当）、不与 `init` 联动自动生成 `config.yaml`、不探测已有配置；需要落盘就是 shell 重定向
-- 示例中的显式键是「文档也是默认值」，由根包 `main_test.go` 与 `agent.DefaultConfig()` 逐项比对守护（全部显式键含 `api_key`，`data_dir` 允许 `~` 写法、比对前展开，另以 `yaml.Node` 取示例顶层键集合断言无漏比对的新增显式键）；示例里注释掉的项（`api_protocol`/`theme`/`auto_archive` 等）保持代码默认值，不参与比对
+- 示例中的显式键是「文档也是默认值」，由根包 `main_test.go` 与 `config.Default()` 逐项比对守护（全部显式键含 `api_key`，`data_dir` 允许 `~` 写法、比对前展开，另以 `yaml.Node` 取示例顶层键集合断言无漏比对的新增显式键）；示例里注释掉的项（`api_protocol`/`theme`/`auto_archive` 等）保持代码默认值，不参与比对
 
 ## LLM 接入
 
@@ -210,7 +211,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 `agent_custom` 是唯一带状态的工具，形态为**键值化三参数**：`action`（`get`/`set`）+ `key`（能力名，enum）+ `value`（仅 `set` 且 key 可写时使用）。顶层参数形态恒定，能力面由 `key` 展开；实现走 key 表（`keySpec{writable, read, write}`）驱动，新增能力 = 表加一行 + `key` enum 加一值：
 
 - 可写 key：`model`（非空字符串）、`reasoning_effort`（minimal/low/medium/high/max/off）——`set` 校验失败不改动状态，对下一次请求生效
-- 只读 key：`models`（服务端可用模型列表，超 50 项截断并标注总数）、`usage`（最近一次请求的上下文 tokens、缓存命中、命中率）、`stat`（会话 id、消息数、累计 token；`--no-save` 时会话显示 `(不落盘)`）、`sessions`（本工作区会话列表 + 每个会话 `.jsonl` 的绝对路径，id 倒序列前 20）、`config_path`（生效配置文件绝对路径 + 改动需重启生效的提示——`Config.Path` 由 `LoadConfig` 记录，`-c` 优先、`~` 展开并绝对化；只回路径不回内容，读文件由模型自理，改自身配置走 `run_shell`）
+- 只读 key：`models`（服务端可用模型列表，超 50 项截断并标注总数）、`usage`（最近一次请求的上下文 tokens、缓存命中、命中率）、`stat`（会话 id、消息数、累计 token；`--no-save` 时会话显示 `(不落盘)`）、`sessions`（本工作区会话列表 + 每个会话 `.jsonl` 的绝对路径，id 倒序列前 20）、`config_path`（生效配置文件绝对路径——由 `config.Load` 写入 `Config.ConfigPath`，`-c` 优先、`~` 展开并绝对化；只回路径不回内容，读文件由模型自理，改自身配置走 `run_shell`）
 - 只读 key 出现在 `set` 里**明确报错**（不静默忽略）；未知 `action`/`key`、缺 `value`、值非法均返回带可修建议的错误文本 (`MsgErrPrefix` 前缀)
 
 `get sessions` 只给列表与文件位置，**不读内容**——读内容交回 `run_shell`（符合「新能力优先用 shell 命令组合实现」）。依赖经窄接口 `configTarget`（`*Agent` 满足，测试可注入替身）注入，与 `shellTool` 的构造期注入同一风格。改动只写内存 `Config`：不落盘、不入会话文件，`/load` 或重启后回落配置文件值；`repl` 的 `{model}`/`{effort}` 占位符每轮现读 `Agent`，自动跟上，无需事件通知。`SetModel` 带空值校验（`/model` 命令共用同一路径）。形态选型与偏差记录见 `docs/agent-control-tool.md`。
@@ -270,7 +271,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 启动自动归档
 
-- 配置三键（仅配置文件，无 env）：`auto_archive`（默认 true）、`auto_archive_threshold`（默认 64）、`auto_archive_keep`（默认 16）；`auto_archive` 是唯一「默认开」的归档开关，`defaultConfig()` 里显式置 true，yaml 写 `auto_archive: false` 即覆盖关闭；`LoadConfig` 校验 `threshold >= 2` 与 `0 <= keep < threshold`，越界即启动报错（`MsgBadArchiveThreshold`/`MsgBadArchiveKeep`）
+- 配置三键（仅配置文件，无 env）：`auto_archive`（默认 true）、`auto_archive_threshold`（默认 64）、`auto_archive_keep`（默认 16）；`auto_archive` 是唯一「默认开」的归档开关，`config.Default()` 里显式置 true，yaml 写 `auto_archive: false` 即覆盖关闭；`config.Load` 校验 `threshold >= 2` 与 `0 <= keep < threshold`，越界即启动报错（`MsgBadArchiveThreshold`/`MsgBadArchiveKeep`）
 - `Agent.SuggestArchive() (ArchiveSuggestion, bool)`：`auto_archive` 关闭、`-n`（`store.disabled`）、或活跃会话数 < 阈值时返回 false；否则用 `store.list()`（活动组在前、组内 id 降序）算出 `Threshold/Keep/Active/Candidates/Bytes`——候选计算与 `archive()` 同序镜像：活动会话按 id 降序先占满 `Keep` 个保留名额，余下的再剔除当前会话后计数（对应 `Exclude` 在 Keep 截断之后过滤），故提示的 `Candidates/Bytes` 与实际归档严格一致；`Keep=0` 即除当前会话外全部入选
 - REPL 在欢迎屏之后、进循环之前调 `autoArchivePrompt()`：门禁与 `/archive` 同一判据 `archiveInteractive()`（rich 输出 + `r.raw` + `r.prof.TTY`），纯文本模式（`-p`/ask 的 plain 档）、stdout 非终端（管道/重定向）、无控制终端（`/dev/tty` 打不开 → readline 降级档）一律静默返回，管道场景既不污染 stdout 也不阻塞；随后取建议——`auto_archive` 关闭、`-n`（`store.disabled`）、活跃会话数 < 阈值任一成立即静默返回，命中才进共用流程
 - 两条入口共用一条线路 `REPL.archiveFlow(opt, noneArg)`（`repl/archive_flow.go`）：先 `DryRun` 取 `ArchiveReport` → 0 命中按口径给 none 文案 + 跳过/失败行 → 出预览 → `readConfirm` 读一行 → `y`/`yes` 去 `DryRun` 真跑并出报告，其它（含空行、EOF）打 `MsgArchiveCancel`；预览文案 `当前活跃会话 A 个；将归档 C 个（约 X[，保留最近 K 个]）。`，其中 `A` = `ArchiveReport.Active`（操作前活跃会话总数，`archive()` 在 Keep 截断前记下未归档会话数）、`K` 段仅 `Keep > 0` 时出现（时长窗口口径无保留数概念）
@@ -397,9 +398,21 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 平台划分：`terminal_posix.go`（`linux || darwin`）以 termios（`termios_linux.go` 用 TCGETS/TCSETS/TCSETSF、`termios_darwin.go` 用 TIOCGETA/TIOCSETA/TIOCSETAF）+ `ctty.Size` 实现真实输入；`terminal_windows.go`（`windows`）以控制台模式实现真实输入——`Raw` 开 `ENABLE_VIRTUAL_TERMINAL_INPUT`、清 `ECHO/LINE/PROCESSED`，输出侧 `ctty.EnableVT` 兜底，`readChunk` 用 `GetNumberOfConsoleInputEvents` 轮询 5ms + 1s 超时对齐 posix 的 `VMIN=0/VTIME=1` 语义，`Size` 走 `ctty.Size`；`terminal_stub.go`（其余平台）返回 ErrUnsupported 走 Degraded。按键状态机（队列/解析/超时 flush/挂起判定）已抽为平台无关的 `keySource`（`readline/terminal_io.go`），分片只实现 `readChunk` 与可选 `hungUp`——**降级只影响输入侧**，显示侧不受影响，且 ghost/补全菜单/历史随 raw 自动生效（编辑器与平台无关）。逃生开关 `TANYA_NO_RAW_INPUT=1` 强制回落 Degraded（两平台通用）；Windows 侧实机验证清单见 `docs/terminal-caps.md` §8
 - 终端探测（`ctty.Facts` + `ctty.Probe()`，2026-09-16）：stdin/stdout 是否终端（posix `GetTermios`、windows `GetConsoleMode`）、尺寸（`TIOCGWINSZ` / `GetConsoleScreenBufferInfo`）、VT（windows 幂等开 `ENABLE_VIRTUAL_TERMINAL_PROCESSING`，posix 恒真）由 `ctty` 单点探测，`main.go` 组装出 `term.Profile`（`DetectProfile(stdoutTTY, vt)`）与 `repl.TermFacts`（宽度）；`readline.NewTerminal` 的 bool 语义收窄为"输入后端可用"，不再外泄为渲染判定。支持范围、组合矩阵与分阶段见 `docs/terminal-caps.md`
 
+## 配置分层
+
+配置拆成两层，**目的**：`agent` 是可嵌入核心，只关心自己运行需要什么；终端表现层配置不应出现在核心配置面里。
+
+- **`agent.Config`（14 项，核心）**：`base_url` / `api_key` / `model` / `temperature` / `reasoning_effort` / `api_protocol` / `user_agent` / `data_dir` / `session_mode` / `shell` / `auto_archive` / `auto_archive_threshold` / `auto_archive_keep` + `config_path`（非 yaml，见下）。**`agent` 不提供任何加载机制**——无 `LoadConfig`/`DefaultConfig`，不读 yaml、不读 env（依赖仅剩 `golang.org/x/sys`）。`agent.Config` 保留 yaml tag，供 `config` 包 inline 解析。
+- **`config/Config`（完整 CLI 配置）**：顶层包 `config`，`config.Config = agent.Config(yaml:",inline") + UI(yaml:",inline") + Path`。`UI` 段是终端表现项：`show_reasoning` / `bell` / `notify_osc` / `notify_cmd` / `colors` / `theme` / `palette` / `tool_output_lines`——agent 包内一次都不读，只由 `main` 分派给 `repl`。`config.Load` / `config.Default` 是唯一的加载入口。
+- **`config_path` 传递**：`agent.Config.ConfigPath` 是结构体字段（不是 Option、不是 loader）。`config.Load` 把生效路径写入；`agent_custom` 的 `config_path` 键读它回报（空则 `(未设置)`）。库使用方自行填入该字段，即得到同一份回报能力。
+- **校验**：`Config.Validate()` 对核心项做自洽校验（`base_url`/`model`/`user_agent`/`data_dir`/`config_path` 非空、`api_protocol`/`session_mode` 取值合法、归档阈值与保留数在界内），`agent.New` 入口即调用，缺失/非法直接返回错误；`nil` 配置返回 `MsgNilConfig`（此前会 panic）。**`api_key` 是唯一豁免**：允许空、失败点延迟到首次请求（`MsgAPIKey`），保留 REPL 可启动性。默认值填充与 yaml/env 加载归 `config.Load`——故文件缺失但无 env 时，有默认值的项（`base_url`/`model`/`data_dir`/`user_agent` 等）由 `config.Default()` 兜住，仍能过校验。
+- **不变式**：yaml 键名、`TANYA_*` env 名、`config.example.yaml` 全文、`tanya config` 输出**全部不改**，旧配置零迁移；`agent` 侧 `LoadConfig`/`DefaultConfig`/`ToolOutputLines()` 属删除的导出 API（仓外无使用者）。
+- **依赖方向**：`config → agent`（唯一进入 agent 方向的边），`agent` 不依赖 `config`；`main` 是唯一 import `config` 的包（`config` 为纯装配层，`repl` 不 import `config`——工具输出行数默认常量落 `repl.DefaultToolOutputLines`，不跨界借常量）。
+- **测试夹具**：`agent` 测试同包，`defaultConfig()` 从生产代码移入 `agent/fixtures_test.go` 作测试夹具（补全必填字段），生产路径不再引用。
+
 ## 配置
 
-优先级：env（`TANYA_*`）> `~/.config/tanya/config.yaml` > 默认值。
+优先级：env（`TANYA_*`）> `~/.config/tanya/config.yaml` > 默认值。加载与校验由 `config` 包承担；`agent` 侧只持有已收窄的核心项（见《配置分层》）。
 
 | 配置项 | 默认 | 说明 |
 |---|---|---|

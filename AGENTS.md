@@ -13,13 +13,16 @@
 - 运行期信号统一收敛在 `ctty`（SIGTERM/SIGHUP 关闭、SIGINT 中断、SIGQUIT 保持默认转储），业务层（`repl`/`main`）不出现 `os/signal`；退出统一走 `REPL.quit()`，进程退出码取 `ctty.ExitStatus()`，见 `docs/ctty.md`《运行期信号》
 - `interactive: true` 的 run_shell 走全 pty 桥接，仅 Linux（失败回退 `/dev/tty` + `TIOCSPGRP`）；Windows 为控制台继承直通，见 `docs/interactive-tty.md`、`docs/terminal-caps.md` §8.6
 - 系统提示词原文放仓库根 `system_prompt.md`（可读可改，纯文本），`main` 用 `//go:embed` 编译期嵌入、构造时经 `agent.WithSystemPrompt` 注入；`agent` 侧无内置文本（未注入即无内置段），改动需重新编译
-- 默认配置示例原文放仓库根 `config.example.yaml`（可读可改，纯文本），`main` 用 `//go:embed` 编译期嵌入，`tanya config` 原样打到 stdout（不带提示行，可直接 `> ~/.config/tanya/config.yaml`）；示例与 `agent.DefaultConfig()` 的一致性由根包测试守护，改动需重新编译
+- 默认配置示例原文放仓库根 `config.example.yaml`（可读可改，纯文本），`main` 用 `//go:embed` 编译期嵌入，`tanya config` 原样打到 stdout（不带提示行，可直接 `> ~/.config/tanya/config.yaml`）；示例与 `config.Default()` 的一致性由根包测试守护，改动需重新编译
 - 工具只有编译期显式清单 `allTools()`（`run_shell` + `builtinTools()` + `agent_custom`），不做动态注册/插件；清单顺序即请求顺序，改动会让缓存前缀作废（代价可接受，见下条）
 - 缓存不变性（history append-only、system 快照冻结、`/load` 还原首行）是为命中 provider 前缀缓存服务的**优化手段**，不是功能红线：保证范围仅限「同一二进制 + 会话首行快照未被改写」（进程内多轮、重开快照未变的旧会话都命中）；跨版本无此约束——改了默认系统提示词/工具描述/env 段后 `/load` 旧会话前缀变化属预期，代价只是首轮 cache miss。评估改动时按 `docs/cache-probe.md` 的台阶估代价即可，不必为字节不变放弃功能，见 `docs/design.md`《系统提示与缓存友好》
 - `agent_custom` 供模型运行时自调与自省：key 表驱动，只写内存、不落盘不入会话，`/load` 或重启后回落配置，见 `docs/agent-control-tool.md`
 - 工具策略：以 `run_shell` 为核心，新能力优先用 shell 命令组合实现；小型纯计算/查询工具放 `builtin.go`
 - 启动即拒绝 root：`ctty.IsRoot()`（posix 取 `os.Geteuid() == 0`，含 `sudo`/setuid；Windows 及其余平台恒 false）为真则整个入口拒绝（`-v`/`config`/`ask`/`init` 无豁免），逃生舱只认 `TANYA_ALLOW_ROOT=1`；`-h` 与非法选项由 flag 包先行退出、不受影响，判定留在 `main`（`agent` 作库用时不判权限），见 `docs/design.md`《启动安全检查》
 - 启动即要求可用 shell：`agent.New` 解析（配置覆盖 > 平台探测）全落空直接报错退出，无降级路径
+- 配置分层：`agent.Config` 只留 agent 运行时需要的核心项（LLM 接入/工作区会话/shell/归档策略共 14 项，含调用方填入的 `ConfigPath`），终端表现项（`show_reasoning`/`bell`/`notify_osc`/`notify_cmd`/`colors`/`theme`/`palette`/`tool_output_lines`）整体外移到顶级 `config` 包（`config.UI` 段，与 `agent.Config` 以 `yaml:",inline"` 合成 `config.Config`）；**yaml 键名与 `TANYA_*` env 名全程不变**，`config.example.yaml` 与 `tanya config` 输出逐字节不变，见 `docs/design.md`《配置分层》
+- `agent` 包不提供任何配置加载机制：无 `LoadConfig`/`DefaultConfig`、不读 yaml、不读 env（依赖仅剩 `golang.org/x/sys`）；配置文件路径由调用方写入 `Config.ConfigPath` 结构体字段直接读取，`agent_custom` 的 `config_path` 键据此回报（未填即 `(未设置)`）
+- `agent.Config.Validate()` 是自洽校验（`agent.New` 入口调用，外部亦可显式调用）：`base_url`/`model`/`user_agent`/`data_dir`/`config_path` 非空、`api_protocol`/`session_mode` 取值合法、归档阈值与保留数在界内；`agent.New` 入口即校验，缺失/非法直接返回错误（`nil` 配置返回 `MsgNilConfig` 而非 panic）。**`api_key` 是唯一豁免**（保留"可启动、首次请求才警告"的现有行为）。默认值填充与 yaml/env 加载由 `config` 包负责
 - `init` 子命令是新工作区的一次性脚手架（三项动作幂等、不覆盖既有文件），**必须在 `agent.New` 之前执行**；不做项目探测、不调模型，见 `docs/design.md`《init 模式》
 - 会话归档：写入触发点只有 `/archive` 与启动自动归档两处，共用 `REPL.archiveFlow`（先出报告再确认）；卷逐字节无损、写入后不可变、不做解档；归档会话 `/load` 只读，继续对话一律 `/fork`（通用分支命令，原会话不动），见 `docs/session-archive.md`
 - REPL 输入分发（`repl/dispatch.go`）：`/` 白名单斜杠命令、`exit`/`quit` 内建退出、`:`/`：` 等价显式对话前缀；进程 cwd 恒为启动目录（全程不 `os.Chdir`），`run_shell` 默认在当前工作区执行、可用 `cwd` 参数指定单次目录；`/switch <dir>` 换工作区即放弃当前会话，由 `Agent.loadWorkspace` 按新目录重建派生态（shell 工具/prompt/store/env 段），任一步失败或目标非法（不存在/非目录/等同当前）时原工作区与会话不动
@@ -38,10 +41,11 @@
 main.go             入口、flag 子命令、ask 单发、init 工作区脚手架、config 输出默认配置（含系统提示词与配置示例的 embed）
 system_prompt.md    内置系统提示词原文（顶层，编译期嵌入）
 config.example.yaml 默认配置示例原文（顶层，编译期嵌入，`tanya config` 输出）
+config/             tanya 作为 CLI 的完整配置：agent.Config(inline) + UI 段(inline) + Path；yaml 加载、TANYA_* env 覆盖、值域校验（agent 侧零加载机制）
 ctty/               控制终端原语与终端探测（前台组、/dev/tty、termios、Facts）；白名单 + stub，零内部依赖
 repl/               REPL 循环与输入分发、斜杠命令、提示符、ghost 补全、/load picker、工具块渲染、状态行、退出收尾
 readline/           自研终端输入层：行编辑/历史/Tab 补全、按键解析、raw mode、显示宽度、pty 桥接（linux）、状态自愈
-agent/              核心逻辑与工具：config / llm(+http,+responses) / agent loop / prompt / session / session_archive / stats / envprobe / init / tools / shelltool / shell(+平台分片) / builtin / control / tty_bridge
+agent/              核心逻辑与工具：config(收窄结构+校验) / llm(+http,+responses) / agent loop / prompt / session / session_archive / stats / envprobe / init / tools / shelltool / shell(+平台分片) / builtin / control / tty_bridge
 render/             表现层树根（IR → ANSI）；style/ 样式词汇、term/ 终端原语、ir/ 渲染 IR、theme/ 配色、markdown/ 流式解析、markup/ 内联标记
 ```
 

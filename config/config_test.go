@@ -1,18 +1,16 @@
-package agent
+package config
 
 import (
-	"context"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/LaoQi/tanya/agent"
 )
 
 func TestDefaultConfig(t *testing.T) {
-	cfg := defaultConfig()
+	cfg := Default()
 	if cfg.BaseURL == "" || cfg.Model == "" {
 		t.Error("默认值不应为空")
 	}
@@ -22,7 +20,7 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Temperature != 0.7 {
 		t.Errorf("默认数值异常: %+v", cfg)
 	}
-	if cfg.UserAgent != DefaultUserAgent || !strings.HasPrefix(cfg.UserAgent, "pi/") {
+	if cfg.UserAgent != agent.DefaultUserAgent || !strings.HasPrefix(cfg.UserAgent, "pi/") {
 		t.Errorf("默认 UA 异常: %q", cfg.UserAgent)
 	}
 }
@@ -32,7 +30,7 @@ func TestLoadConfigApiProtocol(t *testing.T) {
 	if err := os.WriteFile(path, []byte("api_protocol: chat\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +38,7 @@ func TestLoadConfigApiProtocol(t *testing.T) {
 		t.Errorf("yaml api_protocol 未生效: %q", cfg.ApiProtocol)
 	}
 	t.Setenv("TANYA_API_PROTOCOL", "RESPONSES")
-	cfg, err = LoadConfig(path)
+	cfg, err = Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,18 +49,18 @@ func TestLoadConfigApiProtocol(t *testing.T) {
 	if err := os.WriteFile(path, []byte("api_protocol: bogus\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "bogus") {
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "bogus") {
 		t.Errorf("非法 api_protocol 应报错: %v", err)
 	}
 }
 
 func TestConfigPathDefaultAndExplicit(t *testing.T) {
-	cfg := defaultConfig()
+	cfg := Default()
 	if cfg.Path == "" || !filepath.IsAbs(cfg.Path) {
 		t.Fatalf("默认配置路径应非空且绝对: %q", cfg.Path)
 	}
 	path := filepath.Join(t.TempDir(), "nonexistent.yaml")
-	fallback, err := LoadConfig(path)
+	fallback, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,11 +80,11 @@ func TestConfigPathDefaultAndExplicit(t *testing.T) {
 }
 
 func TestLoadConfigMissingFile(t *testing.T) {
-	cfg, err := LoadConfig(filepath.Join(t.TempDir(), "nonexistent.yaml"))
+	cfg, err := Load(filepath.Join(t.TempDir(), "nonexistent.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Model != defaultConfig().Model {
+	if cfg.Model != Default().Model {
 		t.Error("缺文件时应使用默认值")
 	}
 }
@@ -100,7 +98,7 @@ temperature: 0.3
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +112,7 @@ func TestLoadConfigReasoningEffort(t *testing.T) {
 	if err := os.WriteFile(path, []byte("reasoning_effort: high\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +120,7 @@ func TestLoadConfigReasoningEffort(t *testing.T) {
 		t.Errorf("yaml reasoning_effort 未生效: %q", cfg.ReasoningEffort)
 	}
 	t.Setenv("TANYA_REASONING_EFFORT", "MAX")
-	cfg, err = LoadConfig(path)
+	cfg, err = Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +128,7 @@ func TestLoadConfigReasoningEffort(t *testing.T) {
 		t.Errorf("env 应覆盖 yaml 并归一小写: %q", cfg.ReasoningEffort)
 	}
 	t.Setenv("TANYA_REASONING_EFFORT", "")
-	cfg, err = LoadConfig(path)
+	cfg, err = Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +138,7 @@ func TestLoadConfigReasoningEffort(t *testing.T) {
 	if err := os.WriteFile(path, []byte("reasoning_effort: bogus\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err = LoadConfig(path)
+	cfg, err = Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +154,7 @@ func TestLoadConfigEnvOverride(t *testing.T) {
 	}
 	t.Setenv("TANYA_MODEL", "env-model")
 	t.Setenv("TANYA_API_KEY", "env-key")
-	cfg, err := LoadConfig(path)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +171,7 @@ func TestLoadConfigShell(t *testing.T) {
 	if err := os.WriteFile(path, []byte("shell: zsh\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,14 +179,14 @@ func TestLoadConfigShell(t *testing.T) {
 		t.Errorf("yaml shell 覆盖失败: %q", cfg.Shell)
 	}
 	t.Setenv("TANYA_SHELL", "/usr/bin/fish")
-	cfg, err = LoadConfig(path)
+	cfg, err = Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Shell != "/usr/bin/fish" {
 		t.Errorf("env 应覆盖 yaml: %q", cfg.Shell)
 	}
-	if cfg := defaultConfig(); cfg.Shell != "" {
+	if cfg := Default(); cfg.Shell != "" {
 		t.Errorf("默认 shell 应为空（自动探测）: %q", cfg.Shell)
 	}
 }
@@ -198,7 +196,7 @@ func TestLoadConfigInvalidYAML(t *testing.T) {
 	if err := os.WriteFile(path, []byte("model: [unclosed"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadConfig(path); err == nil {
+	if _, err := Load(path); err == nil {
 		t.Error("非法 yaml 应报错")
 	}
 }
@@ -209,38 +207,8 @@ func TestLoadConfigPromptIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("TANYA_PROMPT", "[{cwd}] ")
-	if _, err := LoadConfig(path); err != nil {
+	if _, err := Load(path); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestUserAgentHeader(t *testing.T) {
-	var ua, modelUA string
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		ua = r.Header.Get("User-Agent")
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: [DONE]\n\n")
-	})
-	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
-		modelUA = r.Header.Get("User-Agent")
-		fmt.Fprint(w, `{"data":[{"id":"m1"}]}`)
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-	cfg := defaultConfig()
-	cfg.BaseURL = srv.URL + "/v1"
-	cfg.APIKey = "test-key"
-	cfg.ApiProtocol = "chat"
-	c := NewClient(cfg, nil)
-	if _, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := c.ListModels(); err != nil {
-		t.Fatal(err)
-	}
-	if ua != DefaultUserAgent || modelUA != DefaultUserAgent {
-		t.Errorf("UA 头异常: chat=%q models=%q", ua, modelUA)
 	}
 }
 
@@ -258,14 +226,14 @@ func TestExpandHome(t *testing.T) {
 }
 
 func TestToolOutputLines(t *testing.T) {
-	if cfg := defaultConfig(); cfg.ToolOutputLines != 20 {
+	if cfg := Default(); cfg.ToolOutputLines != 20 {
 		t.Errorf("默认应为 20: %d", cfg.ToolOutputLines)
 	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("tool_output_lines: 5\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +243,7 @@ func TestToolOutputLines(t *testing.T) {
 	if err := os.WriteFile(path, []byte("tool_output_lines: -3\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err = LoadConfig(path)
+	cfg, err = Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +251,7 @@ func TestToolOutputLines(t *testing.T) {
 		t.Errorf("非法值应回退 20: %d", cfg.ToolOutputLines)
 	}
 	t.Setenv("TANYA_TOOL_OUTPUT_LINES", "7")
-	cfg, err = LoadConfig(path)
+	cfg, err = Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +266,7 @@ func TestLoadConfigStyle(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +283,7 @@ func TestConfigTheme(t *testing.T) {
 	if err := os.WriteFile(path, []byte("theme: solar\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +291,7 @@ func TestConfigTheme(t *testing.T) {
 		t.Errorf("yaml theme 未生效: %q", cfg.Theme)
 	}
 	t.Setenv("TANYA_THEME", "minimal")
-	cfg, err = LoadConfig(path)
+	cfg, err = Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,20 +299,20 @@ func TestConfigTheme(t *testing.T) {
 		t.Errorf("env 应覆盖 yaml: %q", cfg.Theme)
 	}
 	t.Setenv("TANYA_THEME", "")
-	if cfg := defaultConfig(); cfg.Theme != "nord" {
+	if cfg := Default(); cfg.Theme != "nord" {
 		t.Errorf("默认主题应为 nord: %q", cfg.Theme)
 	}
 }
 
 func TestLoadConfigShowReasoning(t *testing.T) {
-	if defaultConfig().ShowReasoning {
+	if Default().ShowReasoning {
 		t.Error("默认应为关闭")
 	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("show_reasoning: true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +322,7 @@ func TestLoadConfigShowReasoning(t *testing.T) {
 	if err := os.WriteFile(path, []byte("show_reasoning: false\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if cfg, err = LoadConfig(path); err != nil || cfg.ShowReasoning {
+	if cfg, err = Load(path); err != nil || cfg.ShowReasoning {
 		t.Errorf("显式关闭应生效: %v %v", cfg.ShowReasoning, err)
 	}
 }
@@ -379,7 +347,7 @@ func TestLoadConfigAutoArchive(t *testing.T) {
 			if err := os.WriteFile(path, []byte(c.content), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := LoadConfig(path)
+			cfg, err := Load(path)
 			if c.wantErr {
 				if err == nil {
 					t.Fatalf("应报错: %+v", cfg)
@@ -389,7 +357,7 @@ func TestLoadConfigAutoArchive(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cfg.ArchiveThreshold != DefaultArchiveThreshold || cfg.ArchiveKeep != DefaultArchiveKeep {
+			if cfg.ArchiveThreshold != agent.DefaultArchiveThreshold || cfg.ArchiveKeep != agent.DefaultArchiveKeep {
 				t.Errorf("默认阈值/保留数异常: %+v", cfg)
 			}
 			if cfg.AutoArchive != c.wantAuto {
@@ -404,7 +372,7 @@ func TestLoadConfigAutoArchiveValues(t *testing.T) {
 	if err := os.WriteFile(path, []byte("auto_archive: true\nauto_archive_threshold: 8\nauto_archive_keep: 3\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +387,7 @@ func TestLoadConfigNotify(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +397,7 @@ func TestLoadConfigNotify(t *testing.T) {
 	if cfg.NotifyCmd != "notify-send -a tanya {title} {content}" {
 		t.Errorf("notify_cmd 应去空白: %q", cfg.NotifyCmd)
 	}
-	if cfg := defaultConfig(); cfg.NotifyOSC || cfg.NotifyCmd != "" {
+	if cfg := Default(); cfg.NotifyOSC || cfg.NotifyCmd != "" {
 		t.Errorf("通知默认应为关闭: osc=%v cmd=%q", cfg.NotifyOSC, cfg.NotifyCmd)
 	}
 }

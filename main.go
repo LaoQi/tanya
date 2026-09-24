@@ -11,6 +11,7 @@ import (
 	"github.com/LaoQi/tanya/render/term"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/config"
 	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/readline"
 	"github.com/LaoQi/tanya/repl"
@@ -99,7 +100,7 @@ func main() {
 	repl.Version = version
 	repl.BuildTime = buildTime
 
-	cfg, err := agent.LoadConfig(*f.configPath)
+	cfg, err := config.Load(*f.configPath)
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
@@ -127,7 +128,7 @@ func main() {
 		cfg.SessionMode = *f.sessionMode
 	}
 	if cmd == repl.CmdInit {
-		if err := repl.RunInit(st, sem, cfg); err != nil {
+		if err := repl.RunInit(st, sem, &cfg.Config); err != nil {
 			st.FailErr("", err)
 			exitNow(1)
 		}
@@ -136,7 +137,7 @@ func main() {
 	ctty.WatchSignals()
 	readline.InitTerminalGuard()
 	readline.SecureTerminal()
-	a, err := agent.New(cfg,
+	a, err := agent.New(&cfg.Config,
 		agent.NoSave(*f.noSave),
 		agent.WithTTYBridge(readline.NewTTYBridge()),
 		agent.WithSystemPrompt(systemPromptFile))
@@ -145,7 +146,7 @@ func main() {
 		exitNow(1)
 	}
 	termFacts := repl.TermFacts{Cols: facts.Cols, ColsOK: facts.SizeOK}
-	sink := repl.NewToolView(st, prof, sem, termFacts.Width, a.ToolOutputLines())
+	sink := repl.NewToolView(st, prof, sem, termFacts.Width, cfg.ToolOutputLines)
 
 	if cmd == repl.CmdAsk {
 		ctx, done := repl.InterruptContext()
@@ -165,12 +166,12 @@ func main() {
 		return
 	}
 
-	notifier, err := buildNotifier(cfg)
+	notifier, err := buildNotifier(cfg.UI, &cfg.Config)
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
 	}
-	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier))
+	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines))
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
@@ -195,20 +196,20 @@ func writeUsage(w io.Writer, fs *flag.FlagSet) {
 }
 
 // buildNotifier 按配置组装通知行为（bell / OSC 9 / 外部程序，各自独立开关），全关时为 nil。
-func buildNotifier(cfg *agent.Config) (repl.Notifier, error) {
+func buildNotifier(ui config.UI, acfg *agent.Config) (repl.Notifier, error) {
 	var list []repl.Notifier
-	if cfg.Bell {
+	if ui.Bell {
 		list = append(list, repl.BellNotifier())
 	}
-	if cfg.NotifyOSC {
+	if ui.NotifyOSC {
 		list = append(list, repl.OSCNotifier())
 	}
-	if cfg.NotifyCmd != "" {
-		inv, err := agent.ResolveShell(cfg)
+	if ui.NotifyCmd != "" {
+		inv, err := agent.ResolveShell(acfg)
 		if err != nil {
 			return nil, err
 		}
-		n, err := repl.NewCommandNotifier(inv, cfg.NotifyCmd)
+		n, err := repl.NewCommandNotifier(inv, ui.NotifyCmd)
 		if err != nil {
 			return nil, err
 		}

@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/config"
 	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/repl"
 )
@@ -29,11 +29,11 @@ func TestConfigExampleEmbedded(t *testing.T) {
 }
 
 func TestConfigExampleMatchesDefaults(t *testing.T) {
-	var got agent.Config
+	var got config.Config
 	if err := yaml.Unmarshal([]byte(configExampleFile), &got); err != nil {
 		t.Fatalf("示例应可被 yaml 解析: %v", err)
 	}
-	want := agent.DefaultConfig()
+	want := config.Default()
 	checks := []struct {
 		key  string
 		got  string
