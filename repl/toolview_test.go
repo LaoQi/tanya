@@ -38,7 +38,7 @@ func TestRenderToolStartBadJSON(t *testing.T) {
 }
 
 func TestRenderToolEndShortOutput(t *testing.T) {
-	res := agent.ToolResult{Shell: &agent.ShellResult{
+	res := agent.ToolResult{Meta: &agent.ShellResult{
 		Stdout:   []agent.ShellChunk{{Data: "line1\nline2\nline3\n"}},
 		Duration: 250 * time.Millisecond,
 		ExitCode: 0,
@@ -57,7 +57,7 @@ func TestRenderToolEndLongOutput(t *testing.T) {
 	for i := 1; i <= 30; i++ {
 		sb.WriteString("L" + strings.Repeat("x", i) + "\n")
 	}
-	res := agent.ToolResult{Shell: &agent.ShellResult{
+	res := agent.ToolResult{Meta: &agent.ShellResult{
 		Stdout: []agent.ShellChunk{{Data: sb.String()}},
 	}}
 	got := renderToolEnd(testSem(), "run_shell", `{"command":"seq"}`, res, 80, 20)
@@ -73,7 +73,7 @@ func TestRenderToolEndLongOutput(t *testing.T) {
 }
 
 func TestRenderToolEndFailStatus(t *testing.T) {
-	res := agent.ToolResult{Shell: &agent.ShellResult{
+	res := agent.ToolResult{Meta: &agent.ShellResult{
 		Stderr:   []agent.ShellChunk{{Data: "oops"}},
 		ExitCode: 2,
 	}}
@@ -87,23 +87,23 @@ func TestRenderToolEndFailStatus(t *testing.T) {
 }
 
 func TestRenderToolEndTimeoutInterrupt(t *testing.T) {
-	res := agent.ToolResult{Shell: &agent.ShellResult{TimedOut: true, Duration: 3 * time.Second}}
+	res := agent.ToolResult{Meta: &agent.ShellResult{TimedOut: true, Duration: 3 * time.Second}}
 	got := renderToolEnd(testSem(), "run_shell", `{"command":"sleep"}`, res, 80, 20)
 	if !strings.Contains(got, "执行超时") || !strings.Contains(got, "3.0s") {
 		t.Errorf("got %q", got)
 	}
-	res2 := agent.ToolResult{Shell: &agent.ShellResult{Interrupted: true}}
+	res2 := agent.ToolResult{Meta: &agent.ShellResult{Interrupted: true}}
 	if got := renderToolEnd(testSem(), "run_shell", `{}`, res2, 80, 20); !strings.Contains(got, "已中断") {
 		t.Errorf("got %q", got)
 	}
-	res3 := agent.ToolResult{Shell: &agent.ShellResult{Interrupted: true, NotStarted: true}}
+	res3 := agent.ToolResult{Meta: &agent.ShellResult{Interrupted: true, NotStarted: true}}
 	if got := renderToolEnd(testSem(), "run_shell", `{}`, res3, 80, 20); !strings.Contains(got, "未执行") {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestRenderToolEndTruncateLongLine(t *testing.T) {
-	res := agent.ToolResult{Shell: &agent.ShellResult{
+	res := agent.ToolResult{Meta: &agent.ShellResult{
 		Stdout: []agent.ShellChunk{{Data: strings.Repeat("a", 200) + "\n"}},
 	}}
 	got := renderToolEnd(testSem(), "run_shell", `{"command":"cat"}`, res, 80, 20)
@@ -126,6 +126,24 @@ func TestRenderToolEndBuiltin(t *testing.T) {
 	}
 }
 
+func TestRenderToolEndMetaFallback(t *testing.T) {
+	cases := []struct {
+		name string
+		res  agent.ToolResult
+	}{
+		{"Meta 为 nil", agent.ToolResult{Text: "纯文本结果"}},
+		{"Meta 异类型", agent.ToolResult{Text: "纯文本结果", Meta: "不是 ShellResult"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := renderToolEnd(testSem(), "run_shell", `{"command":"x"}`, c.res, 80, 20)
+			if !strings.Contains(got, "纯文本结果") {
+				t.Errorf("Meta 不可断言时应回落文本渲染: %q", got)
+			}
+		})
+	}
+}
+
 func TestRenderToolEndBuiltinError(t *testing.T) {
 	res := agent.ToolResult{Text: "error: 除数为零"}
 	got := renderToolEnd(testSem(), "calc", `{"expression":"1/0"}`, res, 80, 20)
@@ -135,7 +153,7 @@ func TestRenderToolEndBuiltinError(t *testing.T) {
 }
 
 func TestRenderToolEndTruncationMarker(t *testing.T) {
-	res := agent.ToolResult{Shell: &agent.ShellResult{
+	res := agent.ToolResult{Meta: &agent.ShellResult{
 		Stdout: []agent.ShellChunk{
 			{Data: "head\n"},
 			{Data: "tail\n", Truncated: 9999},
@@ -214,7 +232,7 @@ func TestRenderResponseInfoErrorPath(t *testing.T) {
 
 func TestRenderToolBlocksNoWrap(t *testing.T) {
 	long := `{"command":"go build ./... && go vet ./... && go test ./repl/ ./style/ ./readline/ ./agent/ -count=1 2>&1 | tail -40"}`
-	res := agent.ToolResult{Shell: &agent.ShellResult{
+	res := agent.ToolResult{Meta: &agent.ShellResult{
 		Stdout:   []agent.ShellChunk{{Data: strings.Repeat("输出内容宽字符测试", 30) + "\n"}},
 		Duration: 250 * time.Millisecond,
 		ExitCode: 0,
@@ -308,7 +326,7 @@ func TestToolViewInteractive(t *testing.T) {
 	view.heart.interval = 10 * time.Millisecond
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true})
 	time.Sleep(30 * time.Millisecond)
-	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "sudo -S true", ExitCode: 1}}})
+	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true, Result: agent.ToolResult{Meta: &agent.ShellResult{Command: "sudo -S true", ExitCode: 1}}})
 	out := buf.String()
 	if !strings.Contains(out, "等待终端输入") {
 		t.Errorf("交互模式应打印引导行: %q", out)
@@ -336,7 +354,7 @@ func TestToolViewNonInteractive(t *testing.T) {
 	view.heart.interval = 10 * time.Millisecond
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	time.Sleep(30 * time.Millisecond)
-	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`, Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", ExitCode: 0}}})
+	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`, Result: agent.ToolResult{Meta: &agent.ShellResult{Command: "echo hi", ExitCode: 0}}})
 	out := buf.String()
 	if out == "" {
 		t.Fatal("输出为空则负向断言会静默通过")
@@ -359,7 +377,7 @@ func TestRenderToolEndAppendNoTitle(t *testing.T) {
 	old := term.GetProfile()
 	term.SetProfile(term.Profile{TTY: true, Colors: term.Level16})
 	t.Cleanup(func() { term.SetProfile(old) })
-	res := agent.ToolResult{Shell: &agent.ShellResult{
+	res := agent.ToolResult{Meta: &agent.ShellResult{
 		Stdout:   []agent.ShellChunk{{Data: "hi\n"}},
 		Duration: 2 * time.Millisecond,
 	}}
@@ -399,7 +417,7 @@ func TestRenderToolEndANSIDirectView(t *testing.T) {
 	oldProf := term.GetProfile()
 	term.SetProfile(term.Profile{TTY: true, Colors: term.Level16})
 	defer term.SetProfile(oldProf)
-	res := agent.ToolResult{Shell: &agent.ShellResult{
+	res := agent.ToolResult{Meta: &agent.ShellResult{
 		Stdout:   []agent.ShellChunk{{Data: "logo\n\x1b[90m版本行\x1b[0m\n"}},
 		Duration: 100 * time.Millisecond,
 	}}
@@ -421,7 +439,7 @@ func TestRenderToolEndPlainBlockIntegrity(t *testing.T) {
 	oldProf := term.GetProfile()
 	term.SetProfile(term.Profile{TTY: true, Colors: term.Level16})
 	defer term.SetProfile(oldProf)
-	res := agent.ToolResult{Shell: &agent.ShellResult{
+	res := agent.ToolResult{Meta: &agent.ShellResult{
 		Stdout:   []agent.ShellChunk{{Data: "a\x1b[2Kb\rc\n"}},
 		Duration: 100 * time.Millisecond,
 	}}
@@ -444,7 +462,7 @@ func TestRenderToolEndNonTTYNoEscape(t *testing.T) {
 	oldProf := term.GetProfile()
 	term.SetProfile(term.Profile{TTY: false, Colors: term.LevelNone})
 	defer term.SetProfile(oldProf)
-	res := agent.ToolResult{Shell: &agent.ShellResult{
+	res := agent.ToolResult{Meta: &agent.ShellResult{
 		Stdout:   []agent.ShellChunk{{Data: "\x1b[31mred\x1b[0m\n"}},
 		Duration: 100 * time.Millisecond,
 	}}
@@ -458,7 +476,7 @@ func TestRenderToolEndSGRMixedStderr(t *testing.T) {
 	oldProf := term.GetProfile()
 	term.SetProfile(term.Profile{TTY: true, Colors: term.Level16})
 	defer term.SetProfile(oldProf)
-	res := agent.ToolResult{Shell: &agent.ShellResult{
+	res := agent.ToolResult{Meta: &agent.ShellResult{
 		Stdout:   []agent.ShellChunk{{Data: "plain\n"}},
 		Stderr:   []agent.ShellChunk{{Data: "\x1b[91merr\x1b[0m\n"}},
 		Duration: 100 * time.Millisecond,
@@ -842,7 +860,7 @@ func TestToolBlockSingleWrite(t *testing.T) {
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	before := wc.count()
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
-		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
+		Result: agent.ToolResult{Meta: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
 	writes := wc.writes()[before:]
 	if len(writes) == 0 || writes[0] != "\n" {
 		t.Fatalf("收尾应先补一个换行收尾心跳行，实际 %q", writes)
@@ -877,7 +895,7 @@ func TestToolViewStateFields(t *testing.T) {
 	}
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
-		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
+		Result: agent.ToolResult{Meta: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
 	if !view.justEnded || view.dirty {
 		t.Errorf("工具块结束应置 justEnded 并清 dirty: justEnded=%v dirty=%v", view.justEnded, view.dirty)
 	}
@@ -925,7 +943,7 @@ func TestToolStatusLineSanitized(t *testing.T) {
 	var out syncBuf
 	st := NewStreams(&out, &syncBuf{}, modePlainVerbose)
 	view := NewToolView(st, plainProf, testSem(), func() int { return 80 }, 20)
-	res := agent.ToolResult{Shell: &agent.ShellResult{Cwd: "/tmp/\x1b[2Kx", Err: "cwd 不存在或不是目录: /tmp/\x1b[2Kx"}}
+	res := agent.ToolResult{Meta: &agent.ShellResult{Cwd: "/tmp/\x1b[2Kx", Err: "cwd 不存在或不是目录: /tmp/\x1b[2Kx"}}
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{}`, Result: res})
 	got := out.String()
 	if strings.Contains(got, "\x1b[2K") {

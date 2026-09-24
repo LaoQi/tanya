@@ -82,12 +82,13 @@ func (t *shellTool) Invoke(ctx context.Context, argsJSON string) ToolResult {
 	if err != nil {
 		return ToolResult{Text: fmt.Sprintf(MsgParseArgs, err)}
 	}
-	return ToolResult{Shell: t.run(ctx, shellRequest{
+	res := t.run(ctx, shellRequest{
 		Command:     args.Command,
 		TimeoutSec:  args.Timeout,
 		Interactive: args.Interactive,
 		Cwd:         args.Cwd,
-	})}
+	})
+	return ToolResult{Text: res.String(), Meta: res}
 }
 
 func (t *shellTool) run(ctx context.Context, req shellRequest) *ShellResult {

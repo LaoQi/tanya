@@ -168,11 +168,11 @@ func toolEndBody(res agent.ToolResult, width, maxLines int) (string, string) {
 	var b strings.Builder
 	var lines []string
 	status := ""
-	if res.Shell != nil {
+	if sh, ok := res.Meta.(*agent.ShellResult); ok && sh != nil {
 		var total int
 		var trunc bool
-		lines, status, total, trunc = shellView(res.Shell, width, maxLines)
-		parts := []string{status, respDuration(res.Shell.Duration)}
+		lines, status, total, trunc = shellView(sh, width, maxLines)
+		parts := []string{status, respDuration(sh.Duration)}
 		switch {
 		case trunc:
 			parts = append(parts, fmt.Sprintf(MsgLinesTotal, total))

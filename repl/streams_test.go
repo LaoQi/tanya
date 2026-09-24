@@ -123,7 +123,7 @@ func TestOutputAtomicNoInterleave(t *testing.T) {
 	close(stop)
 	wg.Wait()
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"sleep 1"}`,
-		Result: agent.ToolResult{Shell: &agent.ShellResult{Command: "sleep 1", ExitCode: 0}}})
+		Result: agent.ToolResult{Meta: &agent.ShellResult{Command: "sleep 1", ExitCode: 0}}})
 
 	got := buf.String()
 	if pairs == 0 {

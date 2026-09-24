@@ -11,8 +11,17 @@ type Tool interface {
 	Invoke(ctx context.Context, argsJSON string) ToolResult
 }
 
-type interactiveTool interface {
+type Interactive interface {
 	Interactive(argsJSON string) bool
+}
+
+type EnvReporter interface {
+	EnvSection() string
+}
+
+type ToolResult struct {
+	Text string
+	Meta any
 }
 
 type toolRegistry struct {
@@ -50,11 +59,32 @@ func newToolDef(name, desc, params string) ToolDef {
 }
 
 func interactiveOf(t Tool, argsJSON string) bool {
-	it, ok := t.(interactiveTool)
+	it, ok := t.(Interactive)
 	if !ok {
 		return false
 	}
 	return it.Interactive(argsJSON)
+}
+
+type funcTool struct {
+	name   string
+	desc   string
+	params string
+	fn     func(ctx context.Context, argsJSON string) ToolResult
+}
+
+func (f funcTool) Name() string { return f.name }
+
+func (f funcTool) Definition() ToolDef {
+	return newToolDef(f.name, f.desc, f.params)
+}
+
+func (f funcTool) Invoke(ctx context.Context, argsJSON string) ToolResult {
+	return f.fn(ctx, argsJSON)
+}
+
+func NewTool(name, desc, params string, fn func(ctx context.Context, argsJSON string) ToolResult) Tool {
+	return funcTool{name: name, desc: desc, params: params, fn: fn}
 }
 
 func allTools(shell *shellTool, ctl configTarget) []Tool {

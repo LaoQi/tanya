@@ -18,6 +18,7 @@ type Agent struct {
 	workspace  string
 	home       string
 	bridge     TTYBridge
+	registered []Tool
 	history    []Message
 	env        string
 	basePrompt string
@@ -39,6 +40,7 @@ type Options struct {
 	noSave       bool
 	bridge       TTYBridge
 	systemPrompt string
+	registered   []Tool
 }
 
 type Option func(*Options)
@@ -55,6 +57,10 @@ func WithSystemPrompt(s string) Option {
 	return func(o *Options) { o.systemPrompt = s }
 }
 
+func WithTools(tools ...Tool) Option {
+	return func(o *Options) { o.registered = append(o.registered, tools...) }
+}
+
 func New(cfg *Config, opts ...Option) (*Agent, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -68,7 +74,7 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 		return nil, err
 	}
 	home, _ := os.UserHomeDir()
-	a := &Agent{cfg: cfg, workspace: cwd, home: home, bridge: o.bridge, basePrompt: o.systemPrompt}
+	a := &Agent{cfg: cfg, workspace: cwd, home: home, bridge: o.bridge, basePrompt: o.systemPrompt, registered: o.registered}
 	if err := a.loadWorkspace(cwd, o.noSave); err != nil {
 		return nil, err
 	}
@@ -96,7 +102,7 @@ func (a *Agent) loadWorkspace(dir string, noSave bool) error {
 	a.env = envSection(dir, tool.profile)
 	a.prompt = newPromptBuilder(a.basePrompt, dir, globalAgentsPath(), readAgentsFile)
 	a.store = newSessionStore(sessionDir, archiveDir, dir, noSave)
-	a.tools = newToolRegistry(allTools(tool, a)...)
+	a.tools = newToolRegistry(append(allTools(tool, a), a.registered...)...)
 	a.client = NewClient(a.cfg, a.tools.defs())
 	a.NewSession()
 	a.store.refresh()
@@ -335,23 +341,11 @@ func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
 				Role:       "tool",
 				ToolCallID: tc.ID,
 				Name:       tc.Function.Name,
-				Content:    res.Content(),
+				Content:    res.Text,
 			})
 		}
 	}
 	return nil
-}
-
-type ToolResult struct {
-	Shell *ShellResult
-	Text  string
-}
-
-func (r ToolResult) Content() string {
-	if r.Shell != nil {
-		return r.Shell.String()
-	}
-	return r.Text
 }
 
 func (a *Agent) dispatch(ctx context.Context, name, args string) ToolResult {
