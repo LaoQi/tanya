@@ -26,7 +26,7 @@ render/markup/     内联标记解析
 设计取舍：
 
 - **不做细粒度拆包**：代码总量小，按包分职责即可
-- **不做动态工具注册**：工具经 `Tool` 接口（`agent/tools.go`）自述名/描述/参数并提供执行，`allTools()` 编译期显式列清单（`run_shell` + `builtinTools()` + `agent_custom`），`toolRegistry.lookup` 线性扫描（N=4 实测快于 map，现 N=5，不做索引），无插件/运行时注册，存量小且预计长期以 shell 为主
+- **注册只在构造期、运行期冻结**：工具经 `Tool` 接口（`agent/tools.go`）自述名/描述/参数并提供执行；工具集 = 编译期内置清单 `allTools()`（`run_shell` + `builtinTools()` + `agent_custom`）+ 构造期外部注册（`agent.WithTools`），在 `agent.New` 装配期一次合成、之后不可变（无运行期注册 API、无插件）。注册**仅作契约**：内置在前、注册追加在后（保序），不校验重名，`lookup` 首个匹配胜出故内置优先。`toolRegistry.lookup` 线性扫描（N=4 实测快于 map，现 N=5，不做索引），存量小且预计长期以 shell 为主
 - **依赖仅 2 个**：`gopkg.in/yaml.v3`（配置）、`golang.org/x/sys`（`unix` 做 termios/pty、`windows` 做控制台探测）；终端输入层与富文本管线自研
 - **颜色铁律**：SGR 与 CSI 仅 `render/style`、`render/term` 产生（业务代码不得出现裸 `\x1b`，readline 的光标操作也走 `term.Cursor*`）；同一 IR 按终端能力档案（`term.Profile`）降级，无色终端自动纯文本。档案由 `main` 单点探测（`ctty.Probe()`）后注入：**渲染类判定看 stdout 是否终端、输入类看 stdin**，见 `docs/terminal-caps.md`
 
@@ -127,7 +127,19 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## 工具
 
-工具统一经 `Tool` 接口（`agent/tools.go`）声明：`Name()` 给名字、`Definition()` 给描述与参数 schema（即 wire 上的 function 定义）、`Invoke()` 给执行——**描述、参数与执行同处一个实现**，不再有独立清单文件。`allTools(shell, ctl)` 编译期显式列出全集（`run_shell` 在前、`builtinTools()` 居中、`agent_custom` 在末尾），顺序即请求体 `tools` 段顺序（prompt cache 依赖，见 `docs/cache-probe.md`）；`newToolRegistry` 持有该 slice，`defs()` 供 `NewClient` 构造期注入，`lookup` 线性扫描（N=4 实测快于 map，现 N=5，不做索引）。`Agent.dispatch` 退化为查表，未命中回 `MsgUnknownTool`。需要终端直通的工具可额外实现窄接口 `interactiveTool`（当前仅 `run_shell`），供 `runTurn` 在 `EventToolStart/End` 上提前标记 `Interactive`。代价是 `run_shell` 的参数被解析两次——`interactiveOf`（`runTurn` 取 `Interactive`）与 `Invoke` 各一次；这是「参数对通用 `Tool` 接口不透明」与「`EventToolStart` 必须在执行前携带参数派生字段」两条约束相交的**有意保留**结果（实测单次 678ns，对比一次 `bash -c true` 1.26ms 可忽略），不是待办。
+工具统一经 `Tool` 接口（`agent/tools.go`）声明：`Name()` 给名字、`Definition()` 给描述与参数 schema（即 wire 上的 function 定义）、`Invoke()` 给执行——**描述、参数与执行同处一个实现**，不再有独立清单文件。结果类型 `ToolResult{Text string; Meta any}`：`Text` 回写 history 的 tool 消息，`Meta` 是表现层结构化载荷（`run_shell` 放 `*ShellResult`，`repl` 类型断言渲染、断言失败回落 `textView(res.Text)`）——核心不引用任何具体 `Meta` 类型。可选能力接口 `Interactive`（终端独占标记，供 `runTurn` 在 `EventToolStart/End` 提前置 `Interactive`）与 `EnvReporter`（向 system 环境段自述行，B2 接线）；外部以 `agent.NewTool` 构造工具。`allTools(shell, ctl)` 编译期显式列出全集（`run_shell` 在前、`builtinTools()` 居中、`agent_custom` 在末尾），顺序即请求体 `tools` 段顺序（prompt cache 依赖，见 `docs/cache-probe.md`）；`newToolRegistry` 持有该 slice，`defs()` 供 `NewClient` 构造期注入，`lookup` 线性扫描（N=4 实测快于 map，现 N=5，不做索引）。`Agent.dispatch` 退化为查表，未命中回 `MsgUnknownTool`。需要终端直通的工具可额外实现窄接口 `Interactive`（当前仅 `run_shell`），供 `runTurn` 在 `EventToolStart/End` 上提前标记 `Interactive`。代价是 `run_shell` 的参数被解析两次——`interactiveOf`（`runTurn` 取 `Interactive`）与 `Invoke` 各一次；这是「参数对通用 `Tool` 接口不透明」与「`EventToolStart` 必须在执行前携带参数派生字段」两条约束相交的**有意保留**结果（实测单次 678ns，对比一次 `bash -c true` 1.26ms 可忽略），不是待办。
+
+### interactive 标记的流向
+
+`interactive` 是**工具自述、核心只标、表现层消费**的一条单向链路，agent 不解释该标记的含义（不得据此改变执行逻辑）：
+
+1. **产生**：`Interactive` 接口（`agent/tools.go`）可选实现——`run_shell` 解析 `argsJSON` 返回 `args.Interactive`（模型在参数里写的 `"interactive": true`），其余工具不实现即恒 false。
+2. **取值**：`runTurn` 在 `EventToolStart` **之前**调 `interactiveOf(tool, tc.Function.Arguments)`（`agent/agent.go`），据此让同一布尔随 `EventToolStart` 与 `EventToolEnd` 两个事件下发（`Event.Interactive`，`agent/event.go`）。代价是参数被解析两次（`interactiveOf` 与 `Invoke`），见本条上文。
+3. **消费（全在 `repl`，三处 + 一处通知）**：
+   - `toolview.Handle` 的 `EventToolStart`：interactive 时在标题行下打印 `MsgInteractiveHint`（`⏎ 等待终端输入…`），并**不起**执行中状态行心跳（终端即将移交，心跳会污染/误导）；非 interactive 才 `heart.start`。
+   - `toolview.Handle` 的 `EventToolEnd`：interactive 的正文块前补一个空行（给"在下方直接应答"留视觉空间）。
+   - `flow.turn.Handle` 在 `EventToolStart` 上调 `notifyNeedInput`：`e.Interactive` 为真即以 `Notification{Reason: NotifyNeedInput, Tool: e.ToolName}` 触发注意力通知（`payloadOf` 压单行、`kind=input`，经 `Notifier` fan-out；不探测子进程真实读取 stdin 的时刻，静默阻塞如 `cat` 的虚报接受）。
+4. **不参与**：`ask` 单发路径（不构造 `turn`）、命令文本猜测（早期 sudo/ssh 关键词兜底已移除）——是否 interactive 完全由模型显式声明。
 
 ### run_shell（`agent/shelltool.go` 组件 + `agent/shell.go` 叶子）
 
@@ -164,7 +176,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 进程终止语义（`platform.KillGroup`，超时/中断/挂起三条路径共用）：posix 经 `Setpgid` 建独立进程组、`kill(-pid, SIGKILL)` 杀整组（`ESRCH` 归一为 `os.ErrProcessDone`）；windows 走 `taskkill /T /F /PID` 杀整棵进程树（PowerShell/cmd 派生的子进程一并终止，超时不再残留孤儿），`taskkill` 不可用或失败时回退 `Process.Kill()`（仅直接子进程）
 - 挂起探测（`waitShell`）：200ms 轮询进程状态，连续 2 次判定为停止态即认定被终端挂起（Ctrl+Z 等停止信号），SIGKILL 进程组并置 `Stopped`，状态行显示 `挂起已终止`，避免静默挂到超时；探测走平台抽象 `platform.ProcessStopped`——linux 读 `/proc/<pid>/stat` 判 `T`，darwin 走 `sysctl(kern.proc.pid)` 取 `kinfo_proc` 的 `p_stat` 判 `SSTOP`（经 `x/sys/unix` 的 `SysctlKinfoProc`；该状态常量标准库与 `x/sys` 均未导出，本地定义 `darwinStatusStopped`），两者在读取失败或进程不存在时都返回 false（保守，不误杀），并各有真实 `SIGSTOP`/`SIGCONT` 双方向用例（`TestLinuxProcessStopped`/`TestDarwinProcessStopped`，macOS 上 `kern.proc.pid` 不可读时 skip）；windows 与 stub 由 `fillDefaults` 兜底恒 false（探测失效，其余功能不受影响）
 - 字段集：`ShellResult` 为 Command/Stdout/Stderr chunks/Err/ExitCode/TimedOut/Interrupted/Stopped/Duration
-- 事件：`EventToolStart`（dispatch 前触发）/ `EventToolEnd`（结构化 `ToolResult`：Shell/Text 二选一，发回模型的 content 由 `Content()` 拼回文本），渲染在 repl 包 `toolview.go`
+- 事件：`EventToolStart`（dispatch 前触发）/ `EventToolEnd`（携带 `ToolResult{Text, Meta}`——`Text` 即发回模型的 content，`Meta` 供渲染方类型断言），渲染在 repl 包 `toolview.go`
 - **免确认直接执行**（早期版本有 y/n/a 确认机制，已移除）
 
 ### 工具视图渲染（repl/toolview.go）

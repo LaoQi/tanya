@@ -50,14 +50,15 @@ func TestSwitchWorkspaceResetsEverything(t *testing.T) {
 		t.Errorf("env 段应指向新工作区: %q", got)
 	}
 	res := a.dispatch(context.Background(), "run_shell", `{"command":"pwd"}`)
-	if res.Shell == nil {
+	sh, ok := res.Meta.(*ShellResult)
+	if !ok || sh == nil {
 		t.Fatalf("run_shell 未返回: %+v", res)
 	}
-	if got, want := evalDir(t, strings.TrimSpace(shellStdout(res.Shell))), evalDir(t, target); got != want {
+	if got, want := evalDir(t, strings.TrimSpace(shellStdout(sh))), evalDir(t, target); got != want {
 		t.Errorf("run_shell 默认目录应跟随工作区: got %q want %q", got, want)
 	}
-	if res.Shell.Cwd != "" {
-		t.Errorf("默认目录不应回显 cwd: %q", res.Shell.Cwd)
+	if sh.Cwd != "" {
+		t.Errorf("默认目录不应回显 cwd: %q", sh.Cwd)
 	}
 }
 

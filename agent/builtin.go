@@ -11,45 +11,22 @@ import (
 	"unicode"
 )
 
-type builtinTool struct {
-	name   string
-	desc   string
-	params string
-	run    func(argsJSON string) string
-}
-
-func (b builtinTool) Name() string { return b.name }
-
-func (b builtinTool) Definition() ToolDef {
-	return newToolDef(b.name, b.desc, b.params)
-}
-
-func (b builtinTool) Invoke(_ context.Context, argsJSON string) ToolResult {
-	return ToolResult{Text: b.run(argsJSON)}
-}
-
 func builtinTools() []Tool {
 	return []Tool{
-		builtinTool{
-			name:   "get_time",
-			desc:   "获取当前日期时间（含时区）",
-			params: `{"type":"object","properties":{}}`,
-			run: func(string) string {
-				return time.Now().Format("2006-01-02 15:04:05 -0700 MST (Monday)")
-			},
-		},
-		builtinTool{
-			name:   "get_env",
-			desc:   "获取指定环境变量的值（疑似敏感的变量会被拒绝）",
-			params: `{"type":"object","properties":{"names":{"type":"array","items":{"type":"string"},"description":"环境变量名列表"}},"required":["names"]}`,
-			run:    runGetEnv,
-		},
-		builtinTool{
-			name:   "calc",
-			desc:   "计算四则运算表达式，支持 + - * / % 与括号",
-			params: `{"type":"object","properties":{"expression":{"type":"string","description":"算数表达式，如 (1+2)*3/4"}},"required":["expression"]}`,
-			run:    runCalc,
-		},
+		NewTool("get_time", "获取当前日期时间（含时区）", `{"type":"object","properties":{}}`,
+			func(context.Context, string) ToolResult {
+				return ToolResult{Text: time.Now().Format("2006-01-02 15:04:05 -0700 MST (Monday)")}
+			}),
+		NewTool("get_env", "获取指定环境变量的值（疑似敏感的变量会被拒绝）",
+			`{"type":"object","properties":{"names":{"type":"array","items":{"type":"string"},"description":"环境变量名列表"}},"required":["names"]}`,
+			func(_ context.Context, argsJSON string) ToolResult {
+				return ToolResult{Text: runGetEnv(argsJSON)}
+			}),
+		NewTool("calc", "计算四则运算表达式，支持 + - * / % 与括号",
+			`{"type":"object","properties":{"expression":{"type":"string","description":"算数表达式，如 (1+2)*3/4"}},"required":["expression"]}`,
+			func(_ context.Context, argsJSON string) ToolResult {
+				return ToolResult{Text: runCalc(argsJSON)}
+			}),
 	}
 }
 

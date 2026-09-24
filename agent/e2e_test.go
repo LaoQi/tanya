@@ -315,7 +315,7 @@ func TestAskToolEventsCarryResult(t *testing.T) {
 			if started {
 				startBeforeEnd = true
 			}
-			if e.Result.Shell == nil || !strings.Contains(e.Result.Content(), "evt") {
+			if sh, ok := e.Result.Meta.(*ShellResult); !ok || sh == nil || !strings.Contains(e.Result.Text, "evt") {
 				t.Errorf("ToolEnd 应携带结构化结果: %+v", e.Result)
 			}
 			sawResult = true
