@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/config"
 )
 
 func initWorkdir(t *testing.T) string {
@@ -34,7 +35,7 @@ func initStreams(t *testing.T, mode outMode) (*streams, *syncBuf, *syncBuf) {
 func runInitStrip(t *testing.T, mode outMode, tty string) (string, error) {
 	t.Helper()
 	st, out, _ := initStreams(t, mode)
-	cfg, err := agent.LoadConfig("")
+	cfg, err := config.Load("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +43,7 @@ func runInitStrip(t *testing.T, mode outMode, tty string) (string, error) {
 	if tty != "" {
 		r = strings.NewReader(tty)
 	}
-	err = runInit(st, testSem(), cfg, r)
+	err = runInit(st, testSem(), &cfg.Config, r)
 	return out.String(), err
 }
 

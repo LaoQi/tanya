@@ -18,9 +18,10 @@ func newSessTestAgent(t *testing.T, dir string, opts ...agent.Option) *agent.Age
 		BaseURL:         "http://127.0.0.1:1",
 		Model:           "test-model",
 		UserAgent:       agent.DefaultUserAgent,
+		ConfigPath:      "/tmp/tanya-test-config.yaml",
+		ApiProtocol:     "chat",
 		DataDir:         dir,
 		SessionMode:     "global",
-		ToolOutputLines: 20,
 
 		ArchiveThreshold: agent.DefaultArchiveThreshold,
 		ArchiveKeep:      agent.DefaultArchiveKeep,

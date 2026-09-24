@@ -126,8 +126,7 @@ func TestAgentToolKeyTableConsistent(t *testing.T) {
 
 func TestAgentToolConfigPath(t *testing.T) {
 	st := &stubConfigTarget{path: "/home/u/.config/tanya/config.yaml"}
-	want := "配置文件: /home/u/.config/tanya/config.yaml\n" +
-		"改动需重启 tanya 生效（本次会话可用 agent_custom 调整 model/reasoning_effort）"
+	want := "配置文件: /home/u/.config/tanya/config.yaml"
 	if got := invokeAgentTool(t, st, `{"action":"get","key":"config_path"}`); got != want {
 		t.Errorf("config_path 输出不匹配:\n got %q\nwant %q", got, want)
 	}
@@ -142,8 +141,8 @@ func TestAgentToolConfigPath(t *testing.T) {
 
 func TestAgentConfigPathFollowsConfig(t *testing.T) {
 	a := newControlAgent(t, nil, "responses")
-	if got := a.ConfigPath(); got != a.cfg.Path || got == "" {
-		t.Errorf("ConfigPath = %q, cfg.Path = %q", got, a.cfg.Path)
+	if got := a.ConfigPath(); got != a.cfg.ConfigPath || got == "" {
+		t.Errorf("ConfigPath = %q, cfg.ConfigPath = %q", got, a.cfg.ConfigPath)
 	}
 }
 

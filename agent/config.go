@@ -1,55 +1,47 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	BaseURL          string            `yaml:"base_url"`
-	APIKey           string            `yaml:"api_key"`
-	Model            string            `yaml:"model"`
-	Temperature      float64           `yaml:"temperature"`
-	ReasoningEffort  string            `yaml:"reasoning_effort"`
-	ShowReasoning    bool              `yaml:"show_reasoning"`
-	Bell             bool              `yaml:"bell"`
-	NotifyOSC        bool              `yaml:"notify_osc"`
-	NotifyCmd        string            `yaml:"notify_cmd"`
-	Path             string            `yaml:"-"`
-	ApiProtocol      string            `yaml:"api_protocol"`
-	UserAgent        string            `yaml:"user_agent"`
-	DataDir          string            `yaml:"data_dir"`
-	SessionMode      string            `yaml:"session_mode"`
-	ToolOutputLines  int               `yaml:"tool_output_lines"`
-	AutoArchive      bool              `yaml:"auto_archive"`
-	ArchiveThreshold int               `yaml:"auto_archive_threshold"`
-	ArchiveKeep      int               `yaml:"auto_archive_keep"`
-	Shell            string            `yaml:"shell"`
-	Colors           string            `yaml:"colors"`
-	Theme            string            `yaml:"theme"`
-	Palette          map[string]string `yaml:"palette"`
+	BaseURL          string  `yaml:"base_url"`
+	APIKey           string  `yaml:"api_key"`
+	Model            string  `yaml:"model"`
+	Temperature      float64 `yaml:"temperature"`
+	ReasoningEffort  string  `yaml:"reasoning_effort"`
+	ApiProtocol      string  `yaml:"api_protocol"`
+	UserAgent        string  `yaml:"user_agent"`
+	DataDir          string  `yaml:"data_dir"`
+	SessionMode      string  `yaml:"session_mode"`
+	Shell            string  `yaml:"shell"`
+	AutoArchive      bool    `yaml:"auto_archive"`
+	ArchiveThreshold int     `yaml:"auto_archive_threshold"`
+	ArchiveKeep      int     `yaml:"auto_archive_keep"`
+	ConfigPath       string  `yaml:"-"`
 }
 
 var EffortLevels = []string{"minimal", "low", "medium", "high", "max"}
 
 var ApiProtocols = []string{"chat", "responses"}
 
-func normalizeEffort(v string) string {
+var SessionModes = []string{"auto", "local", "global"}
+
+const DefaultUserAgent = "pi/0.85.0 (linux; node/v22.14.0; x64)"
+
+func NormalizeEffort(v string) string {
 	v = strings.ToLower(strings.TrimSpace(v))
 	for _, e := range EffortLevels {
 		if v == e {
-			return e
+			return v
 		}
 	}
 	return ""
 }
 
-func normalizeApiProtocol(v string) string {
+func NormalizeApiProtocol(v string) string {
 	v = strings.ToLower(strings.TrimSpace(v))
 	for _, p := range ApiProtocols {
 		if v == p {
@@ -59,136 +51,42 @@ func normalizeApiProtocol(v string) string {
 	return ""
 }
 
-const DefaultUserAgent = "pi/0.85.0 (linux; node/v22.14.0; x64)"
-
-func defaultDataDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "tanya")
-}
-
-func defaultConfigPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "tanya", "config.yaml")
-}
-
-func normalizeConfigPath(p string) string {
-	p = expandHome(p)
-	if abs, err := filepath.Abs(p); err == nil {
-		return abs
+func validSessionMode(v string) bool {
+	for _, m := range SessionModes {
+		if v == m {
+			return true
+		}
 	}
-	return p
+	return false
 }
 
-func defaultConfig() *Config {
-	return &Config{
-		Path:             defaultConfigPath(),
-		BaseURL:          "https://api.openai.com/v1",
-		Model:            "deepseek-v4-flash",
-		Temperature:      0.7,
-		ApiProtocol:      "responses",
-		SessionMode:      "auto",
-		Theme:            "nord",
-		UserAgent:        DefaultUserAgent,
-		DataDir:          defaultDataDir(),
-		ToolOutputLines:  20,
-		AutoArchive:      true,
-		ArchiveThreshold: DefaultArchiveThreshold,
-		ArchiveKeep:      DefaultArchiveKeep,
+func (c *Config) Validate() error {
+	if c == nil {
+		return errors.New(MsgNilConfig)
 	}
-}
-
-func DefaultConfig() *Config {
-	return defaultConfig()
-}
-
-func LoadConfig(path string) (*Config, error) {
-	cfg := defaultConfig()
-	if path == "" {
-		path = cfg.Path
-	} else {
-		path = normalizeConfigPath(path)
-	}
-	cfg.Path = path
-	b, err := os.ReadFile(path)
 	switch {
-	case err == nil:
-		if err := yaml.Unmarshal(b, cfg); err != nil {
-			return nil, fmt.Errorf(MsgConfigParse, path, err)
-		}
-	case !os.IsNotExist(err):
-		return nil, err
+	case c.BaseURL == "":
+		return errors.New(MsgEmptyBaseURL)
+	case c.Model == "":
+		return errors.New(MsgEmptyModel)
+	case c.UserAgent == "":
+		return errors.New(MsgEmptyUserAgent)
+	case c.DataDir == "":
+		return errors.New(MsgEmptyDataDir)
+	case c.ConfigPath == "":
+		return errors.New(MsgEmptyConfigPath)
 	}
-
-	if v := os.Getenv("TANYA_BASE_URL"); v != "" {
-		cfg.BaseURL = v
+	if NormalizeApiProtocol(c.ApiProtocol) == "" {
+		return fmt.Errorf(MsgBadApiProtocol, c.ApiProtocol)
 	}
-	if v := os.Getenv("TANYA_API_KEY"); v != "" {
-		cfg.APIKey = v
+	if !validSessionMode(c.SessionMode) {
+		return fmt.Errorf(MsgBadSessionMode, c.SessionMode)
 	}
-	if v := os.Getenv("TANYA_MODEL"); v != "" {
-		cfg.Model = v
+	if c.ArchiveThreshold < 2 {
+		return fmt.Errorf(MsgBadArchiveThreshold, c.ArchiveThreshold)
 	}
-	if v := os.Getenv("TANYA_TEMPERATURE"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.Temperature = f
-		}
+	if c.ArchiveKeep < 0 || c.ArchiveKeep >= c.ArchiveThreshold {
+		return fmt.Errorf(MsgBadArchiveKeep, c.ArchiveKeep, c.ArchiveThreshold)
 	}
-	if v := os.Getenv("TANYA_REASONING_EFFORT"); v != "" {
-		cfg.ReasoningEffort = v
-	}
-	if v := os.Getenv("TANYA_API_PROTOCOL"); v != "" {
-		cfg.ApiProtocol = v
-	}
-	if v := os.Getenv("TANYA_DATA_DIR"); v != "" {
-		cfg.DataDir = v
-	}
-	if v := os.Getenv("TANYA_SESSION_MODE"); v != "" {
-		cfg.SessionMode = v
-	}
-	if v := os.Getenv("TANYA_THEME"); v != "" {
-		cfg.Theme = v
-	}
-	if v := os.Getenv("TANYA_USER_AGENT"); v != "" {
-		cfg.UserAgent = v
-	}
-	if v := os.Getenv("TANYA_SHELL"); v != "" {
-		cfg.Shell = v
-	}
-	if v := os.Getenv("TANYA_TOOL_OUTPUT_LINES"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.ToolOutputLines = n
-		}
-	}
-	if cfg.ToolOutputLines < 1 || cfg.ToolOutputLines > 1000 {
-		cfg.ToolOutputLines = 20
-	}
-	if cfg.UserAgent == "" {
-		cfg.UserAgent = DefaultUserAgent
-	}
-	cfg.NotifyCmd = strings.TrimSpace(cfg.NotifyCmd)
-	cfg.ReasoningEffort = normalizeEffort(cfg.ReasoningEffort)
-	rawProtocol := cfg.ApiProtocol
-	cfg.ApiProtocol = normalizeApiProtocol(cfg.ApiProtocol)
-	if cfg.ApiProtocol == "" {
-		return nil, fmt.Errorf(MsgBadApiProtocol, rawProtocol)
-	}
-	cfg.DataDir = expandHome(cfg.DataDir)
-	if cfg.DataDir == "" {
-		cfg.DataDir = defaultDataDir()
-	}
-	if cfg.ArchiveThreshold < 2 {
-		return nil, fmt.Errorf(MsgBadArchiveThreshold, cfg.ArchiveThreshold)
-	}
-	if cfg.ArchiveKeep < 0 || cfg.ArchiveKeep >= cfg.ArchiveThreshold {
-		return nil, fmt.Errorf(MsgBadArchiveKeep, cfg.ArchiveKeep, cfg.ArchiveThreshold)
-	}
-	return cfg, nil
-}
-
-func expandHome(p string) string {
-	if strings.HasPrefix(p, "~/") {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, p[2:])
-	}
-	return p
+	return nil
 }

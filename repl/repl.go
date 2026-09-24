@@ -19,6 +19,8 @@ import (
 	"github.com/LaoQi/tanya/readline"
 )
 
+const DefaultToolOutputLines = 20
+
 type REPL struct {
 	agent         *agent.Agent
 	ed            *readline.Editor
@@ -48,6 +50,7 @@ type options struct {
 	palette   map[string]string
 	reasoning bool
 	notifier  Notifier
+	maxLines  int
 }
 
 type Option func(*options)
@@ -74,6 +77,10 @@ func WithTermFacts(f TermFacts) Option {
 
 func WithTheme(name string, palette map[string]string) Option {
 	return func(o *options) { o.themeName, o.palette = name, palette }
+}
+
+func WithToolOutputLines(n int) Option {
+	return func(o *options) { o.maxLines = n }
 }
 
 // Semantics 按主题名与 palette 覆盖计算语义色集合；主题名非法时回落 default。
@@ -130,9 +137,9 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	r.prof = term.GetProfile()
 	r.rend = render.NewThemedRenderer(r.prof, sch.MD)
 	ed.SetStyles(sem.Dim, sem.Accent)
-	maxLines := 20
-	if a != nil {
-		maxLines = a.ToolOutputLines()
+	maxLines := o.maxLines
+	if maxLines < 1 {
+		maxLines = DefaultToolOutputLines
 	}
 	facts := o.facts
 	if !o.factsSet {
