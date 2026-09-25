@@ -45,7 +45,7 @@ func (r *toolRegistry) lookup(name string) (Tool, bool) {
 	return nil, false
 }
 
-func newToolDef(name, desc, params string) ToolDef {
+func NewToolDef(name, desc, params string) ToolDef {
 	var t ToolDef
 	t.Type = "function"
 	t.Function.Name = name
@@ -72,7 +72,7 @@ type funcTool struct {
 func (f funcTool) Name() string { return f.name }
 
 func (f funcTool) Definition() ToolDef {
-	return newToolDef(f.name, f.desc, f.params)
+	return NewToolDef(f.name, f.desc, f.params)
 }
 
 func (f funcTool) Invoke(ctx context.Context, argsJSON string) ToolResult {
@@ -83,6 +83,8 @@ func NewTool(name, desc, params string, fn func(ctx context.Context, argsJSON st
 	return funcTool{name: name, desc: desc, params: params, fn: fn}
 }
 
-func allTools(shell *shellTool, ctl configTarget) []Tool {
-	return append(append([]Tool{shell}, builtinTools()...), newAgentTool(ctl))
+func assembleTools(registered []Tool, ctl configTarget) []Tool {
+	out := make([]Tool, 0, len(registered)+1)
+	out = append(out, registered...)
+	return append(out, newAgentTool(ctl))
 }

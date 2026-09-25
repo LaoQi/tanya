@@ -1,4 +1,4 @@
-package agent
+package shell
 
 import (
 	"io"
@@ -6,7 +6,7 @@ import (
 	"os/exec"
 )
 
-type TTYBridge interface {
+type Bridge interface {
 	Prepare(cmd *exec.Cmd) (*os.File, error)
 	Attach(capture io.Writer) (stop func(), err error)
 }

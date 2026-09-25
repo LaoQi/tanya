@@ -1,6 +1,6 @@
 //go:build linux || darwin
 
-package agent
+package shell
 
 import (
 	"strings"
@@ -26,7 +26,7 @@ func TestPlatformPosixPrograms(t *testing.T) {
 
 func TestPlatformPosixCapabilities(t *testing.T) {
 	want := "管道与文本工具链（grep/sed/awk/xargs 等）可直接组合；交互式程序（sudo/ssh/gpg 等）的提示写入控制终端 /dev/tty，用户在终端可见并可直接应答；被信号终止的命令按 128+signum 记退出码。"
-	if got := platform.Capabilities(&shellProfile{Name: "bash", Kind: KindPosix}); got != want {
+	if got := platform.Capabilities(&profile{Name: "bash", Kind: KindPosix}); got != want {
 		t.Errorf("posix 能力描述不匹配:\n got %q\nwant %q", got, want)
 	}
 }

@@ -1,6 +1,6 @@
 //go:build linux || darwin
 
-package agent
+package shell
 
 import (
 	"errors"
@@ -19,7 +19,7 @@ var posixPrograms = []string{
 	"git", "curl", "wget", "go", "node", "python",
 }
 
-func posixCapabilities(*shellProfile) string {
+func posixCapabilities(*profile) string {
 	return "管道与文本工具链（grep/sed/awk/xargs 等）可直接组合；交互式程序（sudo/ssh/gpg 等）的提示写入控制终端 /dev/tty，用户在终端可见并可直接应答；被信号终止的命令按 128+signum 记退出码。"
 }
 

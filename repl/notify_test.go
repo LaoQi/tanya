@@ -12,6 +12,7 @@ import (
 
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/render/term"
+	"github.com/LaoQi/tanya/tools/shell"
 )
 
 type fakeNotifier struct{ got []Notification }
@@ -190,9 +191,9 @@ func TestNotifyOSCGated(t *testing.T) {
 	}
 }
 
-var testShellInv = agent.ShellInvocation{Argv: []string{"/bin/bash", "-c"}, Kind: agent.KindPosix}
+var testShellInv = shell.Invocation{Argv: []string{"/bin/bash", "-c"}, Kind: shell.KindPosix}
 
-func captureCommandNotifier(t *testing.T, inv agent.ShellInvocation, tmpl string) (*commandNotifier, *[][]string, chan struct{}) {
+func captureCommandNotifier(t *testing.T, inv shell.Invocation, tmpl string) (*commandNotifier, *[][]string, chan struct{}) {
 	t.Helper()
 	c := mustCommandNotifier(t, inv, tmpl)
 	var mu sync.Mutex
@@ -208,7 +209,7 @@ func captureCommandNotifier(t *testing.T, inv agent.ShellInvocation, tmpl string
 	return c, &got, done
 }
 
-func mustCommandNotifier(t *testing.T, inv agent.ShellInvocation, tmpl string) *commandNotifier {
+func mustCommandNotifier(t *testing.T, inv shell.Invocation, tmpl string) *commandNotifier {
 	t.Helper()
 	n, err := NewCommandNotifier(inv, tmpl)
 	if err != nil {
@@ -316,13 +317,13 @@ func TestCommandNotifierTemplateValidation(t *testing.T) {
 
 func TestShellQuote(t *testing.T) {
 	cases := []struct {
-		kind agent.ShellKind
+		kind shell.Kind
 		in   string
 		want string
 	}{
-		{agent.KindPosix, "it's ok", `'it'\''s ok'`},
-		{agent.KindPowerShell, "it's ok", `'it''s ok'`},
-		{agent.KindCmd, `say "hi"`, `"say ""hi"""`},
+		{shell.KindPosix, "it's ok", `'it'\''s ok'`},
+		{shell.KindPowerShell, "it's ok", `'it''s ok'`},
+		{shell.KindCmd, `say "hi"`, `"say ""hi"""`},
 	}
 	for _, c := range cases {
 		if got := shellQuote(c.kind, c.in); got != c.want {

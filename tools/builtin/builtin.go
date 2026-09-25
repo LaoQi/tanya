@@ -1,4 +1,4 @@
-package agent
+package builtin
 
 import (
 	"context"
@@ -9,23 +9,25 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/LaoQi/tanya/agent"
 )
 
-func builtinTools() []Tool {
-	return []Tool{
-		NewTool("get_time", "获取当前日期时间（含时区）", `{"type":"object","properties":{}}`,
-			func(context.Context, string) ToolResult {
-				return ToolResult{Text: time.Now().Format("2006-01-02 15:04:05 -0700 MST (Monday)")}
+func Tools() []agent.Tool {
+	return []agent.Tool{
+		agent.NewTool("get_time", "获取当前日期时间（含时区）", `{"type":"object","properties":{}}`,
+			func(context.Context, string) agent.ToolResult {
+				return agent.ToolResult{Text: time.Now().Format("2006-01-02 15:04:05 -0700 MST (Monday)")}
 			}),
-		NewTool("get_env", "获取指定环境变量的值（疑似敏感的变量会被拒绝）",
+		agent.NewTool("get_env", "获取指定环境变量的值（疑似敏感的变量会被拒绝）",
 			`{"type":"object","properties":{"names":{"type":"array","items":{"type":"string"},"description":"环境变量名列表"}},"required":["names"]}`,
-			func(_ context.Context, argsJSON string) ToolResult {
-				return ToolResult{Text: runGetEnv(argsJSON)}
+			func(_ context.Context, argsJSON string) agent.ToolResult {
+				return agent.ToolResult{Text: runGetEnv(argsJSON)}
 			}),
-		NewTool("calc", "计算四则运算表达式，支持 + - * / % 与括号",
+		agent.NewTool("calc", "计算四则运算表达式，支持 + - * / % 与括号",
 			`{"type":"object","properties":{"expression":{"type":"string","description":"算数表达式，如 (1+2)*3/4"}},"required":["expression"]}`,
-			func(_ context.Context, argsJSON string) ToolResult {
-				return ToolResult{Text: runCalc(argsJSON)}
+			func(_ context.Context, argsJSON string) agent.ToolResult {
+				return agent.ToolResult{Text: runCalc(argsJSON)}
 			}),
 	}
 }
@@ -35,7 +37,7 @@ func runGetEnv(argsJSON string) string {
 		Names []string `json:"names"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return fmt.Sprintf(MsgParseArgs, err)
+		return fmt.Sprintf(agent.MsgParseArgs, err)
 	}
 	var b strings.Builder
 	for _, n := range args.Names {
@@ -59,7 +61,7 @@ func runCalc(argsJSON string) string {
 		Expression string `json:"expression"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return fmt.Sprintf(MsgParseArgs, err)
+		return fmt.Sprintf(agent.MsgParseArgs, err)
 	}
 	v, err := calcEval(args.Expression)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/tools/shell"
 )
 
 var plainProf = term.Profile{TTY: true, Colors: term.LevelNone}
@@ -97,7 +98,7 @@ func feedAskPath(st *streams, prof term.Profile) *toolView {
 	view.Handle(agent.Event{Kind: agent.EventRequestStart})
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
-		Result: agent.ToolResult{Meta: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
+		Result: agent.ToolResult{Meta: &shell.Result{Command: "echo hi", Stdout: []shell.Chunk{{Data: "hi\n"}}, ExitCode: 0}}})
 	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{FirstEvent: 300e6, Duration: 1200e6}})
 	view.Handle(agent.Event{Kind: agent.EventContent, Text: "答案"})
 	return view
@@ -191,7 +192,7 @@ func TestPlainMasksDecorAndTools(t *testing.T) {
 	turn := r.beginTurn(nil)
 	turn.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	turn.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
-		Result: agent.ToolResult{Meta: &agent.ShellResult{Command: "echo hi", ExitCode: 0}}})
+		Result: agent.ToolResult{Meta: &shell.Result{Command: "echo hi", ExitCode: 0}}})
 	turn.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{Duration: 1e9}})
 	turn.Handle(agent.Event{Kind: agent.EventContent, Text: "正文"})
 	turn.End(nil)
@@ -251,7 +252,7 @@ func TestRichStreamsByteIdentical(t *testing.T) {
 	view := NewToolView(st, nonTTY, testSem(), func() int { return 80 }, 20)
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
-		Result: agent.ToolResult{Meta: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
+		Result: agent.ToolResult{Meta: &shell.Result{Command: "echo hi", Stdout: []shell.Chunk{{Data: "hi\n"}}, ExitCode: 0}}})
 	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{FirstEvent: 300e6, Duration: 1200e6}})
 	view.Handle(agent.Event{Kind: agent.EventContent, Text: "答案\n"})
 	want := "\n▸ run_shell echo hi\n  hi\n  ↳ exit 0 · 0ms · 1 行\n  ↳ TTFT 300ms · 1.2s\n\n答案\n"
@@ -265,7 +266,7 @@ func TestRichStreamsByteIdentical(t *testing.T) {
 	st2 := NewStreams(&out2, &syncBuf{}, modeRich)
 	view2 := NewToolView(st2, tty, testSem(), func() int { return 80 }, 20)
 	view2.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
-		Result: agent.ToolResult{Meta: &agent.ShellResult{Command: "echo hi", Stdout: []agent.ShellChunk{{Data: "hi\n"}}, ExitCode: 0}}})
+		Result: agent.ToolResult{Meta: &shell.Result{Command: "echo hi", Stdout: []shell.Chunk{{Data: "hi\n"}}, ExitCode: 0}}})
 	want2 := "  hi\n  ↳ exit 0 · 0ms · 1 行\n"
 	if got := out2.String(); got != want2 {
 		t.Errorf("rich TTY 收尾应为追加式基线字节（无上移重绘）\n got %q\nwant %q", got, want2)

@@ -1,4 +1,4 @@
-package agent
+package shell
 
 import (
 	"context"
@@ -10,16 +10,16 @@ import (
 )
 
 type dirRecBridge struct {
-	fakeTTYBridge
+	fakeBridge
 	dir string
 }
 
 func (b *dirRecBridge) Prepare(cmd *exec.Cmd) (*os.File, error) {
 	b.dir = cmd.Dir
-	return b.fakeTTYBridge.Prepare(cmd)
+	return b.fakeBridge.Prepare(cmd)
 }
 
-func shellStdout(res *ShellResult) string {
+func shellStdout(res *Result) string {
 	var b strings.Builder
 	for _, c := range res.Stdout {
 		b.WriteString(c.Data)
@@ -32,7 +32,7 @@ func TestRunShellCwdDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res := testShellTool(t).run(context.Background(), shellRequest{Command: "pwd", TimeoutSec: 10})
+	res := testShellTool(t).run(context.Background(), request{Command: "pwd", TimeoutSec: 10})
 	if got := strings.TrimSpace(shellStdout(res)); got != cwd {
 		t.Errorf("默认目录应为进程 cwd: got %q want %q", got, cwd)
 	}
@@ -46,7 +46,7 @@ func TestRunShellCwdDefault(t *testing.T) {
 
 func TestRunShellCwdEffective(t *testing.T) {
 	dir := t.TempDir()
-	res := testShellTool(t).run(context.Background(), shellRequest{Command: "pwd", TimeoutSec: 10, Cwd: dir})
+	res := testShellTool(t).run(context.Background(), request{Command: "pwd", TimeoutSec: 10, Cwd: dir})
 	want, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestRunShellCwdRelative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res := testShellTool(t, func(cfg *shellToolConfig) { cfg.Workspace = cwd }).run(context.Background(), shellRequest{Command: "pwd", TimeoutSec: 10, Cwd: "."})
+	res := testShellTool(t, func(cfg *Config) { cfg.Workspace = func() string { return cwd } }).run(context.Background(), request{Command: "pwd", TimeoutSec: 10, Cwd: "."})
 	if res.Cwd != cwd {
 		t.Errorf("相对路径应按会话启动目录解析: got %q want %q", res.Cwd, cwd)
 	}
@@ -82,7 +82,7 @@ func TestRunShellCwdMissing(t *testing.T) {
 	base := t.TempDir()
 	marker := filepath.Join(base, "marker")
 	missing := filepath.Join(base, "nope")
-	res := testShellTool(t).run(context.Background(), shellRequest{Command: "touch " + marker, TimeoutSec: 10, Cwd: missing})
+	res := testShellTool(t).run(context.Background(), request{Command: "touch " + marker, TimeoutSec: 10, Cwd: missing})
 	if !strings.Contains(res.Err, "cwd") {
 		t.Errorf("应报 cwd 错误: %q", res.Err)
 	}
@@ -103,7 +103,7 @@ func TestRunShellCwdMissing(t *testing.T) {
 func TestRunShellInteractiveCwd(t *testing.T) {
 	b := &dirRecBridge{}
 	dir := t.TempDir()
-	res := bridgeTool(t, b).run(context.Background(), shellRequest{Command: "echo hi", TimeoutSec: 10, Interactive: true, Cwd: dir})
+	res := bridgeTool(t, b).run(context.Background(), request{Command: "echo hi", TimeoutSec: 10, Interactive: true, Cwd: dir})
 	if b.dir != dir {
 		t.Errorf("桥接子进程 dir = %q want %q", b.dir, dir)
 	}
@@ -115,36 +115,13 @@ func TestRunShellInteractiveCwd(t *testing.T) {
 	}
 }
 
-func TestAskShellToolCwd(t *testing.T) {
-	dir := t.TempDir()
-	m := newMockLLM(t,
-		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "run_shell", args: `{"command":"pwd","cwd":"` + dir + `"}`}}},
-		mockStep{content: "完成"},
-	)
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
-	sink := EventSink(func(Event) {})
-	if err := a.Ask(context.Background(), "在指定目录执行", sink); err != nil {
-		t.Fatal(err)
-	}
-	if len(a.history) != 4 {
-		t.Fatalf("history: %d", len(a.history))
-	}
-	content := a.history[2].Content
-	if !strings.Contains(content, "cwd: "+dir) {
-		t.Errorf("tool 结果应含 cwd 行: %q", content)
-	}
-}
-
 func TestRunShellCwdRelativeToWorkspace(t *testing.T) {
 	ws := t.TempDir()
 	sub := filepath.Join(ws, "sub")
 	if err := os.Mkdir(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	res := testShellTool(t, func(cfg *shellToolConfig) { cfg.Workspace = ws }).run(context.Background(), shellRequest{Command: "pwd", TimeoutSec: 10, Cwd: "sub"})
+	res := testShellTool(t, func(cfg *Config) { cfg.Workspace = func() string { return ws } }).run(context.Background(), request{Command: "pwd", TimeoutSec: 10, Cwd: "sub"})
 	if res.Cwd != sub {
 		t.Fatalf("Cwd = %q want %q", res.Cwd, sub)
 	}
@@ -158,38 +135,13 @@ func TestRunShellCwdRelativeToWorkspace(t *testing.T) {
 	}
 }
 
-func TestAskShellToolRelativeCwdUsesWorkspace(t *testing.T) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := newMockLLM(t,
-		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "run_shell", args: `{"command":"pwd","cwd":"."}`}}},
-		mockStep{content: "完成"},
-	)
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
-	sink := EventSink(func(Event) {})
-	if err := a.Ask(context.Background(), "在相对目录执行", sink); err != nil {
-		t.Fatal(err)
-	}
-	if len(a.history) != 4 {
-		t.Fatalf("history: %d", len(a.history))
-	}
-	if content := a.history[2].Content; !strings.Contains(content, "cwd: "+cwd+"\n") {
-		t.Errorf("相对 cwd 应按工作区（shellTool.workspace）解析: %q", content)
-	}
-}
-
 func TestRunShellCwdKeepsProcessCwd(t *testing.T) {
 	before, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	res := testShellTool(t).run(context.Background(), shellRequest{Command: "pwd", TimeoutSec: 10, Cwd: dir})
+	res := testShellTool(t).run(context.Background(), request{Command: "pwd", TimeoutSec: 10, Cwd: dir})
 	if res.Err != "" || res.ExitCode != 0 {
 		t.Fatalf("run: %+v", res)
 	}
@@ -200,4 +152,30 @@ func TestRunShellCwdKeepsProcessCwd(t *testing.T) {
 	if after != before {
 		t.Errorf("进程 cwd 被改变: %q → %q", before, after)
 	}
+}
+
+func TestWorkspaceConsultedPerInvoke(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	ws := first
+	tool := testShellTool(t, func(c *Config) { c.Workspace = func() string { return ws } })
+	pwd := func() string {
+		res := tool.run(context.Background(), request{Command: "pwd", TimeoutSec: 10})
+		return evalDirTrim(t, shellStdout(res))
+	}
+	if got, want := pwd(), evalDirTrim(t, first); got != want {
+		t.Fatalf("默认目录应取当时的工作区: got %q want %q", got, want)
+	}
+	ws = second
+	if got, want := pwd(), evalDirTrim(t, second); got != want {
+		t.Fatalf("工作区变化后默认目录应跟随: got %q want %q", got, want)
+	}
+}
+
+func evalDirTrim(t *testing.T, p string) string {
+	t.Helper()
+	p = strings.TrimSpace(p)
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
 }

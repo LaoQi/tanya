@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/render/term"
+	"github.com/LaoQi/tanya/tools/shell"
 )
 
 // NotifyReason 标记通知原因：触发语义归 REPL（什么事件值得打扰用户），行为归 Notifier。
@@ -114,7 +114,7 @@ func OSCNotifier() Notifier { return oscNotifier{write: ctty.NotifyOSC} }
 // commandNotifier 按配置调用外部程序：异步、单飞（上一次未结束就丢弃本次）、固定超时、stdio 接空设备、失败静默。
 type commandNotifier struct {
 	argv    []string
-	kind    agent.ShellKind
+	kind    shell.Kind
 	tmpl    string
 	timeout time.Duration
 	run     func(context.Context, []string) error
@@ -122,7 +122,7 @@ type commandNotifier struct {
 }
 
 // NewCommandNotifier 校验模板（未知占位符、花括号不配对、占位符紧邻引号）后构造通知行为。
-func NewCommandNotifier(inv agent.ShellInvocation, tmpl string) (Notifier, error) {
+func NewCommandNotifier(inv shell.Invocation, tmpl string) (Notifier, error) {
 	if err := validateNotifyTemplate(tmpl); err != nil {
 		return nil, err
 	}
@@ -172,11 +172,11 @@ func (c *commandNotifier) render(t notifyText) string {
 	).Replace(c.tmpl)
 }
 
-func shellQuote(kind agent.ShellKind, s string) string {
+func shellQuote(kind shell.Kind, s string) string {
 	switch kind {
-	case agent.KindPowerShell:
+	case shell.KindPowerShell:
 		return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-	case agent.KindCmd:
+	case shell.KindCmd:
 		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 	default:
 		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"

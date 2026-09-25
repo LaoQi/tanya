@@ -2,34 +2,48 @@ package agent
 
 import (
 	"context"
-	"strings"
+	"encoding/json"
 	"testing"
 )
 
-func shellOf(t *testing.T, a *Agent) *shellTool {
-	t.Helper()
-	tool, ok := a.tools.lookup("run_shell")
-	if !ok {
-		t.Fatal("run_shell 未在注册表中")
-	}
-	st, ok := tool.(*shellTool)
-	if !ok {
-		t.Fatalf("run_shell 不是 *shellTool: %T", tool)
-	}
-	return st
+type stubTool struct {
+	name string
+	meta any
 }
 
-func newTestShellTool() *shellTool {
-	return &shellTool{
-		profile:  &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix},
-		programs: []string{"ls"},
-	}
+func (s *stubTool) Name() string { return s.name }
+
+func (s *stubTool) Definition() ToolDef {
+	return NewToolDef(s.name, "测试桩工具", `{"type":"object","properties":{"v":{"type":"string"}}}`)
 }
 
-func TestToolRegistryOrderAndDefs(t *testing.T) {
-	r := newToolRegistry(allTools(newTestShellTool(), &stubConfigTarget{})...)
+func (s *stubTool) Invoke(_ context.Context, argsJSON string) ToolResult {
+	return ToolResult{Text: s.name + ":" + argsJSON, Meta: s.meta}
+}
+
+type stubInteractiveTool struct{ stubTool }
+
+func (s *stubInteractiveTool) Interactive(argsJSON string) bool {
+	var args struct {
+		Interactive bool `json:"interactive"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return false
+	}
+	return args.Interactive
+}
+
+func newStubTool(name string) *stubTool { return &stubTool{name: name} }
+
+func testToolDefs() []ToolDef {
+	r := newToolRegistry(assembleTools([]Tool{newStubTool("t1")}, &stubConfigTarget{})...)
+	return r.defs()
+}
+
+func TestAssembleToolsOrderAndDefs(t *testing.T) {
+	r := newToolRegistry(assembleTools([]Tool{newStubTool("t1"), newStubTool("t2")}, &stubConfigTarget{})...)
 	defs := r.defs()
-	want := []string{"run_shell", "get_time", "get_env", "calc", "agent_custom"}
+	want := []string{"t1", "t2", "agent_custom"}
 	if len(defs) != len(want) {
 		t.Fatalf("工具数 = %d, 期望 %d", len(defs), len(want))
 	}
@@ -49,12 +63,19 @@ func TestToolRegistryOrderAndDefs(t *testing.T) {
 	}
 }
 
+func TestAssembleToolsEmptyKeepsBuiltin(t *testing.T) {
+	got := names(newToolRegistry(assembleTools(nil, &stubConfigTarget{})...).defs())
+	if len(got) != 1 || got[0] != "agent_custom" {
+		t.Fatalf("无注入时清单应只剩 agent_custom: %v", got)
+	}
+}
+
 func TestToolRegistryLookup(t *testing.T) {
-	shell := newTestShellTool()
-	r := newToolRegistry(allTools(shell, &stubConfigTarget{})...)
-	tool, ok := r.lookup("run_shell")
-	if !ok || tool != shell {
-		t.Fatalf("run_shell 应命中同一 shellTool 实例: ok=%v tool=%v", ok, tool)
+	stub := newStubTool("t1")
+	r := newToolRegistry(assembleTools([]Tool{stub}, &stubConfigTarget{})...)
+	tool, ok := r.lookup("t1")
+	if !ok || tool != Tool(stub) {
+		t.Fatalf("t1 应命中同一实例: ok=%v tool=%v", ok, tool)
 	}
 	if _, ok := r.lookup("no_such_tool"); ok {
 		t.Error("未知工具不应命中")
@@ -62,30 +83,18 @@ func TestToolRegistryLookup(t *testing.T) {
 }
 
 func TestInteractiveOf(t *testing.T) {
-	shell := newTestShellTool()
-	if !interactiveOf(shell, `{"command":"x","interactive":true}`) {
+	it := &stubInteractiveTool{stubTool{name: "it"}}
+	if !interactiveOf(it, `{"v":"x","interactive":true}`) {
 		t.Error("interactive:true 应返回 true")
 	}
-	if interactiveOf(shell, `{"command":"x"}`) {
+	if interactiveOf(it, `{"v":"x"}`) {
 		t.Error("缺省 interactive 应为 false")
 	}
-	if interactiveOf(shell, `{bad`) {
+	if interactiveOf(it, `{bad`) {
 		t.Error("坏 JSON 应为 false")
 	}
-	for _, tool := range builtinTools() {
-		if interactiveOf(tool, `{}`) {
-			t.Errorf("%s 不应实现 Interactive", tool.Name())
-		}
-	}
-}
-
-func TestShellToolInvokeBadArgs(t *testing.T) {
-	res := newTestShellTool().Invoke(context.Background(), `{bad`)
-	if res.Meta != nil {
-		t.Fatal("坏参数不应执行命令")
-	}
-	if !strings.Contains(res.Text, "参数解析失败") {
-		t.Fatalf("坏参数应返回解析错误: %q", res.Text)
+	if interactiveOf(newStubTool("plain"), `{"v":"x","interactive":true}`) {
+		t.Error("未实现 Interactive 的工具应恒 false")
 	}
 }
 
@@ -102,8 +111,8 @@ func TestWithToolsRegistered(t *testing.T) {
 		t.Fatal(err)
 	}
 	defs := a.tools.defs()
-	if defs[len(defs)-1].Function.Name != "echo_tool" {
-		t.Fatalf("注册工具应在清单末尾: %v", names(defs))
+	if defs[len(defs)-1].Function.Name != "agent_custom" {
+		t.Fatalf("agent_custom 应恒在清单末尾: %v", names(defs))
 	}
 	tool, ok := a.tools.lookup("echo_tool")
 	if !ok {
@@ -118,7 +127,7 @@ func TestWithToolsRegistered(t *testing.T) {
 	}
 }
 
-func TestWithToolsOrderAfterBuiltin(t *testing.T) {
+func TestWithToolsOrderBeforeBuiltin(t *testing.T) {
 	isolatePromptEnv(t)
 	cfg := defaultConfig()
 	cfg.DataDir = t.TempDir()
@@ -129,7 +138,7 @@ func TestWithToolsOrderAfterBuiltin(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := names(a.tools.defs())
-	want := []string{"run_shell", "get_time", "get_env", "calc", "agent_custom", "t1", "t2"}
+	want := []string{"t1", "t2", "agent_custom"}
 	if len(got) != len(want) {
 		t.Fatalf("清单 = %v, 期望 %v", got, want)
 	}
@@ -149,9 +158,9 @@ func TestWithToolsNoRegistrationKeepsDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := names(a.tools.defs())
-	want := []string{"run_shell", "get_time", "get_env", "calc", "agent_custom"}
+	want := []string{"agent_custom"}
 	if len(got) != len(want) {
-		t.Fatalf("不注册时清单应不变: %v", got)
+		t.Fatalf("不注册时清单应只剩 agent_custom: %v", got)
 	}
 	for i := range want {
 		if got[i] != want[i] {

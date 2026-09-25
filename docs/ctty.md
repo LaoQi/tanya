@@ -2,6 +2,8 @@
 
 ## 背景
 
+> 更正（2026-09-25）：`run_shell` 已从 `agent` 外置到 `tools/shell`（`agent` 本身零内部依赖、不再引用本包）——下文凡指 run_shell 一侧的 `agent`/`agent/shell*.go`，现均指 `tools/shell`（文件名 `platform*.go`/`bridge.go`）；原语与策略的划分不变。
+
 `agent` 与 `readline` 各自实现同一组"控制终端（controlling tty）原语"：
 
 | 原语 | agent | readline |

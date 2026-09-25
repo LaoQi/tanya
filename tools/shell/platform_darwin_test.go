@@ -1,6 +1,6 @@
 //go:build darwin
 
-package agent
+package shell
 
 import (
 	"os"

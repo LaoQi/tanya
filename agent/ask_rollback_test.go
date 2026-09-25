@@ -14,10 +14,7 @@ import (
 
 func TestAskErrorNoOutputRollsBack(t *testing.T) {
 	m := newMockLLM(t, mockStep{status: 500})
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	if err := a.Ask(context.Background(), "问题", nil); err == nil {
 		t.Fatal("应返回错误")
 	}
@@ -31,11 +28,8 @@ func TestAskErrorKeepsPartialTurn(t *testing.T) {
 		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "get_time", args: `{}`}}},
 		mockStep{status: 500},
 	)
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = a.Ask(context.Background(), "问题", nil)
+	a := newAgent(t, m)
+	err := a.Ask(context.Background(), "问题", nil)
 	if err == nil {
 		t.Fatal("应返回错误")
 	}
@@ -50,16 +44,13 @@ func TestAskErrorKeepsPartialTurn(t *testing.T) {
 
 func TestAskInterruptKeepsPartialTurn(t *testing.T) {
 	m := newMockLLM(t, mockStep{toolCalls: []mockToolCall{{id: "c1", name: "run_shell", args: `{"command":"sleep 30"}`}}})
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		cancel()
 	}()
-	err = a.Ask(ctx, "问题", nil)
+	err := a.Ask(ctx, "问题", nil)
 	var ie *InterruptError
 	if !errors.As(err, &ie) {
 		t.Fatalf("应返回中断错误: %v", err)
@@ -83,16 +74,13 @@ func TestAskInterruptKeepsPartialTurn(t *testing.T) {
 
 func TestAskInterruptNoOutputRollsBack(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "回复", hold: 300 * time.Millisecond})
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		cancel()
 	}()
-	err = a.Ask(ctx, "问题", nil)
+	err := a.Ask(ctx, "问题", nil)
 	var ie *InterruptError
 	if !errors.As(err, &ie) {
 		t.Fatalf("应返回中断错误: %v", err)
@@ -110,10 +98,7 @@ func TestAskRollbackKeepsPreviousTurn(t *testing.T) {
 		mockStep{content: "第一轮回答"},
 		mockStep{status: 500},
 	)
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	if err := a.Ask(context.Background(), "第一问", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -131,10 +116,7 @@ func TestAskRollbackKeepsPreviousTurn(t *testing.T) {
 func TestNoticeTurnPersisted(t *testing.T) {
 	m := newMockLLM(t, mockStep{toolCalls: []mockToolCall{{id: "c1", name: "run_shell", args: `{"command":"sleep 30"}`}}})
 	cfg := m.config()
-	a, err := New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgentWithCfg(t, cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(300 * time.Millisecond)
@@ -167,10 +149,7 @@ func TestNoticeTurnPersisted(t *testing.T) {
 	if msgs[3].Content != MsgInterruptNotice {
 		t.Errorf("文件末条应为中断提示: %+v", msgs[3])
 	}
-	a2, err := New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	a2 := newAgentWithCfg(t, cfg)
 	if err := a2.LoadSession(strings.TrimSuffix(filepath.Base(a.store.path()), ".jsonl")); err != nil {
 		t.Fatal(err)
 	}
@@ -187,10 +166,7 @@ func TestSaveWriteFailureKeepsCursor(t *testing.T) {
 		t.Skip("/dev/full 仅 linux 可用")
 	}
 	m := newMockLLM(t)
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	a.store.file = "/dev/full"
 	a.history = []Message{{Role: "user", Content: "x"}}
 	if err := a.save(); err == nil {
@@ -209,16 +185,13 @@ func TestAskInterruptMultiToolPartial(t *testing.T) {
 		{id: "c1", name: "run_shell", args: `{"command":"sleep 30"}`},
 		{id: "c2", name: "run_shell", args: `{"command":"sleep 30"}`},
 	}})
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		cancel()
 	}()
-	err = a.Ask(ctx, "跑两个", nil)
+	err := a.Ask(ctx, "跑两个", nil)
 	var ie *InterruptError
 	if !errors.As(err, &ie) || !ie.Kept {
 		t.Fatalf("应中断并保留产出: %v", err)

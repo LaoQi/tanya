@@ -26,6 +26,7 @@ type UI struct {
 type Config struct {
 	agent.Config `yaml:",inline"`
 	UI           `yaml:",inline"`
+	Shell        string `yaml:"shell"`
 	Path         string `yaml:"-"`
 }
 

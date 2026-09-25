@@ -648,24 +648,3 @@ func TestTotalTokensCountsMultipleReasoningItems(t *testing.T) {
 		t.Fatalf("多条 reasoning 未全部计入: 差 %d", multi-single)
 	}
 }
-
-func TestNewWiresTTYBridge(t *testing.T) {
-	isolatePromptEnv(t)
-	cfg := defaultConfig()
-	cfg.DataDir = t.TempDir()
-	f := &fakeTTYBridge{}
-	a, err := New(cfg, WithTTYBridge(f))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := shellOf(t, a); got.bridge != TTYBridge(f) {
-		t.Errorf("WithTTYBridge 未接入组件: %+v", got)
-	}
-	b, err := New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := shellOf(t, b); got.bridge != nil {
-		t.Errorf("未注入时 bridge 应为 nil: %#v", got.bridge)
-	}
-}

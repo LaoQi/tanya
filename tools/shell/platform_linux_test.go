@@ -1,6 +1,6 @@
 //go:build linux
 
-package agent
+package shell
 
 import (
 	"os/exec"

@@ -1,4 +1,4 @@
-package agent
+package shell
 
 import (
 	"errors"
@@ -17,7 +17,7 @@ type shellPlatform struct {
 	ExitCode       func(error) (int, bool)
 	ProcessStopped func(int) bool
 	Programs       []string
-	Capabilities   func(*shellProfile) string
+	Capabilities   func(*profile) string
 	DecodeOutput   func([]byte) string
 }
 
@@ -61,7 +61,7 @@ func noopProtectSignals() {}
 
 func neverStopped(int) bool { return false }
 
-func noopCapabilities(*shellProfile) string { return "" }
+func noopCapabilities(*profile) string { return "" }
 
 func defaultKillGroup(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
