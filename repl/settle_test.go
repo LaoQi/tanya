@@ -19,13 +19,13 @@ func withPlainProfile(t *testing.T) {
 func newSettleAgent(t *testing.T) *agent.Agent {
 	t.Helper()
 	cfg := &agent.Config{
-		BaseURL:         "http://127.0.0.1:1",
-		Model:           "test-model",
-		UserAgent:       agent.DefaultUserAgent,
-		ConfigPath:      "/tmp/tanya-test-config.yaml",
-		ApiProtocol:     "chat",
-		DataDir:         t.TempDir(),
-		SessionMode:     "global",
+		BaseURL:     "http://127.0.0.1:1",
+		Model:       "test-model",
+		UserAgent:   agent.DefaultUserAgent,
+		ConfigPath:  "/tmp/tanya-test-config.yaml",
+		ApiProtocol: "chat",
+		DataDir:     t.TempDir(),
+		SessionMode: "global",
 
 		ArchiveThreshold: agent.DefaultArchiveThreshold,
 		ArchiveKeep:      agent.DefaultArchiveKeep,

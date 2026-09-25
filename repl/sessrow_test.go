@@ -15,13 +15,13 @@ import (
 func newSessTestAgent(t *testing.T, dir string, opts ...agent.Option) *agent.Agent {
 	t.Helper()
 	cfg := &agent.Config{
-		BaseURL:         "http://127.0.0.1:1",
-		Model:           "test-model",
-		UserAgent:       agent.DefaultUserAgent,
-		ConfigPath:      "/tmp/tanya-test-config.yaml",
-		ApiProtocol:     "chat",
-		DataDir:         dir,
-		SessionMode:     "global",
+		BaseURL:     "http://127.0.0.1:1",
+		Model:       "test-model",
+		UserAgent:   agent.DefaultUserAgent,
+		ConfigPath:  "/tmp/tanya-test-config.yaml",
+		ApiProtocol: "chat",
+		DataDir:     dir,
+		SessionMode: "global",
 
 		ArchiveThreshold: agent.DefaultArchiveThreshold,
 		ArchiveKeep:      agent.DefaultArchiveKeep,
