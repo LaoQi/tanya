@@ -90,7 +90,7 @@ func TestResponsesContentAndUsage(t *testing.T) {
 		t.Fatalf("工具数: %d", len(tools))
 	}
 	tool := tools[0].(map[string]any)
-	if tool["type"] != "function" || tool["name"] != "run_shell" {
+	if tool["type"] != "function" || tool["name"] != "t1" {
 		t.Errorf("扁平工具格式: %v", tool)
 	}
 	if _, nested := tool["function"]; nested {

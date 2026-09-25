@@ -12,10 +12,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/config"
 	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/repl"
+	"github.com/LaoQi/tanya/tools/shell"
 )
 
 func TestConfigExampleEmbedded(t *testing.T) {
@@ -128,7 +128,7 @@ func TestRootRefusalMatrix(t *testing.T) {
 }
 
 func TestEnvSectionNoCwdAndGolden(t *testing.T) {
-	inv := agent.ShellInvocation{Argv: []string{"/bin/bash", "-c"}, Name: "bash", Kind: agent.KindPosix}
+	inv := shell.Invocation{Argv: []string{"/bin/bash", "-c"}, Name: "bash", Kind: shell.KindPosix}
 	got := envSection(inv)
 	want := "# 环境\n" +
 		"OS: " + runtime.GOOS + "/" + runtime.GOARCH + "\n" +
@@ -147,10 +147,11 @@ func TestEnvSectionNoCwdAndGolden(t *testing.T) {
 }
 
 func TestSystemBaseAppendsEnvAfterPrompt(t *testing.T) {
-	base, err := systemBase(&agent.Config{})
+	inv, err := shell.Resolve("")
 	if err != nil {
 		t.Skipf("当前环境无可解析 shell: %v", err)
 	}
+	base := systemBase(inv)
 	if !strings.HasPrefix(base, strings.TrimRight(systemPromptFile, "\n")) {
 		t.Error("内置提示词应在基座最前")
 	}

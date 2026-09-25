@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/tools/shell"
 )
 
 func ttyProfile(t *testing.T, p term.Profile) {
@@ -95,7 +96,7 @@ func TestTurnGapOnce(t *testing.T) {
 	}
 	turn.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	turn.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
-		Result: agent.ToolResult{Meta: &agent.ShellResult{Command: "echo hi", ExitCode: 0}}})
+		Result: agent.ToolResult{Meta: &shell.Result{Command: "echo hi", ExitCode: 0}}})
 	if !strings.Contains(buf.String(), "▸ run_shell") || !strings.Contains(buf.String(), "↳ exit 0") {
 		t.Errorf("事件应送达工具视图: %q", buf.String())
 	}

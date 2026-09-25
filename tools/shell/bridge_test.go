@@ -1,4 +1,4 @@
-package agent
+package shell
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/LaoQi/tanya/readline"
 )
 
-type fakeTTYBridge struct {
+type fakeBridge struct {
 	prepareErr error
 	attachErr  error
 	readEnd    *os.File
@@ -23,7 +23,7 @@ type fakeTTYBridge struct {
 	env        []string
 }
 
-func (f *fakeTTYBridge) Prepare(cmd *exec.Cmd) (*os.File, error) {
+func (f *fakeBridge) Prepare(cmd *exec.Cmd) (*os.File, error) {
 	if f.prepareErr != nil {
 		return nil, f.prepareErr
 	}
@@ -39,7 +39,7 @@ func (f *fakeTTYBridge) Prepare(cmd *exec.Cmd) (*os.File, error) {
 	return w, nil
 }
 
-func (f *fakeTTYBridge) Attach(capture io.Writer) (func(), error) {
+func (f *fakeBridge) Attach(capture io.Writer) (func(), error) {
 	if f.attachErr != nil {
 		return nil, f.attachErr
 	}
@@ -56,14 +56,14 @@ func (f *fakeTTYBridge) Attach(capture io.Writer) (func(), error) {
 	}, nil
 }
 
-func bridgeTool(t *testing.T, b TTYBridge) *shellTool {
+func bridgeTool(t *testing.T, b Bridge) *Tool {
 	t.Helper()
-	return testShellTool(t, func(c *shellToolConfig) { c.Bridge = b })
+	return testShellTool(t, func(c *Config) { c.Bridge = b })
 }
 
 func TestRunShellBridgedCapture(t *testing.T) {
-	f := &fakeTTYBridge{}
-	res := bridgeTool(t, f).run(context.Background(), shellRequest{Command: `echo hi; echo oops >&2`, TimeoutSec: 10, Interactive: true})
+	f := &fakeBridge{}
+	res := bridgeTool(t, f).run(context.Background(), request{Command: `echo hi; echo oops >&2`, TimeoutSec: 10, Interactive: true})
 	if !f.prepared || !f.attached || !f.stopped {
 		t.Fatalf("桥接未走全流程: %+v", f)
 	}
@@ -83,8 +83,8 @@ func TestRunShellBridgedCapture(t *testing.T) {
 }
 
 func TestRunShellBridgePrepareFailureFallsBack(t *testing.T) {
-	f := &fakeTTYBridge{prepareErr: errors.New("no tty")}
-	res := bridgeTool(t, f).run(context.Background(), shellRequest{Command: "echo fallback", TimeoutSec: 10, Interactive: true})
+	f := &fakeBridge{prepareErr: errors.New("no tty")}
+	res := bridgeTool(t, f).run(context.Background(), request{Command: "echo fallback", TimeoutSec: 10, Interactive: true})
 	if f.attached {
 		t.Fatal("Prepare 失败仍进入桥接")
 	}
@@ -98,8 +98,8 @@ func TestRunShellBridgePrepareFailureFallsBack(t *testing.T) {
 }
 
 func TestRunShellBridgeAttachFailureFallsBack(t *testing.T) {
-	f := &fakeTTYBridge{attachErr: errors.New("attach failed")}
-	res := bridgeTool(t, f).run(context.Background(), shellRequest{Command: "echo fallback2", TimeoutSec: 10, Interactive: true})
+	f := &fakeBridge{attachErr: errors.New("attach failed")}
+	res := bridgeTool(t, f).run(context.Background(), request{Command: "echo fallback2", TimeoutSec: 10, Interactive: true})
 	if f.attached {
 		t.Fatal("Attach 失败应回退")
 	}
@@ -113,8 +113,8 @@ func TestRunShellBridgeAttachFailureFallsBack(t *testing.T) {
 }
 
 func TestRunShellNonInteractiveSkipsBridge(t *testing.T) {
-	f := &fakeTTYBridge{}
-	res := bridgeTool(t, f).run(context.Background(), shellRequest{Command: "echo plain", TimeoutSec: 10})
+	f := &fakeBridge{}
+	res := bridgeTool(t, f).run(context.Background(), request{Command: "echo plain", TimeoutSec: 10})
 	if f.prepared || f.attached {
 		t.Fatalf("非交互不应使用桥接: %+v", f)
 	}
@@ -128,7 +128,7 @@ func TestRunShellNonInteractiveSkipsBridge(t *testing.T) {
 }
 
 func TestRunShellNoBridgeInjected(t *testing.T) {
-	res := testShellTool(t).run(context.Background(), shellRequest{Command: "echo plain", TimeoutSec: 10, Interactive: true})
+	res := testShellTool(t).run(context.Background(), request{Command: "echo plain", TimeoutSec: 10, Interactive: true})
 	if res.Err != "" || res.ExitCode != 0 {
 		t.Fatalf("无桥接注入应走现状路径: %+v", res)
 	}
@@ -136,9 +136,9 @@ func TestRunShellNoBridgeInjected(t *testing.T) {
 
 func TestRunShellBridgedRealTTYE2E(t *testing.T) {
 	if os.Getenv("TTY_E2E") == "" {
-		t.Skip("需真实 tty: printf 'hello\\n' | script -qec 'TTY_E2E=1 go test -run TestRunShellBridgedRealTTYE2E -v ./agent' /dev/null")
+		t.Skip("需真实 tty: printf 'hello\\n' | script -qec 'TTY_E2E=1 go test -run TestRunShellBridgedRealTTYE2E -v ./tools/shell' /dev/null")
 	}
-	res := bridgeTool(t, readline.NewTTYBridge()).run(context.Background(), shellRequest{Command: `read x < /dev/tty; echo got:$x; tty`, TimeoutSec: 15, Interactive: true})
+	res := bridgeTool(t, readline.NewTTYBridge()).run(context.Background(), request{Command: `read x < /dev/tty; echo got:$x; tty`, TimeoutSec: 15, Interactive: true})
 	var out strings.Builder
 	for _, c := range res.Stdout {
 		out.WriteString(c.Data)
@@ -153,10 +153,10 @@ func TestRunShellBridgedRealTTYE2E(t *testing.T) {
 
 func TestRunShellBridgedRealTTYReuse(t *testing.T) {
 	if os.Getenv("TTY_E2E_REUSE") == "" {
-		t.Skip("需真实 tty: (printf 'hello\\n'; sleep 3; printf 'world\\n'; sleep 3) | script -qec 'TTY_E2E_REUSE=1 go test -count=1 -run TestRunShellBridgedRealTTYReuse -v ./agent' /dev/null")
+		t.Skip("需真实 tty: (printf 'hello\\n'; sleep 3; printf 'world\\n'; sleep 3) | script -qec 'TTY_E2E_REUSE=1 go test -count=1 -run TestRunShellBridgedRealTTYReuse -v ./tools/shell' /dev/null")
 	}
 	for _, want := range []string{"hello", "world"} {
-		res := bridgeTool(t, readline.NewTTYBridge()).run(context.Background(), shellRequest{Command: `read -r x < /dev/tty; echo got:$x`, TimeoutSec: 15, Interactive: true})
+		res := bridgeTool(t, readline.NewTTYBridge()).run(context.Background(), request{Command: `read -r x < /dev/tty; echo got:$x`, TimeoutSec: 15, Interactive: true})
 		var out strings.Builder
 		for _, c := range res.Stdout {
 			out.WriteString(c.Data)
@@ -168,7 +168,7 @@ func TestRunShellBridgedRealTTYReuse(t *testing.T) {
 }
 
 func TestRunShellSignaledExitCode(t *testing.T) {
-	res := testShellTool(t).run(context.Background(), shellRequest{Command: "kill -INT $$", TimeoutSec: 10})
+	res := testShellTool(t).run(context.Background(), request{Command: "kill -INT $$", TimeoutSec: 10})
 	if res.ExitCode != 130 {
 		t.Fatalf("SIGINT 应记为 130: %+v", res)
 	}
@@ -178,7 +178,7 @@ func TestRunShellSignaledExitCode(t *testing.T) {
 }
 
 func TestRunShellBridgedSignaledExitCode(t *testing.T) {
-	res := bridgeTool(t, &fakeTTYBridge{}).run(context.Background(), shellRequest{Command: "kill -INT $$", TimeoutSec: 10, Interactive: true})
+	res := bridgeTool(t, &fakeBridge{}).run(context.Background(), request{Command: "kill -INT $$", TimeoutSec: 10, Interactive: true})
 	if res.ExitCode != 130 {
 		t.Fatalf("桥接路径 SIGINT 应记为 130: %+v", res)
 	}
@@ -186,13 +186,13 @@ func TestRunShellBridgedSignaledExitCode(t *testing.T) {
 
 func TestRunShellBridgedCwdRealTTYE2E(t *testing.T) {
 	if os.Getenv("TTY_E2E") == "" {
-		t.Skip("需真实 tty: printf '\\n' | script -qec 'TTY_E2E=1 go test -count=1 -run TestRunShellBridgedCwdRealTTYE2E -v ./agent' /dev/null")
+		t.Skip("需真实 tty: printf '\\n' | script -qec 'TTY_E2E=1 go test -count=1 -run TestRunShellBridgedCwdRealTTYE2E -v ./tools/shell' /dev/null")
 	}
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	res := bridgeTool(t, readline.NewTTYBridge()).run(context.Background(), shellRequest{Command: "pwd", TimeoutSec: 15, Interactive: true, Cwd: dir})
+	res := bridgeTool(t, readline.NewTTYBridge()).run(context.Background(), request{Command: "pwd", TimeoutSec: 15, Interactive: true, Cwd: dir})
 	var out strings.Builder
 	for _, c := range res.Stdout {
 		out.WriteString(c.Data)

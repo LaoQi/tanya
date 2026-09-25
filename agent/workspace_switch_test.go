@@ -2,7 +2,6 @@ package agent
 
 import (
 	"archive/zip"
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,14 +9,6 @@ import (
 	"testing"
 	"time"
 )
-
-func evalDir(t *testing.T, p string) string {
-	t.Helper()
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		return r
-	}
-	return p
-}
 
 func TestSwitchWorkspaceResetsEverything(t *testing.T) {
 	a := newTestAgent(t)
@@ -45,17 +36,6 @@ func TestSwitchWorkspaceResetsEverything(t *testing.T) {
 	}
 	if got := a.systemPrompt(); !strings.Contains(got, "新的工作区标记") {
 		t.Errorf("system 提示应重读新工作区的 AGENTS.md: %q", got)
-	}
-	res := a.dispatch(context.Background(), "run_shell", `{"command":"pwd"}`)
-	sh, ok := res.Meta.(*ShellResult)
-	if !ok || sh == nil {
-		t.Fatalf("run_shell 未返回: %+v", res)
-	}
-	if got, want := evalDir(t, strings.TrimSpace(shellStdout(sh))), evalDir(t, target); got != want {
-		t.Errorf("run_shell 默认目录应跟随工作区: got %q want %q", got, want)
-	}
-	if sh.Cwd != "" {
-		t.Errorf("默认目录不应回显 cwd: %q", sh.Cwd)
 	}
 }
 
@@ -183,18 +163,12 @@ func TestSwitchWorkspaceAtomicOnBuildFailure(t *testing.T) {
 	}
 
 	broken := t.TempDir()
-	shell := a.cfg.Shell
-	a.cfg.Shell = "tanya-no-such-shell"
-	if err := a.SwitchWorkspace(broken); err == nil {
-		t.Error("shell 解析失败时应失败")
-	}
-	a.cfg.Shell = shell
 
 	if a.Workspace() != from || a.SessionID() != oldID || len(a.History()) != 1 {
 		t.Fatalf("失败后状态应不变: ws=%q id=%q msgs=%d", a.Workspace(), a.SessionID(), len(a.History()))
 	}
 	if err := a.SwitchWorkspace(broken); err != nil {
-		t.Fatalf("恢复配置后应能切换: %v", err)
+		t.Fatalf("失败后应能继续切换: %v", err)
 	}
 	if a.Workspace() != broken {
 		t.Errorf("工作区: got %q want %q", a.Workspace(), broken)

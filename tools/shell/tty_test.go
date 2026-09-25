@@ -1,6 +1,6 @@
 //go:build linux
 
-package agent
+package shell
 
 import (
 	"context"
@@ -28,7 +28,7 @@ func TestRunShellForegroundTTY(t *testing.T) {
 	if cur != syscall.Getpgrp() {
 		t.Skip("当前进程组非前台（嵌套/后台环境）")
 	}
-	res := testShellTool(t).run(context.Background(), shellRequest{
+	res := testShellTool(t).run(context.Background(), request{
 		Command:    `sleep 0.2; read -r _ _ _ _ pgrp _ _ tpgid _ < /proc/self/stat; [ "$pgrp" = "$tpgid" ] && echo FG-OK || echo FG-FAIL`,
 		TimeoutSec: 10,
 	})
@@ -55,7 +55,7 @@ func TestRunShellForegroundTTY(t *testing.T) {
 
 func TestRunShellStdinRead(t *testing.T) {
 	if os.Getenv("TTY_FEED") == "" {
-		t.Skip("需 script 喂入输入: printf 'secret\\n' | script -qec \"TTY_FEED=1 go test -run TestRunShellStdinRead -v ./agent\" /dev/null")
+		t.Skip("需 script 喂入输入: printf 'secret\\n' | script -qec \"TTY_FEED=1 go test -run TestRunShellStdinRead -v ./tools/shell\" /dev/null")
 	}
 	ProtectTerminalSignals()
 	probe, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
@@ -70,7 +70,7 @@ func TestRunShellStdinRead(t *testing.T) {
 	if cur != syscall.Getpgrp() {
 		t.Skip("当前进程组非前台（嵌套/后台环境）")
 	}
-	res := testShellTool(t).run(context.Background(), shellRequest{Command: `read -r -t 5 line; echo "RC=$? GOT=$line"`, TimeoutSec: 10})
+	res := testShellTool(t).run(context.Background(), request{Command: `read -r -t 5 line; echo "RC=$? GOT=$line"`, TimeoutSec: 10})
 	var out strings.Builder
 	for _, c := range res.Stdout {
 		out.WriteString(c.Data)
@@ -80,8 +80,8 @@ func TestRunShellStdinRead(t *testing.T) {
 	}
 }
 
-func TestShellResultStoppedString(t *testing.T) {
-	r := &ShellResult{Stopped: true}
+func TestResultStoppedString(t *testing.T) {
+	r := &Result{Stopped: true}
 	if s := r.String(); !strings.Contains(s, "挂起") {
 		t.Errorf("Stopped 未渲染: %q", s)
 	}
@@ -101,7 +101,7 @@ func TestRunShellStopDetection(t *testing.T) {
 	if cur != syscall.Getpgrp() {
 		t.Skip("当前进程组非前台（嵌套/后台环境）")
 	}
-	res := testShellTool(t).run(context.Background(), shellRequest{Command: `kill -TSTP $$`, TimeoutSec: 10})
+	res := testShellTool(t).run(context.Background(), request{Command: `kill -TSTP $$`, TimeoutSec: 10})
 	if !res.Stopped {
 		t.Fatalf("未检测到挂起: %+v", res)
 	}
@@ -130,7 +130,7 @@ func requireForegroundTTY(t *testing.T) (*os.File, int, ctty.Termios) {
 	return tty, fd, before
 }
 
-func shellOut(res *ShellResult) string {
+func shellOut(res *Result) string {
 	var out strings.Builder
 	for _, c := range res.Stdout {
 		out.WriteString(c.Data)
@@ -143,7 +143,7 @@ func shellOut(res *ShellResult) string {
 
 const rawTTYCmd = `stty -opost -icanon -echo < /dev/tty; stty -a < /dev/tty | tr ';' '\n' | grep -E 'opost|icanon'`
 
-func assertRawThenRestored(t *testing.T, res *ShellResult, fd int, before ctty.Termios) {
+func assertRawThenRestored(t *testing.T, res *Result, fd int, before ctty.Termios) {
 	t.Helper()
 	out := shellOut(res)
 	if !strings.Contains(out, "-opost") || !strings.Contains(out, "-icanon") {
@@ -164,7 +164,7 @@ func TestRunShellRestoresTermios(t *testing.T) {
 		_ = ctty.SetTermios(fd, before)
 		tty.Close()
 	}()
-	res := testShellTool(t).run(context.Background(), shellRequest{Command: rawTTYCmd, TimeoutSec: 10})
+	res := testShellTool(t).run(context.Background(), request{Command: rawTTYCmd, TimeoutSec: 10})
 	assertRawThenRestored(t, res, fd, before)
 }
 
@@ -174,7 +174,7 @@ func TestRunShellRestoresTermiosOnTimeout(t *testing.T) {
 		_ = ctty.SetTermios(fd, before)
 		tty.Close()
 	}()
-	res := testShellTool(t).run(context.Background(), shellRequest{
+	res := testShellTool(t).run(context.Background(), request{
 		Command:    `stty -opost -icanon -echo < /dev/tty; stty -a < /dev/tty | tr ';' '\n' | grep -E 'opost|icanon'; sleep 30`,
 		TimeoutSec: 1,
 	})

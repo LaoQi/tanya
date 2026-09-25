@@ -1,6 +1,6 @@
 //go:build linux
 
-package agent
+package shell
 
 import (
 	"context"
@@ -80,7 +80,7 @@ func TestRunShellForegroundCursorAnchor(t *testing.T) {
 	master, slave := newTestPTYPair(t)
 	defer swapTTYHooks(func() (*os.File, error) { return slave, nil }, func(int) bool { return true })()
 
-	res := testShellTool(t).run(context.Background(), shellRequest{
+	res := testShellTool(t).run(context.Background(), request{
 		Command:    "printf CHILD-MARK > " + slave.Name(),
 		TimeoutSec: 10,
 	})
@@ -109,7 +109,7 @@ func TestRunShellForegroundSkipsTerminalWhenNotOwner(t *testing.T) {
 	master, slave := newTestPTYPair(t)
 	defer swapTTYHooks(func() (*os.File, error) { return slave, nil }, func(int) bool { return false })()
 
-	res := testShellTool(t).run(context.Background(), shellRequest{
+	res := testShellTool(t).run(context.Background(), request{
 		Command:    "printf CHILD-MARK > " + slave.Name(),
 		TimeoutSec: 10,
 	})

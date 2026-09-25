@@ -16,7 +16,6 @@ type Config struct {
 	UserAgent        string  `yaml:"user_agent"`
 	DataDir          string  `yaml:"data_dir"`
 	SessionMode      string  `yaml:"session_mode"`
-	Shell            string  `yaml:"shell"`
 	AutoArchive      bool    `yaml:"auto_archive"`
 	ArchiveThreshold int     `yaml:"auto_archive_threshold"`
 	ArchiveKeep      int     `yaml:"auto_archive_keep"`

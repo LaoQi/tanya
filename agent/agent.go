@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -17,7 +16,6 @@ type Agent struct {
 	tools      *toolRegistry
 	workspace  string
 	home       string
-	bridge     TTYBridge
 	registered []Tool
 	history    []Message
 	basePrompt string
@@ -37,7 +35,6 @@ type ResponseInfo struct {
 
 type Options struct {
 	noSave       bool
-	bridge       TTYBridge
 	systemPrompt string
 	registered   []Tool
 }
@@ -46,10 +43,6 @@ type Option func(*Options)
 
 func NoSave(v bool) Option {
 	return func(o *Options) { o.noSave = v }
-}
-
-func WithTTYBridge(b TTYBridge) Option {
-	return func(o *Options) { o.bridge = b }
 }
 
 func WithSystemPrompt(s string) Option {
@@ -73,7 +66,7 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 		return nil, err
 	}
 	home, _ := os.UserHomeDir()
-	a := &Agent{cfg: cfg, workspace: cwd, home: home, bridge: o.bridge, basePrompt: o.systemPrompt, registered: o.registered}
+	a := &Agent{cfg: cfg, workspace: cwd, home: home, basePrompt: o.systemPrompt, registered: o.registered}
 	if err := a.loadWorkspace(cwd, o.noSave); err != nil {
 		return nil, err
 	}
@@ -81,16 +74,6 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 }
 
 func (a *Agent) loadWorkspace(dir string, noSave bool) error {
-	tool, err := newShellTool(shellToolConfig{
-		Override:  a.cfg.Shell,
-		LookPath:  exec.LookPath,
-		Home:      a.home,
-		Workspace: dir,
-		Bridge:    a.bridge,
-	})
-	if err != nil {
-		return err
-	}
 	sessionDir, archiveDir := resolveWorkspaceDirs(a.cfg, dir)
 	if !noSave {
 		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
@@ -100,7 +83,7 @@ func (a *Agent) loadWorkspace(dir string, noSave bool) error {
 	a.workspace = dir
 	a.prompt = newPromptBuilder(a.basePrompt, dir, globalAgentsPath(), readAgentsFile)
 	a.store = newSessionStore(sessionDir, archiveDir, dir, noSave)
-	a.tools = newToolRegistry(append(allTools(tool, a), a.registered...)...)
+	a.tools = newToolRegistry(assembleTools(a.registered, a)...)
 	a.client = NewClient(a.cfg, a.tools.defs())
 	a.NewSession()
 	a.store.refresh()

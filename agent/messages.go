@@ -3,15 +3,9 @@ package agent
 import "errors"
 
 const (
-	MsgErrPrefix           = "error: "
-	MsgErrLine             = MsgErrPrefix + "%s"
-	MsgParseArgs           = MsgErrPrefix + "参数解析失败: %v"
-	MsgUnknownTool         = MsgErrPrefix + "未知工具 %s"
-	MsgBadCwd              = MsgErrPrefix + "cwd 不存在或不是目录: %s"
-	MsgInterruptNotStarted = MsgErrPrefix + "已中断（命令未执行）"
-	MsgInterruptRunning    = MsgErrPrefix + "已中断（进程已终止，输出可能不完整）"
-	MsgTimedOut            = MsgErrPrefix + "执行超时"
-	MsgStopped             = MsgErrPrefix + "进程被终端挂起(Ctrl+Z)已终止"
+	MsgErrPrefix   = "error: "
+	MsgParseArgs   = MsgErrPrefix + "参数解析失败: %v"
+	MsgUnknownTool = MsgErrPrefix + "未知工具 %s"
 )
 
 const (
@@ -39,8 +33,6 @@ const (
 	MsgControlStatArchive  = "会话: 归档只读 %s（未写入）"
 	MsgBadSessionID        = "非法会话 id"
 	MsgSessionGone         = "会话不存在: %s"
-	MsgNoShellFmt          = "未找到可用 shell（已尝试 %s），请安装或在配置中指定 shell:"
-	MsgShellOverrideFmt    = "配置的 shell %q 不可执行，请检查 shell: 或 TANYA_SHELL"
 	MsgBadEffort           = "无效思考等级 %q（可选: minimal/low/medium/high/max/off）"
 	MsgBadApiProtocol      = "无效 api_protocol %q（可选: chat/responses）"
 	MsgBadArchiveThreshold = "无效 auto_archive_threshold %d（需 ≥ 2）"
@@ -97,25 +89,6 @@ const (
 	MsgControlConfigPath     = "配置文件: %s"
 	MsgControlModelSpec      = "非空模型名"
 	MsgControlEffortSpec     = "minimal/low/medium/high/max/off，off 表示清空"
-)
-
-const (
-	MsgNoOutput    = "(无输出，退出码 0)"
-	MsgTruncMiddle = "[%s 中间截断 %d 字节]"
-	MsgTruncTail   = "[%s 截断 %d 字节]"
-)
-
-const (
-	MsgEnvDenied = "%s: <拒绝：疑似敏感变量>"
-	MsgEnvUnset  = "%s: <未设置>"
-)
-
-const (
-	MsgCalcUnparsed      = "表达式存在无法解析的部分: %q"
-	MsgCalcDivZero       = "除数为零"
-	MsgCalcUnexpectedEnd = "表达式意外结束"
-	MsgCalcMissingRParen = "缺少右括号"
-	MsgCalcWantNumber    = "第 %d 个字符处应为数字"
 )
 
 var (

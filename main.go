@@ -17,6 +17,8 @@ import (
 	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/readline"
 	"github.com/LaoQi/tanya/repl"
+	"github.com/LaoQi/tanya/tools"
+	"github.com/LaoQi/tanya/tools/shell"
 )
 
 var (
@@ -135,19 +137,31 @@ func main() {
 			exitNow(1)
 		}
 	}
-	agent.ProtectTerminalSignals()
+	shell.ProtectTerminalSignals()
 	ctty.WatchSignals()
 	readline.InitTerminalGuard()
 	readline.SecureTerminal()
-	sysPrompt, err := systemBase(&cfg.Config)
+	inv, err := shell.Resolve(cfg.Shell)
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
 	}
-	a, err := agent.New(&cfg.Config,
+	home, _ := os.UserHomeDir()
+	var a *agent.Agent
+	list, err := tools.Standard(tools.Options{
+		ShellOverride: cfg.Shell,
+		Home:          home,
+		Workspace:     func() string { return a.Workspace() },
+		Bridge:        readline.NewTTYBridge(),
+	})
+	if err != nil {
+		st.FailErr("", err)
+		exitNow(1)
+	}
+	a, err = agent.New(&cfg.Config,
 		agent.NoSave(*f.noSave),
-		agent.WithTTYBridge(readline.NewTTYBridge()),
-		agent.WithSystemPrompt(sysPrompt))
+		agent.WithTools(list...),
+		agent.WithSystemPrompt(systemBase(inv)))
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
@@ -173,7 +187,7 @@ func main() {
 		return
 	}
 
-	notifier, err := buildNotifier(cfg.UI, &cfg.Config)
+	notifier, err := buildNotifier(cfg.UI, inv)
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
@@ -194,16 +208,12 @@ func main() {
 }
 
 // systemBase 组装注入 agent 的系统提示基座：内置提示词 + 环境段（OS/shell 执行契约）。
-func systemBase(cfg *agent.Config) (string, error) {
-	inv, err := agent.ResolveShell(cfg)
-	if err != nil {
-		return "", err
-	}
-	return systemPromptFile + "\n\n" + envSection(inv), nil
+func systemBase(inv shell.Invocation) string {
+	return systemPromptFile + "\n\n" + envSection(inv)
 }
 
 // envSection 是 agent 初始化头部的环境段，由 main 组装并随基座注入。
-func envSection(inv agent.ShellInvocation) string {
+func envSection(inv shell.Invocation) string {
 	var b strings.Builder
 	b.WriteString("# 环境\n")
 	fmt.Fprintf(&b, "OS: %s/%s\n", runtime.GOOS, runtime.GOARCH)
@@ -211,8 +221,8 @@ func envSection(inv agent.ShellInvocation) string {
 	if ctty.Supported {
 		b.WriteString("TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）\n")
 	}
-	fmt.Fprintf(&b, "TIMEOUT: 默认 %ds（interactive 时 %ds），上限 %ds\n", agent.ShellTimeoutSec, agent.ShellInteractiveTimeoutSec, agent.ShellTimeoutLimit)
-	fmt.Fprintf(&b, "OUTPUT: stdout/stderr 头尾各 %dKB，中间截断\n", agent.ShellMaxOutput/1000)
+	fmt.Fprintf(&b, "TIMEOUT: 默认 %ds（interactive 时 %ds），上限 %ds\n", shell.TimeoutSec, shell.InteractiveTimeoutSec, shell.TimeoutLimit)
+	fmt.Fprintf(&b, "OUTPUT: stdout/stderr 头尾各 %dKB，中间截断\n", shell.MaxOutput/1000)
 	return b.String()
 }
 
@@ -226,7 +236,7 @@ func writeUsage(w io.Writer, fs *flag.FlagSet) {
 }
 
 // buildNotifier 按配置组装通知行为（bell / OSC 9 / 外部程序，各自独立开关），全关时为 nil。
-func buildNotifier(ui config.UI, acfg *agent.Config) (repl.Notifier, error) {
+func buildNotifier(ui config.UI, inv shell.Invocation) (repl.Notifier, error) {
 	var list []repl.Notifier
 	if ui.Bell {
 		list = append(list, repl.BellNotifier())
@@ -235,10 +245,6 @@ func buildNotifier(ui config.UI, acfg *agent.Config) (repl.Notifier, error) {
 		list = append(list, repl.OSCNotifier())
 	}
 	if ui.NotifyCmd != "" {
-		inv, err := agent.ResolveShell(acfg)
-		if err != nil {
-			return nil, err
-		}
 		n, err := repl.NewCommandNotifier(inv, ui.NotifyCmd)
 		if err != nil {
 			return nil, err

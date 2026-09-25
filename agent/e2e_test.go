@@ -8,10 +8,7 @@ import (
 
 func TestAskSingleTurn(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "这是回答"})
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	var sb strings.Builder
 	sink := EventSink(func(e Event) {
 		if e.Kind == EventContent {
@@ -40,11 +37,7 @@ func TestAskShellToolLoop(t *testing.T) {
 		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "run_shell", args: `{"command":"echo hello-tool"}`}}},
 		mockStep{content: "执行完毕"},
 	)
-	cfg := m.config()
-	a, err := New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	var toolEvents []string
 	var startEvents []string
 	sink := EventSink(func(e Event) {
@@ -84,29 +77,23 @@ func TestAskShellToolLoop(t *testing.T) {
 	}
 }
 
-func TestAskBuiltinToolLoop(t *testing.T) {
+func TestAskNonShellToolLoop(t *testing.T) {
 	m := newMockLLM(t,
 		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "calc", args: `{"expression":"6*7"}`}}},
 		mockStep{content: "42"},
 	)
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	if err := a.Ask(context.Background(), "算一下", nil); err != nil {
 		t.Fatal(err)
 	}
 	if a.history[2].Content != "42" {
-		t.Errorf("calc 结果: %q", a.history[2].Content)
+		t.Errorf("非 shell 工具结果应回填: %q", a.history[2].Content)
 	}
 }
 
 func TestAskUsageFallback(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "回答"})
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	if st := a.Stats(); st.HasContext {
 		t.Errorf("无 usage 时不应标记实报: %+v", st)
 	}
@@ -120,10 +107,7 @@ func TestAskUsageFallback(t *testing.T) {
 
 func TestAskUsageReal(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "回答", usage: &Usage{PromptTokens: 1500, CompletionTokens: 10, TotalTokens: 1510}})
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	if err := a.Ask(context.Background(), "问题", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -137,10 +121,7 @@ func TestAskRequestCallbacks(t *testing.T) {
 		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "calc", args: `{"expression":"1+1"}`}}},
 		mockStep{content: "2", usage: &Usage{PromptTokens: 1200, CompletionTokens: 5, TotalTokens: 1205}},
 	)
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	var starts int
 	var infos []ResponseInfo
 	sink := EventSink(func(e Event) {
@@ -181,10 +162,7 @@ func TestAskRequestCallbacks(t *testing.T) {
 
 func TestAskRequestCallbackOnError(t *testing.T) {
 	m := newMockLLM(t, mockStep{status: 500})
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	var starts int
 	var infos []ResponseInfo
 	sink := EventSink(func(e Event) {
@@ -211,10 +189,7 @@ func TestAskUnknownTool(t *testing.T) {
 		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "hack", args: `{}`}}},
 		mockStep{content: "end"},
 	)
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	if err := a.Ask(context.Background(), "go", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -239,10 +214,7 @@ func TestAskEventSequence(t *testing.T) {
 		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "calc", args: `{"expression":"1+1"}`}}},
 		mockStep{content: "2"},
 	)
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	var kinds []EventKind
 	if err := a.Ask(context.Background(), "算一下", EventSink(func(e Event) { kinds = append(kinds, e.Kind) })); err != nil {
 		t.Fatal(err)
@@ -261,10 +233,7 @@ func TestAskEventSequence(t *testing.T) {
 
 func TestAskReasoningPhaseEvents(t *testing.T) {
 	m := newMockLLM(t, mockStep{reasoning: "先推理", content: "结论"})
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	var order []EventKind
 	var info ResponseInfo
 	sink := EventSink(func(e Event) {
@@ -297,10 +266,7 @@ func TestAskToolEventsCarryResult(t *testing.T) {
 		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "run_shell", args: `{"command":"echo evt"}`}}},
 		mockStep{content: "done"},
 	)
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	var startBeforeEnd bool
 	var sawResult bool
 	var started bool
@@ -315,7 +281,7 @@ func TestAskToolEventsCarryResult(t *testing.T) {
 			if started {
 				startBeforeEnd = true
 			}
-			if sh, ok := e.Result.Meta.(*ShellResult); !ok || sh == nil || !strings.Contains(e.Result.Text, "evt") {
+			if meta, ok := e.Result.Meta.(*stubShellMeta); !ok || meta == nil || !strings.Contains(e.Result.Text, "echo evt") {
 				t.Errorf("ToolEnd 应携带结构化结果: %+v", e.Result)
 			}
 			sawResult = true
@@ -335,10 +301,7 @@ func TestRunTurnInteractiveEventPassthrough(t *testing.T) {
 		mockStep{toolCalls: []mockToolCall{{id: "call_2", name: "run_shell", args: `{"command":"echo hi"}`}}},
 		mockStep{content: "完成"},
 	)
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	type toolEvent struct {
 		name        string
 		interactive bool
@@ -374,10 +337,7 @@ func TestRunTurnBadJSONArgs(t *testing.T) {
 		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "run_shell", args: `{"command":`}}},
 		mockStep{content: "已忽略"},
 	)
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	var interactive []bool
 	sink := EventSink(func(e Event) {
 		if e.Kind == EventToolStart {
@@ -406,10 +366,7 @@ func TestAskChatReplaysReasoningContent(t *testing.T) {
 		mockStep{reasoning: "先看看目录", toolCalls: []mockToolCall{{id: "call_1", name: "run_shell", args: `{"command":"echo hi"}`}}},
 		mockStep{reasoning: "再作答", content: "完成"},
 	)
-	a, err := New(m.config())
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := newAgent(t, m)
 	if err := a.Ask(context.Background(), "跑一下", nil); err != nil {
 		t.Fatal(err)
 	}

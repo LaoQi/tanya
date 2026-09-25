@@ -45,7 +45,7 @@ func newAgentTool(t configTarget) *agentTool { return &agentTool{target: t} }
 func (t *agentTool) Name() string { return "agent_custom" }
 
 func (t *agentTool) Definition() ToolDef {
-	return newToolDef(t.Name(), agentDesc, agentParams())
+	return NewToolDef(t.Name(), agentDesc, agentParams())
 }
 
 type agentArgs struct {

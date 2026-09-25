@@ -1,4 +1,4 @@
-package agent
+package shell
 
 import (
 	"context"
@@ -10,9 +10,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/LaoQi/tanya/agent"
 )
 
-func testShellTool(t *testing.T, mutate ...func(*shellToolConfig)) *shellTool {
+func testShellTool(t *testing.T, mutate ...func(*Config)) *Tool {
 	t.Helper()
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -22,30 +24,26 @@ func testShellTool(t *testing.T, mutate ...func(*shellToolConfig)) *shellTool {
 	if err != nil || home == "" {
 		t.Fatalf("UserHomeDir 不可用: err=%v home=%q", err, home)
 	}
-	cfg := shellToolConfig{LookPath: exec.LookPath, Home: home, Workspace: cwd}
+	cfg := Config{LookPath: exec.LookPath, Home: home, Workspace: func() string { return cwd }}
 	for _, f := range mutate {
 		f(&cfg)
 	}
-	tool, err := newShellTool(cfg)
+	tool, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return tool
 }
 
-func testToolDefs() []ToolDef {
-	return newToolRegistry(allTools(&shellTool{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}}, &stubConfigTarget{})...).defs()
-}
-
 func runShellString(t *testing.T, ctx context.Context, command string, timeoutSec int) string {
 	t.Helper()
-	return testShellTool(t).run(ctx, shellRequest{Command: command, TimeoutSec: timeoutSec}).String()
+	return testShellTool(t).run(ctx, request{Command: command, TimeoutSec: timeoutSec}).String()
 }
 
 func TestNewShellToolResolvesProfileAndPrograms(t *testing.T) {
-	tool, err := newShellTool(shellToolConfig{LookPath: lookPathStub("bash", "ls")})
+	tool, err := New(Config{LookPath: lookPathStub("bash", "ls")})
 	if err != nil || tool.profile == nil || tool.profile.Name != "bash" {
-		t.Fatalf("newShellTool: %+v err=%v", tool, err)
+		t.Fatalf("New: %+v err=%v", tool, err)
 	}
 	if strings.Join(tool.programs, ",") != "ls" {
 		t.Errorf("programs = %v", tool.programs)
@@ -56,7 +54,7 @@ func TestNewShellToolResolvesProfileAndPrograms(t *testing.T) {
 }
 
 func TestNewShellToolInjectedPrograms(t *testing.T) {
-	tool, err := newShellTool(shellToolConfig{
+	tool, err := New(Config{
 		LookPath: lookPathStub("bash", "ls", "grep"),
 		Programs: []string{"ls"},
 	})
@@ -66,13 +64,13 @@ func TestNewShellToolInjectedPrograms(t *testing.T) {
 }
 
 func TestNewShellToolNoShell(t *testing.T) {
-	if tool, err := newShellTool(shellToolConfig{LookPath: lookPathStub()}); err == nil || tool != nil {
+	if tool, err := New(Config{LookPath: lookPathStub()}); err == nil || tool != nil {
 		t.Errorf("无 shell 应报错: %+v err=%v", tool, err)
 	}
 }
 
 func TestNewShellToolOverrideUnavailable(t *testing.T) {
-	_, err := newShellTool(shellToolConfig{Override: "zsh", LookPath: lookPathStub("bash")})
+	_, err := New(Config{Override: "zsh", LookPath: lookPathStub("bash")})
 	if err == nil || !strings.Contains(err.Error(), "配置的 shell") {
 		t.Fatalf("override 无效应报错: %v", err)
 	}
@@ -91,7 +89,7 @@ func TestShellToolResolveCwdInjected(t *testing.T) {
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tool := testShellTool(t, func(c *shellToolConfig) { c.Home = home; c.Workspace = ws })
+	tool := testShellTool(t, func(c *Config) { c.Home = home; c.Workspace = func() string { return ws } })
 	cases := []struct{ in, want string }{
 		{"", ""},
 		{home, home},
@@ -116,7 +114,7 @@ func TestShellToolResolveCwdInjected(t *testing.T) {
 }
 
 func TestShellToolResolveCwdNoBaseline(t *testing.T) {
-	tool := testShellTool(t, func(c *shellToolConfig) { c.Home = ""; c.Workspace = "" })
+	tool := testShellTool(t, func(c *Config) { c.Home = ""; c.Workspace = nil })
 	if got, err := tool.resolveCwd("sub"); err == nil || got != "" {
 		t.Errorf("无工作区基准时相对路径应报错: got %q, %v", got, err)
 	}
@@ -129,7 +127,7 @@ func TestShellToolResolveCwdNoBaseline(t *testing.T) {
 }
 
 func TestShellToolRunBadCwd(t *testing.T) {
-	res := testShellTool(t).run(context.Background(), shellRequest{
+	res := testShellTool(t).run(context.Background(), request{
 		Command:    "echo hi",
 		TimeoutSec: 10,
 		Cwd:        filepath.Join(t.TempDir(), "nope"),
@@ -151,7 +149,7 @@ func TestShellToolConcurrentRun(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			cmd := fmt.Sprintf("echo out-%d; exit %d", i, i)
-			results[i] = tool.run(context.Background(), shellRequest{Command: cmd, TimeoutSec: 30}).String()
+			results[i] = tool.run(context.Background(), request{Command: cmd, TimeoutSec: 30}).String()
 		}(i)
 	}
 	wg.Wait()
@@ -174,7 +172,7 @@ func TestNewShellToolEmptyPrograms(t *testing.T) {
 		}
 		return "", errors.New("not found")
 	}
-	tool, err := newShellTool(shellToolConfig{LookPath: lookPath, Programs: []string{}})
+	tool, err := New(Config{LookPath: lookPath, Programs: []string{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,8 +188,8 @@ func TestNewShellToolEmptyPrograms(t *testing.T) {
 }
 
 func TestShellToolInteractiveBadCwdSkipsBridge(t *testing.T) {
-	f := &fakeTTYBridge{}
-	res := bridgeTool(t, f).run(context.Background(), shellRequest{
+	f := &fakeBridge{}
+	res := bridgeTool(t, f).run(context.Background(), request{
 		Command:     "echo hi",
 		TimeoutSec:  10,
 		Interactive: true,
@@ -206,8 +204,8 @@ func TestShellToolInteractiveBadCwdSkipsBridge(t *testing.T) {
 }
 
 func TestShellToolDescGolden(t *testing.T) {
-	profile := &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}
-	tool := &shellTool{profile: profile, programs: []string{"ls", "grep"}}
+	profile := &profile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}
+	tool := &Tool{profile: profile, programs: []string{"ls", "grep"}}
 	want := "在 " + platform.GOOS + " bash 中执行命令（shell 语法），返回 stdout/stderr/退出码。" +
 		"默认在当前工作区下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。" +
 		platform.Capabilities(profile) +
@@ -219,7 +217,7 @@ func TestShellToolDescGolden(t *testing.T) {
 }
 
 func TestShellToolDescPowerShellFallback(t *testing.T) {
-	tool := &shellTool{profile: &shellProfile{
+	tool := &Tool{profile: &profile{
 		Path: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
 		Name: "powershell", Kind: KindPowerShell,
 	}}
@@ -230,17 +228,17 @@ func TestShellToolDescPowerShellFallback(t *testing.T) {
 }
 
 func TestDescribeShellCrossPlatform(t *testing.T) {
-	posix := shellPlatform{GOOS: "linux", Capabilities: func(*shellProfile) string { return "平台能力句。" }}
+	posix := shellPlatform{GOOS: "linux", Capabilities: func(*profile) string { return "平台能力句。" }}
 	cwdLine := "默认在当前工作区下执行，无需 cd 进入项目；需要其它目录时用 cwd 参数，不必写 cd 前缀。"
 	useLine := "读文件、搜索、文本处理等系统操作都用它。"
-	got := describeShell(posix, &shellProfile{Name: "bash", Kind: KindPosix}, []string{"ls", "grep"})
+	got := describeShell(posix, &profile{Name: "bash", Kind: KindPosix}, []string{"ls", "grep"})
 	want := "在 linux bash 中执行命令（shell 语法），返回 stdout/stderr/退出码。" + cwdLine + "平台能力句。" + useLine + "可用程序: ls, grep"
 	if got != want {
 		t.Errorf("posix 描述不匹配:\n got %q\nwant %q", got, want)
 	}
 
-	empty := shellPlatform{GOOS: "plan9", Capabilities: func(*shellProfile) string { return "" }}
-	got = describeShell(empty, &shellProfile{Name: "sh", Kind: KindPosix}, nil)
+	empty := shellPlatform{GOOS: "plan9", Capabilities: func(*profile) string { return "" }}
+	got = describeShell(empty, &profile{Name: "sh", Kind: KindPosix}, nil)
 	want = "在 plan9 sh 中执行命令（shell 语法），返回 stdout/stderr/退出码。" + cwdLine + useLine
 	if got != want {
 		t.Errorf("空能力句/空清单应无空洞:\n got %q\nwant %q", got, want)
@@ -248,10 +246,10 @@ func TestDescribeShellCrossPlatform(t *testing.T) {
 
 	windows := posix
 	windows.GOOS = "windows"
-	if got := describeShell(windows, &shellProfile{Name: "pwsh", Kind: KindPowerShell}, nil); !strings.HasPrefix(got, "在 windows pwsh 中执行命令（PowerShell 语法），") {
+	if got := describeShell(windows, &profile{Name: "pwsh", Kind: KindPowerShell}, nil); !strings.HasPrefix(got, "在 windows pwsh 中执行命令（PowerShell 语法），") {
 		t.Errorf("PowerShell 语法提示缺失: %q", got)
 	}
-	if got := describeShell(windows, &shellProfile{Name: "cmd", Kind: KindCmd}, nil); !strings.HasPrefix(got, "在 windows cmd 中执行命令（cmd 语法），") {
+	if got := describeShell(windows, &profile{Name: "cmd", Kind: KindCmd}, nil); !strings.HasPrefix(got, "在 windows cmd 中执行命令（cmd 语法），") {
 		t.Errorf("cmd 语法提示缺失: %q", got)
 	}
 }
@@ -260,5 +258,40 @@ func TestRunShellParamsGolden(t *testing.T) {
 	want := `{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"cwd":{"type":"string","description":"命令执行目录，默认当前工作区"},"timeout":{"type":"integer","description":"超时秒数，默认 60（interactive 时 300），最大 900"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令与终端直通、可直接应答（Linux 独立 pty、Windows 继承控制台），停用等待动画，默认超时放宽"}},"required":["command"]}`
 	if got := runShellParams(); got != want {
 		t.Errorf("runShellParams 全串不匹配:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestInvokeBadArgs(t *testing.T) {
+	res := testShellTool(t).Invoke(context.Background(), `{bad`)
+	if res.Meta != nil {
+		t.Fatal("坏参数不应执行命令")
+	}
+	if !strings.Contains(res.Text, "参数解析失败") {
+		t.Fatalf("坏参数应返回解析错误: %q", res.Text)
+	}
+}
+
+func TestInvokeCarriesMeta(t *testing.T) {
+	res := testShellTool(t).Invoke(context.Background(), `{"command":"echo hi","timeout":10}`)
+	sh, ok := res.Meta.(*Result)
+	if !ok || sh == nil {
+		t.Fatalf("Meta 应为 *Result: %T", res.Meta)
+	}
+	if !strings.Contains(res.Text, "hi") || res.Text != sh.String() {
+		t.Errorf("Text 应为 Result.String(): %q / %q", res.Text, sh.String())
+	}
+	if !testShellTool(t).Interactive(`{"command":"x","interactive":true}`) {
+		t.Error("interactive:true 应被识别")
+	}
+}
+
+func TestToolSatisfiesAgentContracts(t *testing.T) {
+	var tool agent.Tool = testShellTool(t)
+	var interactive agent.Interactive = tool.(agent.Interactive)
+	if tool.Name() != "run_shell" {
+		t.Fatalf("工具名: %q", tool.Name())
+	}
+	if !interactive.Interactive(`{"command":"x","interactive":true}`) || interactive.Interactive(`{"command":"x"}`) {
+		t.Error("Interactive 契约未按参数解析")
 	}
 }

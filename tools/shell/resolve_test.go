@@ -1,7 +1,8 @@
-package agent
+package shell
 
 import (
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -122,42 +123,31 @@ func TestProbePrograms(t *testing.T) {
 	}
 }
 
-func TestToolDefsHasRunShell(t *testing.T) {
-	defs := newToolRegistry(&shellTool{profile: &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix}}).defs()
-	if len(defs) == 0 || defs[0].Function.Name != "run_shell" {
-		t.Errorf("run_shell 应恒定注册在首位: %+v", defs)
-	}
-}
-
-func TestToolDefsRunShellDesc(t *testing.T) {
-	tool := &shellTool{
-		profile:  &shellProfile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix},
+func TestDefinitionNameAndDesc(t *testing.T) {
+	tool := &Tool{
+		profile:  &profile{Path: "/usr/bin/bash", Name: "bash", Kind: KindPosix},
 		programs: []string{"ls", "grep"},
 	}
-	defs := newToolRegistry(tool).defs()
-	if len(defs) == 0 || defs[0].Function.Name != "run_shell" {
-		t.Fatalf("run_shell 应注册在首位: %+v", defs)
+	def := tool.Definition()
+	if def.Type != "function" || def.Function.Name != "run_shell" {
+		t.Fatalf("definition 头异常: %+v", def)
 	}
-	if got := defs[0].Function.Description; got != tool.toolDesc() {
+	if got := def.Function.Description; got != tool.toolDesc() {
 		t.Errorf("描述应与 toolDesc 一致:\n got %q\nwant %q", got, tool.toolDesc())
 	}
-	if got := string(defs[0].Function.Parameters); got != runShellParams() {
+	if got := string(def.Function.Parameters); got != runShellParams() {
 		t.Errorf("参数应与 runShellParams 一致:\n got %q\nwant %q", got, runShellParams())
 	}
 }
 
 func TestNewRejectsUnavailableShellOverride(t *testing.T) {
-	isolatePromptEnv(t)
-	cfg := defaultConfig()
-	cfg.Shell = "/no/such/shell-tanya"
-	cfg.DataDir = t.TempDir()
-	if _, err := New(cfg); err == nil || !strings.Contains(err.Error(), "配置的 shell") {
+	if _, err := New(Config{Override: "/no/such/shell-tanya", LookPath: exec.LookPath}); err == nil || !strings.Contains(err.Error(), "配置的 shell") {
 		t.Fatalf("无可用 shell 时 New 应报错: %v", err)
 	}
 }
 
-func TestResolveShell(t *testing.T) {
-	inv, err := ResolveShell(&Config{})
+func TestResolve(t *testing.T) {
+	inv, err := Resolve("")
 	if err != nil {
 		t.Skipf("当前环境无可解析 shell: %v", err)
 	}
@@ -165,14 +155,14 @@ func TestResolveShell(t *testing.T) {
 		t.Fatalf("argv 应含解释器与执行参数: %q", inv.Argv)
 	}
 	last := inv.Argv[len(inv.Argv)-1]
-	want := map[ShellKind]string{KindPosix: "-c", KindPowerShell: "-Command", KindCmd: "/c"}[inv.Kind]
+	want := map[Kind]string{KindPosix: "-c", KindPowerShell: "-Command", KindCmd: "/c"}[inv.Kind]
 	if last != want {
 		t.Errorf("kind %v 的执行参数应为 %q: %q", inv.Kind, want, last)
 	}
 }
 
-func TestResolveShellBadOverride(t *testing.T) {
-	if _, err := ResolveShell(&Config{Shell: "tanya-no-such-shell-xyz"}); err == nil {
+func TestResolveBadOverride(t *testing.T) {
+	if _, err := Resolve("tanya-no-such-shell-xyz"); err == nil {
 		t.Error("不可用的 shell 覆盖应报错")
 	}
 }

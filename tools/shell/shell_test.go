@@ -1,4 +1,4 @@
-package agent
+package shell
 
 import (
 	"context"
@@ -81,7 +81,7 @@ func TestRunShellTruncation(t *testing.T) {
 	if !strings.Contains(got, "中间截断 150000 字节") {
 		t.Errorf("应包含中间截断标记: len=%d", len(got))
 	}
-	if len(got) > 2*ShellMaxOutput+200 {
+	if len(got) > 2*MaxOutput+200 {
 		t.Errorf("截断后仍过长: %d", len(got))
 	}
 }
@@ -111,31 +111,31 @@ func TestRunShellWaitDelay(t *testing.T) {
 }
 
 func TestLimitedBuffer(t *testing.T) {
-	var chunks []ShellChunk
+	var chunks []Chunk
 	c := streamCapture{chunks: &chunks}
-	full := strings.Repeat("a", ShellMaxOutput+500)
+	full := strings.Repeat("a", MaxOutput+500)
 	if n, err := c.Write([]byte(full)); err != nil || n != len(full) {
 		t.Fatalf("Write 返回 n=%d err=%v", n, err)
 	}
 	c.finish()
-	if len(chunks) != 1 || len(chunks[0].Data) != ShellMaxOutput+500 || chunks[0].Truncated != 0 {
+	if len(chunks) != 1 || len(chunks[0].Data) != MaxOutput+500 || chunks[0].Truncated != 0 {
 		t.Fatalf("连续数据应合并为单一 chunk: %+v（len=%d）", chunks, len(chunks[0].Data))
 	}
-	var chunks2 []ShellChunk
+	var chunks2 []Chunk
 	c2 := streamCapture{chunks: &chunks2}
 	c2.Write([]byte("x"))
-	c2.Write([]byte(strings.Repeat("a", ShellMaxOutput*2)))
+	c2.Write([]byte(strings.Repeat("a", MaxOutput*2)))
 	c2.finish()
 	if len(chunks2) != 2 {
 		t.Fatalf("应产出 2 chunk，实际 %d", len(chunks2))
 	}
-	if len(chunks2[0].Data) != ShellMaxOutput || chunks2[0].Truncated != 0 {
+	if len(chunks2[0].Data) != MaxOutput || chunks2[0].Truncated != 0 {
 		t.Errorf("chunk[0] 异常: len=%d trunc=%d", len(chunks2[0].Data), chunks2[0].Truncated)
 	}
-	if len(chunks2[1].Data) != ShellMaxOutput/2+1 || chunks2[1].Truncated != ShellMaxOutput/2 {
+	if len(chunks2[1].Data) != MaxOutput/2+1 || chunks2[1].Truncated != MaxOutput/2 {
 		t.Errorf("chunk[1] 异常: len=%d trunc=%d", len(chunks2[1].Data), chunks2[1].Truncated)
 	}
-	var chunks3 []ShellChunk
+	var chunks3 []Chunk
 	c3 := streamCapture{chunks: &chunks3}
 	c3.finish()
 	if len(chunks3) != 0 {
@@ -144,14 +144,14 @@ func TestLimitedBuffer(t *testing.T) {
 }
 
 func TestShellArgsInteractive(t *testing.T) {
-	ps := &shellProfile{Path: "pwsh", Name: "pwsh", Kind: KindPowerShell, ExtraArgs: []string{"-NoProfile", "-NonInteractive"}}
+	ps := &profile{Path: "pwsh", Name: "pwsh", Kind: KindPowerShell, ExtraArgs: []string{"-NoProfile", "-NonInteractive"}}
 	if got := strings.Join(shellArgs(ps, "echo hi", false), " "); got != "-NoProfile -NonInteractive -Command echo hi" {
 		t.Errorf("非交互应保留 -NonInteractive: %q", got)
 	}
 	if got := strings.Join(shellArgs(ps, "Read-Host x", true), " "); got != "-NoProfile -Command Read-Host x" {
 		t.Errorf("交互应去除 -NonInteractive: %q", got)
 	}
-	cmdProfile := &shellProfile{Path: "cmd", Name: "cmd", Kind: KindCmd, ExtraArgs: []string{"/d", "/s"}}
+	cmdProfile := &profile{Path: "cmd", Name: "cmd", Kind: KindCmd, ExtraArgs: []string{"/d", "/s"}}
 	if got := strings.Join(shellArgs(cmdProfile, "dir", true), " "); got != "/d /s /c dir" {
 		t.Errorf("cmd 参数不应受 interactive 影响: %q", got)
 	}

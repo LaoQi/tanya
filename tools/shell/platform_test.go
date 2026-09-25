@@ -1,4 +1,4 @@
-package agent
+package shell
 
 import (
 	"errors"
@@ -45,7 +45,7 @@ func TestFillDefaults(t *testing.T) {
 		t.Errorf("默认进程组配置应为 no-op: %+v", cmd.SysProcAttr)
 	}
 	p.ProtectSignals()
-	if got := p.Capabilities(&shellProfile{Name: "bash", Kind: KindPosix}); got != "" {
+	if got := p.Capabilities(&profile{Name: "bash", Kind: KindPosix}); got != "" {
 		t.Errorf("默认能力句应为空: %q", got)
 	}
 	if p.ProcessStopped(1) {

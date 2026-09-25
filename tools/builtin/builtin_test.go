@@ -1,4 +1,4 @@
-package agent
+package builtin
 
 import (
 	"context"
@@ -8,11 +8,12 @@ import (
 
 func invokeBuiltin(t *testing.T, name, args string) (string, bool) {
 	t.Helper()
-	tool, ok := newToolRegistry(builtinTools()...).lookup(name)
-	if !ok {
-		return "", false
+	for _, tool := range Tools() {
+		if tool.Name() == name {
+			return tool.Invoke(context.Background(), args).Text, true
+		}
 	}
-	return tool.Invoke(context.Background(), args).Text, true
+	return "", false
 }
 
 func TestCalcEval(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/tools/shell"
 )
 
 const (
@@ -168,7 +169,7 @@ func toolEndBody(res agent.ToolResult, width, maxLines int) (string, string) {
 	var b strings.Builder
 	var lines []string
 	status := ""
-	if sh, ok := res.Meta.(*agent.ShellResult); ok && sh != nil {
+	if sh, ok := res.Meta.(*shell.Result); ok && sh != nil {
 		var total int
 		var trunc bool
 		lines, status, total, trunc = shellView(sh, width, maxLines)
@@ -336,7 +337,7 @@ func expandTabs(s string) string {
 	return strings.ReplaceAll(s, "\t", strings.Repeat(" ", toolTabWidth))
 }
 
-func shellView(r *agent.ShellResult, width, maxLines int) ([]string, string, int, bool) {
+func shellView(r *shell.Result, width, maxLines int) ([]string, string, int, bool) {
 	stdoutLines := chunkLines(r.Stdout)
 	stderrLines := chunkLines(r.Stderr)
 	total := len(stdoutLines) + len(stderrLines)
@@ -368,7 +369,7 @@ func shellView(r *agent.ShellResult, width, maxLines int) ([]string, string, int
 	return lines, shellStatus(r), total, trunc
 }
 
-func chunkLines(chunks []agent.ShellChunk) []string {
+func chunkLines(chunks []shell.Chunk) []string {
 	var out []string
 	for _, c := range chunks {
 		if c.Truncated > 0 {
@@ -382,7 +383,7 @@ func chunkLines(chunks []agent.ShellChunk) []string {
 	return out
 }
 
-func shellStatus(r *agent.ShellResult) string {
+func shellStatus(r *shell.Result) string {
 	switch {
 	case r.Interrupted && r.NotStarted:
 		return MsgNotStarted

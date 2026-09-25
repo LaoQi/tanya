@@ -1,4 +1,4 @@
-package agent
+package shell
 
 import (
 	"context"
@@ -13,30 +13,30 @@ import (
 )
 
 const (
-	ShellMaxOutput             = 30000
-	ShellTimeoutSec            = 60
-	ShellInteractiveTimeoutSec = 300
-	ShellTimeoutLimit          = 900
+	MaxOutput             = 30000
+	TimeoutSec            = 60
+	InteractiveTimeoutSec = 300
+	TimeoutLimit          = 900
 
 	shellWaitDelay = 2 * time.Second
 )
 
-type ShellKind int
+type Kind int
 
 const (
-	KindPosix ShellKind = iota
+	KindPosix Kind = iota
 	KindPowerShell
 	KindCmd
 )
 
-type shellProfile struct {
+type profile struct {
 	Path      string
 	Name      string
-	Kind      ShellKind
+	Kind      Kind
 	ExtraArgs []string
 }
 
-func (p *shellProfile) arg() string {
+func (p *profile) arg() string {
 	switch p.Kind {
 	case KindPowerShell:
 		return "-Command"
@@ -47,7 +47,7 @@ func (p *shellProfile) arg() string {
 	}
 }
 
-func resolveProfile(override string, lookPath func(string) (string, error)) (*shellProfile, error) {
+func resolveProfile(override string, lookPath func(string) (string, error)) (*profile, error) {
 	if override != "" {
 		p, err := lookPath(override)
 		if err != nil {
@@ -58,27 +58,27 @@ func resolveProfile(override string, lookPath func(string) (string, error)) (*sh
 	return firstAvailable(platform.Candidates, lookPath)
 }
 
-// ShellInvocation 是一次性旁路执行（终端通知等）复用的 shell 入口：Argv 为解释器路径 + 固定参数，Kind 决定引号规则。
-type ShellInvocation struct {
+// Invocation 是一次性旁路执行（终端通知等）复用的 shell 入口：Argv 为解释器路径 + 固定参数，Kind 决定引号规则。
+type Invocation struct {
 	Argv []string
 	Name string
-	Kind ShellKind
+	Kind Kind
 }
 
-// ResolveShell 按 run_shell 同一套解析（cfg.Shell 覆盖 > 平台探测）出 shell 入口，供通知命令等旁路复用。
-func ResolveShell(cfg *Config) (ShellInvocation, error) {
-	profile, err := resolveProfile(cfg.Shell, exec.LookPath)
+// Resolve 按 run_shell 同一套解析（配置覆盖 > 平台探测）出 shell 入口，供环境段与通知命令等旁路复用。
+func Resolve(override string) (Invocation, error) {
+	p, err := resolveProfile(override, exec.LookPath)
 	if err != nil {
-		return ShellInvocation{}, err
+		return Invocation{}, err
 	}
-	argv := make([]string, 0, len(profile.ExtraArgs)+2)
-	argv = append(argv, profile.Path)
-	argv = append(argv, profile.ExtraArgs...)
-	argv = append(argv, profile.arg())
-	return ShellInvocation{Argv: argv, Name: profile.Name, Kind: profile.Kind}, nil
+	argv := make([]string, 0, len(p.ExtraArgs)+2)
+	argv = append(argv, p.Path)
+	argv = append(argv, p.ExtraArgs...)
+	argv = append(argv, p.arg())
+	return Invocation{Argv: argv, Name: p.Name, Kind: p.Kind}, nil
 }
 
-func firstAvailable(candidates []string, lookPath func(string) (string, error)) (*shellProfile, error) {
+func firstAvailable(candidates []string, lookPath func(string) (string, error)) (*profile, error) {
 	for _, name := range candidates {
 		if p, err := lookPath(name); err == nil {
 			return newProfile(p), nil
@@ -87,10 +87,10 @@ func firstAvailable(candidates []string, lookPath func(string) (string, error)) 
 	return nil, fmt.Errorf(MsgNoShellFmt, strings.Join(candidates, "/"))
 }
 
-func newProfile(path string) *shellProfile {
+func newProfile(path string) *profile {
 	name := strings.ToLower(filepath.Base(strings.ReplaceAll(path, `\`, "/")))
 	name = strings.TrimSuffix(name, ".exe")
-	p := &shellProfile{Path: path, Name: name}
+	p := &profile{Path: path, Name: name}
 	switch name {
 	case "powershell", "pwsh":
 		p.Kind = KindPowerShell
@@ -114,11 +114,11 @@ func probePrograms(names []string, lookPath func(string) (string, error)) []stri
 	return found
 }
 
-type ShellResult struct {
+type Result struct {
 	Command     string
 	Cwd         string
-	Stdout      []ShellChunk
-	Stderr      []ShellChunk
+	Stdout      []Chunk
+	Stderr      []Chunk
 	Err         string
 	ExitCode    int
 	TimedOut    bool
@@ -128,12 +128,12 @@ type ShellResult struct {
 	Duration    time.Duration
 }
 
-type ShellChunk struct {
+type Chunk struct {
 	Data      string
 	Truncated int64
 }
 
-func (r *ShellResult) String() string {
+func (r *Result) String() string {
 	var b strings.Builder
 	if r.Cwd != "" {
 		fmt.Fprintf(&b, "cwd: %s\n", r.Cwd)
@@ -165,7 +165,7 @@ func (r *ShellResult) String() string {
 	return b.String()
 }
 
-func writeStream(sb *strings.Builder, label string, chunks []ShellChunk) {
+func writeStream(sb *strings.Builder, label string, chunks []Chunk) {
 	if len(chunks) == 0 {
 		return
 	}
@@ -178,7 +178,7 @@ func writeStream(sb *strings.Builder, label string, chunks []ShellChunk) {
 }
 
 type streamCapture struct {
-	chunks   *[]ShellChunk
+	chunks   *[]Chunk
 	head     []byte
 	tail     []byte
 	written  int64
@@ -191,22 +191,22 @@ func (c *streamCapture) Write(p []byte) (int, error) {
 	c.written += int64(n)
 	for len(p) > 0 {
 		if !c.headDone {
-			space := ShellMaxOutput - len(c.head)
+			space := MaxOutput - len(c.head)
 			if space > len(p) {
 				space = len(p)
 			}
 			c.head = append(c.head, p[:space]...)
 			p = p[space:]
-			if len(c.head) == ShellMaxOutput {
+			if len(c.head) == MaxOutput {
 				c.headDone = true
 			}
 			continue
 		}
-		if len(c.tail) == ShellMaxOutput {
-			c.middle += ShellMaxOutput / 2
-			c.tail = c.tail[ShellMaxOutput/2:]
+		if len(c.tail) == MaxOutput {
+			c.middle += MaxOutput / 2
+			c.tail = c.tail[MaxOutput/2:]
 		}
-		space := ShellMaxOutput - len(c.tail)
+		space := MaxOutput - len(c.tail)
 		if space > len(p) {
 			space = len(p)
 		}
@@ -224,12 +224,12 @@ func (c *streamCapture) finish() {
 		joined := make([]byte, 0, len(c.head)+len(c.tail))
 		joined = append(joined, c.head...)
 		joined = append(joined, c.tail...)
-		*c.chunks = append(*c.chunks, ShellChunk{Data: toUTF8(joined)})
+		*c.chunks = append(*c.chunks, Chunk{Data: toUTF8(joined)})
 		return
 	}
-	*c.chunks = append(*c.chunks, ShellChunk{Data: toUTF8(c.head)})
+	*c.chunks = append(*c.chunks, Chunk{Data: toUTF8(c.head)})
 	if len(c.tail) > 0 {
-		*c.chunks = append(*c.chunks, ShellChunk{Data: toUTF8(c.tail), Truncated: c.middle})
+		*c.chunks = append(*c.chunks, Chunk{Data: toUTF8(c.tail), Truncated: c.middle})
 	}
 }
 
@@ -242,15 +242,15 @@ func toUTF8(b []byte) string {
 	return decodeStream(b)
 }
 
-func shellArgs(profile *shellProfile, command string, interactive bool) []string {
-	args := make([]string, 0, len(profile.ExtraArgs)+2)
-	for _, a := range profile.ExtraArgs {
+func shellArgs(p *profile, command string, interactive bool) []string {
+	args := make([]string, 0, len(p.ExtraArgs)+2)
+	for _, a := range p.ExtraArgs {
 		if interactive && strings.EqualFold(a, "-NonInteractive") {
 			continue
 		}
 		args = append(args, a)
 	}
-	args = append(args, profile.arg(), command)
+	args = append(args, p.arg(), command)
 	return args
 }
 
@@ -289,8 +289,8 @@ func waitShell(cmd *exec.Cmd, stopped *bool) error {
 	}
 }
 
-func runShellForeground(ctx context.Context, command string, timeoutSec int, profile *shellProfile, dir string, interactive bool) *ShellResult {
-	res := &ShellResult{Command: command, Cwd: dir}
+func runForeground(ctx context.Context, command string, timeoutSec int, p *profile, dir string, interactive bool) *Result {
+	res := &Result{Command: command, Cwd: dir}
 	tty, _ := openTTY()
 	handed := false
 	anchored := false
@@ -323,7 +323,7 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 	ctty.IgnoreCtrlEvents()
 	defer ctty.RestoreCtrlEvents()
 
-	cmd := exec.CommandContext(runCtx, profile.Path, shellArgs(profile, command, interactive)...)
+	cmd := exec.CommandContext(runCtx, p.Path, shellArgs(p, command, interactive)...)
 	cmd.Dir = dir
 	platform.ConfigureGroup(cmd)
 	cmd.Cancel = func() error { return platform.KillGroup(cmd) }
@@ -376,16 +376,16 @@ func runShellForeground(ctx context.Context, command string, timeoutSec int, pro
 	return res
 }
 
-func runShellBridged(ctx context.Context, bridge TTYBridge, command string, timeoutSec int, profile *shellProfile, dir string) (*ShellResult, bool) {
+func runBridged(ctx context.Context, bridge Bridge, command string, timeoutSec int, p *profile, dir string) (*Result, bool) {
 	if bridge == nil {
 		return nil, false
 	}
-	res := &ShellResult{Command: command, Cwd: dir}
+	res := &Result{Command: command, Cwd: dir}
 	start := time.Now()
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, profile.Path, shellArgs(profile, command, true)...)
+	cmd := exec.CommandContext(runCtx, p.Path, shellArgs(p, command, true)...)
 	cmd.Dir = dir
 	cmd.Cancel = func() error { return platform.KillGroup(cmd) }
 	cmd.WaitDelay = shellWaitDelay
@@ -438,15 +438,15 @@ func runShellBridged(ctx context.Context, bridge TTYBridge, command string, time
 	return res, true
 }
 
-func effectiveShellTimeout(explicit int, interactive bool) int {
+func effectiveTimeout(explicit int, interactive bool) int {
 	if explicit <= 0 {
 		if interactive {
-			return ShellInteractiveTimeoutSec
+			return InteractiveTimeoutSec
 		}
-		return ShellTimeoutSec
+		return TimeoutSec
 	}
-	if explicit > ShellTimeoutLimit {
-		return ShellTimeoutLimit
+	if explicit > TimeoutLimit {
+		return TimeoutLimit
 	}
 	return explicit
 }
