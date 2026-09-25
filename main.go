@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
+	"strings"
 
 	"github.com/LaoQi/tanya/render/term"
 
@@ -137,10 +139,15 @@ func main() {
 	ctty.WatchSignals()
 	readline.InitTerminalGuard()
 	readline.SecureTerminal()
+	sysPrompt, err := systemBase(&cfg.Config)
+	if err != nil {
+		st.FailErr("", err)
+		exitNow(1)
+	}
 	a, err := agent.New(&cfg.Config,
 		agent.NoSave(*f.noSave),
 		agent.WithTTYBridge(readline.NewTTYBridge()),
-		agent.WithSystemPrompt(systemPromptFile))
+		agent.WithSystemPrompt(sysPrompt))
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
@@ -184,6 +191,29 @@ func main() {
 	if code := ctty.ExitStatus(); code != 0 {
 		exitNow(code)
 	}
+}
+
+// systemBase 组装注入 agent 的系统提示基座：内置提示词 + 环境段（OS/shell 执行契约）。
+func systemBase(cfg *agent.Config) (string, error) {
+	inv, err := agent.ResolveShell(cfg)
+	if err != nil {
+		return "", err
+	}
+	return systemPromptFile + "\n\n" + envSection(inv), nil
+}
+
+// envSection 是 agent 初始化头部的环境段，由 main 组装并随基座注入。
+func envSection(inv agent.ShellInvocation) string {
+	var b strings.Builder
+	b.WriteString("# 环境\n")
+	fmt.Fprintf(&b, "OS: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	fmt.Fprintf(&b, "SHELL: %s\n", inv.Name)
+	if ctty.Supported {
+		b.WriteString("TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）\n")
+	}
+	fmt.Fprintf(&b, "TIMEOUT: 默认 %ds（interactive 时 %ds），上限 %ds\n", agent.ShellTimeoutSec, agent.ShellInteractiveTimeoutSec, agent.ShellTimeoutLimit)
+	fmt.Fprintf(&b, "OUTPUT: stdout/stderr 头尾各 %dKB，中间截断\n", agent.ShellMaxOutput/1000)
+	return b.String()
 }
 
 // writeUsage 打印用法：模式段为固定文案，选项段由 flag 包按定义清单生成。

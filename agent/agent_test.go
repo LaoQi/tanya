@@ -559,15 +559,10 @@ func TestStatsFollowsLastRequestAndAccumulates(t *testing.T) {
 	}
 }
 
-func TestRuntimePromptAppendsEnv(t *testing.T) {
+func TestSystemPromptIsInjectedBase(t *testing.T) {
 	a := newTestAgent(t)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := a.systemPrompt() + "\n\n" + envSection(cwd, shellOf(t, a).profile)
-	if a.runtimePrompt() != want {
-		t.Errorf("runtimePrompt 拼接异常:\n got %q\nwant %q", a.runtimePrompt(), want)
+	if got := a.systemPrompt(); got != testBasePrompt {
+		t.Errorf("system 应等于注入的基座（无 AGENTS.md）: %q", got)
 	}
 }
 
@@ -577,14 +572,14 @@ func TestEnvStableInSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := a.runtimePrompt()
+	before := a.systemPrompt()
 	for _, f := range []string{"go.mod", "Makefile", "package.json"} {
 		if err := os.WriteFile(filepath.Join(cwd, f), []byte("x\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if a.runtimePrompt() != before {
-		t.Errorf("会话期间环境段不得变更:\n got %q\nwant %q", a.runtimePrompt(), before)
+	if a.systemPrompt() != before {
+		t.Errorf("会话期间 system 快照不得变更:\n got %q\nwant %q", a.systemPrompt(), before)
 	}
 }
 

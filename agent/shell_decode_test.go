@@ -40,7 +40,7 @@ func TestFinishJoinsContiguousSeam(t *testing.T) {
 
 	var chunks []ShellChunk
 	c := streamCapture{chunks: &chunks}
-	pad := strings.Repeat("a", shellMaxOutput-2)
+	pad := strings.Repeat("a", ShellMaxOutput-2)
 	c.Write([]byte(pad))
 	c.Write([]byte{0xC4, 0xE3})
 	c.Write([]byte{0xC4, 0xE3})
@@ -53,7 +53,7 @@ func TestFinishJoinsContiguousSeam(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("middle==0 时应整体解码一次（跨 head/tail 边界的多字节序列不能被切断）: calls=%d", len(calls))
 	}
-	if len(calls[0]) != shellMaxOutput+3 {
+	if len(calls[0]) != ShellMaxOutput+3 {
 		t.Errorf("解码器应收到完整拼接缓冲: len=%d", len(calls[0]))
 	}
 	if !strings.HasPrefix(chunks[0].Data, "[") || !strings.HasSuffix(chunks[0].Data, "]") {
@@ -75,7 +75,7 @@ func TestFinishDecodesDisjointFragments(t *testing.T) {
 
 	var chunks []ShellChunk
 	c := streamCapture{chunks: &chunks}
-	invalid := strings.Repeat("\x81", shellMaxOutput*2+1)
+	invalid := strings.Repeat("\x81", ShellMaxOutput*2+1)
 	c.Write([]byte(invalid))
 	c.finish()
 
@@ -85,10 +85,10 @@ func TestFinishDecodesDisjointFragments(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("不连续片段应各自解码: calls=%d", len(calls))
 	}
-	if len(calls[0]) != shellMaxOutput || len(calls[1]) != shellMaxOutput/2+1 {
+	if len(calls[0]) != ShellMaxOutput || len(calls[1]) != ShellMaxOutput/2+1 {
 		t.Errorf("解码输入长度异常: head=%d tail=%d", len(calls[0]), len(calls[1]))
 	}
-	if chunks[1].Truncated != shellMaxOutput/2 {
+	if chunks[1].Truncated != ShellMaxOutput/2 {
 		t.Errorf("截断计数应保留: %d", chunks[1].Truncated)
 	}
 	for i, ch := range chunks {
