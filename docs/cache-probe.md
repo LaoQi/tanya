@@ -64,6 +64,8 @@ python3 scripts/cache_probe.py --group all --model deepseek-flash
 
 ## 落实：env 段的动态源（2026-09-14）
 
+> 后续（2026-09-24）：环境段整体移出 `agent`，改由 `main` 组装并作为基座随 `agent.WithSystemPrompt` 注入（并**去掉 CWD 行**），`agent` 侧不再有 `envSection`/`Agent.env`/`runtimePrompt`。下面记录的是 mov 式定格（`agent.New` 调用一次）时期的情况，机制结论不变，见 `docs/design.md`《系统提示头部（env 段）》。
+
 `envSection` 的 `WORKSPACE` 行曾每轮请求重算（`os.Stat` 8 个标记文件），是 system 段里唯一会自行变化的内容。用本文同一方法实测（deepseek-flash，system = `DefaultSystemPrompt` + env 段 ≈ 0.7 KB，history ≈ 3.9 k token 的构造文本，tools 段 1 个 `run_shell`）：
 
 | 请求 | prompt | hit | 命中率 |

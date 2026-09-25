@@ -46,9 +46,6 @@ func TestSwitchWorkspaceResetsEverything(t *testing.T) {
 	if got := a.systemPrompt(); !strings.Contains(got, "新的工作区标记") {
 		t.Errorf("system 提示应重读新工作区的 AGENTS.md: %q", got)
 	}
-	if got := a.runtimePrompt(); !strings.Contains(got, "CWD: "+shortPath(target)) {
-		t.Errorf("env 段应指向新工作区: %q", got)
-	}
 	res := a.dispatch(context.Background(), "run_shell", `{"command":"pwd"}`)
 	sh, ok := res.Meta.(*ShellResult)
 	if !ok || sh == nil {

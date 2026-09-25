@@ -15,10 +15,6 @@ type Interactive interface {
 	Interactive(argsJSON string) bool
 }
 
-type EnvReporter interface {
-	EnvSection() string
-}
-
 type ToolResult struct {
 	Text string
 	Meta any

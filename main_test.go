@@ -5,12 +5,14 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/config"
 	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/repl"
@@ -122,5 +124,37 @@ func TestRootRefusalMatrix(t *testing.T) {
 		if err != nil && err.Error() != repl.MsgRootRefused {
 			t.Errorf("%s=%q: 文案 = %q, want %q", envAllowRoot, c.env, err.Error(), repl.MsgRootRefused)
 		}
+	}
+}
+
+func TestEnvSectionNoCwdAndGolden(t *testing.T) {
+	inv := agent.ShellInvocation{Argv: []string{"/bin/bash", "-c"}, Name: "bash", Kind: agent.KindPosix}
+	got := envSection(inv)
+	want := "# 环境\n" +
+		"OS: " + runtime.GOOS + "/" + runtime.GOARCH + "\n" +
+		"SHELL: bash\n"
+	if ctty.Supported {
+		want += "TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）\n"
+	}
+	want += "TIMEOUT: 默认 60s（interactive 时 300s），上限 900s\n" +
+		"OUTPUT: stdout/stderr 头尾各 30KB，中间截断\n"
+	if got != want {
+		t.Errorf("envSection 全串不匹配:\n got %q\nwant %q", got, want)
+	}
+	if strings.Contains(got, "CWD:") {
+		t.Error("env 头部不应含 CWD 行（agent 不再感知工作区）")
+	}
+}
+
+func TestSystemBaseAppendsEnvAfterPrompt(t *testing.T) {
+	base, err := systemBase(&agent.Config{})
+	if err != nil {
+		t.Skipf("当前环境无可解析 shell: %v", err)
+	}
+	if !strings.HasPrefix(base, strings.TrimRight(systemPromptFile, "\n")) {
+		t.Error("内置提示词应在基座最前")
+	}
+	if !strings.Contains(base, "\n\n# 环境\n") {
+		t.Errorf("环境段应紧随内置提示词之后: %q", base)
 	}
 }

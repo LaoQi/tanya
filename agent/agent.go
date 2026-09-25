@@ -20,7 +20,6 @@ type Agent struct {
 	bridge     TTYBridge
 	registered []Tool
 	history    []Message
-	env        string
 	basePrompt string
 	prompt     *promptBuilder
 	store      *sessionStore
@@ -99,7 +98,6 @@ func (a *Agent) loadWorkspace(dir string, noSave bool) error {
 		}
 	}
 	a.workspace = dir
-	a.env = envSection(dir, tool.profile)
 	a.prompt = newPromptBuilder(a.basePrompt, dir, globalAgentsPath(), readAgentsFile)
 	a.store = newSessionStore(sessionDir, archiveDir, dir, noSave)
 	a.tools = newToolRegistry(append(allTools(tool, a), a.registered...)...)
@@ -161,10 +159,6 @@ func (a *Agent) systemPrompt() string {
 
 func (a *Agent) LegacyPrompt() bool {
 	return a.prompt.legacyPrompt()
-}
-
-func (a *Agent) runtimePrompt() string {
-	return a.prompt.runtime(a.env)
 }
 
 func (a *Agent) NewSession() {
@@ -358,7 +352,7 @@ func (a *Agent) dispatch(ctx context.Context, name, args string) ToolResult {
 
 func (a *Agent) buildMessages() []Message {
 	msgs := make([]Message, 0, len(a.history)+1)
-	msgs = append(msgs, Message{Role: "system", Content: a.runtimePrompt()})
+	msgs = append(msgs, Message{Role: "system", Content: a.prompt.system()})
 	msgs = append(msgs, a.history...)
 	return msgs
 }
@@ -376,7 +370,7 @@ func estimateTokens(s string) int {
 }
 
 func (a *Agent) totalTokens() int {
-	t := estimateTokens(a.runtimePrompt())
+	t := estimateTokens(a.prompt.system())
 	for _, m := range a.history {
 		t += estimateTokens(m.Content)
 		for _, tc := range m.ToolCalls {

@@ -12,10 +12,10 @@
 - 终端原语（`/dev/tty`、前台组、termios、探测）一律走 `ctty`，移交/夺回/复原策略由 `agent`、`readline` 各自决定；`run_shell` 交终端前快照输入模式与光标、子进程结束后复原，中断不变量与 readline 自愈见 `docs/ctty.md`、`docs/interactive-tty.md` §5.9
 - 运行期信号统一收敛在 `ctty`（SIGTERM/SIGHUP 关闭、SIGINT 中断、SIGQUIT 保持默认转储），业务层（`repl`/`main`）不出现 `os/signal`；退出统一走 `REPL.quit()`，进程退出码取 `ctty.ExitStatus()`，见 `docs/ctty.md`《运行期信号》
 - `interactive: true` 的 run_shell 走全 pty 桥接，仅 Linux（失败回退 `/dev/tty` + `TIOCSPGRP`）；Windows 为控制台继承直通，见 `docs/interactive-tty.md`、`docs/terminal-caps.md` §8.6
-- 系统提示词原文放仓库根 `system_prompt.md`（可读可改，纯文本），`main` 用 `//go:embed` 编译期嵌入、构造时经 `agent.WithSystemPrompt` 注入；`agent` 侧无内置文本（未注入即无内置段），改动需重新编译
+- 系统提示词原文放仓库根 `system_prompt.md`（可读可改，纯文本），`main` 用 `//go:embed` 编译期嵌入，并与**环境段**（OS/shell 执行契约，`main.envSection` 组装，无 CWD 行）合成**基座**、构造时经 `agent.WithSystemPrompt` 注入；`agent` 侧无内置文本（未注入即无内置段）、**无任何 env 概念**（只有「基座 + 两层 AGENTS.md」的快照），改动需重新编译，见 `docs/design.md`《系统提示头部（env 段）》
 - 默认配置示例原文放仓库根 `config.example.yaml`（可读可改，纯文本），`main` 用 `//go:embed` 编译期嵌入，`tanya config` 原样打到 stdout（不带提示行，可直接 `> ~/.config/tanya/config.yaml`）；示例与 `config.Default()` 的一致性由根包测试守护，改动需重新编译
 - 工具 = 编译期内置清单 `allTools()`（`run_shell` + `builtinTools()` + `agent_custom`）+ **构造期外部注册**（`agent.WithTools`），二者在 `agent.New` 装配期合成、之后**运行期冻结**；不提供运行期注册 API，不做插件。注册**仅作契约、不做强约束**：agent 不校验重名、不仲裁——内置在前、注册追加在后（顺序保序），重名由调用方保证，`lookup` 首个匹配胜出故内置优先。清单顺序即请求 `tools` 顺序（缓存契约），改动会让缓存前缀作废（代价可接受，见下条）
-- 工具抽象：`Tool` 三方法（`Name`/`Definition`/`Invoke`）+ 可选接口 `Interactive`（终端独占标记）、`EnvReporter`（env 段自述，B2 接线）；外部用 `agent.NewTool(name, desc, params, fn)` 构造工具，不依赖包内类型
+- 工具抽象：`Tool` 三方法（`Name`/`Definition`/`Invoke`）+ 可选接口 `Interactive`（终端独占标记）；外部用 `agent.NewTool(name, desc, params, fn)` 构造工具，不依赖包内类型
 - 工具结果抽象：`ToolResult{Text string; Meta any}`——`Text` 是模型侧内容（写回 history），`Meta` 是表现层结构化载荷（`run_shell` 填 `*ShellResult`，`repl` 断言渲染、失败回落文本）；agent 核心不知道任何具体 `Meta` 类型
 - 缓存不变性（history append-only、system 快照冻结、`/load` 还原首行）是为命中 provider 前缀缓存服务的**优化手段**，不是功能红线：保证范围仅限「同一二进制 + 会话首行快照未被改写」（进程内多轮、重开快照未变的旧会话都命中）；跨版本无此约束——改了默认系统提示词/工具描述/env 段后 `/load` 旧会话前缀变化属预期，代价只是首轮 cache miss。评估改动时按 `docs/cache-probe.md` 的台阶估代价即可，不必为字节不变放弃功能，见 `docs/design.md`《系统提示与缓存友好》
 - `agent_custom` 供模型运行时自调与自省：key 表驱动，只写内存、不落盘不入会话，`/load` 或重启后回落配置，见 `docs/agent-control-tool.md`
@@ -47,7 +47,7 @@ config/             tanya 作为 CLI 的完整配置：agent.Config(inline) + UI
 ctty/               控制终端原语与终端探测（前台组、/dev/tty、termios、Facts）；白名单 + stub，零内部依赖
 repl/               REPL 循环与输入分发、斜杠命令、提示符、ghost 补全、/load picker、工具块渲染、状态行、退出收尾
 readline/           自研终端输入层：行编辑/历史/Tab 补全、按键解析、raw mode、显示宽度、pty 桥接（linux）、状态自愈
-agent/              核心逻辑与工具：config(收窄结构+校验) / llm(+http,+responses) / agent loop / prompt / session / session_archive / stats / envprobe / init / tools / shelltool / shell(+平台分片) / builtin / control / tty_bridge
+agent/              核心逻辑与工具：config(收窄结构+校验) / llm(+http,+responses) / agent loop / prompt / session / session_archive / stats / path / init / tools / shelltool / shell(+平台分片) / builtin / control / tty_bridge
 render/             表现层树根（IR → ANSI）；style/ 样式词汇、term/ 终端原语、ir/ 渲染 IR、theme/ 配色、markdown/ 流式解析、markup/ 内联标记
 ```
 

@@ -13,11 +13,12 @@ import (
 )
 
 const (
-	shellMaxOutput             = 30000
-	shellWaitDelay             = 2 * time.Second
-	shellTimeoutSec            = 60
-	shellInteractiveTimeoutSec = 300
-	shellTimeoutLimit          = 900
+	ShellMaxOutput             = 30000
+	ShellTimeoutSec            = 60
+	ShellInteractiveTimeoutSec = 300
+	ShellTimeoutLimit          = 900
+
+	shellWaitDelay = 2 * time.Second
 )
 
 type ShellKind int
@@ -60,6 +61,7 @@ func resolveProfile(override string, lookPath func(string) (string, error)) (*sh
 // ShellInvocation 是一次性旁路执行（终端通知等）复用的 shell 入口：Argv 为解释器路径 + 固定参数，Kind 决定引号规则。
 type ShellInvocation struct {
 	Argv []string
+	Name string
 	Kind ShellKind
 }
 
@@ -73,7 +75,7 @@ func ResolveShell(cfg *Config) (ShellInvocation, error) {
 	argv = append(argv, profile.Path)
 	argv = append(argv, profile.ExtraArgs...)
 	argv = append(argv, profile.arg())
-	return ShellInvocation{Argv: argv, Kind: profile.Kind}, nil
+	return ShellInvocation{Argv: argv, Name: profile.Name, Kind: profile.Kind}, nil
 }
 
 func firstAvailable(candidates []string, lookPath func(string) (string, error)) (*shellProfile, error) {
@@ -189,22 +191,22 @@ func (c *streamCapture) Write(p []byte) (int, error) {
 	c.written += int64(n)
 	for len(p) > 0 {
 		if !c.headDone {
-			space := shellMaxOutput - len(c.head)
+			space := ShellMaxOutput - len(c.head)
 			if space > len(p) {
 				space = len(p)
 			}
 			c.head = append(c.head, p[:space]...)
 			p = p[space:]
-			if len(c.head) == shellMaxOutput {
+			if len(c.head) == ShellMaxOutput {
 				c.headDone = true
 			}
 			continue
 		}
-		if len(c.tail) == shellMaxOutput {
-			c.middle += shellMaxOutput / 2
-			c.tail = c.tail[shellMaxOutput/2:]
+		if len(c.tail) == ShellMaxOutput {
+			c.middle += ShellMaxOutput / 2
+			c.tail = c.tail[ShellMaxOutput/2:]
 		}
-		space := shellMaxOutput - len(c.tail)
+		space := ShellMaxOutput - len(c.tail)
 		if space > len(p) {
 			space = len(p)
 		}
@@ -439,12 +441,12 @@ func runShellBridged(ctx context.Context, bridge TTYBridge, command string, time
 func effectiveShellTimeout(explicit int, interactive bool) int {
 	if explicit <= 0 {
 		if interactive {
-			return shellInteractiveTimeoutSec
+			return ShellInteractiveTimeoutSec
 		}
-		return shellTimeoutSec
+		return ShellTimeoutSec
 	}
-	if explicit > shellTimeoutLimit {
-		return shellTimeoutLimit
+	if explicit > ShellTimeoutLimit {
+		return ShellTimeoutLimit
 	}
 	return explicit
 }

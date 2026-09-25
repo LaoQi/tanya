@@ -23,12 +23,6 @@ func TestPromptBuilderInjectedRead(t *testing.T) {
 	if b.legacyPrompt() {
 		t.Error("自建提示不应判为旧版")
 	}
-	if b.runtime("") != want {
-		t.Errorf("空 env 不应追加分隔符: %q", b.runtime(""))
-	}
-	if got := b.runtime("# 环境"); got != want+"\n\n# 环境" {
-		t.Errorf("env 应追加在快照之后: %q", got)
-	}
 
 	files[filepath.Join(ws, "AGENTS.md")] = "项目 P2"
 	if b.system() != want {
@@ -65,15 +59,9 @@ func TestPromptBuilderNormalizesBase(t *testing.T) {
 	if got := b.system(); got != "线1\n线2" {
 		t.Errorf("注入文本应归一化（CRLF→LF、去尾部换行）: %q", got)
 	}
-	if got := b.runtime("# 环境"); got != "线1\n线2\n\n# 环境" {
-		t.Errorf("归一化后 env 段拼接异常: %q", got)
-	}
 	empty := newPromptBuilder("", "/fake/ws", "/fake/global", func(string) string { return "" })
 	if got := empty.system(); got != "" {
 		t.Errorf("未注入提示词时快照应为空: %q", got)
-	}
-	if got := empty.runtime("# 环境"); got != "# 环境" {
-		t.Errorf("空快照不应留下前导空行: %q", got)
 	}
 }
 
@@ -90,9 +78,6 @@ func TestPromptBuilderEmptyBaseSections(t *testing.T) {
 	b := newPromptBuilder("", ws, global, read)
 	if got := b.system(); got != want {
 		t.Errorf("空 base 下段拼接不应留前导空行: %q", got)
-	}
-	if got := b.runtime("# 环境"); got != want+"\n\n# 环境" {
-		t.Errorf("非空快照与 env 段拼接异常: %q", got)
 	}
 	onlyProject := map[string]string{filepath.Join(ws, "AGENTS.md"): "项目 P"}
 	b2 := newPromptBuilder("", ws, global, func(p string) string { return onlyProject[p] })

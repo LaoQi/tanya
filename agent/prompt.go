@@ -60,16 +60,6 @@ func (p *promptBuilder) system() string { return p.snapshot }
 
 func (p *promptBuilder) legacyPrompt() bool { return p.legacy }
 
-func (p *promptBuilder) runtime(env string) string {
-	if p.snapshot == "" {
-		return env
-	}
-	if env == "" {
-		return p.snapshot
-	}
-	return p.snapshot + "\n\n" + env
-}
-
 func globalAgentsPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "tanya", "AGENTS.md")

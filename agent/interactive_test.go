@@ -36,11 +36,11 @@ func TestEffectiveShellTimeout(t *testing.T) {
 		interactive bool
 		want        int
 	}{
-		{"default", 0, false, shellTimeoutSec},
-		{"interactive default", 0, true, shellInteractiveTimeoutSec},
+		{"default", 0, false, ShellTimeoutSec},
+		{"interactive default", 0, true, ShellInteractiveTimeoutSec},
 		{"explicit wins", 30, true, 30},
-		{"negative treated as default", -5, false, shellTimeoutSec},
-		{"clamped to limit", 9999, false, shellTimeoutLimit},
+		{"negative treated as default", -5, false, ShellTimeoutSec},
+		{"clamped to limit", 9999, false, ShellTimeoutLimit},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

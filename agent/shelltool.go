@@ -176,5 +176,5 @@ func shellSyntaxHint(kind ShellKind) string {
 
 func runShellParams() string {
 	return fmt.Sprintf(`{"type":"object","properties":{"command":{"type":"string","description":"要执行的命令"},"cwd":{"type":"string","description":"命令执行目录，默认当前工作区"},"timeout":{"type":"integer","description":"超时秒数，默认 %d（interactive 时 %d），最大 %d"},"interactive":{"type":"boolean","description":"命令需要用户在终端应答（sudo/ssh/gpg/read 等交互提示）时置 true：命令与终端直通、可直接应答（Linux 独立 pty、Windows 继承控制台），停用等待动画，默认超时放宽"}},"required":["command"]}`,
-		shellTimeoutSec, shellInteractiveTimeoutSec, shellTimeoutLimit)
+		ShellTimeoutSec, ShellInteractiveTimeoutSec, ShellTimeoutLimit)
 }

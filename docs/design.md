@@ -127,7 +127,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## 工具
 
-工具统一经 `Tool` 接口（`agent/tools.go`）声明：`Name()` 给名字、`Definition()` 给描述与参数 schema（即 wire 上的 function 定义）、`Invoke()` 给执行——**描述、参数与执行同处一个实现**，不再有独立清单文件。结果类型 `ToolResult{Text string; Meta any}`：`Text` 回写 history 的 tool 消息，`Meta` 是表现层结构化载荷（`run_shell` 放 `*ShellResult`，`repl` 类型断言渲染、断言失败回落 `textView(res.Text)`）——核心不引用任何具体 `Meta` 类型。可选能力接口 `Interactive`（终端独占标记，供 `runTurn` 在 `EventToolStart/End` 提前置 `Interactive`）与 `EnvReporter`（向 system 环境段自述行，B2 接线）；外部以 `agent.NewTool` 构造工具。`allTools(shell, ctl)` 编译期显式列出全集（`run_shell` 在前、`builtinTools()` 居中、`agent_custom` 在末尾），顺序即请求体 `tools` 段顺序（prompt cache 依赖，见 `docs/cache-probe.md`）；`newToolRegistry` 持有该 slice，`defs()` 供 `NewClient` 构造期注入，`lookup` 线性扫描（N=4 实测快于 map，现 N=5，不做索引）。`Agent.dispatch` 退化为查表，未命中回 `MsgUnknownTool`。需要终端直通的工具可额外实现窄接口 `Interactive`（当前仅 `run_shell`），供 `runTurn` 在 `EventToolStart/End` 上提前标记 `Interactive`。代价是 `run_shell` 的参数被解析两次——`interactiveOf`（`runTurn` 取 `Interactive`）与 `Invoke` 各一次；这是「参数对通用 `Tool` 接口不透明」与「`EventToolStart` 必须在执行前携带参数派生字段」两条约束相交的**有意保留**结果（实测单次 678ns，对比一次 `bash -c true` 1.26ms 可忽略），不是待办。
+工具统一经 `Tool` 接口（`agent/tools.go`）声明：`Name()` 给名字、`Definition()` 给描述与参数 schema（即 wire 上的 function 定义）、`Invoke()` 给执行——**描述、参数与执行同处一个实现**，不再有独立清单文件。结果类型 `ToolResult{Text string; Meta any}`：`Text` 回写 history 的 tool 消息，`Meta` 是表现层结构化载荷（`run_shell` 放 `*ShellResult`，`repl` 类型断言渲染、断言失败回落 `textView(res.Text)`）——核心不引用任何具体 `Meta` 类型。可选能力接口 `Interactive`（终端独占标记，供 `runTurn` 在 `EventToolStart/End` 提前置 `Interactive`；曾短暂声明过 `EnvReporter`，随 B2 环境段移交 `main` 删除，见《系统提示头部（env 段）》）；外部以 `agent.NewTool` 构造工具。`allTools(shell, ctl)` 编译期显式列出全集（`run_shell` 在前、`builtinTools()` 居中、`agent_custom` 在末尾），顺序即请求体 `tools` 段顺序（prompt cache 依赖，见 `docs/cache-probe.md`）；`newToolRegistry` 持有该 slice，`defs()` 供 `NewClient` 构造期注入，`lookup` 线性扫描（N=4 实测快于 map，现 N=5，不做索引）。`Agent.dispatch` 退化为查表，未命中回 `MsgUnknownTool`。需要终端直通的工具可额外实现窄接口 `Interactive`（当前仅 `run_shell`），供 `runTurn` 在 `EventToolStart/End` 上提前标记 `Interactive`。代价是 `run_shell` 的参数被解析两次——`interactiveOf`（`runTurn` 取 `Interactive`）与 `Invoke` 各一次；这是「参数对通用 `Tool` 接口不透明」与「`EventToolStart` 必须在执行前携带参数派生字段」两条约束相交的**有意保留**结果（实测单次 678ns，对比一次 `bash -c true` 1.26ms 可忽略），不是待办。
 
 ### interactive 标记的流向
 
@@ -293,10 +293,10 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## 系统提示与缓存友好
 
-- 组装规则：**内置默认提示词**（原文在仓库根 `system_prompt.md`，`main` 经 `//go:embed` 编译期嵌入，构造时经 `agent.WithSystemPrompt` 注入；`agent` 不再内置文本，配置项 `system_prompt` 早已移除，故内容仍不可配、改后需重新编译）+ 全局 `~/.config/tanya/AGENTS.md`（存在时）+ 工作区 `./AGENTS.md`（存在时），各段以 `# 全局说明`/`# 项目说明` 标题分隔，文件缺失/空白跳过，分隔空行仅在前段非空时补（空 base 下首段直接起步、不留前导空行，仅库用法可达）
-- 规则与事实分离：persistPrompt（上述规则）在 `/new`/`/load` 时组装并冻结进会话首行；每次请求的 system = persistPrompt + 空行 + `Agent.env`（环境事实在 `agent.New` 构造期算一次、冻结进内存，既不持久化也不再重算）
+- 组装规则：**基座**（`main` 组装：内置默认提示词原文 `system_prompt.md` + 空行 + 环境段；`//go:embed` 编译期嵌入，构造时经 `agent.WithSystemPrompt` 注入）+ 全局 `~/.config/tanya/AGENTS.md`（存在时）+ 工作区 `./AGENTS.md`（存在时）。各 AGENTS 段以 `# 全局说明`/`# 项目说明` 标题分隔，文件缺失/空白跳过，分隔空行仅在前段非空时补（空基座下首段直接起步、不留前导空行，仅库用法可达）。`agent` 不再内置文本，配置项 `system_prompt` 早已移除，故内容仍不可配、改后需重新编译
+- 职责边界：**环境段归 `main`**（`main.systemBase` 拼「提示词 + 环境段」一次注入），`agent` 侧**无任何 env 概念**——agent 只管在注入基座后追加两层 AGENTS.md 并冻结快照，与其「通用 agent 核心」定位一致（不感知 shell、工作区）。环境段详见《系统提示头部》
 - 快照机制：注入文本在 `promptBuilder` 构造期归一化（`\r\n`→`\n`、去尾部换行），保证注入字节确定；**快照为空则不写 system 行**（与 `loadFrom` 的「首行 system 且非空才算快照」对称，空提示词的库用法不会在文件里留下空快照行，载入时按当前配置重建）——`/new` 与 `/load` 时刻读取 AGENTS.md 组装快照；会话进行中零文件 IO，快照冻结；旧格式会话（system 首行含历史环境段）原样保留并标记，`/load` 时提示 `/new`
-- 缓存收益：history 全程 append-only，system 两段（规则快照 + 环境段）在本进程内逐字节恒定，同一会话内请求前缀不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中。env 段自 2026-09-14 起在装配期定格（此前的 `WORKSPACE` 行是 system 内唯一会自行变化的输入，已随本次收口删除）；`/switch` 换工作区时 env 段与工具描述一并随新工作区重建，本就不复用的缓存前缀随之作废
+- 缓存收益：history 全程 append-only，system 在本进程内逐字节恒定，同一会话内请求前缀不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中。env 段自 2026-09-14 起在装配期定格、2026-09-24 起随基座并入 `main` 注入（此前的 `WORKSPACE` 行是 system 内唯一会自行变化的输入，已随 2026-09-14 收口删除）；`/switch` 换工作区时工具描述随新工作区重建，而 system 不再变化（env 段已不含工作区事实，见《系统提示头部》）
 - **不变性的性质与范围**（2026-09-21 补）：本条目的「逐字节不变」是为命中 provider 前缀缓存服务的**优化手段**，不是功能红线，其保证范围限定为「同一二进制 + 会话首行快照未被改写」——同一进程内的多轮交互、以及重新打开刚写过、首行快照原样还原的旧会话（`/load`，provider 侧缓存未过期，实测 TTL ≥ 600s），前缀都仍逐字节相同、照常命中；`/new` 时 AGENTS.md 未变亦跨会话命中。**跨版本不在保证范围内**：二进制更新后默认系统提示词、工具清单或 env 段任一变化，`/load` 旧会话首轮 system 就与当初不同，这是被允许的，代价只是该会话首轮 cache miss（会话照常读写、`/fork` 不受影响，落盘快照不被改写）。要守住的是**进程内**稳定性（同一进程内不因请求期输入改变前缀），而非跨版本的字节相同；改模型侧文案时按 `docs/cache-probe.md` 的台阶估代价、尽量把易变内容放靠后（工具描述尾部最省）即可，不必为字节不变牺牲功能或可读性
 - 缓存命中捕获（DeepSeek `prompt_cache_hit_tokens` / OpenAI `prompt_tokens_details.cached_tokens`）经 `Agent.Stats()` 的累计字段供提示符占位符显示
 - 缓存机制的实测结论（64-token 块粒度、tools 段在序列化尾部的代价台阶、各后端写入延迟差异）见 `docs/cache-probe.md`
@@ -465,25 +465,26 @@ pty 桥接三层测试：① `readline/bridge_linux_test.go` 自驱动集成（�
 
 会话归档测试：卷往返（entry 字节与源文件一致、entry comment 的条数与摘要与实读扫描一致）、comment 上限（4 KiB 硬上限、多字节截断降级、`trunc` 标记）、筛选（`OlderThan`、`Exclude`、5 分钟空闲保护、`DryRun` 不落盘、已在卷内 id 去重、0 候选不建空卷）、列表分组排序（活动前归档后）、`/archive` 的预览/确认/取消/非交互降级（`MsgArchiveOnlyTTY`）与保留数、窗口两种口径、`/archive` 恒排除当前会话、损坏卷（截断/CRC 错：列表不崩、载入报错且卷不动）、`*.tmp-*` 忽略、同 id 双区取活动、归档只读态不写盘且 `Ask` 报 `ErrArchiveReadOnly`、`Fork` 从活跃会话与归档会话两条路径的落盘内容/后续增量/原文件不被改写、`rotate` 规避同秒占用名、`resolveWorkspaceDirs` 三态推导、`ParseArchiveArg` 表驱动、picker `[归档] ` 标记渲染。
 
-## 环境段（envprobe）
+## 系统提示头部（env 段）
 
-- 定位：只注入模型无法廉价自探的最小事实集——平台事实与 run_shell 执行契约；工具清单不注入 prompt（function calling 已完整提供），工具版本/分支/目录列表等易变信息模型可按需自探，一律不预注入
-- 组装：`runtimePrompt()` = persistPrompt（规则，冻结）+ 空行 + `Agent.env`；`envSection(cwd, profile)` 在 `agent.New` 调用一次、结果定格进 `Agent.env`，会话期间（含 `/new`、`/load`）不重算；无注入点、无 `probe` 字段（曾有 `envProbeFunc` 注入与 `probe` 配置项，2026-09-14 收口删除）
-- 为何定格：system 位于序列化后的 messages/instructions 之前，其任何字节变化都击穿其后全部 history 与 tools 的缓存前缀（实测量化见 `docs/cache-probe.md`《落实：env 段的动态源》；历史案例 `WORKSPACE` 行增删一行：命中率 96.63% → 3.21%）。定格同时是新增字段的准入红线：只收构造期确定的事实，永不引入请求期/TTL 类输入（定格是**进程内**稳定性要求，跨版本无此约束，见《系统提示与缓存友好》）
-- 取舍：环境事实定格在进程启动时刻（换目录/换机需重启进程；本进程 cwd 恒定，实际不构成限制）；目录内容、分支、工具版本等项目事实一律不注入，由模型按需自探（`ls`/`git rev-parse` 等）
-- 输出格式（7 行紧凑键值，全部源自构造期事实——`runtime` 平台常量、cwd 快照、`shellProfile`、`shell.go` 契约常量；同 cwd 下字节级确定）：
+- 定位：只注入模型无法廉价自探的最小事实集——平台事实与 shell 执行契约；工具清单不注入 prompt（function calling 已完整提供），工具版本/分支/目录列表等易变信息模型可按需自探，一律不预注入
+- 组装：**由 `main` 组装**——`main.systemBase(cfg)` = `systemPromptFile`（内置提示词原文）+ 空行 + `envSection(agent.ResolveShell(cfg))`，经 `agent.WithSystemPrompt` 注入为 agent 的**基座**；`agent` 侧无 env 段概念（无 `Agent.env` / `runtimePrompt` / `envSection` / `EnvReporter`），`promptBuilder.build()` 只在基座后追加两层 AGENTS.md
+- 段序：`system_prompt.md` → `# 环境`（紧随内置提示词）→ `# 全局说明（~/.config/tanya/AGENTS.md）` → `# 项目说明（AGENTS.md）`
+- 生命周期：基座在 `main` 构造期算一次、随 `Options.systemPrompt` 定格进 `promptBuilder`，并**进快照**（写入会话首行 system）；`/load` 时随首行还原（不再重算），`/new`/`/switch` 复用同一份注入基座
+- 为何定格：system 位于序列化后的 messages/instructions 之前，其任何字节变化都击穿其后全部 history 与 tools 的缓存前缀（实测量化见 `docs/cache-probe.md`）。新增字段的准入红线：只收构造期确定的事实，永不引入请求期/TTL 类输入（定格是**进程内**稳定性要求，跨版本无此约束，见《系统提示与缓存友好》）
+- 输出格式（5 行紧凑键值，全部源自构造期事实；同一次构造字节级确定）：
 
   ```
   # 环境
   OS: linux/amd64
-  CWD: ~/Project/tanya
   SHELL: bash
   TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）
   TIMEOUT: 默认 60s（interactive 时 300s），上限 900s
   OUTPUT: stdout/stderr 头尾各 30KB，中间截断
   ```
 
-- 事实源单一：SHELL 行取 `shellProfile.Name`（与 `run_shell` 工具描述同源，只报 shell 名、不描述调用形态），TIMEOUT/OUTPUT 两行由 `shell.go` 常量程序化生成（`shellTimeoutSec`/`shellInteractiveTimeoutSec`/`shellTimeoutLimit`/`shellMaxOutput`），TTY 行固定契约文案，无第二份硬编码描述；各行恒定输出（shell 缺失时进程已在启动阶段退出）
+- **无 CWD 行**（2026-09-24）：`agent` 作为通用 agent 核心不应感知工作区，且 `/switch` 换工作区后 system 前缀本就不该改写（CWD 若在 system 内，切区即击穿缓存前缀）；工作区绝对路径改由模型按需自探（`pwd`）、或从提示符 `{cwd}` / 工具结果获得
+- 事实源单一：OS 行取 `runtime.GOOS`/`GOARCH`（main）；SHELL 行取 `agent.ShellInvocation.Name`（与 `run_shell` 工具描述同源，只报 shell 名、不描述调用形态）；TIMEOUT/OUTPUT 两行由 `agent` 导出常量（`ShellTimeoutSec`/`ShellInteractiveTimeoutSec`/`ShellTimeoutLimit`/`ShellMaxOutput`）程序化生成；TTY 行固定契约文案，无第二份硬编码描述
 - 平台条件：`TTY:` 行仅在 `ctty.Supported`（linux/darwin）为真时输出，不宣称不存在的 /dev/tty 能力
-- 探测机制：`envSection` 为构造期纯函数，输入全为装配期事实——`runtime` 平台常量、工作区快照（`agent.New`/`/switch` 时定格，进程全程不 `os.Chdir`）、`shellProfile.invocation()`（`shellTool` 构造期定格）、`shell.go` 执行契约常量；进程内零重复探测、零 exec
-- 可测性：分层测试——persistPrompt 只含规则 / envSection 直接断言渲染（全串 golden） / runtimePrompt 拼接 / 同参数两次渲染字节相等 / **会话期间冻结守卫**（构建后改动目录内容不得改变 `runtimePrompt`）
+- 取舍：环境事实定格在进程启动时刻（换机需重启进程）；目录内容、分支、工具版本等项目事实一律不注入，由模型按需自探（`ls`/`git rev-parse` 等）
+- 可测性：main 侧 golden（`main_test.go` `TestEnvSectionNoCwdAndGolden` / `TestSystemBaseAppendsEnvAfterPrompt`）；agent 侧 `TestSystemPromptIsInjectedBase`（system 等于注入基座）+ `TestEnvStableInSession`（会话期间快照冻结守卫）
