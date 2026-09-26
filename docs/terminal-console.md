@@ -179,7 +179,7 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 
 | # | 变化 | 说明 |
 |---|---|---|
-| 1 | sudo/ssh/gpg 等隐式交互消失 | 必须 `interactive: true`；漏标则命令读 tty 失败或立即 EOF；工具描述文案同步改（§6） |
+| 1 | sudo/ssh/gpg 等隐式交互消失 | 必须 `interactive: true`；漏标时读 stdin 立即 EOF，读 tty 通常立即 `EIO`（继承 Ignore 处置），若链中程序恢复 `SIGTTIN` 默认处置（如 GNU `timeout`）则改为停止、静默挂到超时强杀；工具描述文案同步改（§6） |
 | 2 | 裸读 stdin 的命令（`cat`、`read`） | stdin=`/dev/null`，立即 EOF |
 | 3 | 普通 `run_shell` 执行期 `^C` | 从「只中断该命令、工具返回、回合继续」变为「中断整个回合并杀子进程组」（§4 规则 1） |
 | 4 | `^Z` 全面无响应 | tanya 自身维持吞没；interactive 子进程被停不再检测，等超时强杀 |

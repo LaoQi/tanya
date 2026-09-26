@@ -205,7 +205,7 @@ TTY 下的状态展示是**追加式**（不重绘、不移动光标，终端被
 
 ### 终端与信号行为
 
-普通命令不被移交终端：tanya 自始至终是控制终端的前台作业，子进程 stdin 接空设备（`/dev/null`）、只继承 stdout/stderr。因此需要应答的程序（`sudo`/`ssh`/`gpg`/`read`）**必须显式 `interactive: true`**——漏标时它们读不到输入：写 `/dev/tty` 的提示不可见、读 `/dev/tty` 立即失败（`EIO`），不会静默挂死至超时。
+普通命令不被移交终端：tanya 自始至终是控制终端的前台作业，子进程 stdin 接空设备（`/dev/null`）、只继承 stdout/stderr。因此需要应答的程序（`sudo`/`ssh`/`gpg`/`read`）**必须显式 `interactive: true`**——漏标时它们读不到输入：写 `/dev/tty` 的提示不可见；读 `/dev/tty` 通常立即失败（`EIO`——子进程继承 tanya 的 `SIGTTIN/SIGTTOU=Ignore`），但若命令链中的程序把这两个信号恢复默认处置（GNU `timeout` 默认模式即如此），该次读会转成 `SIGTTIN` 停止、静默挂到工具超时或 `^C` 强杀。
 
 `interactive: true` 在 Linux 走独立 pty 借出：命令在自己的 pty 中运行，真实 tty 切 raw 由双向泵转，提示与输出实时可见；`^C` 经 pty 行规程投递（`^Z` 在桥接下不挂起子进程）。**借不出即报错**（macOS、无控制终端、已在借出中等场景：`error: interactive 不支持（无法借出终端）`），不再回退成普通执行。Windows 不走 pty：子进程 stdin 接控制台（`CONIN$`）可直接应答、输出直上屏，运行期 tanya 屏蔽自身 `^C`（`Ctrl+Break` 仍可中断），interactive 时去除 PowerShell 的 `-NonInteractive`（Read-Host 可用）。细节见 `docs/interactive-tty.md`、`docs/terminal-console.md` 与 `docs/terminal-caps.md` §8.6。
 
