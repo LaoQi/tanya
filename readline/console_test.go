@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -111,5 +113,80 @@ func TestPipeDeviceSynthesizesLineEvent(t *testing.T) {
 	}
 	if _, err := con.ReadEvent(); err != io.EOF {
 		t.Fatalf("读尽应 EOF: %v", err)
+	}
+}
+
+func TestConsolePendingInterruptReplaysToNextSubscriber(t *testing.T) {
+	con := newConsole(&fakeDevice{})
+	con.signalInterrupt()
+	got := 0
+	con.Subscribe(func(ev Event) {
+		if ev.Kind == EventInterrupt {
+			got++
+		}
+	})
+	if got != 1 {
+		t.Fatalf("无订阅者时的中断应由下一个订阅者补投递，实际 %d", got)
+	}
+	got2 := 0
+	con.Subscribe(func(ev Event) {
+		if ev.Kind == EventInterrupt {
+			got2++
+		}
+	})
+	if got2 != 0 {
+		t.Fatalf("已消费的中断不应重复补投递，实际 %d", got2)
+	}
+}
+
+func TestConsoleInterruptDispatchesToCurrentSubscribers(t *testing.T) {
+	con := newConsole(&fakeDevice{})
+	n := 0
+	con.Subscribe(func(ev Event) {
+		if ev.Kind == EventInterrupt {
+			n++
+		}
+	})
+	con.signalInterrupt()
+	if n != 1 {
+		t.Fatalf("现有订阅者应收到中断，实际 %d", n)
+	}
+	n2 := 0
+	con.Subscribe(func(ev Event) {
+		if ev.Kind == EventInterrupt {
+			n2++
+		}
+	})
+	if n2 != 0 {
+		t.Fatalf("已 dispatch 的中断不应留给后来订阅者，实际 %d", n2)
+	}
+}
+
+func TestConsoleInterruptConcurrent(t *testing.T) {
+	con := newConsole(&fakeDevice{})
+	const subs = 8
+	hits := make([]int32, subs)
+	var wg sync.WaitGroup
+	for i := 0; i < subs; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			con.Subscribe(func(ev Event) {
+				if ev.Kind == EventInterrupt {
+					atomic.AddInt32(&hits[i], 1)
+				}
+			})
+		}(i)
+	}
+	for i := 0; i < 16; i++ {
+		con.signalInterrupt()
+	}
+	wg.Wait()
+	var total int32
+	for i := range hits {
+		total += atomic.LoadInt32(&hits[i])
+	}
+	if total == 0 {
+		t.Fatal("并发中断至少送达一次")
 	}
 }

@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
-	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/readline"
 )
 
@@ -300,26 +299,27 @@ func (r *REPL) Run() error {
 
 func (r *REPL) ask(q string) {
 	readline.SecureTerminal()
-	ctx, done := InterruptContext()
+	ctx, done := InterruptContext(r.con)
 	t := r.beginTurn(done)
 	err := r.agent.Ask(ctx, q, t.Handle)
 	t.End(err)
 }
 
-func InterruptContext() (context.Context, func()) {
+func InterruptContext(con readline.Console) (context.Context, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
-	interrupted := ctty.Interrupted()
+	unsub := con.Subscribe(func(ev readline.Event) {
+		if ev.Kind == readline.EventInterrupt {
+			cancel()
+		}
+	})
 	finished := make(chan struct{})
 	go func() {
-		select {
-		case <-interrupted:
-			cancel()
-		case <-ctx.Done():
-		}
+		<-ctx.Done()
 		close(finished)
 	}()
 	return ctx, func() {
 		cancel()
+		unsub()
 		<-finished
 	}
 }

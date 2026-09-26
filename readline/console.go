@@ -48,20 +48,47 @@ type device interface {
 }
 
 func NewConsole() Console {
-	if d, err := openTerminal(); err == nil {
-		return newConsole(d)
+	d, err := openTerminal()
+	if err != nil {
+		d = newPipeDevice()
 	}
-	return newConsole(newPipeDevice())
+	c := newConsole(d)
+	go c.watchSignals()
+	return c
 }
 
 type consoleImpl struct {
-	dev  device
-	mu   sync.Mutex
-	subs []func(Event)
+	dev     device
+	mu      sync.Mutex
+	subs    []func(Event)
+	pending bool
 }
 
 func newConsole(dev device) *consoleImpl {
 	return &consoleImpl{dev: dev}
+}
+
+func (c *consoleImpl) signalInterrupt() {
+	c.mu.Lock()
+	c.pending = len(c.subs) == 0
+	fns := make([]func(Event), len(c.subs))
+	copy(fns, c.subs)
+	c.mu.Unlock()
+	for _, fn := range fns {
+		if fn != nil {
+			fn(Event{Kind: EventInterrupt})
+		}
+	}
+}
+
+func (c *consoleImpl) watchSignals() {
+	for {
+		<-ctty.Interrupted()
+		c.signalInterrupt()
+		if ctty.Exiting() {
+			return
+		}
+	}
 }
 
 func (c *consoleImpl) BeginRead() error { return c.dev.Raw() }
@@ -82,7 +109,12 @@ func (c *consoleImpl) Subscribe(fn func(Event)) (cancel func()) {
 	c.mu.Lock()
 	c.subs = append(c.subs, fn)
 	i := len(c.subs) - 1
+	replay := c.pending
+	c.pending = false
 	c.mu.Unlock()
+	if replay {
+		fn(Event{Kind: EventInterrupt})
+	}
 	return func() {
 		c.mu.Lock()
 		if i < len(c.subs) {
