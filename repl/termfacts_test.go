@@ -2,6 +2,7 @@ package repl
 
 import (
 	"io"
+	"os/exec"
 	"testing"
 
 	"github.com/LaoQi/tanya/readline"
@@ -13,6 +14,12 @@ func (t widthTerm) BeginRead() error                         { return nil }
 func (t widthTerm) EndRead()                                 {}
 func (t widthTerm) Size() (readline.Size, bool)              { return readline.Size{Cols: t.cols, Rows: 24}, true }
 func (t widthTerm) Subscribe(fn func(readline.Event)) func() { return func() {} }
+
+func (t widthTerm) LendStdin() (readline.Lease, error) { return nil, readline.ErrUnsupported }
+
+func (t widthTerm) LendFull(cmd *exec.Cmd, capture io.Writer) (readline.Lease, error) {
+	return nil, readline.ErrUnsupported
+}
 func (t widthTerm) ReadEvent() (readline.Event, error) {
 	return readline.Event{}, io.EOF
 }

@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/LaoQi/tanya/ctty"
 )
 
 const (
@@ -259,11 +257,6 @@ const (
 	stopPollHits     = 2
 )
 
-var (
-	openTTY      = ctty.Open
-	isForeground = ctty.IsForeground
-)
-
 func waitShell(cmd *exec.Cmd, stopped *bool) error {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -289,39 +282,16 @@ func waitShell(cmd *exec.Cmd, stopped *bool) error {
 	}
 }
 
-func runForeground(ctx context.Context, command string, timeoutSec int, p *profile, dir string, interactive bool) *Result {
+func runForeground(ctx context.Context, con Console, command string, timeoutSec int, p *profile, dir string, interactive bool) *Result {
 	res := &Result{Command: command, Cwd: dir}
-	tty, _ := openTTY()
-	handed := false
-	anchored := false
-	var saved ctty.InputModes
-	hasSaved := false
-	if tty != nil {
-		if s, ok := ctty.SnapshotInput(int(tty.Fd())); ok {
-			saved, hasSaved = s, true
-		}
+	lease, _ := con.LendStdin()
+	if lease == nil {
+		lease = nullLease{}
 	}
-	defer func() {
-		if tty == nil {
-			return
-		}
-		if hasSaved {
-			ctty.RestoreInput(int(tty.Fd()), saved)
-		}
-		if handed {
-			ctty.SetForeground(int(tty.Fd()), ctty.OwnPgrp())
-		}
-		if anchored && isForeground(int(tty.Fd())) {
-			ctty.ResetModes(tty)
-			ctty.RestoreCursor(tty)
-		}
-		tty.Close()
-	}()
+	defer lease.Release()
 	start := time.Now()
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
-	ctty.IgnoreCtrlEvents()
-	defer ctty.RestoreCtrlEvents()
 
 	cmd := exec.CommandContext(runCtx, p.Path, shellArgs(p, command, interactive)...)
 	cmd.Dir = dir
@@ -333,11 +303,8 @@ func runForeground(ctx context.Context, command string, timeoutSec int, p *profi
 	stderr.chunks = &res.Stderr
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if tty != nil {
-		cmd.Stdin = tty
-	}
-	if tty != nil && isForeground(int(tty.Fd())) {
-		anchored = ctty.SaveCursor(tty)
+	if f := lease.Stdin(); f != nil {
+		cmd.Stdin = f
 	}
 	if err := cmd.Start(); err != nil {
 		switch {
@@ -352,9 +319,7 @@ func runForeground(ctx context.Context, command string, timeoutSec int, p *profi
 		res.Duration = time.Since(start)
 		return res
 	}
-	if anchored {
-		handed = ctty.SetForeground(int(tty.Fd()), cmd.Process.Pid)
-	}
+	lease.Handover(cmd.Process.Pid)
 	err := waitShell(cmd, &res.Stopped)
 	stdout.finish()
 	stderr.finish()
@@ -376,10 +341,7 @@ func runForeground(ctx context.Context, command string, timeoutSec int, p *profi
 	return res
 }
 
-func runBridged(ctx context.Context, bridge Bridge, command string, timeoutSec int, p *profile, dir string) (*Result, bool) {
-	if bridge == nil {
-		return nil, false
-	}
+func runFull(ctx context.Context, con Console, command string, timeoutSec int, p *profile, dir string) (*Result, bool) {
 	res := &Result{Command: command, Cwd: dir}
 	start := time.Now()
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
@@ -391,19 +353,13 @@ func runBridged(ctx context.Context, bridge Bridge, command string, timeoutSec i
 	cmd.WaitDelay = shellWaitDelay
 	var capture streamCapture
 	capture.chunks = &res.Stdout
-	slave, err := bridge.Prepare(cmd)
-	if err != nil || slave == nil {
+	lease, err := con.LendFull(cmd, &capture)
+	if err != nil || lease == nil {
 		return nil, false
 	}
-	defer slave.Close()
-	stop, err := bridge.Attach(&capture)
-	if err != nil {
-		return nil, false
-	}
-	defer stop()
+	defer lease.Release()
 	if err := cmd.Start(); err != nil {
-		stop()
-		slave.Close()
+		lease.Release()
 		res.Duration = time.Since(start)
 		switch {
 		case ctx.Err() != nil:
@@ -416,9 +372,9 @@ func runBridged(ctx context.Context, bridge Bridge, command string, timeoutSec i
 		}
 		return res, true
 	}
-	slave.Close()
+	lease.Handover(cmd.Process.Pid)
 	err = waitShell(cmd, &res.Stopped)
-	stop()
+	lease.Release()
 	capture.finish()
 	res.Duration = time.Since(start)
 

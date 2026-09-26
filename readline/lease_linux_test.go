@@ -95,10 +95,10 @@ func TestBridgePrepareTwiceRejected(t *testing.T) {
 	defer slave.Close()
 	b := newBridgeTTY(slave)
 	cmd := exec.Command("true")
-	if _, err := b.Prepare(cmd); err != nil {
+	if _, err := b.prepare(cmd); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if _, err := b.Prepare(exec.Command("true")); err != ErrUnsupported {
+	if _, err := b.prepare(exec.Command("true")); err != ErrUnsupported {
 		t.Fatalf("二次 Prepare 应拒绝: %v", err)
 	}
 	b.release()
@@ -123,12 +123,13 @@ func TestBridgeInteractiveTTY(t *testing.T) {
 	cmd := exec.Command("bash", "-c",
 		`read x < /dev/tty; echo got:$x; tty; [ -c /dev/tty ] && echo tty-openable; echo slave:$GPG_TTY`)
 	var capture bytes.Buffer
-	childSlave, err := b.Prepare(cmd)
+	childSlave, err := b.prepare(cmd)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	childName := childSlave.Name()
-	stop, err := b.Attach(&capture)
+	stop := b.stop
+	err = b.attach(&capture)
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
@@ -191,11 +192,12 @@ func TestBridgeOutputWhileChildAlive(t *testing.T) {
 	b := newBridgeTTY(slave)
 	cmd := exec.Command("bash", "-c", `echo ready; sleep 5`)
 	var capture bytes.Buffer
-	childSlave, err := b.Prepare(cmd)
+	childSlave, err := b.prepare(cmd)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	stop, err := b.Attach(&capture)
+	stop := b.stop
+	err = b.attach(&capture)
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
@@ -222,15 +224,16 @@ func TestBridgeProductionTTYE2E(t *testing.T) {
 	if os.Getenv("TTY_BRIDGE_E2E") == "" {
 		t.Skip("需真实 tty: printf 'hello\\n' | script -qec 'TTY_BRIDGE_E2E=1 go test -run TestBridgeProductionTTYE2E -v ./readline' /dev/null")
 	}
-	b := NewTTYBridge()
+	b := newBridgeTTY(nil)
 	cmd := exec.Command("bash", "-c", `read x < /dev/tty; echo got:$x; tty`)
 	var capture bytes.Buffer
-	slave, err := b.Prepare(cmd)
+	slave, err := b.prepare(cmd)
 	if err != nil {
 		t.Fatalf("Prepare（真实 /dev/tty）: %v", err)
 	}
 	name := slave.Name()
-	stop, err := b.Attach(&capture)
+	stop := b.stop
+	err = b.attach(&capture)
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
@@ -273,11 +276,12 @@ func TestBridgePendingInputPreserved(t *testing.T) {
 	b := newBridgeTTY(slave)
 	cmd := exec.Command("bash", "-c", `read -r x < /dev/tty; echo got:$x`)
 	var capture bytes.Buffer
-	childSlave, err := b.Prepare(cmd)
+	childSlave, err := b.prepare(cmd)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	stop, err := b.Attach(&capture)
+	stop := b.stop
+	err = b.attach(&capture)
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
@@ -307,12 +311,13 @@ func TestBridgeReusable(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		cmd := exec.Command("bash", "-c", `echo run; tty; echo done`)
 		var capture bytes.Buffer
-		childSlave, err := b.Prepare(cmd)
+		childSlave, err := b.prepare(cmd)
 		if err != nil {
 			t.Fatalf("第 %d 次 Prepare: %v", i+1, err)
 		}
 		name := childSlave.Name()
-		stop, err := b.Attach(&capture)
+		stop := b.stop
+		err = b.attach(&capture)
 		if err != nil {
 			t.Fatalf("第 %d 次 Attach: %v", i+1, err)
 		}
@@ -352,11 +357,12 @@ func TestBridgeCtrlCPassthrough(t *testing.T) {
 	b := newBridgeTTY(slave)
 	cmd := exec.Command("bash", "-c", `read -r x < /dev/tty; echo never`)
 	var capture bytes.Buffer
-	childSlave, err := b.Prepare(cmd)
+	childSlave, err := b.prepare(cmd)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	stop, err := b.Attach(&capture)
+	stop := b.stop
+	err = b.attach(&capture)
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
@@ -410,11 +416,12 @@ func TestBridgeKillUnblocksPumps(t *testing.T) {
 	b := newBridgeTTY(slave)
 	cmd := exec.Command("bash", "-c", "sleep 30")
 	var capture bytes.Buffer
-	childSlave, err := b.Prepare(cmd)
+	childSlave, err := b.prepare(cmd)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	stop, err := b.Attach(&capture)
+	stop := b.stop
+	err = b.attach(&capture)
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
@@ -445,14 +452,15 @@ func TestBridgeAttachTwiceRejected(t *testing.T) {
 	defer slave.Close()
 	b := newBridgeTTY(slave)
 	cmd := exec.Command("true")
-	if _, err := b.Prepare(cmd); err != nil {
+	if _, err := b.prepare(cmd); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	stop, err := b.Attach(&bytes.Buffer{})
-	if err != nil {
+	stop := b.stop
+	if err := b.attach(&bytes.Buffer{}); err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
-	if _, err := b.Attach(&bytes.Buffer{}); err != ErrUnsupported {
+	_ = stop
+	if err := b.attach(&bytes.Buffer{}); err != ErrUnsupported {
 		t.Fatalf("二次 Attach 应拒绝: %v", err)
 	}
 	stop()
@@ -474,7 +482,7 @@ func TestBridgeConcurrentPrepare(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			f, err := b.Prepare(exec.Command("true"))
+			f, err := b.prepare(exec.Command("true"))
 			if err == nil {
 				atomic.AddInt32(&okCount, 1)
 				if f != nil {

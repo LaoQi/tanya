@@ -7,6 +7,7 @@ import (
 	rstyle "github.com/LaoQi/tanya/render/style"
 	"github.com/LaoQi/tanya/render/term"
 	"io"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -34,6 +35,12 @@ func (f *fakeTerm) Size() (Size, bool) {
 	return Size{Cols: cols, Rows: rows}, true
 }
 func (f *fakeTerm) Subscribe(fn func(Event)) func() { return func() {} }
+
+func (f *fakeTerm) LendStdin() (Lease, error) { return nullLease{}, nil }
+
+func (f *fakeTerm) LendFull(cmd *exec.Cmd, capture io.Writer) (Lease, error) {
+	return nil, ErrUnsupported
+}
 func (f *fakeTerm) ReadEvent() (Event, error) {
 	if len(f.events) == 0 {
 		return Event{}, io.EOF

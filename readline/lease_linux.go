@@ -43,13 +43,49 @@ type bridgeTTY struct {
 	attached bool
 }
 
-func NewTTYBridge() TTYBridge { return newBridgeTTY(nil) }
-
 func newBridgeTTY(tty *os.File) *bridgeTTY {
 	return &bridgeTTY{tty: tty, wakeR: -1, wakeW: -1}
 }
 
-func (b *bridgeTTY) Prepare(cmd *exec.Cmd) (*os.File, error) {
+var lendPump = newBridgeTTY(nil)
+
+type fullLease struct {
+	b     *bridgeTTY
+	slave *os.File
+}
+
+func (l *fullLease) Stdin() *os.File { return l.slave }
+
+func (l *fullLease) Handover(pid int) bool {
+	_ = pid
+	if l.slave != nil {
+		l.slave.Close()
+		l.slave = nil
+	}
+	return false
+}
+
+func (l *fullLease) Release() {
+	l.b.stop()
+	if l.slave != nil {
+		l.slave.Close()
+		l.slave = nil
+	}
+}
+
+func lendFullImpl(cmd *exec.Cmd, capture io.Writer) (Lease, error) {
+	b := lendPump
+	slave, err := b.prepare(cmd)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.attach(capture); err != nil {
+		return nil, err
+	}
+	return &fullLease{b: b, slave: slave}, nil
+}
+
+func (b *bridgeTTY) prepare(cmd *exec.Cmd) (*os.File, error) {
 	if !b.acquire() {
 		return nil, ErrUnsupported
 	}
@@ -85,16 +121,16 @@ func (b *bridgeTTY) Prepare(cmd *exec.Cmd) (*os.File, error) {
 	return slave, nil
 }
 
-func (b *bridgeTTY) Attach(capture io.Writer) (func(), error) {
+func (b *bridgeTTY) attach(capture io.Writer) error {
 	if !b.markAttached() {
-		return nil, ErrUnsupported
+		return ErrUnsupported
 	}
 	b.ttyFd = int(b.tty.Fd())
 	b.masterFd = int(b.master.Fd())
 	saved, err := ctty.GetTermios(b.ttyFd)
 	if err != nil {
 		b.release()
-		return nil, err
+		return err
 	}
 	raw := saved
 	raw.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP |
@@ -105,23 +141,23 @@ func (b *bridgeTTY) Attach(capture io.Writer) (func(), error) {
 	raw.Cc[unix.VTIME] = 0
 	if err := ctty.SetTermios(b.ttyFd, raw); err != nil {
 		b.release()
-		return nil, err
+		return err
 	}
 	b.saved = saved
 	b.rawSet = true
 	var pipe [2]int
 	if err := unix.Pipe2(pipe[:], unix.O_CLOEXEC|unix.O_NONBLOCK); err != nil {
 		b.release()
-		return nil, err
+		return err
 	}
 	b.wakeR, b.wakeW = pipe[0], pipe[1]
 	if err := unix.SetNonblock(b.ttyFd, true); err != nil {
 		b.release()
-		return nil, err
+		return err
 	}
 	if err := unix.SetNonblock(b.masterFd, true); err != nil {
 		b.release()
-		return nil, err
+		return err
 	}
 	if ws, err := unix.IoctlGetWinsize(b.ttyFd, unix.TIOCGWINSZ); err == nil {
 		_ = unix.IoctlSetWinsize(b.masterFd, unix.TIOCSWINSZ, ws)
@@ -133,7 +169,7 @@ func (b *bridgeTTY) Attach(capture io.Writer) (func(), error) {
 	go b.pumpInput()
 	go b.pumpOutput(capture)
 	go b.watchWinch()
-	return b.stop, nil
+	return nil
 }
 
 func (b *bridgeTTY) stop() {

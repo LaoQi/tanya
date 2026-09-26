@@ -2,6 +2,8 @@ package readline
 
 import (
 	"errors"
+	"io"
+	"os/exec"
 	"sync"
 
 	"github.com/LaoQi/tanya/ctty"
@@ -38,6 +40,8 @@ type Console interface {
 	ReadEvent() (Event, error)
 	Subscribe(fn func(Event)) (cancel func())
 	Size() (Size, bool)
+	LendStdin() (Lease, error)
+	LendFull(cmd *exec.Cmd, capture io.Writer) (Lease, error)
 }
 
 type device interface {

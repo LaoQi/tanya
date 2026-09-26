@@ -10,7 +10,7 @@ type Options struct {
 	ShellOverride string
 	Home          string
 	Workspace     func() string
-	Bridge        shell.Bridge
+	Console       shell.Console
 	LookPath      func(string) (string, error)
 	Programs      []string
 }
@@ -21,7 +21,7 @@ func Shell(o Options) (*shell.Tool, error) {
 		LookPath:  o.LookPath,
 		Home:      o.Home,
 		Workspace: o.Workspace,
-		Bridge:    o.Bridge,
+		Console:   o.Console,
 		Programs:  o.Programs,
 	})
 }
