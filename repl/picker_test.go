@@ -3,6 +3,9 @@ package repl
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -182,5 +185,112 @@ func TestSessSummarySingleLine(t *testing.T) {
 	}
 	if arch := sessSummary(agent.SessionInfo{Archived: true, Summary: "s\x1b[31m"}); strings.Contains(arch, "\x1b") || !strings.HasPrefix(arch, SessArchMark) {
 		t.Errorf("归档标记应保留且内容已清洗: %q", arch)
+	}
+}
+
+type pickConsole struct {
+	beginErr error
+	events   []readline.Event
+	sizes    []readline.Size
+}
+
+func (c *pickConsole) BeginRead() error                      { return c.beginErr }
+func (c *pickConsole) EndRead()                              {}
+func (c *pickConsole) Sane()                                 {}
+func (c *pickConsole) Subscribe(func(readline.Event)) func() { return func() {} }
+
+func (c *pickConsole) Size() (readline.Size, bool) {
+	if len(c.sizes) == 0 {
+		return readline.Size{}, false
+	}
+	s := c.sizes[0]
+	if len(c.sizes) > 1 {
+		c.sizes = c.sizes[1:]
+	}
+	return s, true
+}
+
+func (c *pickConsole) LendStdin() (readline.Lease, error) { return nil, readline.ErrUnsupported }
+
+func (c *pickConsole) LendFull(*exec.Cmd, io.Writer) (readline.Lease, error) {
+	return nil, readline.ErrUnsupported
+}
+
+func (c *pickConsole) ReadEvent() (readline.Event, error) {
+	if len(c.events) == 0 {
+		return readline.Event{}, io.EOF
+	}
+	ev := c.events[0]
+	c.events = c.events[1:]
+	return ev, nil
+}
+
+func keyEvent(code readline.KeyCode, r rune) readline.Event {
+	return readline.Event{Kind: readline.EventKey, Key: readline.KeyEvent{Code: code, Rune: r}}
+}
+
+func TestPickSessionEmptyListFallsBack(t *testing.T) {
+	var buf bytes.Buffer
+	idx, ok, keys := pickSession(&pickConsole{}, nil, &buf, testSem())
+	if idx != -1 || ok || !keys {
+		t.Fatalf("空列表应直接回落数字选择: idx=%d ok=%v keys=%v", idx, ok, keys)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("空列表不应渲染选择器: %q", buf.String())
+	}
+}
+
+func TestPickSessionWithoutKeys(t *testing.T) {
+	var buf bytes.Buffer
+	idx, ok, keys := pickSession(&pickConsole{beginErr: readline.ErrUnsupported}, testSessions(3), &buf, testSem())
+	if idx != -1 || ok || keys {
+		t.Fatalf("非逐键终端应回落数字选择: idx=%d ok=%v keys=%v", idx, ok, keys)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("回落路径不应渲染选择器: %q", buf.String())
+	}
+}
+
+func TestPickSessionReadErrorAndInterrupt(t *testing.T) {
+	cases := map[string]*pickConsole{
+		"读尽": {},
+		"中断": {events: []readline.Event{{Kind: readline.EventInterrupt}}},
+	}
+	for name, c := range cases {
+		var buf bytes.Buffer
+		idx, ok, keys := pickSession(c, testSessions(3), &buf, testSem())
+		if idx != -1 || ok || !keys {
+			t.Errorf("%s: 应取消并保留按键能力: idx=%d ok=%v keys=%v", name, idx, ok, keys)
+		}
+	}
+}
+
+func TestPickSessionCancelKey(t *testing.T) {
+	c := &pickConsole{events: []readline.Event{keyEvent(readline.KeyRune, 'q')}}
+	var buf bytes.Buffer
+	idx, ok, keys := pickSession(c, testSessions(3), &buf, testSem())
+	if idx != -1 || ok || !keys {
+		t.Fatalf("q 应取消: idx=%d ok=%v keys=%v", idx, ok, keys)
+	}
+}
+
+func TestPickSessionSizeChangeRedrawsWithoutStaleUp(t *testing.T) {
+	c := &pickConsole{
+		sizes: []readline.Size{{Cols: 100, Rows: 32}, {Cols: 60, Rows: 20}},
+		events: []readline.Event{
+			keyEvent(readline.KeyDown, 0),
+			keyEvent(readline.KeyEnter, 0),
+		},
+	}
+	var buf bytes.Buffer
+	idx, ok, keys := pickSession(c, testSessions(3), &buf, testSem())
+	if !ok || !keys || idx != 1 {
+		t.Fatalf("idx=%d ok=%v keys=%v", idx, ok, keys)
+	}
+	if n := strings.Count(buf.String(), PickTitle[:len("选择会话")]); n != 2 {
+		t.Errorf("尺寸变化后应重绘一次（共两帧），实际 %d 帧: %q", n, buf.String())
+	}
+	if re := regexp.MustCompile(`\x1b\[[0-9]*A`); re.MatchString(buf.String()) {
+		t.Errorf("尺寸变化后不应按旧行数上移光标: %q", buf.String())
 	}
 }

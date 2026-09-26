@@ -195,7 +195,7 @@ func TestRunShellFullRealTTYE2E(t *testing.T) {
 
 func TestRunShellFullRealTTYReuse(t *testing.T) {
 	if os.Getenv("TTY_E2E_REUSE") == "" {
-		t.Skip("需真实 tty: (printf 'hello\\n'; sleep 3; printf 'world\\n'; sleep 3) | script -qec 'TTY_E2E_REUSE=1 go test -count=1 -run TestRunShellBridgedRealTTYReuse -v ./tools/shell' /dev/null")
+		t.Skip("需真实 tty: (printf 'hello\\n'; sleep 3; printf 'world\\n'; sleep 3) | script -qec 'TTY_E2E_REUSE=1 go test -count=1 -run TestRunShellFullRealTTYReuse -v ./tools/shell' /dev/null（两次输入必须间隔喂入：一次性写入会被第一个命令的 pty 吃掉）")
 	}
 	for _, want := range []string{"hello", "world"} {
 		res := consoleTool(t, rlConsole{readline.NewConsole()}).run(context.Background(), request{Command: `read -r x < /dev/tty; echo got:$x`, TimeoutSec: 15, Interactive: true})

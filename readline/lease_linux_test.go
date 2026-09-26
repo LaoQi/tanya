@@ -498,3 +498,66 @@ func TestBridgeConcurrentPrepare(t *testing.T) {
 	}
 	b.release()
 }
+
+func TestLendFullThroughConsole(t *testing.T) {
+	master, outer, err := openPTY()
+	if err != nil {
+		t.Fatalf("openPTY: %v", err)
+	}
+	defer master.Close()
+	defer outer.Close()
+	before, err := ctty.GetTermios(int(outer.Fd()))
+	if err != nil {
+		t.Fatalf("getTermios: %v", err)
+	}
+
+	prev := lendPump
+	lendPump = newBridgeTTY(outer)
+	defer func() { lendPump = prev }()
+
+	cmd := exec.Command("bash", "-c", `read -r x < /dev/tty; echo got:$x; tty`)
+	var capture bytes.Buffer
+	lease, err := newConsole(&fakeDevice{}).LendFull(cmd, &capture)
+	if err != nil {
+		t.Fatalf("LendFull: %v", err)
+	}
+	childTTY := lease.Stdin()
+	if childTTY == nil || !strings.HasPrefix(childTTY.Name(), "/dev/pts/") {
+		t.Fatalf("借出应把子进程 stdin 接到 pty slave: %v", childTTY)
+	}
+	if cmd.Stdin != childTTY || cmd.Stdout != childTTY || cmd.Stderr != childTTY {
+		t.Errorf("子进程三路都应接同一 pty slave: %v %v %v", cmd.Stdin, cmd.Stdout, cmd.Stderr)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if _, err := unix.Write(int(master.Fd()), []byte("hello\n")); err != nil {
+		t.Fatalf("写入外层 tty: %v", err)
+	}
+	readUntil(t, int(master.Fd()), "got:hello", 5*time.Second)
+	out := readUntil(t, int(master.Fd()), childTTY.Name(), 5*time.Second)
+	if !strings.Contains(out, childTTY.Name()) {
+		t.Errorf("子进程 tty 应为 pty slave %q: %q", childTTY.Name(), out)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	lease.Release()
+	lease.Release()
+	if !strings.Contains(capture.String(), "got:hello") {
+		t.Errorf("捕获流缺输出: %q", capture.String())
+	}
+	after, err := ctty.GetTermios(int(outer.Fd()))
+	if err != nil {
+		t.Fatalf("恢复后 getTermios: %v", err)
+	}
+	if after != before {
+		t.Errorf("Release 后 termios 未复原:\n before=%+v\n after =%+v", before, after)
+	}
+	if lendPump.master != nil || lendPump.slave != nil {
+		t.Errorf("Release 后 pty 未释放: master=%v slave=%v", lendPump.master, lendPump.slave)
+	}
+	if lendPump.tty != outer {
+		t.Errorf("Release 后注入的 tty 被误改: %v", lendPump.tty)
+	}
+}

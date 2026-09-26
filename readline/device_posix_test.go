@@ -116,3 +116,63 @@ func TestSaneIgnoresNonTerminal(t *testing.T) {
 	defer f.Close()
 	(&posixTTY{in: f}).Sane()
 }
+
+func TestKeysTermiosClearsSignalAndCanonical(t *testing.T) {
+	_, slave := newTestPTY(t)
+	fd := int(slave.Fd())
+	base, err := ctty.GetTermios(fd)
+	if err != nil {
+		t.Fatalf("getTermios: %v", err)
+	}
+	if err := (&posixTTY{in: slave, out: slave}).Raw(); err != nil {
+		t.Fatalf("Raw: %v", err)
+	}
+	got, err := ctty.GetTermios(fd)
+	if err != nil {
+		t.Fatalf("getTermios: %v", err)
+	}
+	fields := []struct {
+		name string
+		base uint32
+		got  uint32
+		mask uint32
+	}{
+		{"Iflag", base.Iflag, got.Iflag, unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP | unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON},
+		{"Lflag", base.Lflag, got.Lflag, unix.ECHO | unix.ICANON | unix.ISIG | unix.IEXTEN},
+		{"Oflag", base.Oflag, got.Oflag, unix.OPOST},
+	}
+	for _, f := range fields {
+		if f.got&f.mask != 0 {
+			t.Errorf("%s 未清位: 残留 0x%x（got 0x%x base 0x%x）", f.name, f.got&f.mask, f.got, f.base)
+		}
+		if f.got&^f.mask != f.base&^f.mask {
+			t.Errorf("%s 误改掩码外其它位: got 0x%x base 0x%x", f.name, f.got, f.base)
+		}
+	}
+	if got.Cc[unix.VMIN] != 0 || got.Cc[unix.VTIME] != 1 {
+		t.Errorf("VMIN/VTIME 应为 0/1，得 %d/%d", got.Cc[unix.VMIN], got.Cc[unix.VTIME])
+	}
+}
+
+func TestSizeFromPTY(t *testing.T) {
+	_, slave := newTestPTY(t)
+	if err := unix.IoctlSetWinsize(int(slave.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 33, Col: 101}); err != nil {
+		t.Fatalf("设置 winsize: %v", err)
+	}
+	got, ok := (&posixTTY{in: slave, out: slave}).Size()
+	if !ok || got.Cols != 101 || got.Rows != 33 {
+		t.Fatalf("Size = %+v ok=%v，期望 101x33", got, ok)
+	}
+	if _, ok := (&posixTTY{in: slave}).Size(); ok {
+		t.Error("无输出设备时 Size 应报不可用")
+	}
+	f, err := os.CreateTemp("", "readline-size-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	if _, ok := (&posixTTY{in: f, out: f}).Size(); ok {
+		t.Error("非终端不应给出尺寸")
+	}
+}
