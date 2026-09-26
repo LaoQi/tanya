@@ -21,7 +21,7 @@ var (
 	procGetNumberOfConsoleInputEvents = kernel32.NewProc("GetNumberOfConsoleInputEvents")
 )
 
-type windowsTerminal struct {
+type windowsConsole struct {
 	in    *os.File
 	out   *os.File
 	saved uint32
@@ -32,7 +32,7 @@ func openTerminal() (Terminal, error) {
 	return openTerminalFile(os.Stdin, os.Stdout)
 }
 
-func openTerminalFile(in, out *os.File) (*windowsTerminal, error) {
+func openTerminalFile(in, out *os.File) (*windowsConsole, error) {
 	if os.Getenv("TANYA_NO_RAW_INPUT") != "" {
 		return nil, ErrUnsupported
 	}
@@ -40,12 +40,12 @@ func openTerminalFile(in, out *os.File) (*windowsTerminal, error) {
 	if !ok {
 		return nil, ErrUnsupported
 	}
-	t := &windowsTerminal{in: in, out: out, saved: saved}
+	t := &windowsConsole{in: in, out: out, saved: saved}
 	t.keys.src = t
 	return t, nil
 }
 
-func (t *windowsTerminal) Raw() error {
+func (t *windowsConsole) Raw() error {
 	mode, ok := ctty.ConsoleMode(int(t.in.Fd()))
 	if !ok {
 		return ErrUnsupported
@@ -61,11 +61,11 @@ func (t *windowsTerminal) Raw() error {
 	return nil
 }
 
-func (t *windowsTerminal) Restore() {
+func (t *windowsConsole) Restore() {
 	ctty.SetConsoleMode(int(t.in.Fd()), t.saved)
 }
 
-func (t *windowsTerminal) Size() (Size, bool) {
+func (t *windowsConsole) Size() (Size, bool) {
 	cols, rows, ok := ctty.Size(int(t.out.Fd()))
 	if !ok {
 		return Size{}, false
@@ -73,7 +73,7 @@ func (t *windowsTerminal) Size() (Size, bool) {
 	return Size{Cols: cols, Rows: rows}, true
 }
 
-func (t *windowsTerminal) readChunk(p []byte) (int, error) {
+func (t *windowsConsole) readChunk(p []byte) (int, error) {
 	deadline := time.Now().Add(consoleReadTimeout)
 	for {
 		if n, ok := consoleInputEvents(int(t.in.Fd())); ok && n > 0 {
@@ -92,7 +92,7 @@ func (t *windowsTerminal) readChunk(p []byte) (int, error) {
 	}
 }
 
-func (t *windowsTerminal) ReadKey() (KeyEvent, error) { return t.keys.readKey() }
+func (t *windowsConsole) ReadKey() (KeyEvent, error) { return t.keys.readKey() }
 
 func consoleInputEvents(fd int) (int, bool) {
 	var n uint32

@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func newPTYTerminal(t *testing.T) (*os.File, *unixTerminal) {
+func newPTYTerminal(t *testing.T) (*os.File, *posixTTY) {
 	t.Helper()
 	master, slave, err := openPTY()
 	if err != nil {
@@ -42,7 +42,7 @@ type keyResult struct {
 	err error
 }
 
-func readKeyAsync(term *unixTerminal) <-chan keyResult {
+func readKeyAsync(term *posixTTY) <-chan keyResult {
 	ch := make(chan keyResult, 1)
 	go func() {
 		ev, err := term.ReadKey()
@@ -51,7 +51,7 @@ func readKeyAsync(term *unixTerminal) <-chan keyResult {
 	return ch
 }
 
-func consumeHangupRead(t *testing.T, term *unixTerminal) {
+func consumeHangupRead(t *testing.T, term *posixTTY) {
 	t.Helper()
 	buf := make([]byte, 8)
 	if _, err := term.readChunk(buf); err != nil && err != unix.EIO {
@@ -59,7 +59,7 @@ func consumeHangupRead(t *testing.T, term *unixTerminal) {
 	}
 }
 
-func waitKey(t *testing.T, term *unixTerminal, d time.Duration) keyResult {
+func waitKey(t *testing.T, term *posixTTY, d time.Duration) keyResult {
 	t.Helper()
 	select {
 	case r := <-readKeyAsync(term):

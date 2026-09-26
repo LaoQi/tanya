@@ -2,10 +2,7 @@
 
 package readline
 
-import (
-	"github.com/LaoQi/tanya/ctty"
-	"golang.org/x/sys/unix"
-)
+import "github.com/LaoQi/tanya/ctty"
 
 var terminalGuardOwns bool
 
@@ -37,11 +34,7 @@ func secureTerminalFd(fd int, owns bool) {
 		return
 	}
 	if t, err := ctty.GetTermios(fd); err == nil {
-		sane := t
-		sane.Iflag |= unix.ICRNL | unix.IXON
-		sane.Lflag |= unix.ISIG | unix.ICANON | unix.ECHO | unix.IEXTEN
-		sane.Oflag |= unix.OPOST | unix.ONLCR
-		if sane != t {
+		if sane := saneTermios(t); sane != t {
 			_ = ctty.SetTermios(fd, sane)
 		}
 	}

@@ -35,9 +35,9 @@ func TestKeySourceExitBeatsQueuedInput(t *testing.T) {
 	}
 }
 
-func TestDegradedStopsOnExitRequest(t *testing.T) {
+func TestPipeDeviceStopsOnExitRequest(t *testing.T) {
 	stubExitRequested(t, func() bool { return true })
-	d := &Degraded{r: bufio.NewReader(strings.NewReader("x\n"))}
+	d := &pipeDevice{r: bufio.NewReader(strings.NewReader("x\n"))}
 	if _, err := d.ReadKey(); err != ErrExited {
 		t.Fatalf("got %v", err)
 	}
