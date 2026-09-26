@@ -308,9 +308,11 @@ func TestCompleteSwitchTilde(t *testing.T) {
 	if err != nil || home == "" {
 		t.Skip("无 HOME")
 	}
-	if err := os.Mkdir(filepath.Join(home, "ws-complete-tilde"), 0o755); err != nil {
+	tildeDir := filepath.Join(home, "ws-complete-tilde")
+	if err := os.MkdirAll(tildeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { os.RemoveAll(tildeDir) })
 	c := switchCompleter(t.TempDir())
 	got := c.complete("/switch ~/ws-complete-tilde")
 	if len(got) != 1 || got[0].Insert != "/switch ~/ws-complete-tilde/" {

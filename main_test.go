@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/LaoQi/tanya/config"
 	"github.com/LaoQi/tanya/ctty"
+	"github.com/LaoQi/tanya/readline"
 	"github.com/LaoQi/tanya/repl"
 	"github.com/LaoQi/tanya/tools/shell"
 )
@@ -157,5 +161,60 @@ func TestSystemBaseAppendsEnvAfterPrompt(t *testing.T) {
 	}
 	if !strings.Contains(base, "\n\n# 环境\n") {
 		t.Errorf("环境段应紧随内置提示词之后: %q", base)
+	}
+}
+
+type fakeConsole struct {
+	stdin   readline.Lease
+	stdinN  int
+	stderr  error
+	full    readline.Lease
+	fullErr error
+}
+
+func (c *fakeConsole) BeginRead() error                      { return nil }
+func (c *fakeConsole) EndRead()                              {}
+func (c *fakeConsole) Sane()                                 {}
+func (c *fakeConsole) ReadEvent() (readline.Event, error)    { return readline.Event{}, io.EOF }
+func (c *fakeConsole) Subscribe(func(readline.Event)) func() { return func() {} }
+func (c *fakeConsole) Size() (readline.Size, bool)           { return readline.Size{}, false }
+func (c *fakeConsole) LendStdin() (readline.Lease, error)    { c.stdinN++; return c.stdin, c.stderr }
+func (c *fakeConsole) LendFull(*exec.Cmd, io.Writer) (readline.Lease, error) {
+	return c.full, c.fullErr
+}
+
+type fakeLease struct{ f *os.File }
+
+func (l fakeLease) Stdin() *os.File { return l.f }
+func (l fakeLease) Release()        {}
+
+func TestConsoleForShellAdapter(t *testing.T) {
+	f, err := os.CreateTemp("", "tanya-adapter-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	c := consoleForShell{&fakeConsole{stdin: fakeLease{f}, full: fakeLease{f}}}
+	lease, err := c.LendStdin()
+	if err != nil || lease == nil {
+		t.Fatalf("LendStdin 应透传租约: %v %v", lease, err)
+	}
+	if lease.Stdin() != f {
+		t.Error("租约应交出同一 stdin 文件")
+	}
+	lease.Release()
+	full, err := c.LendFull(nil, nil)
+	if err != nil || full == nil || full.Stdin() != f {
+		t.Fatalf("LendFull 应透传租约: %v %v", full, err)
+	}
+
+	want := errors.New("无控制终端")
+	bad := consoleForShell{&fakeConsole{stderr: want, fullErr: want}}
+	if l, err := bad.LendStdin(); l != nil || !errors.Is(err, want) {
+		t.Errorf("借出失败应原样回传错误: %v %v", l, err)
+	}
+	if l, err := bad.LendFull(nil, nil); l != nil || !errors.Is(err, want) {
+		t.Errorf("借出失败应原样回传错误: %v %v", l, err)
 	}
 }
