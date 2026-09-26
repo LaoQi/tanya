@@ -5,7 +5,7 @@
 ## 特性
 
 - OpenAI 兼容接口（OpenAI / DeepSeek / GLM / Ollama / vLLM 等），SSE 流式输出
-- 以 shell 为核心的工具体系：模型可直接执行 shell 命令（自动适配平台：Linux/macOS bash/sh/ash，Windows pwsh/powershell；`shell` 配置可指定任意 shell）；命令前后保存/复原控制终端状态（复原 termios + 在自己是前台时归位光标锚点并复位屏幕模式：SGR、字符集、滚动区/换行/光标/鼠标等；交出终端前先 `DECSC` 存锚点、复位后 `DECRC` 归位，子进程设滚动区或挪走光标都不会把后续输出带到屏幕顶部），被超时强杀的交互程序不会留下坏终端
+- 以 shell 为核心的工具体系：模型可直接执行 shell 命令（自动适配平台：Linux/macOS bash/sh/ash，Windows pwsh/powershell；`shell` 配置可指定任意 shell）；命令前后保存/复原控制终端状态（交出终端前 `DECSC` 存锚点，结束后复原 termios + 复位屏幕模式：SGR、字符集、滚动区/换行/光标/鼠标等 + `DECRC` 归位，子进程设滚动区或挪走光标都不会把后续输出带到屏幕顶部），被超时强杀的交互程序不会留下坏终端；普通命令的 stdin 是空设备（`/dev/null`），需要应答的程序请用 `interactive: true`
 - 内置轻量工具：`get_time` / `get_env` / `calc`
 - 模型可运行时自调与自省：`agent_custom` 按 `key` 读写（可写 `model`、`reasoning_effort`；只读 `models`、`usage`、`stat`、`sessions`、`config_path`），`get sessions` 给出会话列表与 jsonl 文件路径（仅本次会话有效，不写配置文件），`get config_path` 给出生效配置文件路径（模型据此可读取或修改自身配置，改动需重启生效）
 - 会话持久化与恢复（JSONL，记录完整历史，system 快照随会话冻结）
@@ -54,7 +54,7 @@ model: deepseek-v4-flash
 
 `show_reasoning` 配置项（仅 yaml，默认 `false`）让思维链随对话显示：思维链以与正文一致的 markdown 渲染呈现在 `─── 思考 ───` 与 `─── 思考结束 · 3.2s ───` 两条分隔符之间（`Think` 语义色，时长取该段思考耗时），同时不再打印 `» 思考中` 状态行——`» 等待响应` 心跳也在首个思维链片段到达时收尾。仅 REPL 的 rich 输出档生效（stdout 非终端、`-p`、`-p --verbose`、`ask` 一律不显示），REPL 内 `/reasoning on|off` 可运行时切换；门禁外 `/reasoning on` 会提示「当前输出档不显示思维链」（开关记忆仍保留，切回富档即生效）。
 
-`bell` 配置项（仅 yaml，默认 `false`）在需要把人叫回终端时发声：对话回合结束（成功与报错都响，`^C` 中断不响）与 `run_shell` 声明 `interactive`、终端即将移交时各响一声，响声写入控制终端（`/dev/tty`），因此不进 stdout、不受 `-p` 与重定向影响。仅 REPL 的 rich 输出档生效（stdout 非终端、`-p`、`ask` 一律不响）。提示音时点是「工具开始执行」而非「子进程真的在等输入」，且是否真能听见取决于终端设置（部分终端配为静音或闪烁）。设计见 `docs/design.md`《终端通知》。
+`bell` 配置项（仅 yaml，默认 `false`）在需要把人叫回终端时发声：对话回合结束（成功与报错都响，`^C` 中断不响）与 `run_shell` 声明 `interactive`、终端即将借出时各响一声，响声写入控制终端（`/dev/tty`），因此不进 stdout、不受 `-p` 与重定向影响。仅 REPL 的 rich 输出档生效（stdout 非终端、`-p`、`ask` 一律不响）。提示音时点是「工具开始执行」而非「子进程真的在等输入」，且是否真能听见取决于终端设置（部分终端配为静音或闪烁）。设计见 `docs/design.md`《终端通知》。
 
 `notify_osc` 配置项（仅 yaml，默认 `false`）把通知发给终端本身：写一帧 `ESC ] 9 ; 文本 BEL` 到控制终端，由终端决定怎么呈现（iTerm2 / WezTerm / Ghostty / Windows Terminal 系支持，弹系统通知或角标；Terminal.app 与传统 xterm 系不认，写了就是没有效果）。适合终端在别的桌面/分屏、人不在跟前的场景。与 `bell` 同一门禁、同一写入通道（`/dev/tty`），因此同样不进 stdout、不受重定向影响；tmux/screen 下未做透传、通常会被吞掉。无 env、无 REPL 命令。
 
@@ -205,16 +205,15 @@ TTY 下的状态展示是**追加式**（不重绘、不移动光标，终端被
 
 ### 终端与信号行为
 
-普通命令执行期间 shell 进程被移交终端前台进程组（`TIOCSPGRP`，无控制终端时自动跳过），因此 ssh/git 等需要密码的程序可直接在终端应答，不再挂死至超时。
+普通命令不被移交终端：tanya 自始至终是控制终端的前台作业，子进程 stdin 接空设备（`/dev/null`）、只继承 stdout/stderr。因此需要应答的程序（`sudo`/`ssh`/`gpg`/`read`）**必须显式 `interactive: true`**——漏标时它们读不到输入：写 `/dev/tty` 的提示不可见、读 `/dev/tty` 立即失败（`EIO`），不会静默挂死至超时。
 
-`interactive: true` 在 Linux 走独立 pty 桥接：命令在自己的 pty 中运行，真实 tty 切 raw 由 bridge 双向泵转，提示与输出实时可见；此时无需前台移交，`^C` 经 pty 行规程投递（`^Z` 在桥接下不挂起子进程）。桥接不可用时回退上述前台移交路径。Windows 不走 pty：子进程 stdin 继承控制台（`CONIN$`）可直接应答，运行期 tanya 屏蔽自身 `^C`（`Ctrl+Break` 仍可中断），interactive 时去除 PowerShell 的 `-NonInteractive`（Read-Host 可用）；提示写到控制台的程序（ssh 等）实时可见，写到 stdout 的随输出捕获。细节见 `docs/interactive-tty.md` 与 `docs/terminal-caps.md` §8.6。
+`interactive: true` 在 Linux 走独立 pty 借出：命令在自己的 pty 中运行，真实 tty 切 raw 由双向泵转，提示与输出实时可见；`^C` 经 pty 行规程投递（`^Z` 在桥接下不挂起子进程）。**借不出即报错**（macOS、无控制终端、已在借出中等场景：`error: interactive 不支持（无法借出终端）`），不再回退成普通执行。Windows 不走 pty：子进程 stdin 接控制台（`CONIN$`）可直接应答、输出直上屏，运行期 tanya 屏蔽自身 `^C`（`Ctrl+Break` 仍可中断），interactive 时去除 PowerShell 的 `-NonInteractive`（Read-Host 可用）。细节见 `docs/interactive-tty.md`、`docs/terminal-console.md` 与 `docs/terminal-caps.md` §8.6。
 
 信号语义：
 
-- 执行期间 Ctrl+C 直接送达命令进程组（命令可优雅退出）；再次按下 Ctrl+C 取消当前回合
-- 普通路径下 Ctrl+Z 会挂起命令进程，tanya 检测到后立即终止并标注 `挂起已终止`，无需等超时
-- 命令间隙/流式阶段 Ctrl+Z 被 tanya 忽略（不会挂起自身），Ctrl+\ 保持 Go 默认行为（全栈转储）
-- 用户脚本内故意 `kill -STOP` 长挂起的进程会被同一机制终止
+- 普通命令执行期间 Ctrl+C 中断**整个回合**并杀子进程组（终端前台始终是 tanya，`^C` 归一为中断事件）；`interactive: true` 借出期则由子进程独占 `^C`（等价在它自己的 pty 里按）
+- Ctrl+Z 全面无响应：tanya 自身吞没 `SIGTSTP`，命令间隙与执行期都不会挂起；子进程被显式停住（如脚本内 `kill -STOP $$`）不再被检测，会静默等到超时强杀
+- Ctrl+\ 保持 Go 默认行为（全栈转储）
 
 
 ## 开发

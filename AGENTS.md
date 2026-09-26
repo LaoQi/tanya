@@ -9,9 +9,9 @@
 - package 划分见下文《结构》，根目录只放 main.go 与顶级包；`agent` 零内部依赖、`ctty` 零依赖叶子
 - 平台分片一律白名单：`linux`/`darwin`/`windows` 各一个装配文件，posix 共享实现落 `linux || darwin`，其余平台 stub；Linux 为主、macOS 尽力
 - 终端输入层自研（raw mode + ANSI 渲染 + fish 风格 ghost 置灰建议），不引入 TUI 框架；Windows 仅支持 Windows Terminal（输入后端与 interactive 直通已实现，实机验证未全覆盖；不支持 cmd/老 conhost）
-- 终端原语（`/dev/tty`、前台组、termios、探测）一律走 `ctty`，移交/夺回/复原策略由 `agent`、`readline` 各自决定；`run_shell` 交终端前快照输入模式与光标、子进程结束后复原，见 `docs/ctty.md`
+- 终端原语（`/dev/tty` 打开、termios、模式复位与光标锚点、探测）一律走 `ctty`——`ctty` **只有原语、没有前台组概念**（`OwnPgrp`/`ForegroundPgrp`/`SetForeground`/`IsForeground` 与输入模式快照 `SnapshotInput`/`RestoreInput` 已于 2026-09-27 删除）；终端持有者与模式策略归 `readline` 的 `Console`（见下条），`run_shell` 的租约在借出前 `SaveCursor`、`Release` 时「termios 复原 → `ResetModes` → `RestoreCursor`」，见 `docs/ctty.md`、`docs/terminal-console.md`
 - 运行期信号统一收敛在 `ctty`（SIGTERM/SIGHUP 关闭、SIGINT 中断、SIGQUIT 保持默认转储），业务层（`repl`/`main`）不出现 `os/signal`；退出统一走 `REPL.quit()`，进程退出码取 `ctty.ExitStatus()`，见 `docs/ctty.md`
-- `interactive: true` 的 run_shell 走全 pty 桥接，仅 Linux（失败回退 `/dev/tty` + `TIOCSPGRP`）；Windows 为控制台继承直通，见 `docs/interactive-tty.md`、`docs/terminal-caps.md` §8.6
+- 终端持有者唯一（`readline` 的 `Console`：L2 仲裁 + L1 device 三实现 + 租约；模式名收在 device 内不暴露，`repl` 只消费事件流与租约，`agent`/`tools` 经注入接口跨界）。借出两型语义固定：`LendStdin`（普通 run_shell）= stdin `os.DevNull` + 终端锚点，不直通终端、不移交前台；`LendFull`（`interactive: true`）= Linux pty 泵（含捕获）/ Windows `CONIN$` 直通（输出直上屏），darwin 与借不出**明确报错**（`ErrNoLend`，不回退）。`^C` 两条规则：tanya 持有期（含普通命令执行期）归一为中断 = 取消回合并杀子进程组，借出期归子进程；不做 `^Z` 检测（tanya 自身吞没 SIGTSTP），见 `docs/terminal-console.md`
 - 仓库根两份纯文本编译期嵌入、改动需重新编译：`system_prompt.md` 内置提示词与**环境段**（OS/shell 契约，`main.envSection`，无 CWD 行）合成**基座**经 `agent.WithSystemPrompt` 注入——`agent` 侧无内置文本、**无任何 env 概念**（快照 = 基座 + 两层 AGENTS.md）；`config.example.yaml` 由 `tanya config` 原样打到 stdout（不带提示行，可直接写入配置路径），与 `config.Default()` 的一致性由根包测试守护
 - 工具 = **调用方注入**（`agent.WithTools`，保序在前）+ agent 自带的 `agent_custom`（恒末位），装配期一次合成、之后**运行期冻结**；不提供运行期注册 API，不做插件。注册**仅作契约**：不校验重名、不仲裁（重名由调用方保证），`lookup` 首个匹配胜出（注入项在前故可遮蔽 `agent_custom`）；清单顺序即请求 `tools` 顺序（缓存契约）
 - 标准工具集（`run_shell` + `get_time`/`get_env`/`calc`）落在顶级 `tools`，`main` 经 `tools.Standard(tools.Options{...})` 一次取齐并按固定顺序注入；**`agent` 不带任何工具实现**（作库用时默认只有 `agent_custom`），也不认 shell
@@ -43,9 +43,9 @@ main.go             入口、flag 子命令、ask 单发、init 工作区脚手�
 system_prompt.md    内置系统提示词原文（顶层，编译期嵌入）
 config.example.yaml 默认配置示例原文（顶层，编译期嵌入，`tanya config` 输出）
 config/             tanya 作为 CLI 的完整配置：agent.Config + UI(inline) + Shell + Path；yaml 加载、TANYA_* 覆盖、校验（agent 侧零加载机制）
-ctty/               控制终端原语与探测（前台组、/dev/tty、termios、Facts）；白名单 + stub，零内部依赖
+ctty/               控制终端原语与探测（/dev/tty、termios、模式复位/光标锚点、信号、Facts）；白名单 + stub，零内部依赖
 repl/               REPL 循环与输入分发、斜杠命令、提示符、ghost 补全、picker、工具块渲染、状态行、退出收尾
-readline/           自研终端输入层：行编辑/历史/补全、按键解析、raw mode、宽度、pty 桥接（linux）、状态自愈
+readline/           终端输入层：Console 仲裁 + device 设备面 + 租约（借出/pty 泵/锚点）、行编辑/历史/补全、按键解析、宽度
 agent/              核心逻辑（config 收窄校验 / llm 双协议 / loop / prompt / session / archive / stats / path / init / tools / control）；零内部依赖
 tools/              外置工具集：根包 tools.Standard 装配标准集与顺序；shell/ = run_shell；builtin/ = get_time/get_env/calc
 render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终端原语、ir/、theme/ 配色、markdown/ 流式解析、markup/ 内联标记
@@ -56,7 +56,7 @@ render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终
 ## 文档
 
 - `docs/design.md` 核心设计与各模块行为细节（权威）；`README.md` 使用说明与配置项
-- 终端：`docs/ctty.md` 控制终端抽象、`docs/interactive-tty.md` pty 桥接、`docs/terminal-caps.md` 探测与能力降级（规划：`docs/terminal-console.md` 控制台层——唯一持有者/租约/`^C` 归一）
+- 终端：`docs/terminal-console.md` 控制台层（唯一持有者/租约/`^C` 归一，已实施）、`docs/ctty.md` 控制终端抽象、`docs/interactive-tty.md` pty 桥接、`docs/terminal-caps.md` 探测与能力降级
 - 表现层：`docs/style-split.md` 拆包、`docs/render-pipeline.md` 渲染管线、`docs/render-refs-compare.md` 参考对比
 - 工具与缓存：`docs/shell-tool.md` run_shell 组件化、`docs/agent-control-tool.md` agent_custom、`docs/cache-probe.md` prompt cache
 - 会话与 REPL：`docs/session-archive.md` 归档卷、`docs/repl-output-refactor.md` 输出收敛、`docs/repl-status-append.md` 状态追加（未实施：`docs/repl-replay-rendering.md`、`docs/reasoning-live-toggle.md` 流式期 `Ctrl+O` 切换思考显示（后延，阻塞于控制台层）；已归档：`docs/probe-redesign.md`）

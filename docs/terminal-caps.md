@@ -1,6 +1,9 @@
 # 终端探测与能力降级：范围约定与实施
 
-状态：**S1–S2 已实施**（`ctty` 探测原语 + `Facts`；`main` 单点探测，渲染判定改为 stdout、输入判定保留 stdin）；阶段 B（Windows 输入后端）与 C（Windows 交互命令）已实施，Windows 侧仅部分实机验证（未全量覆盖，暂不跟踪）。本文承载支持范围约定、判定口径与分阶段计划。
+状态：**S1–S2 已实施**
+
+>
+> **更正（2026-09-27，控制台层 S5）**：§8.6 关于「普通命令继承控制台 stdin / 前台组语义」的段落已作废——前台组概念整体退出设计，普通命令 stdin = 空设备（`/dev/null`），`interactive` 走 `Console.LendFull`（Linux pty 泵 / Windows `CONIN$` 直通）、借不出即报错；Windows 交互掩蔽（`IgnoreCtrlEvents`）语义不变（借出期子进程独占 `^C`）。现行口径见 `docs/terminal-console.md`。（`ctty` 探测原语 + `Facts`；`main` 单点探测，渲染判定改为 stdout、输入判定保留 stdin）；阶段 B（Windows 输入后端）与 C（Windows 交互命令）已实施，Windows 侧仅部分实机验证（未全量覆盖，暂不跟踪）。本文承载支持范围约定、判定口径与分阶段计划。
 
 ## 1. 问题
 
@@ -41,7 +44,7 @@
 |---|---|---|
 | 颜色、状态行、markdown、分隔线、宽度 | **stdout 是否终端** | `ctty.Facts.StdoutTTY` / `Size` |
 | 行编辑、历史、补全、ghost | **stdin 是否终端** ∧ 平台输入后端可用 | `ctty.Facts.StdinTTY` ∧ `readline` 后端 |
-| 控制终端原语（前台移交、`/dev/tty`） | 编译期平台上限（`ctty.Supported`）∧ 运行时前台判定 | `ctty` |
+| 控制终端原语（`/dev/tty` 打开、termios、模式复位与光标锚点） | 编译期平台上限（`ctty.Supported`）∧ 打开控制终端成败 | `ctty` |
 
 颜色判据链（`term.DetectProfile`）：`-p/plain` > `colors` 配置 > `TANYA_COLOR` > `NO_COLOR` > `TERM=dumb` > `StdoutTTY && VT`。`TERM=dumb` 只作用于颜色档，不再是跨能力开关。VT 由 `ctty.EnableVT` 探测（Windows 幂等开启 `ENABLE_VIRTUAL_TERMINAL_PROCESSING`；posix 恒真）。
 
@@ -109,7 +112,7 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 - **超时语义**：posix 靠 `VMIN=0/VTIME=1` 让 `readChunk` 周期返回 `(0, nil)`，编辑器借此把孤立 `Esc` 判为 Esc；Windows 无对应 read timeout，故用 `GetNumberOfConsoleInputEvents`（LazyDLL，`x/sys/windows` 未封装）轮询 5ms、1s 截止后返回 `(0, nil)`，与 posix 同义
 - **只走 VT 路径**：`ENABLE_VIRTUAL_TERMINAL_INPUT` 让控制台把按键转成 VT 字节序列，直接复用 `keyParser`；不做 `ReadConsoleInput` 回退（范围排除 conhost 与 1809 之前）
 - **按键编码补充**：`keys.go` 增 `ESC[1~`/`ESC[4~` → Home/End（WT 与部分 xterm 的编码）
-- **逃生开关**：`TANYA_NO_RAW_INPUT=1` 让 `openTerminal` 直接返回 `ErrUnsupported`，回落 Degraded（两平台通用，便于对照与故障退避）
+- **逃生开关**：`TANYA_NO_RAW_INPUT=1` 让 `openTerminal` 直接返回 `ErrUnsupported`，回落 pipe 设备（两平台通用，便于对照与故障退避）
 - **不在范围**：IME 组合串、Alt 组合键、`ESC O`（F1–F4）；粘贴按多字节序列处理（与 posix 同）
 - **实机验证清单（WT 与 ConPTY 宿主各一遍；仅部分完成，未全量覆盖，暂不跟踪）**：ghost 出现；Tab 多候选菜单（方向键选择、Esc 关闭、收起无残行）；上下键历史；`Ctrl-A/E/B/F/U/K/W/Y/T/L`；左右键与 `Home/End/Delete/Backspace` 编辑；`Ctrl+C` 中断回合、`Ctrl+D` 退出；中文输入；窗口 resize 后菜单与提示符不错位；`TANYA_NO_RAW_INPUT=1` 回落表现为整行读
 

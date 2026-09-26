@@ -1,6 +1,6 @@
 # 终端控制台层：唯一持有者、租约与事件归一
 
-状态：**规划**（2026-09-26 立项，同日修订：正名 `Console`；定稿三层分层；裁决**砍掉前台组直通与 `^Z` 子进程挂起检测**，见 §6/§8）。实施完成后与 `docs/ctty.md` 联动（本文件描述控制台层的职责与搬迁路径，`ctty.md` 继续描述平台原语清单）。
+状态：**已实施**（2026-09-26 立项并定稿，2026-09-27 S1–S7 全部落地；正名 `Console`、三层分层、裁决**砍掉前台组直通与 `^Z` 子进程挂起检测**见 §6/§8）。实施结果与偏差记在 §5/§6 的「落地记录」；`docs/ctty.md` 继续描述平台原语清单（已同步前台组与输入模式快照的删除）。
 
 ## 1 问题
 
@@ -165,7 +165,8 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 - Windows `LendFull` 落地：`CONIN$` 直通 + `IgnoreCtrlEvents` 掩蔽，按 §7 **不接 `capture`**（输出直上屏，`runFull` 的捕获参数在该平台被忽略）；`LendStdin` 按 §7 不掩蔽。未实机验证。
 - 顺带修复两处基线缺陷（S5 暴露、与行为变化无关）：①`Console` 的中断监听改为在 `newConsole` 期捕获 `ctty.Interrupted()` 通道——此前 watcher goroutine 尚未被调度时到达的信号会丢（repl 中断用例在并行跑测下假失败）；②`keyEvent` 从 `device_posix.go` 提到无 tag 的 `keys.go`——S1 拆分 device 后 `GOOS=windows go build` 基线即断（缺该符号）。
 - `interactive` 借不出不再回退前台直通，改为明确报错（`ErrNoLend` → `✗ interactive 不支持（无法借出终端）`）：回退在前台移交下线后已无意义（子进程只会拿到空 stdin 并挂起/失败）。
-- 文档待办（S7 一并改，当前尚未同步）：`AGENTS.md` 的「`interactive: true` 的 run_shell 走全 pty 桥接，仅 Linux（失败回退 `/dev/tty` + `TIOCSPGRP`）」——回退已删，改为「借不出即报错」，另补「普通 run_shell 的 stdin 为空设备、终保持前台」；`AGENTS.md` 的 `run_shell` 快照条与 `ctty` 条（前台组四原语、`SnapshotInput`/`RestoreInput` 已删）；`docs/ctty.md` 的前台组/紧急复原段；`docs/design.md`《工具》《终端输入》《测试》《终端通知》相关句；`README.md` 的 interactive 说明与「sudo/ssh 提示可直接应答」口径。
+- **未落成的设计意图（S5 后核实）**：§5 曾写「借出 LendFull 时自动挂起订阅者/让出读权」，实际代码里**没有**这层显式仲裁——`LendStdin`/`LendFull` 不触碰 `Console.Subscribe` 的订阅者，读权靠约定：空转期（Cooked）无人读、编辑器/选择器在 `BeginRead`/`EndRead` 会话内读、借出期由 `lease_linux.go` 的 pty 泵独占真实终端读。当前无并发读者，故无实际冲突（`LendStdin` 的子进程不读终端）；但**任何新增的流式期读循环（如 `docs/reasoning-live-toggle.md` 的流式期 `Ctrl+O`）必须自行在 `LendFull` 期间停读**，否则会与泵抢字节。若将来读者增多，再补显式仲裁（挂起订阅者/读权令牌）。
+- 文档同步已在 S7 完成（`AGENTS.md`/`docs/design.md`/`docs/ctty.md`/`README.md`/归档文档更正指针/`CHANGELOG.md`），详见 §9 S7 行。
 
 ## 7 平台
 
@@ -194,8 +195,8 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 | S3 | `InterruptContext` 改 `Subscribe` | 回合中断不变；「同步取快照」竞态语义保持；`-race` 并发触发用例 |
 | S4 | `tools/shell` 接 `Lease`（LendStdin 暂按现状直通、LendFull 收编 pty 泵）——纯结构搬迁 | 行为不变；`render_audit` 探针全绿 |
 | S5 | 直通与 `^Z` 检测下线：§6 下线表 + §8 行为变化全部落地（含文案） | sudo/ssh 走 interactive 实机；执行期 `^C` 中断回合；超时强杀无残留；`stty` 无残留 |
-| S6 | 清理 | 前台组原语/`SecureTerminal`/`ProcessStopped` 全仓零残留；非 Console 代码不直接调 termios/模式原语 |
-| S7 | 文档同步（`AGENTS.md`/`docs/design.md`/`docs/ctty.md`/`README.md`/`CHANGELOG.md`） | — |
+| S6 ✅ | 清理（2026-09-27 完成） | 前台组四原语/`SecureTerminal`/`InitTerminalGuard`/`ProcessStopped`/`Stopped`/`MsgStopped`/`MsgSuspended`/`SnapshotInput`/`RestoreInput`/`Handover` 全仓零残留（`rg` 复核）；`ctty.GetTermios`/`SetTermios`/`ResetModes`/`SaveCursor`/`RestoreCursor` 的调用点只剩 `readline` 的 device 与租约文件（+ 测试），非 Console 代码不再直接调模式原语 |
+| S7 ✅ | 文档同步（2026-09-27 完成）：`AGENTS.md`（原语/持有者/借出两条约束 + 结构块 + 文档段）、`docs/design.md`（架构、事实归属、《run_shell》、《终端输入》、《状态行》、《测试》）、`docs/ctty.md`（原语表/设计原则/分片/信号/验证/取舍 + 迁移段标注为历史）、`README.md`（终端与信号行为、特性句、通知句）、归档文档加「更正（2026-09-27）」指针（`interactive-tty.md`/`shell-tool.md`/`terminal-caps.md`/`windows-console-mode-restore.md`/`repl-status-append.md`）、本文件与 `CHANGELOG.md` | — |
 
 ## 10 回归与实机清单（每次改动后执行）
 
