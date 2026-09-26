@@ -71,14 +71,15 @@ func (b *syncBuf) Reset() {
 	b.buf.Reset()
 }
 
-// fakeTerm 是 repl 侧的 readline.Terminal 替身：按键序列驱动 Run，无需真实终端。
+// fakeTerm 是 repl 侧的 readline.Console 替身：按键序列驱动 Run，无需真实终端（模拟真 tty，逐键会话恒可用）。
 type fakeTerm struct {
-	keys  []readline.KeyEvent
-	idx   int
-	raw   bool
-	inKey bool
-	onKey func()
-	err   error
+	keys   []readline.KeyEvent
+	idx    int
+	raw    bool
+	noKeys bool
+	inKey  bool
+	onKey  func()
+	err    error
 }
 
 func newFakeTerm(keys ...readline.KeyEvent) *fakeTerm {
@@ -89,11 +90,19 @@ func line(s string) readline.KeyEvent {
 	return readline.KeyEvent{Code: readline.KeyLine, Text: s}
 }
 
-func (f *fakeTerm) Raw() error { f.raw = true; return nil }
+func (f *fakeTerm) BeginRead() error {
+	if f.noKeys {
+		return readline.ErrUnsupported
+	}
+	f.raw = true
+	return nil
+}
 
-func (f *fakeTerm) Restore() { f.raw = false }
+func (f *fakeTerm) EndRead() { f.raw = false }
 
 func (f *fakeTerm) Size() (readline.Size, bool) { return readline.Size{Cols: 80, Rows: 24}, true }
+
+func (f *fakeTerm) Subscribe(fn func(readline.Event)) func() { return func() {} }
 
 // typed 生成 raw 模式下的一行输入按键序列（逐字符 + 回车）。
 func typed(s string) []readline.KeyEvent {
@@ -106,7 +115,7 @@ func typed(s string) []readline.KeyEvent {
 
 func (f *fakeTerm) rewind() { f.idx = 0 }
 
-func (f *fakeTerm) ReadKey() (readline.KeyEvent, error) {
+func (f *fakeTerm) ReadEvent() (readline.Event, error) {
 	f.inKey = true
 	defer func() { f.inKey = false }()
 	if f.onKey != nil {
@@ -114,39 +123,42 @@ func (f *fakeTerm) ReadKey() (readline.KeyEvent, error) {
 	}
 	if f.idx >= len(f.keys) {
 		if f.err != nil {
-			return readline.KeyEvent{}, f.err
+			return readline.Event{}, f.err
 		}
-		return readline.KeyEvent{}, io.EOF
+		return readline.Event{}, io.EOF
 	}
 	ev := f.keys[f.idx]
 	f.idx++
-	return ev, nil
+	if ev.Code == readline.KeyCtrlC {
+		return readline.Event{Kind: readline.EventInterrupt}, nil
+	}
+	return readline.Event{Kind: readline.EventKey, Key: ev}, nil
 }
 
-func newTestREPLAgent(t *testing.T, a *agent.Agent, dev readline.Terminal) (*REPL, *syncBuf, *syncBuf) {
+func newTestREPLAgent(t *testing.T, a *agent.Agent, dev readline.Console) (*REPL, *syncBuf, *syncBuf) {
 	t.Helper()
 	out, errb := &syncBuf{}, &syncBuf{}
 	st := NewStreams(out, errb, modeRich)
-	r, err := NewREPL(a, "› ", WithStreams(st), WithTerminal(dev, false))
+	r, err := NewREPL(a, "› ", WithStreams(st), WithConsole(dev))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return r, out, errb
 }
 
-func newTestREPL(t *testing.T, dev readline.Terminal) (*REPL, *syncBuf, *syncBuf) {
+func newTestREPL(t *testing.T, dev readline.Console) (*REPL, *syncBuf, *syncBuf) {
 	return newTestREPLAgent(t, nil, dev)
 }
 
 // newTestREPLMode 以指定输出模式与 profile 构造（profile 需在建 REPL 之前设置：构造期会快照）。
-func newTestREPLMode(t *testing.T, dev readline.Terminal, mode outMode, prof term.Profile) (*REPL, *syncBuf, *syncBuf) {
+func newTestREPLMode(t *testing.T, dev readline.Console, mode outMode, prof term.Profile) (*REPL, *syncBuf, *syncBuf) {
 	t.Helper()
 	out, errb := &syncBuf{}, &syncBuf{}
 	st := NewStreams(out, errb, mode)
 	old := term.GetProfile()
 	term.SetProfile(prof)
 	t.Cleanup(func() { term.SetProfile(old) })
-	r, err := NewREPL(nil, "› ", WithStreams(st), WithTerminal(dev, false))
+	r, err := NewREPL(nil, "› ", WithStreams(st), WithConsole(dev))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,6 @@
 
 package readline
 
-func openTerminal() (Terminal, error) {
+func openTerminal() (device, error) {
 	return nil, ErrUnsupported
 }

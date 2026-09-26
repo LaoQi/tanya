@@ -28,7 +28,7 @@ type windowsConsole struct {
 	keys  keySource
 }
 
-func openTerminal() (Terminal, error) {
+func openTerminal() (device, error) {
 	return openTerminalFile(os.Stdin, os.Stdout)
 }
 
@@ -92,7 +92,13 @@ func (t *windowsConsole) readChunk(p []byte) (int, error) {
 	}
 }
 
-func (t *windowsConsole) ReadKey() (KeyEvent, error) { return t.keys.readKey() }
+func (t *windowsConsole) readEvent() (Event, error) {
+	ev, err := t.keys.readKey()
+	if err != nil {
+		return Event{}, err
+	}
+	return keyEvent(ev), nil
+}
 
 func consoleInputEvents(fd int) (int, bool) {
 	var n uint32

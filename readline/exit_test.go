@@ -38,7 +38,7 @@ func TestKeySourceExitBeatsQueuedInput(t *testing.T) {
 func TestPipeDeviceStopsOnExitRequest(t *testing.T) {
 	stubExitRequested(t, func() bool { return true })
 	d := &pipeDevice{r: bufio.NewReader(strings.NewReader("x\n"))}
-	if _, err := d.ReadKey(); err != ErrExited {
+	if _, err := d.readEvent(); err != ErrExited {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -46,7 +46,7 @@ func TestPipeDeviceStopsOnExitRequest(t *testing.T) {
 func TestEditorStopsOnExitRequest(t *testing.T) {
 	stubExitRequested(t, func() bool { return true })
 	f := &fakeTerm{events: []KeyEvent{{Code: KeyLine, Text: "x"}}, out: &bytes.Buffer{}}
-	ed := NewEditor(f, true)
+	ed := NewEditor(f)
 	if _, err := ed.Readline("› "); err != ErrExited {
 		t.Fatalf("got %v", err)
 	}

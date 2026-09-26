@@ -16,7 +16,7 @@ type posixTTY struct {
 	keys  keySource
 }
 
-func openTerminal() (Terminal, error) {
+func openTerminal() (device, error) {
 	return openTerminalFile(os.Stdin, os.Stdout)
 }
 
@@ -97,4 +97,17 @@ func (t *posixTTY) hungUp() bool {
 	}
 }
 
-func (t *posixTTY) ReadKey() (KeyEvent, error) { return t.keys.readKey() }
+func (t *posixTTY) readEvent() (Event, error) {
+	ev, err := t.keys.readKey()
+	if err != nil {
+		return Event{}, err
+	}
+	return keyEvent(ev), nil
+}
+
+func keyEvent(ev KeyEvent) Event {
+	if ev.Code == KeyCtrlC {
+		return Event{Kind: EventInterrupt}
+	}
+	return Event{Kind: EventKey, Key: ev}
+}

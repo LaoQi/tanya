@@ -96,7 +96,7 @@ func newArchiveREPL(t *testing.T, a *agent.Agent, keys ...readline.KeyEvent) (*R
 	ttyProfile(t, term.Profile{TTY: true, Colors: term.LevelNone})
 	dev := newFakeTerm(keys...)
 	out, errb := &syncBuf{}, &syncBuf{}
-	r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, modeRich)), WithTerminal(dev, true))
+	r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, modeRich)), WithConsole(dev))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestHandleCommandArchiveNonInteractive(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			ttyProfile(t, c.prof)
 			out, errb := &syncBuf{}, &syncBuf{}
-			r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, c.mode)), WithTerminal(newFakeTerm(line("y")), c.raw))
+			r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, c.mode)), WithConsole(&fakeTerm{keys: []readline.KeyEvent{line("y")}, noKeys: !c.raw}))
 			if err != nil {
 				t.Fatal(err)
 			}
