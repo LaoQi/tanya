@@ -298,7 +298,7 @@ func (r *REPL) Run() error {
 }
 
 func (r *REPL) ask(q string) {
-	readline.SecureTerminal()
+	r.con.Sane()
 	ctx, done := InterruptContext(r.con)
 	t := r.beginTurn(done)
 	err := r.agent.Ask(ctx, q, t.Handle)

@@ -121,7 +121,6 @@ type Result struct {
 	ExitCode    int
 	TimedOut    bool
 	Interrupted bool
-	Stopped     bool
 	NotStarted  bool
 	Duration    time.Duration
 }
@@ -147,9 +146,6 @@ func (r *Result) String() string {
 	}
 	if r.TimedOut {
 		fmt.Fprintf(&b, MsgTimedOut+"\n")
-	}
-	if r.Stopped {
-		b.WriteString(MsgStopped + "\n")
 	}
 	if r.Err != "" {
 		fmt.Fprintf(&b, MsgErrLine+"\n", r.Err)
@@ -252,36 +248,6 @@ func shellArgs(p *profile, command string, interactive bool) []string {
 	return args
 }
 
-const (
-	stopPollInterval = 200 * time.Millisecond
-	stopPollHits     = 2
-)
-
-func waitShell(cmd *exec.Cmd, stopped *bool) error {
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	tick := time.NewTicker(stopPollInterval)
-	defer tick.Stop()
-	hits := 0
-	for {
-		select {
-		case err := <-done:
-			return err
-		case <-tick.C:
-			if platform.ProcessStopped(cmd.Process.Pid) {
-				hits++
-				if hits >= stopPollHits {
-					*stopped = true
-					platform.KillGroup(cmd)
-					return <-done
-				}
-			} else {
-				hits = 0
-			}
-		}
-	}
-}
-
 func runForeground(ctx context.Context, con Console, command string, timeoutSec int, p *profile, dir string, interactive bool) *Result {
 	res := &Result{Command: command, Cwd: dir}
 	lease, _ := con.LendStdin()
@@ -319,8 +285,7 @@ func runForeground(ctx context.Context, con Console, command string, timeoutSec 
 		res.Duration = time.Since(start)
 		return res
 	}
-	lease.Handover(cmd.Process.Pid)
-	err := waitShell(cmd, &res.Stopped)
+	err := cmd.Wait()
 	stdout.finish()
 	stderr.finish()
 	res.Duration = time.Since(start)
@@ -330,7 +295,6 @@ func runForeground(ctx context.Context, con Console, command string, timeoutSec 
 		res.Interrupted = true
 	case err != nil && runCtx.Err() == context.DeadlineExceeded:
 		res.TimedOut = true
-	case res.Stopped:
 	case err != nil:
 		if code, ok := platform.ExitCode(err); ok {
 			res.ExitCode = code
@@ -372,8 +336,7 @@ func runFull(ctx context.Context, con Console, command string, timeoutSec int, p
 		}
 		return res, true
 	}
-	lease.Handover(cmd.Process.Pid)
-	err = waitShell(cmd, &res.Stopped)
+	err = cmd.Wait()
 	lease.Release()
 	capture.finish()
 	res.Duration = time.Since(start)
@@ -383,7 +346,6 @@ func runFull(ctx context.Context, con Console, command string, timeoutSec int, p
 		res.Interrupted = true
 	case err != nil && runCtx.Err() == context.DeadlineExceeded:
 		res.TimedOut = true
-	case res.Stopped:
 	case err != nil:
 		if code, ok := platform.ExitCode(err); ok {
 			res.ExitCode = code

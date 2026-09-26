@@ -23,6 +23,7 @@ type fakeTerm struct {
 
 func (f *fakeTerm) BeginRead() error { f.raw = true; f.rawCalls++; return nil }
 func (f *fakeTerm) EndRead()         { f.raw = false }
+func (f *fakeTerm) Sane()            { f.raw = false }
 func (f *fakeTerm) Size() (Size, bool) {
 	cols := f.cols
 	if cols <= 0 {
@@ -36,7 +37,7 @@ func (f *fakeTerm) Size() (Size, bool) {
 }
 func (f *fakeTerm) Subscribe(fn func(Event)) func() { return func() {} }
 
-func (f *fakeTerm) LendStdin() (Lease, error) { return nullLease{}, nil }
+func (f *fakeTerm) LendStdin() (Lease, error) { return nil, ErrUnsupported }
 
 func (f *fakeTerm) LendFull(cmd *exec.Cmd, capture io.Writer) (Lease, error) {
 	return nil, ErrUnsupported

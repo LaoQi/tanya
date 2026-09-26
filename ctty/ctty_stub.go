@@ -8,14 +8,6 @@ import (
 
 const Supported = false
 
-func OwnPgrp() int { return -1 }
-
-func ForegroundPgrp(fd int) (int, bool) { return 0, false }
-
-func SetForeground(fd, pgrp int) bool { return false }
-
-func IsForeground(fd int) bool { return false }
-
 func IgnoreJobSignals() {}
 
 func ProtectJobSignals() {}

@@ -56,15 +56,6 @@ type fullLease struct {
 
 func (l *fullLease) Stdin() *os.File { return l.slave }
 
-func (l *fullLease) Handover(pid int) bool {
-	_ = pid
-	if l.slave != nil {
-		l.slave.Close()
-		l.slave = nil
-	}
-	return false
-}
-
 func (l *fullLease) Release() {
 	l.b.stop()
 	if l.slave != nil {
@@ -92,16 +83,10 @@ func (b *bridgeTTY) prepare(cmd *exec.Cmd) (*os.File, error) {
 	b.stopOnce = sync.Once{}
 	b.relOnce = sync.Once{}
 	if b.tty == nil {
-		SecureTerminal()
 		tty, err := ctty.Open()
 		if err != nil {
 			b.release()
 			return nil, err
-		}
-		if !ctty.IsForeground(int(tty.Fd())) {
-			tty.Close()
-			b.release()
-			return nil, ErrUnsupported
 		}
 		b.tty = tty
 		b.ownTTY = true

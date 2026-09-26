@@ -110,20 +110,21 @@ type Event struct {
 type Console interface {
     BeginRead() error              // 进入 Reader 会话（切 Keys；S2 已落地，device 不支持则报错）
     EndRead()                      // 退出会话（复原模式）
+    Sane()                         // 自愈：终端复原为 Sane（纯模式复原，无前台组抢回；S5 落地）
     ReadEvent() (Event, error)     // Reader：同步拉取（编辑器/选择器循环）
     Subscribe(fn func(Event)) (cancel func())  // 后台订阅（InterruptContext、流式期监听）
     Size() (Size, bool)
-    LendStdin() (Lease, error)     // 普通工具：子进程 stdin=/dev/null，不直通控制终端（S4）
-    LendFull(capture io.Writer) (Lease, error) // interactive：posix pty 泵+输出捕获 / windows 直通+掩蔽（S4）
+    LendStdin() (Lease, error)     // 普通工具：子进程 stdin=/dev/null + 终端锚点，不直通、不移交（S5）
+    LendFull(cmd *exec.Cmd, capture io.Writer) (Lease, error) // interactive：posix pty 泵+输出捕获 / windows 直通+掩蔽（S4）
 }
 
 type Lease interface {
-    Stdin() *os.File // 交给子进程的 stdin（LendFull posix: pty slave；windows: CONIN$；LendStdin: /dev/null）
-    Release()        // 复原模式、光标锚点、泵停——机制全在 device
+    Stdin() *os.File // 交给子进程的 stdin（LendStdin: /dev/null；LendFull posix: pty slave / windows: CONIN$）
+    Release()        // 停泵、复原模式、光标锚点、termios——机制全在租约自身
 }
 ```
 
-落地记录：S2 实现 `BeginRead`/`EndRead`/`ReadEvent`/`Subscribe`/`Size`；S4 实现 `LendStdin`/`LendFull`（`readline/lease*.go` 平台分片，pty 泵自 `bridge_linux.go` 收编；`Lender` 未单列接口，`Console` 直接含之）。`Console` 的实现值满足 `tools/shell` 的同名 `Console`/`Lease` 接口，因 Go 接口方法签名要求精确匹配，`main` 以 `consoleForShell` 薄适配器完成跨包注入（同 `Bridge` 先例）。
+落地记录：S5 落地 `Sane`（device 三实现：posix 幂等置回 sane 位、windows 复原开终端时的 console mode、pipe no-op）与 `LendStdin` 的最终语义（stdin=`os.DevNull`，posix 另持终端锚点：借出前 `SaveCursor`、`Release` 时 termios 复原 + `ResetModes` + `RestoreCursor`，无前台移交、无 isForeground 门控）；S2 实现 `BeginRead`/`EndRead`/`ReadEvent`/`Subscribe`/`Size`；S4 实现 `LendStdin`/`LendFull`（`readline/lease*.go` 平台分片，pty 泵自 `bridge_linux.go` 收编；`Lender` 未单列接口，`Console` 直接含之）。`Console` 的实现值满足 `tools/shell` 的同名 `Console`/`Lease` 接口，因 Go 接口方法签名要求精确匹配，`main` 以 `consoleForShell` 薄适配器完成跨包注入（同 `Bridge` 先例）。
 
 L1 device 职责（接口包内私有，各分片一份完整实现）：模式切换、单读者读 + 唤醒、**中断归一**（`0x03` 字节与信号面汇成同一通知）、`Resize`/`Hangup` 产出（能力可选，产不出就是没有该事件）、`LendStdin`/`LendFull` 的机制实现、紧急复原。读循环只在 Reader 活跃期存在（空转期读会抢走子进程输入），唤醒用现有机制收敛（编辑器 `VMIN=0/VTIME=1` 轮询、桥接 wake pipe，二者归一为 device 内部实现细节）。
 
@@ -142,21 +143,29 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 | `repl.InterruptContext`（订阅 `ctty.Interrupted`） | `Subscribe(EventInterrupt)`；「同步取快照」竞态语义保持 |
 | `repl/repl.go` 的 `readline.SecureTerminal()` | Console 自愈（`Sane`，纯模式复原） |
 | `readline/editor.go` 的 `Raw`/`Restore`/`ReadKey` | `ReadEvent` 循环 |
-| `tools/shell` 的借出链（快照/锚点/复位/掩蔽） | `LendStdin`/`LendFull` → `Lease`（时序契约进 device，保序搬迁） |
+| `tools/shell` 的借出链（快照/锚点/复位/掩蔽） | `LendStdin`/`LendFull` → `Lease`；posix 的快照/锚点/复位留在 `readline` 的租约里（与 stdin 直通无关），Windows 掩蔽随 `LendFull` |
 
 下线（2026-09-26 裁决）：
 
 | 现状 | 处置 |
 |---|---|
 | `ctty` 的 `OwnPgrp`/`ForegroundPgrp`/`SetForeground`/`IsForeground` | 删除——前台组机制整体退出设计 |
-| `readline/secure.go` 的 `InitTerminalGuard`/`SecureTerminal` 抢回 | 删除（tanya 恒前台，无需抢回；自愈收敛为纯 termios 复原） |
+| `readline/secure.go` 的 `InitTerminalGuard`/`SecureTerminal` 抢回 | 删除（tanya 恒前台，无需抢回；自愈收敛为 Console 的 `Sane`，纯模式复原） |
 | `runForeground` 的 stdin=tty 直通 + 前台移交/归还 + `isForeground` 门控 | `LendStdin` = stdin `/dev/null`；移交/归还链删除 |
 | `waitShell` 挂起轮询 + `ProcessStopped`（linux/darwin 分片）+ `Stopped` 字段 + `MsgStopped` | 删除——不做 `^Z` 子进程支持；interactive 内子进程被停即等超时强杀 |
-| `posixCapabilities` 文案「sudo/ssh 提示写入控制终端可直接应答」 | 改为「交互式程序需 `interactive: true`」 |
+| `posixCapabilities` 文案「sudo/ssh 提示写入控制终端可直接应答」 | 改为「交互式程序需 `interactive: true`」（Windows 文案同步改为「stdin 接控制台、输入输出直上屏」） |
 | `EventSuspend`/`EventExit`（初版概念） | 不设（前者无消费者，后者走 `ctty` 信号面） |
 | `emergencyRestore` 的 `IsForeground` 门控 | 简化为无条件复原（tanya 恒前台） |
 
 保留不动：`Setpgid` + `KillGroup` 树杀（与前台组无关）、`ProtectJobSignals`（SIGTSTP 吞没 + SIGTTIN/TTOU 忽略，自保）、`IgnoreCtrlEvents`（Windows LendFull 用）。
+
+**S5 落地记录**（2026-09-27，本节清单全部执行）：
+
+- 与方案的差异一处：`LendStdin` 的**终端锚点保留**（借出前 `SaveCursor`、`Release` 时 termios 复原 + `ResetModes` + `RestoreCursor`）。锚点是「子进程继承 stdout、可往屏幕写转义」的保护，与 stdin 直通无关——`render_audit` 的 `clean-tty-scrollregion`/`clean-tty-modes`/`clean-alt-screen-exit`/`clean-tty-cup` 四条门正由它把关，一并删掉会全红。删掉的只有直通/移交/isForeground 门控/`ctty.SnapshotInput`-`RestoreInput`（随租约无消费者）。
+- Windows `LendFull` 落地：`CONIN$` 直通 + `IgnoreCtrlEvents` 掩蔽，按 §7 **不接 `capture`**（输出直上屏，`runFull` 的捕获参数在该平台被忽略）；`LendStdin` 按 §7 不掩蔽。未实机验证。
+- 顺带修复两处基线缺陷（S5 暴露、与行为变化无关）：①`Console` 的中断监听改为在 `newConsole` 期捕获 `ctty.Interrupted()` 通道——此前 watcher goroutine 尚未被调度时到达的信号会丢（repl 中断用例在并行跑测下假失败）；②`keyEvent` 从 `device_posix.go` 提到无 tag 的 `keys.go`——S1 拆分 device 后 `GOOS=windows go build` 基线即断（缺该符号）。
+- `interactive` 借不出不再回退前台直通，改为明确报错（`ErrNoLend` → `✗ interactive 不支持（无法借出终端）`）：回退在前台移交下线后已无意义（子进程只会拿到空 stdin 并挂起/失败）。
+- 文档待办（S7 一并改，当前尚未同步）：`AGENTS.md` 的「`interactive: true` 的 run_shell 走全 pty 桥接，仅 Linux（失败回退 `/dev/tty` + `TIOCSPGRP`）」——回退已删，改为「借不出即报错」，另补「普通 run_shell 的 stdin 为空设备、终保持前台」；`AGENTS.md` 的 `run_shell` 快照条与 `ctty` 条（前台组四原语、`SnapshotInput`/`RestoreInput` 已删）；`docs/ctty.md` 的前台组/紧急复原段；`docs/design.md`《工具》《终端输入》《测试》《终端通知》相关句；`README.md` 的 interactive 说明与「sudo/ssh 提示可直接应答」口径。
 
 ## 7 平台
 
@@ -165,7 +174,7 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 - **windows**：`Keys`=console mode 映射（**关 `ENABLE_PROCESSED_INPUT`**、开 VT 输入模式，`^C` 与 posix 同走字节路径在 device 归一——与现状实现一致）、`Resize`/`Hangup` 暂缺（picker 轮询 `Size` 兜底）、LendFull=`CONIN$` 直通+掩蔽（capture 不支持，输出直上屏）、LendStdin=null 且**不掩蔽**（`^C` 双方收到，等价中断回合）。未实机验证，验收底线=与现状行为一致。
 - **pipe**（全部非 tty 环境：CI/重定向/全部单测/stub 平台）：读=合成整行 `Key` 事件、无模式、无 `Resize`/`Hangup`、中断走信号面——device 一等实现，非降级分支。
 
-## 8 行为变化（S5 落地，独立验收、独立提交）
+## 8 行为变化（S5 已落地，独立验收、独立提交）
 
 | # | 变化 | 说明 |
 |---|---|---|

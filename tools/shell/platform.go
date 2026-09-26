@@ -15,7 +15,6 @@ type shellPlatform struct {
 	KillGroup      func(*exec.Cmd) error
 	ProtectSignals func()
 	ExitCode       func(error) (int, bool)
-	ProcessStopped func(int) bool
 	Programs       []string
 	Capabilities   func(*profile) string
 	DecodeOutput   func([]byte) string
@@ -41,9 +40,6 @@ func fillDefaults(p shellPlatform) shellPlatform {
 	if p.ExitCode == nil {
 		p.ExitCode = defaultExitCode
 	}
-	if p.ProcessStopped == nil {
-		p.ProcessStopped = neverStopped
-	}
 	if p.Capabilities == nil {
 		p.Capabilities = noopCapabilities
 	}
@@ -58,8 +54,6 @@ func identityOutput(b []byte) string { return string(b) }
 func noopConfigureGroup(*exec.Cmd) {}
 
 func noopProtectSignals() {}
-
-func neverStopped(int) bool { return false }
 
 func noopCapabilities(*profile) string { return "" }
 

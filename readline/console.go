@@ -37,6 +37,7 @@ type Event struct {
 type Console interface {
 	BeginRead() error
 	EndRead()
+	Sane()
 	ReadEvent() (Event, error)
 	Subscribe(fn func(Event)) (cancel func())
 	Size() (Size, bool)
@@ -47,6 +48,7 @@ type Console interface {
 type device interface {
 	Raw() error
 	Restore()
+	Sane()
 	readEvent() (Event, error)
 	Size() (Size, bool)
 }
@@ -62,14 +64,15 @@ func NewConsole() Console {
 }
 
 type consoleImpl struct {
-	dev     device
-	mu      sync.Mutex
-	subs    []func(Event)
-	pending bool
+	dev       device
+	interrupt <-chan struct{}
+	mu        sync.Mutex
+	subs      []func(Event)
+	pending   bool
 }
 
 func newConsole(dev device) *consoleImpl {
-	return &consoleImpl{dev: dev}
+	return &consoleImpl{dev: dev, interrupt: ctty.Interrupted()}
 }
 
 func (c *consoleImpl) signalInterrupt() {
@@ -86,18 +89,22 @@ func (c *consoleImpl) signalInterrupt() {
 }
 
 func (c *consoleImpl) watchSignals() {
+	ch := c.interrupt
 	for {
-		<-ctty.Interrupted()
+		<-ch
 		c.signalInterrupt()
 		if ctty.Exiting() {
 			return
 		}
+		ch = ctty.Interrupted()
 	}
 }
 
 func (c *consoleImpl) BeginRead() error { return c.dev.Raw() }
 
 func (c *consoleImpl) EndRead() { c.dev.Restore() }
+
+func (c *consoleImpl) Sane() { c.dev.Sane() }
 
 func (c *consoleImpl) Size() (Size, bool) { return c.dev.Size() }
 

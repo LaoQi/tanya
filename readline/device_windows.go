@@ -65,6 +65,12 @@ func (t *windowsConsole) Restore() {
 	ctty.SetConsoleMode(int(t.in.Fd()), t.saved)
 }
 
+func (t *windowsConsole) Sane() {
+	if t.saved != 0 {
+		ctty.SetConsoleMode(int(t.in.Fd()), t.saved)
+	}
+}
+
 func (t *windowsConsole) Size() (Size, bool) {
 	cols, rows, ok := ctty.Size(int(t.out.Fd()))
 	if !ok {

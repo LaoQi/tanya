@@ -6,14 +6,13 @@ import (
 	"github.com/LaoQi/tanya/agent"
 )
 
-var ErrNoLend = errors.New(agent.MsgErrPrefix + "interactive 不支持此平台")
+var ErrNoLend = errors.New(agent.MsgErrPrefix + "interactive 不支持（无法借出终端）")
 
 const (
 	MsgBadCwd              = agent.MsgErrPrefix + "cwd 不存在或不是目录: %s"
 	MsgInterruptNotStarted = agent.MsgErrPrefix + "已中断（命令未执行）"
 	MsgInterruptRunning    = agent.MsgErrPrefix + "已中断（进程已终止，输出可能不完整）"
 	MsgTimedOut            = agent.MsgErrPrefix + "执行超时"
-	MsgStopped             = agent.MsgErrPrefix + "进程被终端挂起(Ctrl+Z)已终止"
 	MsgErrLine             = agent.MsgErrPrefix + "%s"
 	MsgNoShellFmt          = "未找到可用 shell（已尝试 %s），请安装或在配置中指定 shell:"
 	MsgShellOverrideFmt    = "配置的 shell %q 不可执行，请检查 shell: 或 TANYA_SHELL"

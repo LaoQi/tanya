@@ -2,64 +2,28 @@
 
 package readline
 
-import (
-	"os"
+import "github.com/LaoQi/tanya/ctty"
 
-	"github.com/LaoQi/tanya/ctty"
-)
+var lendOpenTTY = ctty.Open
 
-var (
-	lendOpenTTY  = ctty.Open
-	lendIsForegr = ctty.IsForeground
-)
-
-type stdinLease struct {
-	tty      *os.File
-	saved    ctty.InputModes
-	hasSaved bool
-	anchored bool
-	handed   bool
-}
-
-func (l *stdinLease) Stdin() *os.File { return l.tty }
-
-func (l *stdinLease) Handover(pid int) bool {
-	if l.tty == nil || !l.anchored {
-		return false
-	}
-	l.handed = ctty.SetForeground(int(l.tty.Fd()), pid)
-	return l.handed
-}
-
-func (l *stdinLease) Release() {
-	if l.tty == nil {
-		return
-	}
-	if l.hasSaved {
-		ctty.RestoreInput(int(l.tty.Fd()), l.saved)
-	}
-	if l.handed {
-		ctty.SetForeground(int(l.tty.Fd()), ctty.OwnPgrp())
-	}
-	if l.anchored && lendIsForegr(int(l.tty.Fd())) {
-		ctty.ResetModes(l.tty)
-		ctty.RestoreCursor(l.tty)
-	}
-	l.tty.Close()
-	l.tty = nil
-}
-
-func lendStdinImpl() (Lease, error) {
+func anchorTerminal() func() {
 	tty, err := lendOpenTTY()
 	if err != nil || tty == nil {
-		return nullLease{}, nil
+		return nil
 	}
-	l := &stdinLease{tty: tty}
-	if s, ok := ctty.SnapshotInput(int(tty.Fd())); ok {
-		l.saved, l.hasSaved = s, true
+	fd := int(tty.Fd())
+	saved, savedErr := ctty.GetTermios(fd)
+	hasSaved := savedErr == nil
+	if !ctty.SaveCursor(tty) {
+		tty.Close()
+		return nil
 	}
-	if lendIsForegr(int(tty.Fd())) {
-		l.anchored = ctty.SaveCursor(tty)
+	return func() {
+		if hasSaved {
+			_ = ctty.SetTermios(fd, saved)
+		}
+		ctty.ResetModes(tty)
+		ctty.RestoreCursor(tty)
+		tty.Close()
 	}
-	return l, nil
 }

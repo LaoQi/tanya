@@ -140,8 +140,6 @@ func main() {
 	}
 	shell.ProtectTerminalSignals()
 	ctty.WatchSignals()
-	readline.InitTerminalGuard()
-	readline.SecureTerminal()
 	inv, err := shell.Resolve(cfg.Shell)
 	if err != nil {
 		st.FailErr("", err)

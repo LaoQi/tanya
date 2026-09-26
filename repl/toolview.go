@@ -391,8 +391,6 @@ func shellStatus(r *shell.Result) string {
 		return MsgInterrupt
 	case r.TimedOut:
 		return MsgTimeout
-	case r.Stopped:
-		return MsgSuspended
 	case r.Err != "":
 		return fmt.Sprintf(MsgToolErr, r.Err)
 	}

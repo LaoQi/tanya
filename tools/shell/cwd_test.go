@@ -28,6 +28,17 @@ func shellStdout(res *Result) string {
 	return b.String()
 }
 
+func shellOut(res *Result) string {
+	var b strings.Builder
+	for _, c := range res.Stdout {
+		b.WriteString(c.Data)
+	}
+	for _, c := range res.Stderr {
+		b.WriteString(c.Data)
+	}
+	return b.String()
+}
+
 func TestRunShellCwdDefault(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {

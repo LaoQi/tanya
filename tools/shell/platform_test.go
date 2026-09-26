@@ -21,7 +21,7 @@ func TestPlatformComplete(t *testing.T) {
 		}
 	}
 	if platform.ConfigureGroup == nil || platform.KillGroup == nil || platform.ProtectSignals == nil ||
-		platform.ExitCode == nil || platform.ProcessStopped == nil || platform.Capabilities == nil ||
+		platform.ExitCode == nil || platform.Capabilities == nil ||
 		platform.DecodeOutput == nil {
 		t.Errorf("平台能力存在缺项: %+v", platform)
 	}
@@ -35,7 +35,7 @@ func TestPlatformComplete(t *testing.T) {
 func TestFillDefaults(t *testing.T) {
 	p := fillDefaults(shellPlatform{})
 	if p.ConfigureGroup == nil || p.KillGroup == nil || p.ProtectSignals == nil ||
-		p.ExitCode == nil || p.ProcessStopped == nil || p.Capabilities == nil ||
+		p.ExitCode == nil || p.Capabilities == nil ||
 		p.DecodeOutput == nil {
 		t.Fatalf("零值表应补全函数字段: %+v", p)
 	}
@@ -47,9 +47,6 @@ func TestFillDefaults(t *testing.T) {
 	p.ProtectSignals()
 	if got := p.Capabilities(&profile{Name: "bash", Kind: KindPosix}); got != "" {
 		t.Errorf("默认能力句应为空: %q", got)
-	}
-	if p.ProcessStopped(1) {
-		t.Error("默认挂起探测应恒 false")
 	}
 	if err := p.KillGroup(&exec.Cmd{}); err != os.ErrProcessDone {
 		t.Errorf("默认杀进程应返回 ErrProcessDone: %v", err)
