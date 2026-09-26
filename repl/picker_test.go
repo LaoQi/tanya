@@ -44,9 +44,9 @@ func TestPickerConfirmAndCancel(t *testing.T) {
 		t.Error("Enter 应确认")
 	}
 	p2 := &sessionPicker{items: testSessions(3)}
-	p2.handle(readline.KeyEvent{Code: readline.KeyCtrlC})
+	p2.handle(readline.KeyEvent{Code: readline.KeyCtrlD})
 	if !p2.done || !p2.cancel {
-		t.Error("Ctrl+C 应取消")
+		t.Error("Ctrl+D 应取消")
 	}
 	p3 := &sessionPicker{items: testSessions(3)}
 	p3.handle(readline.KeyEvent{Code: readline.KeyRune, Rune: 'q'})
@@ -77,7 +77,7 @@ func TestPickerUsesWriter(t *testing.T) {
 	list := testSessions(2)
 	term := newFakeTerm(readline.KeyEvent{Code: readline.KeyDown}, readline.KeyEvent{Code: readline.KeyEnter})
 	var buf syncBuf
-	idx, ok := pickSession(term, list, &buf, testSem())
+	idx, ok, _ := pickSession(term, list, &buf, testSem())
 	if !ok || idx != 1 {
 		t.Fatalf("应确认第 2 项: idx=%d ok=%v", idx, ok)
 	}

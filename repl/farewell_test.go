@@ -14,7 +14,7 @@ func newFarewellREPL(t *testing.T, a *agent.Agent, mode outMode) (*REPL, *syncBu
 	t.Helper()
 	out := &syncBuf{}
 	st := NewStreams(out, &syncBuf{}, mode)
-	r, err := NewREPL(a, "› ", WithStreams(st), WithTerminal(newFakeTerm(), false))
+	r, err := NewREPL(a, "› ", WithStreams(st), WithConsole(newFakeTerm()))
 	if err != nil {
 		t.Fatal(err)
 	}

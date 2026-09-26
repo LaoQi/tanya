@@ -1,6 +1,7 @@
 package readline
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	rstyle "github.com/LaoQi/tanya/render/style"
@@ -19,8 +20,8 @@ type fakeTerm struct {
 	rows     int
 }
 
-func (f *fakeTerm) Raw() error { f.raw = true; f.rawCalls++; return nil }
-func (f *fakeTerm) Restore()   { f.raw = false }
+func (f *fakeTerm) BeginRead() error { f.raw = true; f.rawCalls++; return nil }
+func (f *fakeTerm) EndRead()         { f.raw = false }
 func (f *fakeTerm) Size() (Size, bool) {
 	cols := f.cols
 	if cols <= 0 {
@@ -32,18 +33,22 @@ func (f *fakeTerm) Size() (Size, bool) {
 	}
 	return Size{Cols: cols, Rows: rows}, true
 }
-func (f *fakeTerm) ReadKey() (KeyEvent, error) {
+func (f *fakeTerm) Subscribe(fn func(Event)) func() { return func() {} }
+func (f *fakeTerm) ReadEvent() (Event, error) {
 	if len(f.events) == 0 {
-		return KeyEvent{}, io.EOF
+		return Event{}, io.EOF
 	}
 	ev := f.events[0]
 	f.events = f.events[1:]
-	return ev, nil
+	if ev.Code == KeyCtrlC {
+		return Event{Kind: EventInterrupt}, nil
+	}
+	return Event{Kind: EventKey, Key: ev}, nil
 }
 
 func newFakeEditor(events ...KeyEvent) (*Editor, *fakeTerm, *bytes.Buffer) {
 	f := &fakeTerm{events: events, out: &bytes.Buffer{}}
-	ed := NewEditor(f, true)
+	ed := NewEditor(f)
 	ed.SetStyles(rstyle.Style{Fg: rstyle.Color16(8)}, rstyle.Style{Attr: rstyle.AttrReverse})
 	return ed, f, f.out
 }
@@ -149,12 +154,12 @@ func TestEditorRenderOutput(t *testing.T) {
 	}
 }
 
-func TestEditorDegraded(t *testing.T) {
-	f := &fakeTerm{events: []KeyEvent{{Code: KeyLine, Text: "piped input"}}, out: &bytes.Buffer{}}
-	ed := NewEditor(f, false)
+func TestEditorPipe(t *testing.T) {
+	ed := NewEditor(newConsole(&pipeDevice{r: bufio.NewReader(strings.NewReader("piped input\n"))}))
+	ed.SetOutput(&bytes.Buffer{})
 	line, err := ed.Readline("> ")
 	if err != nil || line != "piped input" {
-		t.Fatalf("降级模式: %q %v", line, err)
+		t.Fatalf("管道设备: %q %v", line, err)
 	}
 }
 
@@ -240,7 +245,7 @@ func TestEditorCtrlBFAndCtrlL(t *testing.T) {
 func TestEditorRenderWrap(t *testing.T) {
 	f := &fakeTerm{cols: 10, out: &bytes.Buffer{}}
 	f.events = append(runes("abcdefghij"), KeyEvent{Code: KeyEnter})
-	ed := NewEditor(f, true)
+	ed := NewEditor(f)
 	ed.SetOutput(f.out)
 	if _, err := ed.Readline("> "); err != nil {
 		t.Fatal(err)
@@ -256,7 +261,7 @@ func TestEditorRenderWrap(t *testing.T) {
 func TestEditorRenderWrapCursorHome(t *testing.T) {
 	ft := &fakeTerm{cols: 10, out: &bytes.Buffer{}}
 	ft.events = append(runes("abcdefghij"), KeyEvent{Code: KeyHome}, KeyEvent{Code: KeyEnter})
-	ed := NewEditor(ft, true)
+	ed := NewEditor(ft)
 	ed.SetOutput(ft.out)
 	if _, err := ed.Readline("> "); err != nil {
 		t.Fatal(err)
@@ -269,7 +274,7 @@ func TestEditorRenderWrapCursorHome(t *testing.T) {
 func TestEditorRenderExactCols(t *testing.T) {
 	ft := &fakeTerm{cols: 10, out: &bytes.Buffer{}}
 	ft.events = append(runes("abcdefghijkl"), KeyEvent{Code: KeyEnter})
-	ed := NewEditor(ft, true)
+	ed := NewEditor(ft)
 	ed.SetOutput(ft.out)
 	if _, err := ed.Readline("12345678"); err != nil {
 		t.Fatal(err)
@@ -282,7 +287,7 @@ func TestEditorRenderExactCols(t *testing.T) {
 
 func TestEditorRenderWideWrapCursor(t *testing.T) {
 	ft := &fakeTerm{cols: 10, out: &bytes.Buffer{}}
-	ed := NewEditor(ft, true)
+	ed := NewEditor(ft)
 	ed.SetOutput(ft.out)
 	ed.buf = []rune("abcdefghi中")
 	ed.pos = len(ed.buf)
@@ -296,7 +301,7 @@ func TestEditorCtrlLScrollsOneScreen(t *testing.T) {
 	for _, rows := range []int{1, 5, 24, 50} {
 		f := &fakeTerm{rows: rows, out: &bytes.Buffer{}}
 		f.events = append(runes("hi"), KeyEvent{Code: KeyCtrlL})
-		ed := NewEditor(f, true)
+		ed := NewEditor(f)
 		ed.SetOutput(f.out)
 		_, _ = ed.Readline("> ")
 		o := f.out.String()
@@ -312,7 +317,7 @@ func TestEditorCtrlLScrollsOneScreen(t *testing.T) {
 
 func TestEditorCtrlLSizeUnavailable(t *testing.T) {
 	ed, _, out := newFakeEditor(append(runes("hi"), KeyEvent{Code: KeyCtrlL}, KeyEvent{Code: KeyEnter})...)
-	ed.term = noSizeTerm{ed.term}
+	ed.con = noSizeTerm{ed.con}
 	ed.SetOutput(out)
 	if _, err := ed.Readline("> "); err != nil {
 		t.Fatal(err)
@@ -346,7 +351,7 @@ func TestEditorHistoryFilter(t *testing.T) {
 	}
 
 	ed2.SetHistoryFilter(nil)
-	ed2.term.(*fakeTerm).events = append(runes("after"), KeyEvent{Code: KeyEnter})
+	ed2.con.(*fakeTerm).events = append(runes("after"), KeyEvent{Code: KeyEnter})
 	if _, err := ed2.Readline("? "); err != nil {
 		t.Fatal(err)
 	}

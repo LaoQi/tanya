@@ -24,8 +24,8 @@ const DefaultToolOutputLines = 20
 type REPL struct {
 	agent         *agent.Agent
 	ed            *readline.Editor
-	term          readline.Terminal
-	raw           bool
+	con           readline.Console
+	keys          bool
 	showReasoning bool
 	st            *streams
 	prof          term.Profile
@@ -42,8 +42,7 @@ type REPL struct {
 
 type options struct {
 	st        *streams
-	term      readline.Terminal
-	raw       bool
+	con       readline.Console
 	facts     TermFacts
 	factsSet  bool
 	themeName string
@@ -59,8 +58,8 @@ func WithStreams(st *streams) Option {
 	return func(o *options) { o.st = st }
 }
 
-func WithTerminal(dev readline.Terminal, raw bool) Option {
-	return func(o *options) { o.term, o.raw = dev, raw }
+func WithConsole(con readline.Console) Option {
+	return func(o *options) { o.con = con }
 }
 
 func WithShowReasoning(on bool) Option {
@@ -108,11 +107,15 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if o.st == nil {
 		o.st = NewStreams(os.Stdout, os.Stderr, modeRich)
 	}
-	dev, raw := o.term, o.raw
-	if dev == nil {
-		dev, raw = readline.NewTerminal()
+	con := o.con
+	if con == nil {
+		con = readline.NewConsole()
 	}
-	ed := readline.NewEditor(dev, raw)
+	keys := con.BeginRead() == nil
+	if keys {
+		con.EndRead()
+	}
+	ed := readline.NewEditor(con)
 	ed.SetOutput(o.st.out)
 	c := &completer{listSessions: a.ListSessions, listModels: a.ListModels, workspaceDir: a.Workspace}
 	ed.SetComplete(c.complete)
@@ -133,7 +136,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &REPL{agent: a, ed: ed, term: dev, raw: raw, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
+	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
 	r.prof = term.GetProfile()
 	r.rend = render.NewThemedRenderer(r.prof, sch.MD)
 	ed.SetStyles(sem.Dim, sem.Accent)
@@ -143,7 +146,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	}
 	facts := o.facts
 	if !o.factsSet {
-		if s, ok := dev.Size(); ok && s.Cols > 0 {
+		if s, ok := con.Size(); ok && s.Cols > 0 {
 			facts = TermFacts{Cols: s.Cols, ColsOK: true}
 		}
 	}
@@ -409,7 +412,7 @@ func (r *REPL) loadNotice(id string) string {
 }
 
 func (r *REPL) archiveInteractive() bool {
-	return r.agent != nil && r.raw && r.prof.TTY && !r.st.mode.plain()
+	return r.agent != nil && r.keys && r.prof.TTY && !r.st.mode.plain()
 }
 
 func (r *REPL) readConfirm(prompt string) (string, error) {
@@ -692,11 +695,8 @@ func (r *REPL) loadSessionInteractive() {
 		r.st.out.emit(KindNotice, MsgNoSessions)
 		return
 	}
-	var idx int
-	var ok bool
-	if r.raw {
-		idx, ok = pickSession(r.term, list, r.st.out, r.sem)
-	} else {
+	idx, ok, keys := pickSession(r.con, list, r.st.out, r.sem)
+	if !keys {
 		idx, ok = pickByNumber(list, r.st.out)
 	}
 	if !ok || idx < 0 {

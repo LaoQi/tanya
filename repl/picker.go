@@ -80,7 +80,7 @@ func (p *sessionPicker) handle(ev readline.KeyEvent) {
 		}
 	case readline.KeyEnter:
 		p.done = true
-	case readline.KeyEsc, readline.KeyCtrlC, readline.KeyCtrlD:
+	case readline.KeyEsc, readline.KeyCtrlD:
 		p.done = true
 		p.cancel = true
 	case readline.KeyRune:
@@ -125,38 +125,43 @@ func (p *sessionPicker) render(out io.Writer) {
 	fmt.Fprint(out, b.String())
 }
 
-func pickSession(dev readline.Terminal, list []agent.SessionInfo, out io.Writer, sem theme.Semantics) (int, bool) {
+func pickSession(con readline.Console, list []agent.SessionInfo, out io.Writer, sem theme.Semantics) (idx int, ok bool, keys bool) {
 	if len(list) == 0 {
-		return -1, false
+		return -1, false, true
 	}
-	if err := dev.Raw(); err != nil {
-		return -1, false
+	if err := con.BeginRead(); err != nil {
+		return -1, false, false
 	}
-	defer dev.Restore()
+	defer con.EndRead()
 	p := &sessionPicker{items: list, sem: sem}
-	if size, ok := dev.Size(); ok {
+	if size, ok := con.Size(); ok {
 		p.size = size
 	}
 	p.render(out)
 	for {
-		ev, err := dev.ReadKey()
+		ev, err := con.ReadEvent()
 		if err != nil {
-			return -1, false
+			return -1, false, true
 		}
-		p.handle(ev)
+		if ev.Kind == readline.EventInterrupt {
+			return -1, false, true
+		}
+		if ev.Kind == readline.EventKey {
+			p.handle(ev.Key)
+		}
 		if p.done {
 			break
 		}
-		if size, ok := dev.Size(); ok && size != p.size {
+		if size, ok := con.Size(); ok && size != p.size {
 			p.size = size
 			p.lines = 0 // 尺寸变化：按旧行数上移会错位，放弃锚点另起一块
 		}
 		p.render(out)
 	}
 	if p.cancel {
-		return -1, false
+		return -1, false, true
 	}
-	return p.cursor, true
+	return p.cursor, true, true
 }
 
 func pickByNumber(list []agent.SessionInfo, out *output) (int, bool) {

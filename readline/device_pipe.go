@@ -20,13 +20,13 @@ func (d *pipeDevice) Restore() {}
 
 func (d *pipeDevice) Size() (Size, bool) { return Size{}, false }
 
-func (d *pipeDevice) ReadKey() (KeyEvent, error) {
+func (d *pipeDevice) readEvent() (Event, error) {
 	if exitRequested() {
-		return KeyEvent{}, ErrExited
+		return Event{}, ErrExited
 	}
 	line, err := d.r.ReadString('\n')
 	if err != nil {
-		return KeyEvent{}, err
+		return Event{}, err
 	}
-	return KeyEvent{Code: KeyLine, Text: strings.TrimRight(line, "\r\n")}, nil
+	return Event{Kind: EventKey, Key: KeyEvent{Code: KeyLine, Text: strings.TrimRight(line, "\r\n")}}, nil
 }

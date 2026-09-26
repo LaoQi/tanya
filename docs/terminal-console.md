@@ -108,10 +108,13 @@ type Event struct {
 }
 
 type Console interface {
-    ReadEvent() (Event, error)                 // Reader：同步拉取（编辑器/选择器循环）
+    BeginRead() error              // 进入 Reader 会话（切 Keys；S2 已落地，device 不支持则报错）
+    EndRead()                      // 退出会话（复原模式）
+    ReadEvent() (Event, error)     // Reader：同步拉取（编辑器/选择器循环）
     Subscribe(fn func(Event)) (cancel func())  // 后台订阅（InterruptContext、流式期监听）
-    LendStdin() (Lease, error)                 // 普通工具：子进程 stdin=/dev/null，不直通控制终端
-    LendFull(capture io.Writer) (Lease, error) // interactive：posix pty 泵+输出捕获 / windows 直通+掩蔽
+    Size() (Size, bool)
+    LendStdin() (Lease, error)     // 普通工具：子进程 stdin=/dev/null，不直通控制终端（S4）
+    LendFull(capture io.Writer) (Lease, error) // interactive：posix pty 泵+输出捕获 / windows 直通+掩蔽（S4）
 }
 
 type Lease interface {
@@ -119,6 +122,8 @@ type Lease interface {
     Release()        // 复原模式、光标锚点、泵停——机制全在 device
 }
 ```
+
+落地记录：S2 已实现 `BeginRead`/`EndRead`/`ReadEvent`/`Subscribe`/`Size`（`readline/console.go`，`Terminal` 接口与 `NewTerminal() (Terminal, bool)` 退役）；`LendStdin`/`LendFull` 待 S4。
 
 L1 device 职责（接口包内私有，各分片一份完整实现）：模式切换、单读者读 + 唤醒、**中断归一**（`0x03` 字节与信号面汇成同一通知）、`Resize`/`Hangup` 产出（能力可选，产不出就是没有该事件）、`LendStdin`/`LendFull` 的机制实现、紧急复原。读循环只在 Reader 活跃期存在（空转期读会抢走子进程输入），唤醒用现有机制收敛（编辑器 `VMIN=0/VTIME=1` 轮询、桥接 wake pipe，二者归一为 device 内部实现细节）。
 
@@ -157,7 +162,7 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 
 - **posix/linux**：device 完整——`Keys`/`Sane`/`Pump`、中断归一、`Resize`=SIGWINCH、`Hangup`=POLLHUP、LendFull=pty 泵。
 - **posix/darwin**：同 linux，但 LendFull 不支持（不做 pty 泵；interactive 在 darwin 明确不支持，工具侧报错）。
-- **windows**：`Keys`=console mode 映射（**保留 `ENABLE_PROCESSED_INPUT`**，`^C` 走 ctrl 事件）、中断=信号面汇合、`Resize`/`Hangup` 暂缺（picker 轮询 `Size` 兜底）、LendFull=`CONIN$` 直通+掩蔽（capture 不支持，输出直上屏）、LendStdin=null 且**不掩蔽**（`^C` 双方收到，等价中断回合）。未实机验证，验收底线=与现状行为一致。
+- **windows**：`Keys`=console mode 映射（**关 `ENABLE_PROCESSED_INPUT`**、开 VT 输入模式，`^C` 与 posix 同走字节路径在 device 归一——与现状实现一致）、`Resize`/`Hangup` 暂缺（picker 轮询 `Size` 兜底）、LendFull=`CONIN$` 直通+掩蔽（capture 不支持，输出直上屏）、LendStdin=null 且**不掩蔽**（`^C` 双方收到，等价中断回合）。未实机验证，验收底线=与现状行为一致。
 - **pipe**（全部非 tty 环境：CI/重定向/全部单测/stub 平台）：读=合成整行 `Key` 事件、无模式、无 `Resize`/`Hangup`、中断走信号面——device 一等实现，非降级分支。
 
 ## 8 行为变化（S5 落地，独立验收、独立提交）

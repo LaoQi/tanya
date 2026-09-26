@@ -162,7 +162,7 @@ func TestTabMenuNoSize(t *testing.T) {
 	ed, _, _ := newFakeEditor(
 		append(runes("/s"), KeyEvent{Code: KeyTab}, KeyEvent{Code: KeyDown}, KeyEvent{Code: KeyEnter})...,
 	)
-	ed.term = noSizeTerm{ed.term}
+	ed.con = noSizeTerm{ed.con}
 	ed.SetComplete(func(line string) []Completion {
 		if line == "/s" {
 			return []Completion{{Insert: "/sessions"}, {Insert: "/xyz"}}
@@ -175,6 +175,6 @@ func TestTabMenuNoSize(t *testing.T) {
 	}
 }
 
-type noSizeTerm struct{ Terminal }
+type noSizeTerm struct{ Console }
 
 func (noSizeTerm) Size() (Size, bool) { return Size{}, false }

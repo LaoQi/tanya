@@ -26,8 +26,7 @@ func (c Completion) display() string {
 }
 
 type Editor struct {
-	term          Terminal
-	raw           bool
+	con           Console
 	history       []string
 	draft         string
 	histIdx       int
@@ -48,8 +47,8 @@ type Editor struct {
 	accent        rstyle.Style
 }
 
-func NewEditor(term Terminal, raw bool) *Editor {
-	return &Editor{term: term, raw: raw, out: os.Stdout}
+func NewEditor(con Console) *Editor {
+	return &Editor{con: con, out: os.Stdout}
 }
 
 func (e *Editor) SetComplete(fn func(string) []Completion) { e.complete = fn }
@@ -71,32 +70,18 @@ func (e *Editor) Readline(prompt string) (string, error) {
 		return "", ErrExited
 	}
 	e.prompt = prompt
-	if !e.raw {
+	if err := e.con.BeginRead(); err != nil {
 		fmt.Fprint(e.out, prompt)
-		ev, err := e.term.ReadKey()
+		ev, err := e.con.ReadEvent()
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return "", io.EOF
-			}
 			return "", err
 		}
-		if ev.Code == KeyLine {
-			return ev.Text, nil
+		if ev.Kind == EventKey && ev.Key.Code == KeyLine {
+			return ev.Key.Text, nil
 		}
 		return "", io.EOF
 	}
-	if err := e.term.Raw(); err != nil {
-		fmt.Fprint(e.out, prompt)
-		ev, err2 := e.term.ReadKey()
-		if err2 != nil {
-			return "", err2
-		}
-		if ev.Code == KeyLine {
-			return ev.Text, nil
-		}
-		return "", io.EOF
-	}
-	defer e.term.Restore()
+	defer e.con.EndRead()
 
 	e.buf = nil
 	e.pos = 0
@@ -107,11 +92,24 @@ func (e *Editor) Readline(prompt string) (string, error) {
 	e.menu = nil
 	e.render("")
 	for {
-		ev, err := e.term.ReadKey()
+		ev, err := e.con.ReadEvent()
 		if err != nil {
 			return "", err
 		}
-		done, line, rerr := e.handleKey(ev)
+		if ev.Kind == EventInterrupt {
+			e.buf = nil
+			e.pos = 0
+			e.ghost = ""
+			e.render("")
+			fmt.Fprint(e.out, "\r\n")
+			e.cursorRow = 0
+			e.rowsUsed = 1
+			return "", ErrInterrupt
+		}
+		if ev.Kind != EventKey {
+			continue
+		}
+		done, line, rerr := e.handleKey(ev.Key)
 		if done {
 			return line, rerr
 		}
@@ -157,6 +155,11 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 			e.history = append(e.history, line)
 		}
 		return true, line, nil
+	case KeyLine:
+		if strings.TrimSpace(ev.Text) != "" && e.keepHistory(ev.Text) {
+			e.history = append(e.history, ev.Text)
+		}
+		return true, ev.Text, nil
 	case KeyBackspace:
 		if e.pos > 0 {
 			e.buf = append(e.buf[:e.pos-1], e.buf[e.pos:]...)
@@ -210,15 +213,6 @@ func (e *Editor) handleKey(ev KeyEvent) (bool, string, error) {
 		e.histPrev()
 	case KeyDown:
 		e.histNext()
-	case KeyCtrlC:
-		e.buf = nil
-		e.pos = 0
-		e.ghost = ""
-		e.render("")
-		fmt.Fprint(e.out, "\r\n")
-		e.cursorRow = 0
-		e.rowsUsed = 1
-		return true, "", ErrInterrupt
 	case KeyCtrlD:
 		if len(e.buf) == 0 {
 			e.ghost = ""
@@ -249,7 +243,7 @@ func (e *Editor) keepHistory(line string) bool {
 }
 
 func (e *Editor) clearKeepHistory() {
-	size, ok := e.term.Size()
+	size, ok := e.con.Size()
 	if !ok || size.Rows < 1 {
 		fmt.Fprint(e.out, term.ScreenHome())
 		e.cursorRow = 0
@@ -292,7 +286,7 @@ func (e *Editor) tabComplete() {
 		e.setBuf(common)
 		return
 	}
-	if _, ok := e.term.Size(); !ok {
+	if _, ok := e.con.Size(); !ok {
 		return
 	}
 	e.menu = cands
@@ -419,7 +413,7 @@ func (e *Editor) render(extra string) {
 		line += e.dim.Sprint(e.ghost)
 	}
 	cur := stringWidth(stripANSI(e.prompt)) + stringWidth(string(e.buf[:e.pos]))
-	size, ok := e.term.Size()
+	size, ok := e.con.Size()
 	if !ok || size.Cols <= 0 {
 		fmt.Fprint(e.out, term.ClearLineHome()+line)
 		if cur > 0 {

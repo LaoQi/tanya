@@ -22,7 +22,7 @@ func newPTYTerminal(t *testing.T) (*os.File, *posixTTY) {
 	if err != nil {
 		master.Close()
 		slave.Close()
-		t.Fatalf("newUnixTerminalFile: %v", err)
+		t.Fatalf("openTerminalFile: %v", err)
 	}
 	if err := term.Raw(); err != nil {
 		master.Close()
@@ -38,14 +38,14 @@ func newPTYTerminal(t *testing.T) (*os.File, *posixTTY) {
 }
 
 type keyResult struct {
-	ev  KeyEvent
+	ev  Event
 	err error
 }
 
 func readKeyAsync(term *posixTTY) <-chan keyResult {
 	ch := make(chan keyResult, 1)
 	go func() {
-		ev, err := term.ReadKey()
+		ev, err := term.readEvent()
 		ch <- keyResult{ev, err}
 	}()
 	return ch
@@ -118,7 +118,7 @@ func TestReadKeyIdleIsNotEOF(t *testing.T) {
 		if r.err != nil {
 			t.Fatalf("按键读取失败: %v", r.err)
 		}
-		if r.ev.Code != KeyRune || r.ev.Rune != 'a' {
+		if r.ev.Kind != EventKey || r.ev.Key.Code != KeyRune || r.ev.Key.Rune != 'a' {
 			t.Fatalf("期望 'a'，得到 %+v", r.ev)
 		}
 	case <-time.After(2 * time.Second):
@@ -135,7 +135,7 @@ func TestReadKeyLoneEscAfterIdleTimeout(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("独立 ESC 不应报错: %v", r.err)
 	}
-	if r.ev.Code != KeyEsc {
+	if r.ev.Kind != EventKey || r.ev.Key.Code != KeyEsc {
 		t.Fatalf("期望 KeyEsc，得到 %+v", r.ev)
 	}
 }
@@ -147,13 +147,13 @@ func TestReadKeyQueueSurvivesHangup(t *testing.T) {
 	}
 	time.Sleep(50 * time.Millisecond)
 	r := waitKey(t, term, 2*time.Second)
-	if r.err != nil || r.ev.Code != KeyRune || r.ev.Rune != 'h' {
+	if r.err != nil || r.ev.Kind != EventKey || r.ev.Key.Code != KeyRune || r.ev.Key.Rune != 'h' {
 		t.Fatalf("首个按键期望 'h'，得到 %+v err=%v", r.ev, r.err)
 	}
 	master.Close()
 	consumeHangupRead(t, term)
 	r = waitKey(t, term, 2*time.Second)
-	if r.err != nil || r.ev.Code != KeyRune || r.ev.Rune != 'i' {
+	if r.err != nil || r.ev.Kind != EventKey || r.ev.Key.Code != KeyRune || r.ev.Key.Rune != 'i' {
 		t.Fatalf("挂断后队列残留按键应仍返回 'i'，得到 %+v err=%v", r.ev, r.err)
 	}
 	select {

@@ -58,7 +58,7 @@ func runAutoArchivePrompt(t *testing.T, a *agent.Agent, keys ...readline.KeyEven
 	t.Helper()
 	ttyProfile(t, term.Profile{TTY: true, Colors: term.LevelNone})
 	out, errb := &syncBuf{}, &syncBuf{}
-	r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, modeRich)), WithTerminal(newFakeTerm(keys...), true))
+	r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, modeRich)), WithConsole(newFakeTerm(keys...)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestAutoArchivePromptPlainSkips(t *testing.T) {
 	a := newAutoArchiveAgent(t, dir, 4, 2)
 	seedAutoArchiveSessions(t, dir, 4)
 	out, errb := &syncBuf{}, &syncBuf{}
-	r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, modePlain)), WithTerminal(newFakeTerm(), false))
+	r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, modePlain)), WithConsole(newFakeTerm()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestAutoArchivePromptNonTTYSkips(t *testing.T) {
 	dir := t.TempDir()
 	a := newAutoArchiveAgent(t, dir, 4, 2)
 	seedAutoArchiveSessions(t, dir, 4)
-	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	r, out, errb := newTestREPLAgent(t, a, &fakeTerm{noKeys: true})
 	r.autoArchivePrompt()
 	if out.String() != "" || errb.String() != "" {
 		t.Errorf("stdout 非终端不应询问: %q %q", out.String(), errb.String())

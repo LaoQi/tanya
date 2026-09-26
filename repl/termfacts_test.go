@@ -9,18 +9,19 @@ import (
 
 type widthTerm struct{ cols int }
 
-func (t widthTerm) Raw() error                  { return nil }
-func (t widthTerm) Restore()                    {}
-func (t widthTerm) Size() (readline.Size, bool) { return readline.Size{Cols: t.cols, Rows: 24}, true }
-func (t widthTerm) ReadKey() (readline.KeyEvent, error) {
-	return readline.KeyEvent{}, io.EOF
+func (t widthTerm) BeginRead() error                         { return nil }
+func (t widthTerm) EndRead()                                 {}
+func (t widthTerm) Size() (readline.Size, bool)              { return readline.Size{Cols: t.cols, Rows: 24}, true }
+func (t widthTerm) Subscribe(fn func(readline.Event)) func() { return func() {} }
+func (t widthTerm) ReadEvent() (readline.Event, error) {
+	return readline.Event{}, io.EOF
 }
 
-func newTermFactsREPL(t *testing.T, dev readline.Terminal, opts ...Option) *REPL {
+func newTermFactsREPL(t *testing.T, dev readline.Console, opts ...Option) *REPL {
 	t.Helper()
 	out, errb := &syncBuf{}, &syncBuf{}
 	st := NewStreams(out, errb, modeRich)
-	all := append([]Option{WithStreams(st), WithTerminal(dev, false)}, opts...)
+	all := append([]Option{WithStreams(st), WithConsole(dev)}, opts...)
 	r, err := NewREPL(nil, "› ", all...)
 	if err != nil {
 		t.Fatal(err)
