@@ -170,7 +170,7 @@ func main() {
 	sink := repl.NewToolView(st, prof, sem, termFacts.Width, cfg.ToolOutputLines)
 
 	if cmd == repl.CmdAsk {
-		ctx, done := repl.InterruptContext()
+		ctx, done := repl.InterruptContext(readline.NewConsole())
 		err := a.Ask(ctx, rest, sink.Handle)
 		done()
 		if err != nil {

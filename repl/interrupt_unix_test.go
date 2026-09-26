@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"github.com/LaoQi/tanya/ctty"
+	"github.com/LaoQi/tanya/readline"
 )
 
 func TestInterruptContextSignal(t *testing.T) {
 	ctty.WatchSignals()
-	ctx, done := InterruptContext()
+	ctx, done := InterruptContext(readline.NewConsole())
 	defer done()
 	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
 		t.Fatal(err)
@@ -30,7 +31,7 @@ func TestInterruptContextSignal(t *testing.T) {
 }
 
 func TestInterruptContextDone(t *testing.T) {
-	ctx, done := InterruptContext()
+	ctx, done := InterruptContext(readline.NewConsole())
 	done()
 	select {
 	case <-ctx.Done():
