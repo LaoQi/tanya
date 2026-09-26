@@ -18,6 +18,8 @@ func (d *pipeDevice) Raw() error { return ErrUnsupported }
 
 func (d *pipeDevice) Restore() {}
 
+func (d *pipeDevice) Sane() {}
+
 func (d *pipeDevice) Size() (Size, bool) { return Size{}, false }
 
 func (d *pipeDevice) readEvent() (Event, error) {

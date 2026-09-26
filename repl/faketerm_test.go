@@ -101,6 +101,8 @@ func (f *fakeTerm) BeginRead() error {
 
 func (f *fakeTerm) EndRead() { f.raw = false }
 
+func (f *fakeTerm) Sane() { f.raw = false }
+
 func (f *fakeTerm) Size() (readline.Size, bool) { return readline.Size{Cols: 80, Rows: 24}, true }
 
 func (f *fakeTerm) Subscribe(fn func(readline.Event)) func() { return func() {} }

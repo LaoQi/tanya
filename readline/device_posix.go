@@ -68,6 +68,17 @@ func (t *posixTTY) Restore() {
 	_ = ctty.SetTermios(int(t.in.Fd()), t.saved)
 }
 
+func (t *posixTTY) Sane() {
+	fd := int(t.in.Fd())
+	cur, err := ctty.GetTermios(fd)
+	if err != nil {
+		return
+	}
+	if sane := saneTermios(cur); sane != cur {
+		_ = ctty.SetTermios(fd, sane)
+	}
+}
+
 func (t *posixTTY) Size() (Size, bool) {
 	if t.out == nil {
 		return Size{}, false
@@ -103,11 +114,4 @@ func (t *posixTTY) readEvent() (Event, error) {
 		return Event{}, err
 	}
 	return keyEvent(ev), nil
-}
-
-func keyEvent(ev KeyEvent) Event {
-	if ev.Code == KeyCtrlC {
-		return Event{Kind: EventInterrupt}
-	}
-	return Event{Kind: EventKey, Key: ev}
 }

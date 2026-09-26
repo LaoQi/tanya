@@ -19,9 +19,6 @@ func emergencyRestore() {
 	}
 	defer tty.Close()
 	fd := int(tty.Fd())
-	if !IsForeground(fd) {
-		return
-	}
 	if t, err := GetTermios(fd); err == nil {
 		sane := t
 		sane.Iflag |= unix.ICRNL | unix.IXON

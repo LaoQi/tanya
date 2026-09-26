@@ -117,6 +117,7 @@ func (t *Tool) run(ctx context.Context, req request) *Result {
 		if res, ok := runFull(ctx, t.console, req.Command, timeoutSec, t.profile, dir); ok {
 			return defaultCwd(res, explicit)
 		}
+		return &Result{Command: req.Command, Err: ErrNoLend.Error()}
 	}
 	return defaultCwd(runForeground(ctx, t.console, req.Command, timeoutSec, t.profile, dir, req.Interactive), explicit)
 }

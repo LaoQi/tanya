@@ -20,7 +20,7 @@ var posixPrograms = []string{
 }
 
 func posixCapabilities(*profile) string {
-	return "管道与文本工具链（grep/sed/awk/xargs 等）可直接组合；交互式程序（sudo/ssh/gpg 等）的提示写入控制终端 /dev/tty，用户在终端可见并可直接应答；被信号终止的命令按 128+signum 记退出码。"
+	return "管道与文本工具链（grep/sed/awk/xargs 等）可直接组合；交互式程序（sudo/ssh/gpg/read 等）必须显式 interactive: true（命令与终端直通、可直接应答），普通命令的 stdin 不接终端；被信号终止的命令按 128+signum 记退出码。"
 }
 
 func posixConfigureGroup(cmd *exec.Cmd) {

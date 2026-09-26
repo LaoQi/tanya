@@ -8,7 +8,6 @@ import (
 
 type Lease interface {
 	Stdin() *os.File
-	Handover(pid int) bool
 	Release()
 }
 
@@ -19,9 +18,8 @@ type Console interface {
 
 type nullLease struct{}
 
-func (nullLease) Stdin() *os.File       { return nil }
-func (nullLease) Handover(pid int) bool { return false }
-func (nullLease) Release()              {}
+func (nullLease) Stdin() *os.File { return nil }
+func (nullLease) Release()        {}
 
 type nullConsole struct{}
 

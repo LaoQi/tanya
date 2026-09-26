@@ -193,3 +193,10 @@ func (p *keyParser) parseEscape() (*KeyEvent, int, bool) {
 	}
 	return nil, 3, false
 }
+
+func keyEvent(ev KeyEvent) Event {
+	if ev.Code == KeyCtrlC {
+		return Event{Kind: EventInterrupt}
+	}
+	return Event{Kind: EventKey, Key: ev}
+}

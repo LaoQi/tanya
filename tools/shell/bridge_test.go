@@ -14,11 +14,12 @@ import (
 )
 
 type fakeConsole struct {
-	fullErr  error
-	readEnd  *os.File
-	full     bool
-	released bool
-	env      []string
+	fullErr   error
+	readEnd   *os.File
+	full      bool
+	released  bool
+	env       []string
+	lentStdin int
 }
 
 type fakeLease struct {
@@ -31,14 +32,6 @@ type fakeLease struct {
 
 func (l *fakeLease) Stdin() *os.File { return l.stdin }
 
-func (l *fakeLease) Handover(pid int) bool {
-	if l.stdin != nil {
-		l.stdin.Close()
-		l.stdin = nil
-	}
-	return false
-}
-
 func (l *fakeLease) Release() {
 	if l.released {
 		return
@@ -46,6 +39,10 @@ func (l *fakeLease) Release() {
 	l.released = true
 	if l.owner != nil {
 		l.owner.released = true
+	}
+	if l.stdin != nil {
+		l.stdin.Close()
+		l.stdin = nil
 	}
 	if l.onDone != nil {
 		<-l.onDone
@@ -56,7 +53,7 @@ func (l *fakeLease) Release() {
 	}
 }
 
-func (f *fakeConsole) LendStdin() (Lease, error) { return &fakeLease{}, nil }
+func (f *fakeConsole) LendStdin() (Lease, error) { f.lentStdin++; return &fakeLease{}, nil }
 
 func (f *fakeConsole) LendFull(cmd *exec.Cmd, capture io.Writer) (Lease, error) {
 	if f.fullErr != nil {
@@ -123,33 +120,20 @@ func TestRunShellFullCapture(t *testing.T) {
 	}
 }
 
-func TestRunShellLendFullFailureFallsBack(t *testing.T) {
+func TestRunShellInteractiveWithoutTerminalErrors(t *testing.T) {
 	f := &fakeConsole{fullErr: errors.New("no tty")}
 	res := consoleTool(t, f).run(context.Background(), request{Command: "echo fallback", TimeoutSec: 10, Interactive: true})
 	if f.released {
 		t.Fatal("借出失败仍进入 full 路径")
 	}
-	var out strings.Builder
-	for _, c := range res.Stdout {
-		out.WriteString(c.Data)
+	if !strings.Contains(res.Err, "interactive 不支持") {
+		t.Fatalf("借出失败应明确报错: %+v", res)
 	}
-	if !strings.Contains(out.String(), "fallback") {
-		t.Errorf("回退路径未执行命令: %+v", res)
+	if strings.Contains(shellOut(res), "fallback") {
+		t.Errorf("借出失败不应回退执行命令: %+v", res)
 	}
-}
-
-func TestRunShellLendStdinNoFull(t *testing.T) {
-	f := &fakeConsole{fullErr: errors.New("attach failed")}
-	res := consoleTool(t, f).run(context.Background(), request{Command: "echo fallback2", TimeoutSec: 10, Interactive: true})
-	if f.released {
-		t.Fatal("full 借出失败应回退")
-	}
-	var out strings.Builder
-	for _, c := range res.Stdout {
-		out.WriteString(c.Data)
-	}
-	if !strings.Contains(out.String(), "fallback2") {
-		t.Errorf("回退路径未执行命令: %+v", res)
+	if res.ExitCode != 0 {
+		t.Errorf("未执行不应给出退出码: %+v", res)
 	}
 }
 
@@ -168,10 +152,27 @@ func TestRunShellNonInteractiveSkipsFull(t *testing.T) {
 	}
 }
 
-func TestRunShellNoConsoleInjected(t *testing.T) {
+func TestRunShellNoConsoleInjectedErrors(t *testing.T) {
 	res := testShellTool(t).run(context.Background(), request{Command: "echo plain", TimeoutSec: 10, Interactive: true})
-	if res.Err != "" || res.ExitCode != 0 {
-		t.Fatalf("无桥接注入应走现状路径: %+v", res)
+	if !strings.Contains(res.Err, "interactive 不支持") {
+		t.Fatalf("无终端借出能力应报错: %+v", res)
+	}
+	if strings.Contains(shellOut(res), "plain") {
+		t.Errorf("不应执行命令: %+v", res)
+	}
+}
+
+func TestRunShellNonInteractiveLendsStdin(t *testing.T) {
+	f := &fakeConsole{}
+	res := consoleTool(t, f).run(context.Background(), request{Command: "echo plain", TimeoutSec: 10})
+	if f.full {
+		t.Fatalf("非交互不应借用 full: %+v", f)
+	}
+	if f.lentStdin != 1 {
+		t.Fatalf("非交互应借出 stdin 一次: %+v", f)
+	}
+	if !strings.Contains(shellOut(res), "plain") {
+		t.Errorf("非交互路径异常: %+v", res)
 	}
 }
 

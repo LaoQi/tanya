@@ -15,10 +15,12 @@ type fakeDevice struct {
 	err    error
 	raw    int
 	rst    int
+	sane   int
 }
 
 func (d *fakeDevice) Raw() error         { d.raw++; return nil }
 func (d *fakeDevice) Restore()           { d.rst++ }
+func (d *fakeDevice) Sane()              { d.sane++ }
 func (d *fakeDevice) Size() (Size, bool) { return Size{Cols: 80, Rows: 24}, true }
 
 func (d *fakeDevice) readEvent() (Event, error) {
@@ -89,6 +91,15 @@ func TestConsoleBeginReadForwardsToDevice(t *testing.T) {
 	con.EndRead()
 	if dev.raw != 1 || dev.rst != 1 {
 		t.Fatalf("BeginRead/EndRead 应转发设备，raw=%d rst=%d", dev.raw, dev.rst)
+	}
+}
+
+func TestConsoleSaneForwardsToDevice(t *testing.T) {
+	dev := &fakeDevice{}
+	con := newConsole(dev)
+	con.Sane()
+	if dev.sane != 1 {
+		t.Fatalf("Sane 应转发设备，sane=%d", dev.sane)
 	}
 }
 

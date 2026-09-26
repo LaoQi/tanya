@@ -12,6 +12,7 @@ type widthTerm struct{ cols int }
 
 func (t widthTerm) BeginRead() error                         { return nil }
 func (t widthTerm) EndRead()                                 {}
+func (t widthTerm) Sane()                                    {}
 func (t widthTerm) Size() (readline.Size, bool)              { return readline.Size{Cols: t.cols, Rows: 24}, true }
 func (t widthTerm) Subscribe(fn func(readline.Event)) func() { return func() {} }
 
