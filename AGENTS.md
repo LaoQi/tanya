@@ -56,10 +56,10 @@ render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终
 ## 文档
 
 - `docs/design.md` 核心设计与各模块行为细节（权威）；`README.md` 使用说明与配置项
-- 终端：`docs/ctty.md` 控制终端抽象、`docs/interactive-tty.md` pty 桥接、`docs/terminal-caps.md` 探测与能力降级
+- 终端：`docs/ctty.md` 控制终端抽象、`docs/interactive-tty.md` pty 桥接、`docs/terminal-caps.md` 探测与能力降级（规划：`docs/terminal-console.md` 控制台层——唯一持有者/租约/`^C` 归一）
 - 表现层：`docs/style-split.md` 拆包、`docs/render-pipeline.md` 渲染管线、`docs/render-refs-compare.md` 参考对比
 - 工具与缓存：`docs/shell-tool.md` run_shell 组件化、`docs/agent-control-tool.md` agent_custom、`docs/cache-probe.md` prompt cache
-- 会话与 REPL：`docs/session-archive.md` 归档卷、`docs/repl-output-refactor.md` 输出收敛、`docs/repl-status-append.md` 状态追加（未实施：`docs/repl-replay-rendering.md`；已归档：`docs/probe-redesign.md`）
+- 会话与 REPL：`docs/session-archive.md` 归档卷、`docs/repl-output-refactor.md` 输出收敛、`docs/repl-status-append.md` 状态追加（未实施：`docs/repl-replay-rendering.md`、`docs/reasoning-live-toggle.md` 流式期 `Ctrl+O` 切换思考显示（后延，阻塞于控制台层）；已归档：`docs/probe-redesign.md`）
 
 ## 构建与测试
 

@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type unixTerminal struct {
+type posixTTY struct {
 	in    *os.File
 	out   *os.File
 	saved ctty.Termios
@@ -20,11 +20,11 @@ func openTerminal() (Terminal, error) {
 	return openTerminalFile(os.Stdin, os.Stdout)
 }
 
-func openTerminalFile(in, out *os.File) (*unixTerminal, error) {
+func openTerminalFile(in, out *os.File) (*posixTTY, error) {
 	if os.Getenv("TANYA_NO_RAW_INPUT") != "" {
 		return nil, ErrUnsupported
 	}
-	t := &unixTerminal{in: in, out: out}
+	t := &posixTTY{in: in, out: out}
 	if _, err := ctty.GetTermios(int(in.Fd())); err != nil {
 		return nil, err
 	}
@@ -32,12 +32,20 @@ func openTerminalFile(in, out *os.File) (*unixTerminal, error) {
 	return t, nil
 }
 
-func (t *unixTerminal) Raw() error {
+func (t *posixTTY) Raw() error {
 	saved, err := ctty.GetTermios(int(t.in.Fd()))
 	if err != nil {
 		return err
 	}
 	t.saved = saved
+	if err := ctty.SetTermiosFlush(int(t.in.Fd()), keysTermios(saved)); err != nil {
+		return err
+	}
+	t.keys.reset()
+	return nil
+}
+
+func keysTermios(saved ctty.Termios) ctty.Termios {
 	raw := saved
 	raw.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP |
 		unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON
@@ -45,18 +53,22 @@ func (t *unixTerminal) Raw() error {
 	raw.Oflag &^= unix.OPOST
 	raw.Cc[unix.VMIN] = 0
 	raw.Cc[unix.VTIME] = 1
-	if err := ctty.SetTermiosFlush(int(t.in.Fd()), raw); err != nil {
-		return err
-	}
-	t.keys.reset()
-	return nil
+	return raw
 }
 
-func (t *unixTerminal) Restore() {
+func saneTermios(t ctty.Termios) ctty.Termios {
+	s := t
+	s.Iflag |= unix.ICRNL | unix.IXON
+	s.Lflag |= unix.ISIG | unix.ICANON | unix.ECHO | unix.IEXTEN
+	s.Oflag |= unix.OPOST | unix.ONLCR
+	return s
+}
+
+func (t *posixTTY) Restore() {
 	_ = ctty.SetTermios(int(t.in.Fd()), t.saved)
 }
 
-func (t *unixTerminal) Size() (Size, bool) {
+func (t *posixTTY) Size() (Size, bool) {
 	if t.out == nil {
 		return Size{}, false
 	}
@@ -67,11 +79,11 @@ func (t *unixTerminal) Size() (Size, bool) {
 	return Size{Cols: cols, Rows: rows}, true
 }
 
-func (t *unixTerminal) readChunk(p []byte) (int, error) {
+func (t *posixTTY) readChunk(p []byte) (int, error) {
 	return unix.Read(int(t.in.Fd()), p)
 }
 
-func (t *unixTerminal) hungUp() bool {
+func (t *posixTTY) hungUp() bool {
 	fds := []unix.PollFd{{Fd: int32(t.in.Fd()), Events: unix.POLLIN}}
 	for {
 		n, err := unix.Poll(fds, 0)
@@ -85,4 +97,4 @@ func (t *unixTerminal) hungUp() bool {
 	}
 }
 
-func (t *unixTerminal) ReadKey() (KeyEvent, error) { return t.keys.readKey() }
+func (t *posixTTY) ReadKey() (KeyEvent, error) { return t.keys.readKey() }

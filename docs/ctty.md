@@ -4,6 +4,8 @@
 
 > 更正（2026-09-25）：`run_shell` 已从 `agent` 外置到 `tools/shell`（`agent` 本身零内部依赖、不再引用本包）——下文凡指 run_shell 一侧的 `agent`/`agent/shell*.go`，现均指 `tools/shell`（文件名 `platform*.go`/`bridge.go`）；原语与策略的划分不变。
 
+> 后续方向（2026-09-26 立项）：终端持有者、命名模式与 `^C` 归属收敛为控制台层（三层分层：消费者 / Console 仲裁 / device 设备面；唯一持有者 + 借出分型 + 事件归一），方案见 `docs/terminal-console.md`。两项裁决：**前台组原语（`OwnPgrp`/`ForegroundPgrp`/`SetForeground`/`IsForeground`）与 `run_shell` 的 tty 直通整体下线**（普通命令 stdin=/dev/null、sudo/ssh 需显式 interactive）；**不做 `^Z` 子进程挂起检测**。位组合收在 readline 的 posix device 内，本文件不再新增模式常量。
+
 `agent` 与 `readline` 各自实现同一组"控制终端（controlling tty）原语"：
 
 | 原语 | agent | readline |
