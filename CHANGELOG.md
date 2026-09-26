@@ -3,6 +3,7 @@
 tanya 变更记录。新条目加在最上方的日期分节内（没有当天分节就新建一个）；本文件记变更，AGENTS.md 只保留现行约束。
 
 ## 2026-09-26
+- docs(AGENTS): 精简 `AGENTS.md`——14.2 KB → 11.7 KB（−17%，约 3.9k → 2.9k token，每轮请求固定注入，本次会话实测上下文 ~10.3k token 中该文件占三成以上）；**只删可查的实现细节与重复，不动任何约束语义**。删除项：`package 划分` 条的包职责括号（与《结构》段重复）、`工具抽象` 与 `工具结果` 两条合成一条（内容与《结构》段 `tools/` 行、`docs/design.md`《工具》重复）、根文本两条 embed 合一条、`配置分层`/`Validate`/`agent 零加载` 三条中与《配置分层》逐字重复的字段清单（`base_url`/`model`/`data_dir` 等 13 项、UI 八项）、变更叙述（「解析点已随 run_shell 外置移到」「随工具外置改为」「保留既有行为」「属删除的导出 API」——违反文件开头「只记现行约束」口径）、取证与实现细节（`os.Geteuid() == 0`、Windows 恒 false、`go list -deps ./agent`、`§5.9`、`*shell.Result`、`ctty.Bell`/`ctty.NotifyOSC` 等）；「文档」段 6 行 → 5 行、《结构》段措辞收紧。完整性核对：抽旧版全部反引号标识符与规范词（必须/一律/不得/不做/恒/仅）逐项比对新版，差值均为措辞变化而非约束丢失；对写代码有直接价值的契约保留并补齐（`Tool` 三方法名、`ctty.IsRoot()` 平台行为、通知外部程序复用 `shell.Resolve` 同一套解析、Windows 输入后端与 interactive 直通已实现）。未做（评估后判定不值）：删除《结构》/《文档》两段导航（合计约 1 KB，删后每次任务需额外 ls/grep 定位包与文档，收益低于成本）。
 - style(agent,repl): 清理 gofmt 遗留——`agent/ua_test.go` 文件尾多余空行、`repl/sessrow_test.go` 与 `repl/settle_test.go` 的 `agent.Config` 字面量对齐（字段间空行分组致 gofmt 重排对齐组），三处均为历史遗留、与路线 B 搬迁无关；`gofmt -l .` 全清，build/vet/test 复验通过。
 
 ## 2026-09-25
