@@ -1,6 +1,12 @@
 package shell
 
-import "github.com/LaoQi/tanya/agent"
+import (
+	"errors"
+
+	"github.com/LaoQi/tanya/agent"
+)
+
+var ErrNoLend = errors.New(agent.MsgErrPrefix + "interactive 不支持此平台")
 
 const (
 	MsgBadCwd              = agent.MsgErrPrefix + "cwd 不存在或不是目录: %s"

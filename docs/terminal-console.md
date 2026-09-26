@@ -123,7 +123,7 @@ type Lease interface {
 }
 ```
 
-落地记录：S2 已实现 `BeginRead`/`EndRead`/`ReadEvent`/`Subscribe`/`Size`（`readline/console.go`，`Terminal` 接口与 `NewTerminal() (Terminal, bool)` 退役）；`LendStdin`/`LendFull` 待 S4。
+落地记录：S2 实现 `BeginRead`/`EndRead`/`ReadEvent`/`Subscribe`/`Size`；S4 实现 `LendStdin`/`LendFull`（`readline/lease*.go` 平台分片，pty 泵自 `bridge_linux.go` 收编；`Lender` 未单列接口，`Console` 直接含之）。`Console` 的实现值满足 `tools/shell` 的同名 `Console`/`Lease` 接口，因 Go 接口方法签名要求精确匹配，`main` 以 `consoleForShell` 薄适配器完成跨包注入（同 `Bridge` 先例）。
 
 L1 device 职责（接口包内私有，各分片一份完整实现）：模式切换、单读者读 + 唤醒、**中断归一**（`0x03` 字节与信号面汇成同一通知）、`Resize`/`Hangup` 产出（能力可选，产不出就是没有该事件）、`LendStdin`/`LendFull` 的机制实现、紧急复原。读循环只在 Reader 活跃期存在（空转期读会抢走子进程输入），唤醒用现有机制收敛（编辑器 `VMIN=0/VTIME=1` 轮询、桥接 wake pipe，二者归一为 device 内部实现细节）。
 

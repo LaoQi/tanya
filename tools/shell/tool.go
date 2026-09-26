@@ -18,7 +18,7 @@ type Config struct {
 	LookPath  func(string) (string, error)
 	Home      string
 	Workspace func() string
-	Bridge    Bridge
+	Console   Console
 	Programs  []string
 }
 
@@ -47,7 +47,7 @@ type Tool struct {
 	programs  []string
 	workspace func() string
 	home      string
-	bridge    Bridge
+	console   Console
 	ttyMu     sync.Mutex
 }
 
@@ -69,7 +69,7 @@ func New(cfg Config) (*Tool, error) {
 		programs:  programs,
 		workspace: cfg.Workspace,
 		home:      cfg.Home,
-		bridge:    cfg.Bridge,
+		console:   cfg.Console,
 	}, nil
 }
 
@@ -110,12 +110,15 @@ func (t *Tool) run(ctx context.Context, req request) *Result {
 	}
 	t.ttyMu.Lock()
 	defer t.ttyMu.Unlock()
+	if t.console == nil {
+		t.console = nullConsole{}
+	}
 	if req.Interactive {
-		if res, ok := runBridged(ctx, t.bridge, req.Command, timeoutSec, t.profile, dir); ok {
+		if res, ok := runFull(ctx, t.console, req.Command, timeoutSec, t.profile, dir); ok {
 			return defaultCwd(res, explicit)
 		}
 	}
-	return defaultCwd(runForeground(ctx, req.Command, timeoutSec, t.profile, dir, req.Interactive), explicit)
+	return defaultCwd(runForeground(ctx, t.console, req.Command, timeoutSec, t.profile, dir, req.Interactive), explicit)
 }
 
 func defaultCwd(res *Result, explicit bool) *Result {

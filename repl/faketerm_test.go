@@ -5,6 +5,7 @@ import (
 	"github.com/LaoQi/tanya/render/term"
 	"github.com/LaoQi/tanya/render/theme"
 	"io"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -103,6 +104,12 @@ func (f *fakeTerm) EndRead() { f.raw = false }
 func (f *fakeTerm) Size() (readline.Size, bool) { return readline.Size{Cols: 80, Rows: 24}, true }
 
 func (f *fakeTerm) Subscribe(fn func(readline.Event)) func() { return func() {} }
+
+func (f *fakeTerm) LendStdin() (readline.Lease, error) { return nil, readline.ErrUnsupported }
+
+func (f *fakeTerm) LendFull(cmd *exec.Cmd, capture io.Writer) (readline.Lease, error) {
+	return nil, readline.ErrUnsupported
+}
 
 // typed 生成 raw 模式下的一行输入按键序列（逐字符 + 回车）。
 func typed(s string) []readline.KeyEvent {

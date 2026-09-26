@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 
@@ -148,11 +149,12 @@ func main() {
 	}
 	home, _ := os.UserHomeDir()
 	var a *agent.Agent
+	con := readline.NewConsole()
 	list, err := tools.Standard(tools.Options{
 		ShellOverride: cfg.Shell,
 		Home:          home,
 		Workspace:     func() string { return a.Workspace() },
-		Bridge:        readline.NewTTYBridge(),
+		Console:       consoleForShell{con},
 	})
 	if err != nil {
 		st.FailErr("", err)
@@ -170,7 +172,7 @@ func main() {
 	sink := repl.NewToolView(st, prof, sem, termFacts.Width, cfg.ToolOutputLines)
 
 	if cmd == repl.CmdAsk {
-		ctx, done := repl.InterruptContext(readline.NewConsole())
+		ctx, done := repl.InterruptContext(con)
 		err := a.Ask(ctx, rest, sink.Handle)
 		done()
 		if err != nil {
@@ -192,7 +194,7 @@ func main() {
 		st.FailErr("", err)
 		exitNow(1)
 	}
-	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines))
+	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithConsole(con))
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
@@ -264,4 +266,22 @@ func rootRefusal() error {
 func exitNow(code int) {
 	ctty.RestoreUTF8()
 	os.Exit(code)
+}
+
+type consoleForShell struct{ con readline.Console }
+
+func (c consoleForShell) LendStdin() (shell.Lease, error) {
+	l, err := c.con.LendStdin()
+	if l == nil {
+		return nil, err
+	}
+	return l.(shell.Lease), err
+}
+
+func (c consoleForShell) LendFull(cmd *exec.Cmd, capture io.Writer) (shell.Lease, error) {
+	l, err := c.con.LendFull(cmd, capture)
+	if l == nil {
+		return nil, err
+	}
+	return l.(shell.Lease), err
 }

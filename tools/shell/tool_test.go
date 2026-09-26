@@ -187,9 +187,9 @@ func TestNewShellToolEmptyPrograms(t *testing.T) {
 	}
 }
 
-func TestShellToolInteractiveBadCwdSkipsBridge(t *testing.T) {
-	f := &fakeBridge{}
-	res := bridgeTool(t, f).run(context.Background(), request{
+func TestShellToolInteractiveBadCwdSkipsLend(t *testing.T) {
+	f := &fakeConsole{}
+	res := consoleTool(t, f).run(context.Background(), request{
 		Command:     "echo hi",
 		TimeoutSec:  10,
 		Interactive: true,
@@ -198,8 +198,8 @@ func TestShellToolInteractiveBadCwdSkipsBridge(t *testing.T) {
 	if !strings.Contains(res.Err, "cwd") {
 		t.Fatalf("非法 cwd 应快速失败: %+v", res)
 	}
-	if f.prepared || f.attached {
-		t.Errorf("非法 cwd 不应触碰终端租约: prepared=%v attached=%v", f.prepared, f.attached)
+	if f.full {
+		t.Errorf("非法 cwd 不应触碰终端租约: full=%v", f.full)
 	}
 }
 

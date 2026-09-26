@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,14 +10,14 @@ import (
 	"testing"
 )
 
-type dirRecBridge struct {
-	fakeBridge
+type dirRecConsole struct {
+	fakeConsole
 	dir string
 }
 
-func (b *dirRecBridge) Prepare(cmd *exec.Cmd) (*os.File, error) {
-	b.dir = cmd.Dir
-	return b.fakeBridge.Prepare(cmd)
+func (c *dirRecConsole) LendFull(cmd *exec.Cmd, capture io.Writer) (Lease, error) {
+	c.dir = cmd.Dir
+	return c.fakeConsole.LendFull(cmd, capture)
 }
 
 func shellStdout(res *Result) string {
@@ -101,17 +102,17 @@ func TestRunShellCwdMissing(t *testing.T) {
 }
 
 func TestRunShellInteractiveCwd(t *testing.T) {
-	b := &dirRecBridge{}
+	c := &dirRecConsole{}
 	dir := t.TempDir()
-	res := bridgeTool(t, b).run(context.Background(), request{Command: "echo hi", TimeoutSec: 10, Interactive: true, Cwd: dir})
-	if b.dir != dir {
-		t.Errorf("桥接子进程 dir = %q want %q", b.dir, dir)
+	res := consoleTool(t, c).run(context.Background(), request{Command: "echo hi", TimeoutSec: 10, Interactive: true, Cwd: dir})
+	if c.dir != dir {
+		t.Errorf("full 子进程 dir = %q want %q", c.dir, dir)
 	}
 	if res.Cwd != dir {
 		t.Errorf("Cwd = %q want %q", res.Cwd, dir)
 	}
-	if !b.prepared || !b.attached {
-		t.Errorf("桥接未走全流程: %+v", b)
+	if !c.full || !c.released {
+		t.Errorf("full 借出未走全流程: %+v", c)
 	}
 }
 
