@@ -2,7 +2,9 @@
 
 > 状态：**已落地**（linux 专用；`readline/bridge_linux.go` + `agent/tty_bridge.go`，契约已并入 `docs/design.md`《工具》/《工具视图渲染》/《终端输入》三节），本文归档保留决策过程。
 >
-> 落地差异：① `readline/bridge.go` 承载跨平台接口（`bridge_stub.go` 返回 `ErrUnsupported`）；② 调用顺序为 `Prepare → Attach → Start`（Attach 失败即回退，Start 失败由 `stop()` 收尾）；③ 泵用 `poll` + 自管道唤醒替代"关 fd 打断阻塞读"（Linux 上 close 不会唤醒阻塞中的读）；④ raw 切换用不清输入队列的 `TCSETS`（`TCSETSF` 会丢弃用户提前键入的密码）；⑤ `stop()` 在泵退出前 drain master 残留输出，避免与 `capture.finish()` 竞态；⑥ `stop()` 唤醒泵前若终端写缓冲已满，最多放弃当前 chunk 的**显示**副本（捕获流完整，属 §7 显示侧豁免）；⑦ 实例带 busy/attached 守卫，重复/并发使用返回 `ErrUnsupported`；⑧ 测试改用 pty 自驱集成（`readline/bridge_linux_test.go`）+ 真实 tty E2E（`TTY_BRIDGE_E2E=1` / `TTY_E2E=1` 经 `script` 驱动）；⑨ 光标锚点（2026-09-16 增补）：`Prepare`（切 raw 与 `Start` 之前）调 `ctty.SaveCursor` 存锚点，`release` 里 `ResetModes` 之后调 `ctty.RestoreCursor` 归位——交互期子进程改滚动区/挪光标/进出备用屏都不再让结果块从屏幕顶部开始画，理由与顺序见 `docs/ctty.md`。
+> 落地差异：①
+>
+> **更正（2026-09-27，控制台层 S5）**：本文描述的「桥接失败 → 回退 `open("/dev/tty")` + `TIOCSPGRP` 前台移交」路径**已整体下线**——普通命令不再直通终端 stdin（改空设备 `/dev/null`）、不再移交前台组，`interactive` 借不出时明确报错（`error: interactive 不支持（无法借出终端）`）；`readline/secure.go` 的 `InitTerminalGuard`/`SecureTerminal` 改为 `Console.Sane()`（纯模式复原）；桥接实现文件已由 `readline/bridge_linux.go` 迁至 `readline/lease_linux.go` 并收编进 `Console.LendFull`。§5.9、§7 中依赖前台组的段落按此作废，现行口径见 `docs/terminal-console.md`（§6 下线表 / §8 行为变化）。以下为归档记录。 `readline/bridge.go` 承载跨平台接口（`bridge_stub.go` 返回 `ErrUnsupported`）；② 调用顺序为 `Prepare → Attach → Start`（Attach 失败即回退，Start 失败由 `stop()` 收尾）；③ 泵用 `poll` + 自管道唤醒替代"关 fd 打断阻塞读"（Linux 上 close 不会唤醒阻塞中的读）；④ raw 切换用不清输入队列的 `TCSETS`（`TCSETSF` 会丢弃用户提前键入的密码）；⑤ `stop()` 在泵退出前 drain master 残留输出，避免与 `capture.finish()` 竞态；⑥ `stop()` 唤醒泵前若终端写缓冲已满，最多放弃当前 chunk 的**显示**副本（捕获流完整，属 §7 显示侧豁免）；⑦ 实例带 busy/attached 守卫，重复/并发使用返回 `ErrUnsupported`；⑧ 测试改用 pty 自驱集成（`readline/bridge_linux_test.go`）+ 真实 tty E2E（`TTY_BRIDGE_E2E=1` / `TTY_E2E=1` 经 `script` 驱动）；⑨ 光标锚点（2026-09-16 增补）：`Prepare`（切 raw 与 `Start` 之前）调 `ctty.SaveCursor` 存锚点，`release` 里 `ResetModes` 之后调 `ctty.RestoreCursor` 归位——交互期子进程改滚动区/挪光标/进出备用屏都不再让结果块从屏幕顶部开始画，理由与顺序见 `docs/ctty.md`。
 
 ## 1. 背景与根因
 

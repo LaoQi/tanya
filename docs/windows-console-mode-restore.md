@@ -4,6 +4,7 @@
 - 平台：Windows（Windows Terminal / ConPTY）+ PowerShell 5.1 后端
 - 状态：**已实施**（方案 A，2026-09-17 开发机落地；Windows 实机回归仅部分完成（未全量覆盖，暂不跟踪），见 §8）
 - 相关：`docs/terminal-caps.md` §8.6、`docs/interactive-tty.md`、`AGENTS.md`（终端复原不变量）
+- **更正（2026-09-27，控制台层 S5）**：本文件依赖的 `ctty.InputModes`/`SnapshotInput`/`RestoreInput` 已随 stdin 租约删除；普通命令不再接管控制台 stdin（空设备），故 Windows 侧也不再有「回合末复原 console mode」这一步（`Console.Sane()` 只做纯模式复原）。归档记录。
 
 ## 1. 问题
 

@@ -4,7 +4,7 @@
 
 > 更正（2026-09-25）：`run_shell` 已从 `agent` 外置到 `tools/shell`（`agent` 本身零内部依赖、不再引用本包）——下文凡指 run_shell 一侧的 `agent`/`agent/shell*.go`，现均指 `tools/shell`（文件名 `platform*.go`/`bridge.go`）；原语与策略的划分不变。
 
-> 后续方向（2026-09-26 立项）：终端持有者、命名模式与 `^C` 归属收敛为控制台层（三层分层：消费者 / Console 仲裁 / device 设备面；唯一持有者 + 借出分型 + 事件归一），方案见 `docs/terminal-console.md`。两项裁决：**前台组原语（`OwnPgrp`/`ForegroundPgrp`/`SetForeground`/`IsForeground`）与 `run_shell` 的 tty 直通整体下线**（普通命令 stdin=/dev/null、sudo/ssh 需显式 interactive）；**不做 `^Z` 子进程挂起检测**。位组合收在 readline 的 posix device 内，本文件不再新增模式常量。
+> 控制台层**已实施**（2026-09-26 立项，2026-09-27 S1–S7 完工）：终端持有者、命名模式与 `^C` 归属收敛为三层（消费者 / Console 仲裁 / device 设备面；唯一持有者 + 借出分型 + 事件归一），见 `docs/terminal-console.md`。两项裁决均已落地：**前台组原语（`OwnPgrp`/`ForegroundPgrp`/`SetForeground`/`IsForeground`）与 `run_shell` 的 tty 直通整体删除**（普通命令 stdin = `/dev/null`、不再移交前台，`sudo`/`ssh` 需显式 `interactive: true`），`InputModes`/`SnapshotInput`/`RestoreInput` 随旧租约一并删除；**不做 `^Z` 子进程挂起检测**（`ProtectJobSignals` 的 SIGTSTP 吞没保留）。此后本文件只描述原语：位组合与终端策略收在 `readline` 内，不再新增模式常量。
 
 `agent` 与 `readline` 各自实现同一组"控制终端（controlling tty）原语"：
 
@@ -38,19 +38,13 @@
 | API | 语义 |
 |---|---|
 | `const Supported bool` | 平台能力（linux/darwin 为真）|
-| `Open() (*os.File, error)` | 打开控制终端：posix `/dev/tty`、windows `CONIN$`（2026-09-17 windows 增补，交互子进程 stdin 直通控制台的入口）|
-| `IgnoreCtrlEvents()` / `RestoreCtrlEvents()` | windows：`SetConsoleCtrlHandler(NULL, TRUE/FALSE)` 让本进程忽略控制台 ^C——交互子进程独占 ^C，与 posix 前台组语义对齐（Ctrl+Break 不受掩蔽，保留为紧急中断逃生口）；posix/stub no-op（2026-09-17 增补）|
-| `OwnPgrp() int` | 自身进程组（`Getpgid(0)`，错误 `-1`）|
-| `ForegroundPgrp(fd int) (int, bool)` | 读前台组 |
-| `SetForeground(fd, pgrp int) bool` | 写前台组 |
-| `IsForeground(fd int) bool` | `ForegroundPgrp(fd) == OwnPgrp()` |
+| `Open() (*os.File, error)` | 打开控制终端：posix `/dev/tty`、windows `CONIN$`（2026-09-17 windows 增补）——现由 `readline` 的租约消费：普通命令的终端锚点、`interactive` 的 `CONIN$` 直通 |
+| `IgnoreCtrlEvents()` / `RestoreCtrlEvents()` | windows：`SetConsoleCtrlHandler(NULL, TRUE/FALSE)` 让本进程忽略控制台 ^C——借出期交互子进程独占 ^C（等价 posix 在 pty 行规程下「`^C` 归子进程」；Ctrl+Break 不受掩蔽，保留为紧急中断逃生口）；posix/stub no-op（2026-09-17 增补，消费者为 `readline/lease_windows.go`）|
 | `IgnoreJobSignals()` | `signal.Ignore(SIGTTIN, SIGTTOU)` |
 | `type Termios` | 平台 termios（posix 为 `= unix.Termios`，其余平台空结构）|
 | `GetTermios(fd) (Termios, error)` | 读 termios |
 | `SetTermios(fd, Termios) error` | 写 termios |
 | `SetTermiosFlush(fd, Termios) error` | 写 termios 并丢弃未读输入（raw 前用）|
-| `type InputModes` | 输入模式快照：posix 包 `Termios`、windows 包 console mode、其余平台空结构（2026-09-17 增补）|
-| `SnapshotInput(fd) (InputModes, bool)` / `RestoreInput(fd, InputModes) bool` | 输入模式快照/复原，posix 转发 `Get/SetTermios`、windows 转发 `Get/SetConsoleMode`——`run_shell` 回合末复原的跨平台入口（2026-09-17 增补）|
 | `IsTerminal(fd int) bool` | 是否终端：posix `GetTermios` 成功、windows `GetConsoleMode` 成功（2026-09-16 增补）|
 | `Size(fd int) (int, int, bool)` | 终端尺寸：posix `TIOCGWINSZ`、windows `GetConsoleScreenBufferInfo` |
 | `EnableVT(fd int) bool` | 确保 ANSI 输出可用：windows 幂等开 `ENABLE_VIRTUAL_TERMINAL_PROCESSING`，posix 恒真 |
@@ -74,9 +68,8 @@
 设计原则：
 
 - **以 `fd int` 为原语参数**：readline 的 `secureTerminalFd` 需作用于任意 fd（其单测即作用在 pty slave fd 上），`Open()` 只是便捷入口。
-- **只下沉原语，不下沉策略**：不提供 `Handover/Restore` 组合函数，避免固化"仅前台才移交"这类决策。`agent` 保留三行组合；`readline` 保留启动前台归属与自愈门控。这与 `docs/design.md`《事实归属》"两处前台判定分别采样"的结论一致——共享原语，不合并决策。
-- **termios 原语进 `ctty`（2026-09-15 修订，原结论为"不进"）**：原判断"仅 readline 使用"在 `run_shell` 需要**快照并在子进程结束后复原**控制终端时失效——`agent` 侧持有策略（何时移交、何时复原），原语与 readline 私有实现重复。现由 `ctty` 独占 termios 读写(`Get/Set/SetTermiosFlush`)与模式复位（`ResetModes`），`readline` 删私有 helper 改用 `ctty`，raw mode 的**构造**（flag 组合）仍留各消费方：那是策略，不是原语。跨平台的输入模式快照/复原另设 `InputModes` + `SnapshotInput`/`RestoreInput`（2026-09-17）：posix 转发 termios、windows 转发 console mode，`agent` 的 run_shell 回合末复原统一走它（windows 侧原为 `run_shell` 空转、污染固化，见 `docs/windows-console-mode-restore.md`）。
-- **统一用 `Getpgid(0)`**：全平台返回 `(int, error)`，消除 `Getpgrp()` 的平台签名差异。
+- **只下沉原语，不下沉策略**：不提供 `Handover/Restore` 组合函数。2026-09-27 后策略只剩一处——`readline` 的 Console/租约（何时借出、切模式、存锚点），`tools/shell` 只表达意图（`LendStdin`/`LendFull`）、`repl` 只消费事件流；与 `docs/design.md`《事实归属》的分工一致：共享原语，策略不回流本包。
+- **termios 原语进 `ctty`（2026-09-15 修订，原结论为"不进"）**：原判断"仅 readline 使用"在 `run_shell` 需要**快照并在子进程结束后复原**控制终端时失效——`agent` 侧持有策略（何时移交、何时复原），原语与 readline 私有实现重复。现由 `ctty` 独占 termios 读写(`Get/Set/SetTermiosFlush`)与模式复位（`ResetModes`），`readline` 删私有 helper 改用 `ctty`，raw mode 的**构造**（flag 组合）仍留各消费方：那是策略，不是原语。跨平台的输入模式快照/复原（`InputModes` + `SnapshotInput`/`RestoreInput`，2026-09-17 引入）已于 2026-09-27 随 stdin 租约删除：posix 租约改为直接用 `GetTermios`/`SetTermios` 复原，Windows 侧不再需要回合末复原（子进程不再接管控制台 stdin）。
 - **代码页快照态收在 `ctty`（2026-09-17）**：`EnsureUTF8/RestoreUTF8` 看似策略，但快照必须同时供 `main`（切换/复原）与 `agent`（`FallbackCP` 转码源）读取，跨包共享的唯一自然落点就是 `ctty`——与运行期信号的退出态同构：原语 + 一份包级状态，调用时序由消费方保证（`EnsureUTF8` 严格先于任何子进程派生与终端读写）。
 
 ## 分片
@@ -97,9 +90,6 @@
 | `ctty/termios_linux.go` | `linux` | `Termios` 别名 + `TCGETS/TCSETS/TCSETSF` |
 | `ctty/termios_darwin.go` | `darwin` | `Termios` 别名 + `TIOCGETA/TIOCSETA/TIOCSETAF` |
 | `ctty/termios_stub.go` | `!linux && !darwin` | 空 `Termios` + 恒错实现 |
-| `ctty/modes_posix.go` | `linux \|\| darwin` | `InputModes` = `Termios` 薄转发（`SnapshotInput`/`RestoreInput`）|
-| `ctty/modes_windows.go` | `windows` | `InputModes` = console mode 薄转发（`ConsoleMode`/`SetConsoleMode`）|
-| `ctty/modes_stub.go` | `!linux && !darwin && !windows` | `InputModes` no-op（恒 false）|
 | `ctty/signals.go` | 无 tag | 运行期信号公共逻辑（`WatchSignals`/`Exit`/`Exiting`/`ExitSignal`/`ExitStatus`/`Interrupted`/分发）|
 | `ctty/signals_posix.go` | `linux \|\| darwin` | 信号清单（SIGTERM/SIGHUP/SIGINT）+ `emergencyRestore` |
 | `ctty/signals_windows.go` | `windows` | 信号清单（SIGTERM/`os.Interrupt`）+ `emergencyRestore` = `RestoreUTF8`（2026-09-17 拆出）|
@@ -125,12 +115,14 @@
 
 - 清单：关闭信号 SIGTERM/SIGHUP（`signals_posix.go`）/ `syscall.SIGTERM`（`signals_stub.go`）；中断信号 SIGINT。windows 自 2026-09-17 起有专属分片（清单与原 stub 相同）——Go runtime 把控制台 CLOSE/LOGOFF/SHUTDOWN 事件折为 **SIGTERM** 递送并阻塞等待 handler 收尾（`runtime/os_windows.go` 的 `ctrlHandler`），落进关闭信号路径；`^C`/`^Break` 折为 SIGINT 走中断。**SIGQUIT 不入清单**，保持 Go 默认全栈转储（与 `docs/design.md`《信号》一致）。
 - 关闭信号 → `Exit(sig)` + 广播中断；中断信号 → 只广播，不置退出态。
-- **重复关闭信号 = 强退**：第二次送达时 `emergencyRestore()`（posix：仅自身为 `/dev/tty` 前台时把 tty 拉回 canonical + `ResetModes`，非前台不动——此时终端归子进程；windows：`RestoreUTF8` 复原控制台代码页）后 `os.Exit(ExitStatus())`。之所以不做定时兜底：正常取消路径最坏要 `shellWaitDelay`（2s）才收尾，定时器必须显著大于它，反而容易打断正常退出；而重复信号是显式意图，无隐式时序竞争，且顺带解决「`Notify` 之后普通信号不再有默认处置、用户只能 SIGKILL（必然留 raw）」这一固有缺陷。
+- **重复关闭信号 = 强退**：第二次送达时 `emergencyRestore()`（posix：把 `/dev/tty` 无条件拉回 canonical + `ResetModes`——前台组门控 2026-09-27 删除，tanya 恒为终端持有者；windows：`RestoreUTF8` 复原控制台代码页）后 `os.Exit(ExitStatus())`。之所以不做定时兜底：正常取消路径最坏要 `shellWaitDelay`（2s）才收尾，定时器必须显著大于它，反而容易打断正常退出；而重复信号是显式意图，无隐式时序竞争，且顺带解决「`Notify` 之后普通信号不再有默认处置、用户只能 SIGKILL（必然留 raw）」这一固有缺陷。
 - **订阅点必须同步取快照**：`Interrupted()` 取值要在启动等待 goroutine 之前完成（`repl.InterruptContext` 即此写法）。若在 goroutine 内才取，纯中断广播可能落在快照建立之前而被整轮丢失——该竞态在负载下必现（repl 用例在 `go test -race ./...` 下超时、单包串行却通过），是 2026-09-17 实测修掉的第一个坑。丢失窗口只影响瞬时的中断广播：退出态是持久的，快照时 `Exiting()` 为真则直接拿到已关闭通道（review 2026-09-17 补），回合照样立即取消、`Readline` 照样立即返回 `ErrExited`。
-- 唤醒分工：`readline` 靠轮询 `ctty.Exiting()`（raw 下 `VMIN=0/VTIME=1` 每 ~100ms 一轮），命中即返回 `ErrExited`，且优先于已解析的按键队列（退出不被积压输入拖延）；`Degraded`（管道 stdin）阻塞在 `bufio` 上无法唤醒，但该路径本来就不改 termios，无残留代价，等重复信号强退即可。
+- 唤醒分工：`readline` 靠轮询 `ctty.Exiting()`（raw 下 `VMIN=0/VTIME=1` 每 ~100ms 一轮），命中即返回 `ErrExited`，且优先于已解析的按键队列（退出不被积压输入拖延）；pipe 设备（管道 stdin）阻塞在 `bufio` 上无法唤醒，但该路径本来就不改 termios，无残留代价，等重复信号强退即可。
 - `os.Exit` 只出现在 `WatchSignals` 之后的分发路径，`WatchSignals` 只在 `main` 调用（测试不安装），库的常规使用面不受影响。
 
 ## 迁移
+
+> 本节是 2026-09-15/16/17 当时逐文件搬迁的记录（历史）。其中「前台组移交/夺回」「输入模式快照 `SnapshotInput`/`RestoreInput`」「`run_shell` tty 直通」相关部分已在 2026-09-27 S5 整体下线，现行口径见《抽象》与本文件开头注、`docs/terminal-console.md`。
 
 **agent**：删 `shell_tty_unix.go`、`shell_tty_stub_unix.go`；`shell_other.go` 去掉 4 个 tty 函数（保留进程组/信号；该文件与 `shell_unix.go` 后续收敛为 `shell_platform*.go`，见 `docs/design.md`《shell》）；`shell.go` 的 `openForegroundTTY/handoverForeground/restoreForeground` 改为 `ctty.Open/IsForeground/SetForeground` 组合，`handed` 门控不变；`envprobe.go` 的 `ttyStdinSupported()` → `ctty.Supported`。
 
@@ -155,10 +147,10 @@
 | plan9 / js / wasip1 | **FAIL**（`newUnixTerminal` 未定义）| OK |
 | ios | 需 cgo 工具链（非代码问题）| 同 |
 
-测试：新增 `ctty/ctty_linux_test.go`（`OwnPgrp`/能力常量/非法 fd/`/dev/tty` 打开/pty 前台组往返——helper 子进程建独立会话、先 `IgnoreJobSignals` 再交接与归还，与生产路径同构）；`readline` 既有 pty 自愈测试（`secure_linux_test.go`）继续覆盖 `ctty` 原语的集成路径。
+测试：新增 `ctty/ctty_linux_test.go`（能力常量、`/dev/tty` 打开、termios 往返、`ResetModes` 串内容与顺序、光标锚点原语；前台组往返四测与 `InputModes` 两测文件随 2026-09-27 S5 下线）；`readline` 侧改由 `device_posix_test.go`（`Sane` 四态）、`lease_posix_test.go`（`LendStdin` 锚点序与 termios 复原）、`lease_linux_test.go`（pty 泵）覆盖 `ctty` 原语的集成路径。
 
 ## 取舍与遗留
 
-- **Windows**：Win32 无 pgrp / `TIOCSPGRP` 概念，前台组/termios 原语仍走 stub 降级（`Supported=false`）。交互直通（B2，2026-09-17）不依赖这组抽象：`Open` 返回 `CONIN$` 作子进程 stdin，^C 归属用 ctrl 掩蔽原语解决，控制台模式复原依赖 readline 每回合 `Raw()`/`Restore()` 自愈。
-- **非目标 unix**（freebsd/solaris/aix/android/illumos 等）：从"顺带可用"降级为 stub，换取 tag 集合单一化与可编译性保证。影响不止 ctty 原语 no-op——readline 的 raw mode 同样只剩 stub，这些平台的交互退化为 **Degraded 行输入（失去行编辑/历史/ghost/Tab 补全菜单）**。属明确取舍。
+- **Windows**：Win32 无 pgrp / `TIOCSPGRP` 概念，termios 等原语走 stub 降级（`Supported=false`）——2026-09-27 后这不再是缺口（前台组概念整体退出设计）。`interactive` 借出不依赖这组抽象：`Open` 返回 `CONIN$` 作子进程 stdin（`readline/lease_windows.go`），^C 归属用 ctrl 掩蔽原语解决，控制台模式复原靠 device 的 `Sane()`（每回合开始前）与 `Restore()`（编辑器借出后）。
+- **非目标 unix**（freebsd/solaris/aix/android/illumos 等）：从"顺带可用"降级为 stub，换取 tag 集合单一化与可编译性保证。影响不止 ctty 原语 no-op——readline 的 raw mode 同样只剩 stub，这些平台的交互退化为 **pipe 设备行输入（失去行编辑/历史/ghost/Tab 补全菜单）**。属明确取舍。
 - **build tag 无法共享常量**：排除表达式仍需在各 stub 文件重复书写，`ctty` 只让"ctty 能力"这一概念有了单一归属，无法根除 tag 字符串层面的重复。
