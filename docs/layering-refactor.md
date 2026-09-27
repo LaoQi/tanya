@@ -1,6 +1,6 @@
 # 分层与模块依赖：评估结论与修正方案
 
-> 状态：**实施中**（2026-09-28 评估；S1–S5 已落地，S6 待做）
+> 状态：**已全部落地**（2026-09-28 评估并实施；S1–S6 完成，S7 按 D3 不做）
 > 范围：`ctty` / `render` / `readline` / `repl` / `tools/shell` 的依赖边与职责收口
 > **不动**：`agent`（基线已零内部依赖）、`config`、工具注入与缓存不变性契约
 > 判据：每阶段要么「依赖边消失」（可用 `go list -deps` 断言），要么「行为可观测」（单测 + `render_audit`）；两者都不满足的改动不做
@@ -112,11 +112,17 @@
 - **验收**：`go list -deps ./repl` 不再含任何 `tanya/tools` 包；`tools/shell/view` 直接依赖 = `encoding/json fmt strings present render/term tools/shell`；`gofmt`/`build`/`vet` 干净、`-race` 全绿（18 包）、darwin/windows 交叉编译通过、`render_audit` 15 PASS（工具块与参数块逐字节不变）。新增用例：`repl` 的第三方自带视图（注册走它、未注册回落、视图不认领时回落）、`tools/shell/view` 的结果区四例（状态行/`2|` 前缀/头尾截断/外来 Meta 不认领）。
 - **测试布局偏差**：原计划把 `repl/toolview_test.go` 的 shell 用例整体迁走，实际只迁了 3 个直接引用视图内符号的用例（`ShellArgsView*`/`CommandOmitted`），其余保留在 `repl` 并注入真实 `run_shell` 视图（`testViews()` 复刻 `main` 装配）——这样既有 golden（整块成品形态）继续守着端到端字节，新包另有自身用例；`repl` 测试对 `tools/shell/view` 的依赖属测试二进制，不进生产依赖图。
 
-### S6 `tools/shell` 依赖边正名与测试边修正
+### S6 `tools/shell` 依赖边正名与测试边修正（已落地，见下方落地记录）
 
 - **测试边**：`package shell` 内使用 `readline` 的 pty 集成用例移到外部测试包（`shell_test`），解除「`readline` 不得依赖 `tools/shell`」的隐性枷锁（内部测试包导入 `readline` 会让后者永远无法依赖 `tools/shell`；外部测试包无此约束）。
 - **正名**（§3 D1）：`AGENTS.md` 与 `docs/ctty.md` 明确「`ctty` 是零依赖叶子，任何层可直接依赖；注入只针对**终端所有权**（`Console`）」——`tools/shell` 直连 `ctty.ProtectJobSignals`/`DecodeCP` 属允许，不再记作违反注入原则。
 - 验收：`package shell` 的测试不再导入 `readline`；`go test -race ./...` 全绿。
+
+### S6 落地记录（2026-09-28）
+
+- **测试边**：`tools/shell` 内部测试包（`package shell`）原先导入 `readline`（`rlConsole` 适配器 + 四个真终端用例），这会让 `readline` 永远无法依赖 `tools/shell`（内部测试包进测试二进制即成环）。四个用例（`TestRunShellKeepsTerminalForeground`、`TestRunShellFullRealTTYE2E`、`TestRunShellFullRealTTYReuse`、`TestRunShellFullCwdRealTTYE2E`）迁到**外部测试包** `package shell_test`（新文件 `tools/shell/tty_e2e_test.go`，`//go:build linux`），改用公开 API（`shell.New`/`Tool.Invoke` + JSON 参数 + `*shell.Result`），`rlConsole` 适配器随之搬走。
+- **正名**（D1）：`AGENTS.md` 与 `docs/ctty.md` 明示「`ctty` 是零依赖叶子，任何层可直接依赖，不需要注入；注入只针对终端**所有权**」——撤回首轮对 `tools/shell → ctty` 的"违反注入原则"定性；`AGENTS.md` 另加一条**测试包边界**约定（需要上层包的集成用例一律放外部测试包）。
+- **验收**：`go list -f '{{.TestImports}}' ./tools/shell` 不再含 `readline`（外部测试包按 `XTestImports` 单独报告）；`-race` 全绿；三个真 pty 用例在 `script -qec` 下实跑通过（`TTY_E2E=1` 的 E2E 与 cwd 用例、`TTY_E2E_REUSE=1` 的复用用例输出 `got:hello` / `got:world`）。
 
 ## 3 决策记录
 

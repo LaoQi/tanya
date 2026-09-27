@@ -10,6 +10,7 @@
 - 平台分片一律白名单：`linux`/`darwin`/`windows` 各一个装配文件，posix 共享实现落 `linux || darwin`，其余平台 stub；Linux 为主、macOS 尽力
 - 终端输入层自研（raw mode + ANSI 渲染 + fish 风格 ghost 置灰建议），不引入 TUI 框架；Windows 仅支持 Windows Terminal（输入后端与 interactive 直通已实现，实机验证未全覆盖；不支持 cmd/老 conhost）
 - 终端原语（`/dev/tty` 打开、termios、模式复位与光标锚点、探测）一律走 `ctty`——`ctty` **只有原语、没有前台组概念**（`OwnPgrp`/`ForegroundPgrp`/`SetForeground`/`IsForeground` 与输入模式快照 `SnapshotInput`/`RestoreInput` 已于 2026-09-27 删除）；终端持有者与模式策略归 `readline` 的 `Console`（见下条），`run_shell` 的租约在借出前 `SaveCursor`、`Release` 时「termios 复原 → `ResetModes` → `RestoreCursor`」，见 `docs/ctty.md`、`docs/terminal-console.md`
+- `ctty` 是**零依赖叶子**：任何层可直接依赖它（`tools/shell` 的 `ProtectJobSignals`/`DecodeCP` 即此），不需要注入——注入约定只针对**终端所有权**（`Console`/`Lease`），因为持有者必须唯一。同理 `render/term` 可被 `readline`/`repl` 直连（输出侧原语）
 - 运行期信号统一收敛在 `ctty`（SIGTERM/SIGHUP 关闭、SIGINT 中断、SIGWINCH 尺寸变化、SIGQUIT 保持默认转储），业务层（`repl`/`main`）不出现 `os/signal`；退出统一走 `REPL.quit()`，进程退出码取 `ctty.ExitStatus()`，见 `docs/ctty.md`
 - 终端持有者唯一（`readline` 的 `Console`：L2 仲裁 + L1 device 三实现 + 租约；模式名收在 device 内不暴露，`repl` 只消费事件流与租约，`agent`/`tools` 经注入接口跨界）。借出两型语义固定：`LendStdin`（普通 run_shell）= stdin `os.DevNull` + 终端锚点，不直通终端、不移交前台；`LendFull`（`interactive: true`）= Linux pty 泵（含捕获）/ Windows `CONIN$` 直通（输出直上屏），darwin 与借不出**明确报错**（`ErrNoLend`，不回退）。`^C` 两条规则：tanya 持有期（含普通命令执行期）归一为中断 = 取消回合并杀子进程组，借出期归子进程；不做 `^Z` 检测（tanya 自身吞没 SIGTSTP）。尺寸变化走同一条信号面（`ctty.OnResize`）：`Console` 产出 `EventResize`（多次缩放合并为一次、借出期不推订阅者），编辑器据此重绘、picker 据此重排；**工具块宽度无状态**——每次渲染现取 `con.Size()`，`repl.TermFacts` 只在取不到尺寸（管道）时兜底。**Console 拥有读循环**（状态机 `Idle`/`Exclusive`/`Lent`）：`SubscribeKeys` 才武装**常驻读者**（`Idle` + 有按键订阅 + 设备支持后台读；pipe 与 Windows 不后台读），读者把按键推给订阅者；`BeginRead`/`EndRead`（编辑器、picker 独占）与 `LendStdin`/`LendFull`（借出，`Lease.Release` 归还）**自动挂起/恢复读者**并复原终端；读者用**独立终端模式**——输入侧 raw 但**保留输出处理（OPOST）**，独占 `Raw` 则连 OPOST 一起清（输出链路的逐块换行依赖 `ONLCR`，读者期丢 OPOST 会整屏错位，已由 `render_audit` 抓出并回归守护）。订阅回调可能来自信号协程或读者协程，须自身并发安全且不阻塞。见 `docs/terminal-console.md`
 - 仓库根两份纯文本编译期嵌入、改动需重新编译：`system_prompt.md` 内置提示词与**环境段**（OS/shell 契约，`main.envSection`，无 CWD 行）合成**基座**经 `agent.WithSystemPrompt` 注入——`agent` 侧无内置文本、**无任何 env 概念**（快照 = 基座 + 两层 AGENTS.md）；`config.example.yaml` 由 `tanya config` 原样打到 stdout（不带提示行，可直接写入配置路径），与 `config.Default()` 的一致性由根包测试守护
@@ -74,5 +75,7 @@ go test ./... && go test -race ./...    # 全量测试 + 竞态
 go run . ask "你好"                      # 单发冒烟（需配置 api_key）
 python3 scripts/render_audit.py         # 渲染审计（pty + VT 回放，需先 make build）
 ```
+
+**测试包边界**：需要上层包（如 `readline`）的集成用例一律放**外部测试包**（`package X_test`，写在同目录）——内部测试包导入上层包会让上层永远无法依赖本包（测试二进制成环），实例见 `tools/shell/tty_e2e_test.go`。
 
 测试约定见 `docs/design.md`《测试》：`agent`/`repl` 各自 `TestMain` 做包级基线隔离（HOME 与 cwd 指向临时目录），用例不得依赖真实 HOME/配置；LLM mock 用 `newMockLLM` + `mockStep`，readline 用 fakeTerm 注入按键。交互/中断类手工验证用 `make build` 产出的 `./tanya`：**不要用 `go run .`**（`^Z` 会停住 wrapper、`^C` 失效）。
