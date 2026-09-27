@@ -3,6 +3,8 @@
 状态：**S1–S2 已实施**
 
 >
+> **文件名对照（2026-09-28 补）**：本文提及的 `readline/terminal_posix.go`→`device_posix.go`、`terminal_windows.go`→`device_windows.go`、`terminal_io.go`→`device_io.go`、`terminal_stub.go`→`device_stub.go`、`bridge_linux.go`→`lease_linux.go`、`secure.go`/`secure_stub.go` 整体删除（自愈收敛为 `Console.Sane()` + `device_posix.go` 的 `saneTermios`）、`NewTerminal() (Terminal, bool)`→`NewConsole()`；`agent/tty_bridge.go`→`tools/shell/bridge.go`、`agent/shell*.go`→`tools/shell/{shell,tool,platform*}.go`。本文未改动的历史段落按当时文件名阅读。
+>
 > **更正（2026-09-27，控制台层 S5）**：§8.6 关于「普通命令继承控制台 stdin / 前台组语义」的段落已作废——前台组概念整体退出设计，普通命令 stdin = 空设备（`/dev/null`），`interactive` 走 `Console.LendFull`（Linux pty 泵 / Windows `CONIN$` 直通）、借不出即报错；Windows 交互掩蔽（`IgnoreCtrlEvents`）语义不变（借出期子进程独占 `^C`）。现行口径见 `docs/terminal-console.md`。（`ctty` 探测原语 + `Facts`；`main` 单点探测，渲染判定改为 stdout、输入判定保留 stdin）；阶段 B（Windows 输入后端）与 C（Windows 交互命令）已实施，Windows 侧仅部分实机验证（未全量覆盖，暂不跟踪）。本文承载支持范围约定、判定口径与分阶段计划。
 
 ## 1. 问题
@@ -89,8 +91,8 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 |---|---|---|
 | S1 | `ctty` 探测原语与 `Facts`（posix / windows / stub 分片 + 单测） | 已实施 |
 | S2 | `main` 单点探测；`term.DetectProfile` 加 vt；`repl` 删除包级懒缓存、改注入 | 已实施 |
-| B0 | 抽平台无关的按键状态机 `keySource`（`readline/terminal_io.go`）：分片只提供 `readChunk` 与可选 `hungUp` | 已实施 |
-| B1 | Windows 输入后端（`readline/terminal_windows.go`）：`Raw` 开 `ENABLE_VIRTUAL_TERMINAL_INPUT` 并清 `ECHO/LINE/PROCESSED`、`readChunk` 用 `GetNumberOfConsoleInputEvents` 轮询 5ms + 1s 超时、`Size` 走 `ctty.Size`、`ctty` 加 `ConsoleMode`/`SetConsoleMode`；仅 VT 路径（范围排除 conhost 与 1809 之前，无需 `ReadConsoleInput` 回退）。ghost、补全菜单、历史随 raw 一并生效 | 已实施（部分实机验证，未全量覆盖） |
+| B0 | 抽平台无关的按键状态机 `keySource`（`readline/device_io.go`，当时名 `terminal_io.go`）：分片只提供 `readChunk` 与可选 `hungUp` | 已实施 |
+| B1 | Windows 输入后端（`readline/device_windows.go`，当时名 `terminal_windows.go`）：`Raw` 开 `ENABLE_VIRTUAL_TERMINAL_INPUT` 并清 `ECHO/LINE/PROCESSED`、`readChunk` 用 `GetNumberOfConsoleInputEvents` 轮询 5ms + 1s 超时、`Size` 走 `ctty.Size`、`ctty` 加 `ConsoleMode`/`SetConsoleMode`；仅 VT 路径（范围排除 conhost 与 1809 之前，无需 `ReadConsoleInput` 回退）。ghost、补全菜单、历史随 raw 一并生效 | 已实施（部分实机验证，未全量覆盖） |
 | B2 | Windows 交互命令：`interactive: true` = 控制台继承直通——`ctty.Open` 返回 `CONIN$` 作子进程 stdin、运行期 `IgnoreCtrlEvents` 掩蔽本进程 ^C、interactive 时去除 PowerShell `-NonInteractive`；不做 ConPTY 桥接 | 已实施（部分实机验证，未全量覆盖） |
 | B3 | 编辑器输出切控制终端（解决 #2 盲打与提示符污染） | 待做 |
 | B4 | Windows 编码链路：`ctty` 代码页原语（LazyDLL 补 7 个 proc）+ `main` 启动 `EnsureUTF8` 切 65001、退出/紧急路径复原；run_shell 捕获侧 `utf8.Valid` 直通、非法时按 `ctty.FallbackCP()` 兜底转码（`shellPlatform.DecodeOutput`，posix 恒等） | 已实施（部分实机验证，未全量覆盖） |
