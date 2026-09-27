@@ -37,6 +37,8 @@ func (f *fakeTerm) Size() (Size, bool) {
 }
 func (f *fakeTerm) Subscribe(fn func(Event)) func() { return func() {} }
 
+func (f *fakeTerm) SubscribeKeys(fn func(Event)) func() { return func() {} }
+
 func (f *fakeTerm) LendStdin() (Lease, error) { return nil, ErrUnsupported }
 
 func (f *fakeTerm) LendFull(cmd *exec.Cmd, capture io.Writer) (Lease, error) {

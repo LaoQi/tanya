@@ -199,6 +199,8 @@ func (c *pickConsole) EndRead()                              {}
 func (c *pickConsole) Sane()                                 {}
 func (c *pickConsole) Subscribe(func(readline.Event)) func() { return func() {} }
 
+func (c *pickConsole) SubscribeKeys(func(readline.Event)) func() { return func() {} }
+
 func (c *pickConsole) Size() (readline.Size, bool) {
 	if len(c.sizes) == 0 {
 		return readline.Size{}, false

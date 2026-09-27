@@ -2,7 +2,6 @@ package repl
 
 import (
 	"context"
-	"sync"
 
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/readline"
@@ -45,47 +44,23 @@ func (w sinkWrap) Emit(e agent.Event) {
 	}
 }
 
+const hotkeyQueue = 8
+
 func (r *REPL) startHotkeys() (<-chan readline.KeyEvent, func()) {
 	if !hotkeysSupported || !r.keys || !r.reasonVisible() {
 		return nil, func() {}
 	}
-	if err := r.con.BeginRead(); err != nil {
-		return nil, func() {}
-	}
-	keys := make(chan readline.KeyEvent)
-	stopCh := make(chan struct{})
-	done := make(chan struct{})
-	var once sync.Once
-	go func() {
-		defer close(done)
-		defer r.con.EndRead()
-		for {
-			select {
-			case <-stopCh:
-				return
-			default:
-			}
-			ev, err := r.con.ReadEvent()
-			if err != nil {
-				return
-			}
-			if ev.Kind != readline.EventKey || ev.Key.Code != readline.KeyCtrlO {
-				continue
-			}
-			select {
-			case keys <- ev.Key:
-			case <-stopCh:
-				return
-			}
+	keys := make(chan readline.KeyEvent, hotkeyQueue)
+	cancel := r.con.SubscribeKeys(func(ev readline.Event) {
+		if ev.Kind != readline.EventKey || ev.Key.Code != readline.KeyCtrlO {
+			return
 		}
-	}()
-	stop := func() {
-		once.Do(func() {
-			close(stopCh)
-			<-done
-		})
-	}
-	return keys, stop
+		select {
+		case keys <- ev.Key:
+		default:
+		}
+	})
+	return keys, cancel
 }
 
 func (r *REPL) runTurn(ctx context.Context, q string, t *turn) error {
@@ -95,17 +70,13 @@ func (r *REPL) runTurn(ctx context.Context, q string, t *turn) error {
 		err := r.agent.Ask(ctx, q, sinkWrap{ch: ch, ctx: ctx}.Emit)
 		ch <- turnIn{kind: inDone, err: err}
 	}()
-	keys, stop := r.startHotkeys()
-	defer stop()
+	keys, cancel := r.startHotkeys()
+	defer cancel()
 	for {
 		select {
 		case in := <-ch:
 			switch in.kind {
 			case inAgent:
-				if in.ack != nil {
-					stop()
-					keys = nil
-				}
 				t.Handle(in.ev)
 				if in.ack != nil {
 					close(in.ack)
@@ -113,11 +84,7 @@ func (r *REPL) runTurn(ctx context.Context, q string, t *turn) error {
 			case inDone:
 				return in.err
 			}
-		case k, ok := <-keys:
-			if !ok {
-				keys = nil
-				continue
-			}
+		case k := <-keys:
 			t.Hotkey(k)
 		}
 	}
