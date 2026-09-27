@@ -45,6 +45,25 @@ func (t *posixTTY) Raw() error {
 	return nil
 }
 
+func (t *posixTTY) ReaderRaw() error {
+	saved, err := ctty.GetTermios(int(t.in.Fd()))
+	if err != nil {
+		return err
+	}
+	t.saved = saved
+	if err := ctty.SetTermiosFlush(int(t.in.Fd()), readerTermios(saved)); err != nil {
+		return err
+	}
+	t.keys.reset()
+	return nil
+}
+
+func readerTermios(saved ctty.Termios) ctty.Termios {
+	raw := keysTermios(saved)
+	raw.Oflag = saved.Oflag
+	return raw
+}
+
 func keysTermios(saved ctty.Termios) ctty.Termios {
 	raw := saved
 	raw.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP |
@@ -107,6 +126,8 @@ func (t *posixTTY) hungUp() bool {
 		return fds[0].Revents&(unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0
 	}
 }
+
+func (t *posixTTY) backgroundRead() bool { return true }
 
 func (t *posixTTY) readEvent() (Event, error) {
 	ev, err := t.keys.readKey()

@@ -117,6 +117,11 @@ func TestSaneIgnoresNonTerminal(t *testing.T) {
 	(&posixTTY{in: f}).Sane()
 }
 
+const (
+	keysMaskI = unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP | unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON
+	keysMaskL = unix.ECHO | unix.ICANON | unix.ISIG | unix.IEXTEN
+)
+
 func TestKeysTermiosClearsSignalAndCanonical(t *testing.T) {
 	_, slave := newTestPTY(t)
 	fd := int(slave.Fd())
@@ -137,8 +142,8 @@ func TestKeysTermiosClearsSignalAndCanonical(t *testing.T) {
 		got  uint32
 		mask uint32
 	}{
-		{"Iflag", base.Iflag, got.Iflag, unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP | unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON},
-		{"Lflag", base.Lflag, got.Lflag, unix.ECHO | unix.ICANON | unix.ISIG | unix.IEXTEN},
+		{"Iflag", base.Iflag, got.Iflag, keysMaskI},
+		{"Lflag", base.Lflag, got.Lflag, keysMaskL},
 		{"Oflag", base.Oflag, got.Oflag, unix.OPOST},
 	}
 	for _, f := range fields {
@@ -151,6 +156,42 @@ func TestKeysTermiosClearsSignalAndCanonical(t *testing.T) {
 	}
 	if got.Cc[unix.VMIN] != 0 || got.Cc[unix.VTIME] != 1 {
 		t.Errorf("VMIN/VTIME 应为 0/1，得 %d/%d", got.Cc[unix.VMIN], got.Cc[unix.VTIME])
+	}
+}
+
+func TestReaderTermiosKeepsOutputProcessing(t *testing.T) {
+	_, slave := newTestPTY(t)
+	fd := int(slave.Fd())
+	base, err := ctty.GetTermios(fd)
+	if err != nil {
+		t.Fatalf("getTermios: %v", err)
+	}
+	tty := &posixTTY{in: slave, out: slave}
+	if err := tty.ReaderRaw(); err != nil {
+		t.Fatalf("ReaderRaw: %v", err)
+	}
+	got, err := ctty.GetTermios(fd)
+	if err != nil {
+		t.Fatalf("getTermios: %v", err)
+	}
+	if got.Iflag&keysMaskI != 0 || got.Lflag&keysMaskL != 0 {
+		t.Errorf("常驻读者仍应清输入侧与信号位: Iflag 0x%x Lflag 0x%x", got.Iflag, got.Lflag)
+	}
+	if got.Oflag&unix.OPOST == 0 || got.Oflag != base.Oflag {
+		t.Errorf("常驻读者必须保留输出处理（输出链路依赖 ONLCR 换行）: Oflag 0x%x base 0x%x", got.Oflag, base.Oflag)
+	}
+	if got.Cc[unix.VMIN] != 0 || got.Cc[unix.VTIME] != 1 {
+		t.Errorf("VMIN/VTIME 应为 0/1，得 %d/%d", got.Cc[unix.VMIN], got.Cc[unix.VTIME])
+	}
+	if err := tty.Raw(); err != nil {
+		t.Fatalf("Raw: %v", err)
+	}
+	rawKeys, err := ctty.GetTermios(fd)
+	if err != nil {
+		t.Fatalf("getTermios: %v", err)
+	}
+	if rawKeys.Oflag&unix.OPOST != 0 {
+		t.Error("独占 Raw 仍应清 OPOST（与常驻读者不同）")
 	}
 }
 

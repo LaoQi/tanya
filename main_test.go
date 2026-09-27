@@ -177,8 +177,10 @@ func (c *fakeConsole) EndRead()                              {}
 func (c *fakeConsole) Sane()                                 {}
 func (c *fakeConsole) ReadEvent() (readline.Event, error)    { return readline.Event{}, io.EOF }
 func (c *fakeConsole) Subscribe(func(readline.Event)) func() { return func() {} }
-func (c *fakeConsole) Size() (readline.Size, bool)           { return readline.Size{}, false }
-func (c *fakeConsole) LendStdin() (readline.Lease, error)    { c.stdinN++; return c.stdin, c.stderr }
+
+func (c *fakeConsole) SubscribeKeys(func(readline.Event)) func() { return func() {} }
+func (c *fakeConsole) Size() (readline.Size, bool)               { return readline.Size{}, false }
+func (c *fakeConsole) LendStdin() (readline.Lease, error)        { c.stdinN++; return c.stdin, c.stderr }
 func (c *fakeConsole) LendFull(*exec.Cmd, io.Writer) (readline.Lease, error) {
 	return c.full, c.fullErr
 }

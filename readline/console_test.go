@@ -19,8 +19,10 @@ type fakeDevice struct {
 }
 
 func (d *fakeDevice) Raw() error { d.raw++; return nil }
-func (d *fakeDevice) Restore()   { d.rst++ }
-func (d *fakeDevice) Sane()      { d.sane++ }
+
+func (d *fakeDevice) ReaderRaw() error { return d.Raw() }
+func (d *fakeDevice) Restore()         { d.rst++ }
+func (d *fakeDevice) Sane()            { d.sane++ }
 
 func (d *fakeDevice) Size() (Size, bool) { return Size{Cols: 80, Rows: 24}, true }
 

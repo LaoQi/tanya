@@ -112,7 +112,8 @@ type Console interface {
     EndRead()                      // 退出会话（复原模式）
     Sane()                         // 自愈：终端复原为 Sane（纯模式复原，无前台组抢回；S5 落地）
     ReadEvent() (Event, error)     // Reader：同步拉取（编辑器/选择器循环）
-    Subscribe(fn func(Event)) (cancel func())  // 后台订阅（InterruptContext、流式期监听）
+    Subscribe(fn func(Event)) (cancel func())      // 事件通知（InterruptContext 等），不改终端模式
+    SubscribeKeys(fn func(Event)) (cancel func())  // 请求按键：武装常驻读者（S8：P3 落地）
     Size() (Size, bool)
     LendStdin() (Lease, error)     // 普通工具：子进程 stdin=/dev/null + 终端锚点，不直通、不移交（S5）
     LendFull(cmd *exec.Cmd, capture io.Writer) (Lease, error) // interactive：posix pty 泵+输出捕获 / windows 直通+掩蔽（S4）
@@ -127,6 +128,16 @@ type Lease interface {
 落地记录：S5 落地 `Sane`（device 三实现：posix 幂等置回 sane 位、windows 复原开终端时的 console mode、pipe no-op）与 `LendStdin` 的最终语义（stdin=`os.DevNull`，posix 另持终端锚点：借出前 `SaveCursor`、`Release` 时 termios 复原 + `ResetModes` + `RestoreCursor`，无前台移交、无 isForeground 门控）；S2 实现 `BeginRead`/`EndRead`/`ReadEvent`/`Subscribe`/`Size`；S4 实现 `LendStdin`/`LendFull`（`readline/lease*.go` 平台分片，pty 泵自 `bridge_linux.go` 收编；`Lender` 未单列接口，`Console` 直接含之）。`Console` 的实现值满足 `tools/shell` 的同名 `Console`/`Lease` 接口，因 Go 接口方法签名要求精确匹配，`main` 以 `consoleForShell` 薄适配器完成跨包注入（同 `Bridge` 先例）。
 
 L1 device 职责（接口包内私有，各分片一份完整实现）：模式切换、单读者读 + 唤醒、**中断归一**（`0x03` 字节与信号面汇成同一通知）、`Resize`/`Hangup` 产出（能力可选，产不出就是没有该事件）、`LendStdin`/`LendFull` 的机制实现、紧急复原。读循环只在 Reader 活跃期存在（空转期读会抢走子进程输入），唤醒用现有机制收敛（编辑器 `VMIN=0/VTIME=1` 轮询、桥接 wake pipe，二者归一为 device 内部实现细节）。
+
+**S8 落地记录（2026-09-27，P3：常驻读者与借出仲裁——§6 遗留的「未落成的设计意图」到位）**：
+
+- **状态机**：`Idle`（无人持有）/ `Exclusive`（`BeginRead`…`EndRead`，编辑器与 picker）/ `Lent`（`LendStdin`/`LendFull` 的租约期内）。转移只有四条：`Idle → Exclusive`、`Exclusive → Idle`、`Idle → Lent`、`Lent → Idle`；`EndRead` 与 `Lease.Release` 后回 `Idle` 时按需重启常驻读者。
+- **常驻读者**：仅当「`Idle` + 至少一个 `SubscribeKeys` 订阅 + 设备声明后台读能力」时运行（`posixTTY.backgroundRead()` 为真；`pipeDevice` 不声明——空转期后台读会吃光管道 stdin；`windowsConsole` 刻意不声明，与 `repl` 侧热键门禁一致）。读者由 L2 持有，循环把 `dev.readEvent()` 的事件推给订阅者，空闲周期（`EventIdle`）不推、只续读。
+- **挂起/恢复**：`BeginRead`、`beginLend` 先 `parkReader`（close stop → join → `Restore`）再继续；`EndRead`、`endLend` 之后 `maybeStartReaderLocked` 重启。借出归还即恢复，是 `tools/shell` 不再需要「自行停读」的原因，也让工具后第二轮思考的热键继续可用。读者异常退出（设备 EOF/挂断）时自行 `Restore` 并置 `broken`（**不自启**，避免热循环），下一次成功 `BeginRead` 清 `broken`。
+- **两套终端模式**：读者的模式是**输入侧 raw + 保留 `Oflag`**（新原语 `device.ReaderRaw()`），与独占 `Raw()`（连 `OPOST` 一起清）不同。原因：tanya 的输出链路逐块写 `\n` 而依赖内核 `ONLCR` 补 CR（cooked 语义），读者期丢 `OPOST` 会让工具块与状态行整屏错位——`render_audit` 的 `clean-tool-builtin-args` 正是这么抓出来的，`readline/device_posix_test.go` 的 `TestReaderTermiosKeepsOutputProcessing` 作回归守护。
+- **`^C` 路径不变**：读者期 `ISIG` 关闭，`0x03` 经 device 归一为 `EventInterrupt` 推给订阅者（`InterruptContext` 取消回合），与信号面同效；借出期归子进程。
+- **订阅回调的并发**：可能来自信号 watcher 或读者协程，回调须自身并发安全且不阻塞（现有两个订阅者分别是 `cancel()` 与带缓冲 channel 的非阻塞投递）。
+- 未落成：Windows 后台读（未实机验证，门禁保持关闭）、多读者通用仲裁（仍只有 Reader↔Lease 两态）。
 
 ## 6 搬迁与下线清单
 
@@ -159,7 +170,7 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 
 保留不动：`Setpgid` + `KillGroup` 树杀（与前台组无关）、`ProtectJobSignals`（SIGTSTP 吞没 + SIGTTIN/TTOU 忽略，自保）、`IgnoreCtrlEvents`（Windows LendFull 用）。
 
-**S5 落地记录**（2026-09-27，本节清单全部执行）：
+**S5 落地记录**（2026-09-27，本节清单全部执行；其中「未落成的设计意图」一条已由 S8/P3 补齐，见 §5）：
 
 - 与方案的差异一处：`LendStdin` 的**终端锚点保留**（借出前 `SaveCursor`、`Release` 时 termios 复原 + `ResetModes` + `RestoreCursor`）。锚点是「子进程继承 stdout、可往屏幕写转义」的保护，与 stdin 直通无关——`render_audit` 的 `clean-tty-scrollregion`/`clean-tty-modes`/`clean-alt-screen-exit`/`clean-tty-cup` 四条门正由它把关，一并删掉会全红。删掉的只有直通/移交/isForeground 门控/`ctty.SnapshotInput`-`RestoreInput`（随租约无消费者）。
 - Windows `LendFull` 落地：`CONIN$` 直通 + `IgnoreCtrlEvents` 掩蔽，按 §7 **不接 `capture`**（输出直上屏，`runFull` 的捕获参数在该平台被忽略）；`LendStdin` 按 §7 不掩蔽。未实机验证。

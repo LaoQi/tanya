@@ -1,9 +1,7 @@
 package readline
 
 import (
-	"io"
 	"os"
-	"os/exec"
 )
 
 type Lease interface {
@@ -36,12 +34,4 @@ func newStdinLease() (*stdinLease, error) {
 		return nil, err
 	}
 	return &stdinLease{f: f, release: anchorTerminal()}, nil
-}
-
-func (c *consoleImpl) LendStdin() (Lease, error) {
-	return newStdinLease()
-}
-
-func (c *consoleImpl) LendFull(cmd *exec.Cmd, capture io.Writer) (Lease, error) {
-	return lendFullImpl(cmd, capture)
 }

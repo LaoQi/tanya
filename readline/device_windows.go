@@ -61,6 +61,8 @@ func (t *windowsConsole) Raw() error {
 	return nil
 }
 
+func (t *windowsConsole) ReaderRaw() error { return t.Raw() }
+
 func (t *windowsConsole) Restore() {
 	ctty.SetConsoleMode(int(t.in.Fd()), t.saved)
 }

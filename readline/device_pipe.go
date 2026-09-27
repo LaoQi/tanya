@@ -16,6 +16,8 @@ func newPipeDevice() *pipeDevice {
 
 func (d *pipeDevice) Raw() error { return ErrUnsupported }
 
+func (d *pipeDevice) ReaderRaw() error { return ErrUnsupported }
+
 func (d *pipeDevice) Restore() {}
 
 func (d *pipeDevice) Sane() {}

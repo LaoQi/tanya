@@ -16,6 +16,8 @@ func (t widthTerm) Sane()                                    {}
 func (t widthTerm) Size() (readline.Size, bool)              { return readline.Size{Cols: t.cols, Rows: 24}, true }
 func (t widthTerm) Subscribe(fn func(readline.Event)) func() { return func() {} }
 
+func (t widthTerm) SubscribeKeys(fn func(readline.Event)) func() { return func() {} }
+
 func (t widthTerm) LendStdin() (readline.Lease, error) { return nil, readline.ErrUnsupported }
 
 func (t widthTerm) LendFull(cmd *exec.Cmd, capture io.Writer) (readline.Lease, error) {

@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -155,16 +156,17 @@ func TestTurnHotkeyOnWithoutDelta(t *testing.T) {
 }
 
 func TestRunTurnCtrlOStream(t *testing.T) {
+	dev := newFakeTerm()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		time.Sleep(250 * time.Millisecond)
 		sseChunk(w, map[string]any{"reasoning_content": "落定的思考"})
+		dev.pushCtrlO()
 		sseChunk(w, map[string]any{"content": "答案"})
 		fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	t.Cleanup(srv.Close)
 	a := newAskAgent(t, srv.URL)
-	dev := newFakeTerm(readline.KeyEvent{Code: readline.KeyCtrlO})
 	r, out, _ := newTestREPLAgent(t, a, dev)
 	r.showReasoning = false
 	r.ask("你好")
@@ -177,13 +179,13 @@ func TestRunTurnCtrlOStream(t *testing.T) {
 	}
 }
 
-func TestRunTurnToolAckStopsReader(t *testing.T) {
-	dev := newFakeTerm(readline.KeyEvent{Code: readline.KeyCtrlO})
-	dev.park = true
-	var readsAtInvoke atomic.Int32
+func TestRunTurnToolBlockRenderedBeforeInvoke(t *testing.T) {
+	dev := newFakeTerm()
+	var out *syncBuf
+	var rendered atomic.Bool
 	probe := agent.NewTool("probe", "记录执行时刻", `{"type":"object"}`,
 		func(ctx context.Context, args string) agent.ToolResult {
-			readsAtInvoke.Store(dev.endReads.Load())
+			rendered.Store(out != nil && strings.Contains(term.Strip(out.String()), "probe"))
 			return agent.ToolResult{Text: "ok"}
 		})
 	var n atomic.Int32
@@ -200,15 +202,55 @@ func TestRunTurnToolAckStopsReader(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	a := newAskAgent(t, srv.URL, probe)
-	r, out, _ := newTestREPLAgent(t, a, dev)
-	endReadBase := dev.endReads.Load()
+	r, ob, _ := newTestREPLAgent(t, a, dev)
+	out = ob
+	out.onWrite = func(p []byte) {
+		if bytes.Contains(p, []byte("probe")) {
+			time.Sleep(120 * time.Millisecond)
+		}
+	}
 	r.showReasoning = true
 	r.ask("跑工具")
-	if readsAtInvoke.Load() <= endReadBase {
-		t.Fatalf("工具执行前读循环应已 EndRead（ack 顺序）: base=%d at=%d", endReadBase, readsAtInvoke.Load())
+	if !rendered.Load() {
+		t.Error("工具块应已先于工具执行上屏（ToolStart ack 握手）")
 	}
 	if got := term.Strip(out.String()); !strings.Contains(got, "收尾") {
 		t.Errorf("工具后正文缺失: %q", got)
+	}
+}
+
+func TestRunTurnHotkeyAfterTool(t *testing.T) {
+	dev := newFakeTerm()
+	hit := atomic.Int32{}
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if n.Add(1) == 1 {
+			time.Sleep(120 * time.Millisecond)
+			sseChunk(w, map[string]any{"reasoning_content": "工具前思考"})
+			sseToolCall(w, "call-1", "probe")
+			dev.pushCtrlO()
+		} else {
+			sseChunk(w, map[string]any{"reasoning_content": "工具后思考\n"})
+			sseChunk(w, map[string]any{"content": "收尾"})
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	probe := agent.NewTool("probe", "占位", `{"type":"object"}`,
+		func(ctx context.Context, args string) agent.ToolResult {
+			hit.Add(1)
+			return agent.ToolResult{Text: "ok"}
+		})
+	a := newAskAgent(t, srv.URL, probe)
+	r, out, _ := newTestREPLAgent(t, a, dev)
+	r.showReasoning = false
+	r.ask("跑工具")
+	if hit.Load() != 1 {
+		t.Fatalf("工具应执行一次: %d", hit.Load())
+	}
+	if got := term.Strip(out.String()); !strings.Contains(got, "工具后思考") {
+		t.Errorf("工具后的热键仍应生效（回合内不中途退订）: %q", got)
 	}
 }
 

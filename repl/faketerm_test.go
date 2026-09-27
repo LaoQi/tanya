@@ -8,9 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/readline"
@@ -18,11 +16,18 @@ import (
 
 // syncBuf 让测试断言与心跳 goroutine 的写入互斥，-race 下安全。
 type syncBuf struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
+	mu      sync.Mutex
+	buf     bytes.Buffer
+	onWrite func([]byte)
 }
 
 func (b *syncBuf) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	hook := b.onWrite
+	b.mu.Unlock()
+	if hook != nil {
+		hook(p)
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.Write(p)
@@ -75,18 +80,19 @@ func (b *syncBuf) Reset() {
 }
 
 // fakeTerm 是 repl 侧的 readline.Console 替身：按键序列驱动 Run，无需真实终端（模拟真 tty，逐键会话恒可用）。
+// 常驻读者不在此模拟——SubscribeKeys 只登记回调，由用例用 push 主动投键。
 type fakeTerm struct {
-	keys     []readline.KeyEvent
-	idx      int
-	raw      bool
-	noKeys   bool
-	inKey    bool
-	onKey    func()
-	err      error
-	sane     int
-	subs     int
-	endReads atomic.Int32
-	park     bool
+	mu      sync.Mutex
+	keys    []readline.KeyEvent
+	idx     int
+	raw     bool
+	noKeys  bool
+	inKey   bool
+	onKey   func()
+	err     error
+	sane    int
+	subs    int
+	keySubs []func(readline.Event)
 }
 
 func newFakeTerm(keys ...readline.KeyEvent) *fakeTerm {
@@ -105,13 +111,49 @@ func (f *fakeTerm) BeginRead() error {
 	return nil
 }
 
-func (f *fakeTerm) EndRead() { f.raw = false; f.endReads.Add(1) }
+func (f *fakeTerm) EndRead() { f.raw = false }
 
 func (f *fakeTerm) Sane() { f.raw = false; f.sane++ }
 
 func (f *fakeTerm) Size() (readline.Size, bool) { return readline.Size{Cols: 80, Rows: 24}, true }
 
-func (f *fakeTerm) Subscribe(fn func(readline.Event)) func() { f.subs++; return func() {} }
+func (f *fakeTerm) Subscribe(fn func(readline.Event)) func() {
+	f.mu.Lock()
+	f.subs++
+	f.mu.Unlock()
+	return func() {}
+}
+
+func (f *fakeTerm) SubscribeKeys(fn func(readline.Event)) func() {
+	f.mu.Lock()
+	f.keySubs = append(f.keySubs, fn)
+	i := len(f.keySubs) - 1
+	f.mu.Unlock()
+	return func() {
+		f.mu.Lock()
+		if i < len(f.keySubs) {
+			f.keySubs[i] = nil
+		}
+		f.mu.Unlock()
+	}
+}
+
+// push 把事件投给当前按键订阅者（模拟常驻读者送键）；pushCtrlO 是热键用例的简写。
+func (f *fakeTerm) push(ev readline.Event) {
+	f.mu.Lock()
+	fns := make([]func(readline.Event), len(f.keySubs))
+	copy(fns, f.keySubs)
+	f.mu.Unlock()
+	for _, fn := range fns {
+		if fn != nil {
+			fn(ev)
+		}
+	}
+}
+
+func (f *fakeTerm) pushCtrlO() {
+	f.push(readline.Event{Kind: readline.EventKey, Key: readline.KeyEvent{Code: readline.KeyCtrlO}})
+}
 
 func (f *fakeTerm) LendStdin() (readline.Lease, error) { return nil, readline.ErrUnsupported }
 
@@ -139,10 +181,6 @@ func (f *fakeTerm) ReadEvent() (readline.Event, error) {
 	if f.idx >= len(f.keys) {
 		if f.err != nil {
 			return readline.Event{}, f.err
-		}
-		if f.park {
-			time.Sleep(10 * time.Millisecond)
-			return readline.Event{}, nil
 		}
 		return readline.Event{}, io.EOF
 	}
