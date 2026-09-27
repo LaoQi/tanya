@@ -85,11 +85,14 @@ tanya -n              # 只读会话：可载入历史，不写入
 tanya -n ask "问题"   # 单发且不写入会话历史
 tanya -c x.yaml       # 指定配置文件
 tanya -m local        # 会话存到当前目录 .tanya/
+tanya --model gpt-5   # 本次运行使用指定模型（只影响本次进程，不写配置文件）
 tanya -p              # 纯文本输出：无颜色/状态行/工具块，stdout 只留答案与命令反馈
 tanya -p --verbose    # 纯文本输出但保留工具块与状态行（仍无颜色与光标控制）
 tanya -v              # 显示版本号
 tanya -h              # 用法：四种运行模式与全局选项（--help 同）
 ```
+
+模型来源优先级（从高到低）：命令行 `--model <name>` > env `TANYA_MODEL` > 配置文件 `model`。`--model` 只覆盖本次运行，空值或纯空白视为未指定、回落下层；运行期仍可用 `/model` 或让模型经 `agent_custom` 的 `set model` 再切换。
 
 启动安全检查：以 root（euid 0）运行直接报错退出（stderr 一行，退出码 1），`ask`/`init`/`config`/`-v` 在 root 下同样被拒；容器等确实需要 root 的场景设 `TANYA_ALLOW_ROOT=1` 放行（只认精确值 `1`，静默放行）。`-h`/`--help` 与用法报错不受影响，Windows 无此检查。
 

@@ -39,6 +39,7 @@ type cliFlags struct {
 	showVersion *bool
 	configPath  *string
 	sessionMode *string
+	model       *string
 	noSave      *bool
 	plain       *bool
 	verbose     *bool
@@ -50,6 +51,7 @@ func registerFlags(fs *flag.FlagSet) *cliFlags {
 	f.showVersion = fs.Bool("v", false, repl.FlagVersion)
 	f.configPath = fs.String("c", "", repl.FlagConfig)
 	f.sessionMode = fs.String("m", "", repl.FlagMode)
+	f.model = fs.String("model", "", repl.FlagModel)
 	f.noSave = fs.Bool("n", false, repl.FlagNoSave)
 	fs.BoolVar(f.noSave, "no-save", false, repl.FlagNoSave)
 	f.plain = fs.Bool("p", false, repl.FlagPlain)
@@ -132,6 +134,7 @@ func main() {
 	if *f.sessionMode != "" {
 		cfg.SessionMode = *f.sessionMode
 	}
+	applyModel(cfg, *f.model)
 	if cmd == repl.CmdInit {
 		if err := repl.RunInit(st, sem, &cfg.Config); err != nil {
 			st.FailErr("", err)
@@ -204,6 +207,12 @@ func main() {
 	}
 	if code := ctty.ExitStatus(); code != 0 {
 		exitNow(code)
+	}
+}
+
+func applyModel(cfg *config.Config, v string) {
+	if m := strings.TrimSpace(v); m != "" {
+		cfg.Model = m
 	}
 }
 
