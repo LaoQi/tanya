@@ -68,8 +68,8 @@ func (r Renderer) Inline(in ...ir.Inline) string {
 	return b.String()
 }
 
-func Sprint(in ...ir.Inline) string {
-	return NewRenderer(term.GetProfile()).Inline(in...)
+func Sprint(prof term.Profile, in ...ir.Inline) string {
+	return NewRenderer(prof).Inline(in...)
 }
 
 func (r Renderer) Block(b ir.Block) string {

@@ -24,7 +24,7 @@ func TestParseTemplateMarkup(t *testing.T) {
 		}
 		return "", false
 	}
-	got := tpl.Render(resolve)
+	got := tpl.Render(colorProf, resolve)
 	want := "\x1b[37m/home/u\x1b[0m \x1b[34mdeepseek\x1b[0m"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -50,7 +50,7 @@ func TestTemplateDefaultPromptEquivalence(t *testing.T) {
 		}
 		return "", false
 	}
-	got := tpl.Render(resolve)
+	got := tpl.Render(colorProf, resolve)
 	want := "\x1b[37m~/p\x1b[0m \x1b[34mm1\x1b[0m \x1b[33mlow\x1b[0m \x1b[32mok\x1b[0m \x1b[37m>\x1b[0m "
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -65,7 +65,7 @@ func TestTemplateUnknownPlaceholderKept(t *testing.T) {
 		}
 		return "", false
 	}
-	got := tpl.Render(resolve)
+	got := tpl.Render(colorProf, resolve)
 	want := "\x1b[37m/x {nope}\x1b[0m"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -75,7 +75,7 @@ func TestTemplateUnknownPlaceholderKept(t *testing.T) {
 func TestTemplateResolveFalseKeepsLiteral(t *testing.T) {
 	tpl, _ := ParseTemplate("[red]x{nope}[/]", defSem())
 	resolve := func(string) (string, bool) { return "", false }
-	got := tpl.Render(resolve)
+	got := tpl.Render(colorProf, resolve)
 	want := "\x1b[31mx{nope}\x1b[0m"
 	if got != want {
 		t.Errorf("resolve false 应保留字面量: %q", got)
@@ -87,7 +87,7 @@ func TestTemplateValueWithMarkupChars(t *testing.T) {
 	resolve := func(name string) (string, bool) {
 		return "~[red]{x}~", true
 	}
-	got := tpl.Render(resolve)
+	got := tpl.Render(colorProf, resolve)
 	want := "\x1b[37m~[red]{x}~\x1b[0m"
 	if got != want {
 		t.Errorf("值不应被二次解析: %q", got)
@@ -105,12 +105,14 @@ func TestTemplateEmptyValueSpanSkipped(t *testing.T) {
 		}
 		return ">", name == "cwd"
 	}
-	got := tpl.Render(resolve)
+	got := tpl.Render(colorProf, resolve)
 	want := " \x1b[37m>\x1b[0m "
 	if got != want {
 		t.Errorf("空值应跳过 span: %q", got)
 	}
 }
+
+var colorProf = term.Profile{TTY: true, Colors: term.Level16}
 
 func TestTemplatePassthroughANSI(t *testing.T) {
 	tpl, err := ParseTemplate("\x1b[37m{cwd}\x1b[0m >", defSem())
@@ -123,12 +125,10 @@ func TestTemplatePassthroughANSI(t *testing.T) {
 	resolve := func(name string) (string, bool) {
 		return "/p", name == "cwd"
 	}
-	if got := tpl.Render(resolve); got != "\x1b[37m/p\x1b[0m >" {
+	if got := tpl.Render(colorProf, resolve); got != "\x1b[37m/p\x1b[0m >" {
 		t.Errorf("彩色直通: %q", got)
 	}
-	defer term.SetProfile(term.GetProfile())
-	term.SetProfile(term.Profile{TTY: false, Colors: term.LevelNone})
-	if got := tpl.Render(resolve); got != "/p >" {
+	if got := tpl.Render(term.Profile{TTY: false, Colors: term.LevelNone}, resolve); got != "/p >" {
 		t.Errorf("无色应剥离: %q", got)
 	}
 }

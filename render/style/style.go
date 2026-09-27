@@ -38,8 +38,15 @@ type Style struct {
 	Attr Attr
 }
 
-func (s Style) Sprint(t string) string {
-	seq := s.SGR(term.GetProfile())
+type Bound struct {
+	Style   Style
+	Profile term.Profile
+}
+
+func (s Style) With(p term.Profile) Bound { return Bound{Style: s, Profile: p} }
+
+func (b Bound) Sprint(t string) string {
+	seq := b.Style.SGR(b.Profile)
 	if seq == "" {
 		return t
 	}

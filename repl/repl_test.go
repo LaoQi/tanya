@@ -15,7 +15,7 @@ func promptRender(t *testing.T, tpl string, vars map[string]string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tpl2.Render(func(name string) (string, bool) {
+	return tpl2.Render(ttyRich(), func(name string) (string, bool) {
 		v, ok := vars[name]
 		return v, ok
 	})
@@ -62,7 +62,7 @@ func TestRenderPromptMarkupColored(t *testing.T) {
 }
 
 func TestNewREPLEmptyTplFallback(t *testing.T) {
-	r, err := NewREPL(nil, "")
+	r, err := NewREPL(nil, "", WithProfile(ttyRich()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestPrintHistoryFullUserToolRaw(t *testing.T) {
 }
 
 func TestNoSaveWarnOnlyWhenEnabled(t *testing.T) {
-	r, err := NewREPL(nil, "")
+	r, err := NewREPL(nil, "", WithProfile(ttyRich()))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,6 @@ import (
 
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/readline"
-	"github.com/LaoQi/tanya/render/term"
 )
 
 func newAutoArchiveAgent(t *testing.T, dir string, threshold, keep int) *agent.Agent {
@@ -56,9 +55,8 @@ func countSessions(t *testing.T, a *agent.Agent) (active, archived int) {
 
 func runAutoArchivePrompt(t *testing.T, a *agent.Agent, keys ...readline.KeyEvent) (*syncBuf, *syncBuf) {
 	t.Helper()
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.LevelNone})
 	out, errb := &syncBuf{}, &syncBuf{}
-	r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, modeRich)), WithConsole(newFakeTerm(keys...)))
+	r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, modeRich)), WithProfile(plainProf), WithConsole(newFakeTerm(keys...)))
 	if err != nil {
 		t.Fatal(err)
 	}

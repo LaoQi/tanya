@@ -131,7 +131,7 @@ func (t *turn) writeReasoning(s string) {
 	if !t.reasonOpen {
 		t.reasonOpen = true
 		t.reasonStart = time.Now()
-		t.r.print(reasonSep(t.f.sem, MsgReasonHead, 0), KindReasoning)
+		t.r.print(reasonSep(t.f.sem, t.r.prof, MsgReasonHead, 0), KindReasoning)
 	}
 	for _, blk := range t.reasonBuf.Write(s) {
 		t.r.print(t.f.rend.Block(blk), KindReasoning)
@@ -146,7 +146,7 @@ func (t *turn) flushReason() {
 	for _, blk := range t.reasonBuf.Close() {
 		t.r.print(t.f.rend.Block(blk), KindReasoning)
 	}
-	t.r.print(reasonSep(t.f.sem, MsgReasonTail, time.Since(t.reasonStart)), KindReasoning)
+	t.r.print(reasonSep(t.f.sem, t.r.prof, MsgReasonTail, time.Since(t.reasonStart)), KindReasoning)
 	t.reasonOpen = false
 }
 
@@ -192,7 +192,7 @@ func (t *turn) replayReason() {
 	t.r.view.Stop()
 	t.reasonOpen = true
 	t.reasonStart = time.Now()
-	t.r.print(reasonSep(t.f.sem, MsgReasonHead, 0), KindReasoning)
+	t.r.print(reasonSep(t.f.sem, t.r.prof, MsgReasonHead, 0), KindReasoning)
 	for _, blk := range t.reasonBuf.Rewind() {
 		t.r.print(t.f.rend.Block(blk), KindReasoning)
 	}

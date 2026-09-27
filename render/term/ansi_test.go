@@ -2,30 +2,26 @@ package term
 
 import "testing"
 
-func setTestLevel(l ColorLevel) func() {
-	old := current
-	current = Profile{TTY: l != LevelNone, Colors: l}
-	return func() { current = old }
-}
+func testProfile(l ColorLevel) Profile { return Profile{TTY: l != LevelNone, Colors: l} }
 
 func TestPassthroughKeepsSGRDropsRest(t *testing.T) {
-	defer setTestLevel(Level16)()
+	p := testProfile(Level16)
 	in := "a\x1b[31m红\x1b[0mb\x1b[2K\x1b]0;t\x07c\rd"
 	want := "a\x1b[31m红\x1b[0mbcd"
-	if got := Passthrough(in); got != want {
+	if got := Passthrough(p, in); got != want {
 		t.Errorf("Passthrough = %q, want %q", got, want)
 	}
 }
 
 func TestPassthroughClosesDirty(t *testing.T) {
-	defer setTestLevel(Level16)()
-	if got := Passthrough("a\x1b[31mb"); got != "a\x1b[31mb\x1b[0m" {
+	p := testProfile(Level16)
+	if got := Passthrough(p, "a\x1b[31mb"); got != "a\x1b[31mb\x1b[0m" {
 		t.Errorf("脏状态结尾应补 reset: %q", got)
 	}
 }
 
 func TestPassthroughResetTracking(t *testing.T) {
-	defer setTestLevel(Level16)()
+	p := testProfile(Level16)
 	cases := []struct {
 		in   string
 		want string
@@ -38,29 +34,29 @@ func TestPassthroughResetTracking(t *testing.T) {
 		{"\x1b[38;5;196ma", "\x1b[38;5;196ma\x1b[0m"},
 	}
 	for _, c := range cases {
-		if got := Passthrough(c.in); got != c.want {
+		if got := Passthrough(p, c.in); got != c.want {
 			t.Errorf("Passthrough(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
 
 func TestPassthroughNoColorDropsSGR(t *testing.T) {
-	defer setTestLevel(LevelNone)()
-	if got := Passthrough("a\x1b[31mb"); got != "ab" {
+	p := testProfile(LevelNone)
+	if got := Passthrough(p, "a\x1b[31mb"); got != "ab" {
 		t.Errorf("无色环境应剥色: %q", got)
 	}
 }
 
 func TestPassthroughKeepsTabNewline(t *testing.T) {
-	defer setTestLevel(Level16)()
-	if got := Passthrough("a\tb\nc"); got != "a\tb\nc" {
+	p := testProfile(Level16)
+	if got := Passthrough(p, "a\tb\nc"); got != "a\tb\nc" {
 		t.Errorf("tab 与换行应保留: %q", got)
 	}
 }
 
 func TestPassthroughUnterminated(t *testing.T) {
-	defer setTestLevel(Level16)()
-	if got := Passthrough("a\x1b[31"); got != "a" {
+	p := testProfile(Level16)
+	if got := Passthrough(p, "a\x1b[31"); got != "a" {
 		t.Errorf("未闭合序列应丢弃: %q", got)
 	}
 }

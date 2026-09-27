@@ -33,7 +33,7 @@ func TestThemeCommandSwitch(t *testing.T) {
 	if r.promptTpl != r.sch.Prompt {
 		t.Errorf("切换后 promptTpl 应为 vivid 模板: %q", r.promptTpl)
 	}
-	if got := r.sem.Info.Sprint("x"); got != "\x1b[96mx\x1b[0m" {
+	if got := r.sem.Info.With(r.prof).Sprint("x"); got != "\x1b[96mx\x1b[0m" {
 		t.Errorf("切换后 Info 应渲染亮青: %q", got)
 	}
 }

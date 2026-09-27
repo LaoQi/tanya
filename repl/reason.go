@@ -5,16 +5,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LaoQi/tanya/render/term"
 	"github.com/LaoQi/tanya/render/theme"
 )
 
 // reasonSep 渲染思维链的上下分隔符（Think 语义色，前后各三条横线），收尾一侧附时长。
-func reasonSep(sem theme.Semantics, label string, d time.Duration) string {
+func reasonSep(sem theme.Semantics, prof term.Profile, label string, d time.Duration) string {
 	text := label
 	if d > 0 {
 		text += fmt.Sprintf(MsgReasonDurFmt, turnDuration(d))
 	}
-	return sem.Think.Sprint(reasonRuleLeft+text+reasonRuleRight) + "\n"
+	return sem.Think.With(prof).Sprint(reasonRuleLeft+text+reasonRuleRight) + "\n"
 }
 
 // reasonVisible 报告当前输出档能否显示思维链：TTY 且 KindReasoning 过门禁（仅 rich 档）。

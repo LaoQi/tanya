@@ -1,6 +1,12 @@
 package style
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/LaoQi/tanya/render/term"
+)
+
+func Profile16() term.Profile { return term.Profile{TTY: true, Colors: term.Level16} }
 
 func TestSprintCombinations(t *testing.T) {
 	cases := []struct {
@@ -16,7 +22,7 @@ func TestSprintCombinations(t *testing.T) {
 		{"empty style", Style{}, "x", "x"},
 	}
 	for _, c := range cases {
-		if got := c.style.Sprint(c.text); got != c.want {
+		if got := c.style.With(Profile16()).Sprint(c.text); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
 	}

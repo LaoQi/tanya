@@ -50,13 +50,13 @@ func TestStatusLineNoCursorControl(t *testing.T) {
 	sem := testSem()
 	for _, kind := range []statusKind{statusWaiting, statusToolRunning} {
 		for _, sec := range []int{0, 1, 59, 70, 3660} {
-			assertNoCursorControl(t, statusLine(kind, sem, sec))
+			assertNoCursorControl(t, statusLine(kind, sem, ttyRich(), sec))
 		}
 	}
-	if got := term.Strip(statusLine(statusWaiting, sem, 0)); got != MsgStatusWaiting+" 0s " {
+	if got := term.Strip(statusLine(statusWaiting, sem, ttyRich(), 0)); got != MsgStatusWaiting+" 0s " {
 		t.Errorf("等待行 = %q, want %q", got, MsgStatusWaiting+" 0s ")
 	}
-	if got := term.Strip(statusLine(statusToolRunning, sem, 70)); got != MsgStatusRunning+" 1m10s " {
+	if got := term.Strip(statusLine(statusToolRunning, sem, ttyRich(), 70)); got != MsgStatusRunning+" 1m10s " {
 		t.Errorf("执行行 = %q, want %q", got, MsgStatusRunning+" 1m10s ")
 	}
 }
@@ -75,7 +75,7 @@ func stepClock(step time.Duration) func() time.Time {
 // 满 span 个点即换行并以当时秒数开新行，末行未满点。
 func TestHeartbeatLineStructure(t *testing.T) {
 	var buf syncBuf
-	h := newHeartbeat(newOutput(&buf, allVisible()), testSem())
+	h := newHeartbeat(newOutput(&buf, allVisible()), testSem(), ttyRich())
 	h.interval = 2 * time.Millisecond
 	h.span = 3
 	h.now = stepClock(3 * time.Second)
@@ -115,7 +115,7 @@ func TestHeartbeatLineStructure(t *testing.T) {
 // TestHeartbeatSecondsFromClock 锁定秒数取墙钟而非 span 计数：行首秒数按真实经过时间给出。
 func TestHeartbeatSecondsFromClock(t *testing.T) {
 	var buf syncBuf
-	h := newHeartbeat(newOutput(&buf, allVisible()), testSem())
+	h := newHeartbeat(newOutput(&buf, allVisible()), testSem(), ttyRich())
 	h.interval = 2 * time.Millisecond
 	h.span = 2
 	h.now = stepClock(7 * time.Second)
@@ -136,18 +136,18 @@ func TestHeartbeatSecondsFromClock(t *testing.T) {
 // TestHeartbeatDotSharesLabelColor 锁住点与行首同色：两阶段各用各自语义色包裹单点，
 // 且点自带 reset（行不留在着色态）。
 func TestHeartbeatDotSharesLabelColor(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	sem := testSem()
+	prof := ttyRich()
 	for _, c := range []struct {
 		kind statusKind
 		text string
 		dot  string
 	}{
-		{statusWaiting, sem.Warn.Sprint(MsgStatusWaiting + " 0s"), sem.Warn.Sprint(".")},
-		{statusToolRunning, sem.Run.Sprint(MsgStatusRunning + " 0s"), sem.Run.Sprint(".")},
+		{statusWaiting, sem.Warn.With(prof).Sprint(MsgStatusWaiting + " 0s"), sem.Warn.With(prof).Sprint(".")},
+		{statusToolRunning, sem.Run.With(prof).Sprint(MsgStatusRunning + " 0s"), sem.Run.With(prof).Sprint(".")},
 	} {
 		var buf syncBuf
-		h := newHeartbeat(newOutput(&buf, allVisible()), sem)
+		h := newHeartbeat(newOutput(&buf, allVisible()), sem, prof)
 		h.interval = 2 * time.Millisecond
 		h.start(c.kind, true)
 		waitUntil(t, "出现点", func() bool { return strings.Contains(buf.String(), c.dot) })
@@ -169,7 +169,7 @@ func TestHeartbeatDotSharesLabelColor(t *testing.T) {
 // 以新前缀开新行（一次写完，不重绘）；秒数沿用同一时钟（不重置为 0），点数归零；同相位重复事件是 no-op。
 func TestHeartbeatSetPhase(t *testing.T) {
 	var buf syncBuf
-	h := newHeartbeat(newOutput(&buf, allVisible()), testSem())
+	h := newHeartbeat(newOutput(&buf, allVisible()), testSem(), ttyRich())
 	h.interval = time.Hour
 	h.now = stepClock(3 * time.Second)
 
@@ -209,7 +209,7 @@ func TestHeartbeatSetPhase(t *testing.T) {
 
 func TestHeartbeatRestartStartsFreshLine(t *testing.T) {
 	var buf syncBuf
-	h := newHeartbeat(newOutput(&buf, allVisible()), testSem())
+	h := newHeartbeat(newOutput(&buf, allVisible()), testSem(), ttyRich())
 	h.interval = 2 * time.Millisecond
 	h.start(statusWaiting, true)
 	waitUntil(t, "出现点", func() bool { return strings.Contains(term.Strip(buf.String()), ".") })
@@ -232,7 +232,7 @@ func TestHeartbeatRestartStartsFreshLine(t *testing.T) {
 
 func TestHeartbeatDisabledNoOutput(t *testing.T) {
 	var buf syncBuf
-	h := newHeartbeat(newOutput(&buf, allVisible()), testSem())
+	h := newHeartbeat(newOutput(&buf, allVisible()), testSem(), ttyRich())
 	h.interval = 5 * time.Millisecond
 	h.start(statusWaiting, false)
 	time.Sleep(20 * time.Millisecond)
@@ -244,7 +244,7 @@ func TestHeartbeatDisabledNoOutput(t *testing.T) {
 
 func TestHeartbeatStopsSilently(t *testing.T) {
 	var buf syncBuf
-	h := newHeartbeat(newOutput(&buf, allVisible()), testSem())
+	h := newHeartbeat(newOutput(&buf, allVisible()), testSem(), ttyRich())
 	h.interval = 5 * time.Millisecond
 	h.start(statusWaiting, true)
 	waitUntil(t, "出现点", func() bool { return strings.Contains(term.Strip(buf.String()), ".") })
@@ -261,7 +261,7 @@ func TestHeartbeatStopsSilently(t *testing.T) {
 }
 
 func TestHeartbeatLiveRejectsRetiredLoop(t *testing.T) {
-	h := newHeartbeat(newOutput(&syncBuf{}, allVisible()), testSem())
+	h := newHeartbeat(newOutput(&syncBuf{}, allVisible()), testSem(), ttyRich())
 	oldCh, newCh := make(chan struct{}), make(chan struct{})
 	h.active, h.stopCh = true, newCh
 	if h.live(oldCh) {
@@ -278,7 +278,7 @@ func TestHeartbeatLiveRejectsRetiredLoop(t *testing.T) {
 
 func TestHeartbeatStopIsIdempotent(t *testing.T) {
 	var buf syncBuf
-	h := newHeartbeat(newOutput(&buf, allVisible()), testSem())
+	h := newHeartbeat(newOutput(&buf, allVisible()), testSem(), ttyRich())
 	h.interval = 5 * time.Millisecond
 	h.stop()
 	if got := buf.String(); got != "" {

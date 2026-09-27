@@ -1,20 +1,12 @@
 package repl
 
 import (
-	"github.com/LaoQi/tanya/render/term"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
 )
-
-func withPlainProfile(t *testing.T) {
-	t.Helper()
-	old := term.GetProfile()
-	term.SetProfile(term.Profile{TTY: false, Colors: term.LevelNone})
-	t.Cleanup(func() { term.SetProfile(old) })
-}
 
 func newSettleAgent(t *testing.T) *agent.Agent {
 	t.Helper()
@@ -46,7 +38,6 @@ func infoWithUsage() agent.ResponseInfo {
 }
 
 func TestResponseInfoFollowsSettledTail(t *testing.T) {
-	withPlainProfile(t)
 	a := newSettleAgent(t)
 	r, buf, _ := newTestREPLAgent(t, a, newFakeTerm())
 	turn := r.beginTurn(nil)
@@ -66,7 +57,6 @@ func TestResponseInfoFollowsSettledTail(t *testing.T) {
 }
 
 func TestToolStartFollowsSettledTail(t *testing.T) {
-	withPlainProfile(t)
 	a := newSettleAgent(t)
 	r, buf, _ := newTestREPLAgent(t, a, newFakeTerm())
 	turn := r.beginTurn(nil)

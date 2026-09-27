@@ -2,9 +2,9 @@ package style
 
 import "github.com/LaoQi/tanya/render/term"
 
-func (s Style) Frame(text string) string {
+func (b Bound) Frame(text string) string {
 	clean := term.Sanitize(text, false)
-	seq := s.SGR(term.GetProfile())
+	seq := b.Style.SGR(b.Profile)
 	if seq == "" {
 		return clean
 	}

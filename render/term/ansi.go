@@ -10,8 +10,8 @@ const (
 	seqOther
 )
 
-func Passthrough(text string) string {
-	return Sanitize(text, current.Colors != LevelNone)
+func Passthrough(p Profile, text string) string {
+	return Sanitize(text, p.Colors != LevelNone)
 }
 
 func HasSGR(s string) bool {

@@ -22,7 +22,7 @@ func TestSemanticSGR(t *testing.T) {
 		{"accent", sem.Accent, "\x1b[7m"},
 	}
 	for _, c := range cases {
-		if got := c.style.SGR(term.GetProfile()); got != c.want {
+		if got := c.style.SGR(term.Profile{TTY: true, Colors: term.Level16}); got != c.want {
 			t.Errorf("%s sgr = %q, want %q", c.name, got, c.want)
 		}
 	}

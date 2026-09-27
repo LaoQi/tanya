@@ -59,7 +59,7 @@ func TestPickerConfirmAndCancel(t *testing.T) {
 }
 
 func TestPickerRender(t *testing.T) {
-	p := &sessionPicker{items: testSessions(2), cursor: 1, sem: testSem(), size: readline.Size{Cols: 80, Rows: 24}}
+	p := &sessionPicker{items: testSessions(2), cursor: 1, sem: testSem(), prof: ttyRich(), size: readline.Size{Cols: 80, Rows: 24}}
 	var buf bytes.Buffer
 	p.render(&buf)
 	s := buf.String()
@@ -80,7 +80,7 @@ func TestPickerUsesWriter(t *testing.T) {
 	list := testSessions(2)
 	term := newFakeTerm(readline.KeyEvent{Code: readline.KeyDown}, readline.KeyEvent{Code: readline.KeyEnter})
 	var buf syncBuf
-	idx, ok, _ := pickSession(term, list, &buf, testSem())
+	idx, ok, _ := pickSession(term, list, &buf, testSem(), ttyRich())
 	if !ok || idx != 1 {
 		t.Fatalf("应确认第 2 项: idx=%d ok=%v", idx, ok)
 	}
@@ -92,7 +92,7 @@ func TestPickerUsesWriter(t *testing.T) {
 
 func TestPickerWindowFitsRows(t *testing.T) {
 	list := testSessions(40)
-	p := &sessionPicker{items: list, sem: testSem(), size: readline.Size{Cols: 100, Rows: 32}}
+	p := &sessionPicker{items: list, sem: testSem(), prof: ttyRich(), size: readline.Size{Cols: 100, Rows: 32}}
 	var buf bytes.Buffer
 	p.render(&buf)
 	s := buf.String()
@@ -110,7 +110,7 @@ func TestPickerWindowFitsRows(t *testing.T) {
 func TestPickerLinesTrackedAndBounded(t *testing.T) {
 	for _, rows := range []int{3, 5, 12, 24, 32} {
 		list := testSessions(rows * 2)
-		p := &sessionPicker{items: list, sem: testSem(), size: readline.Size{Cols: 80, Rows: rows}}
+		p := &sessionPicker{items: list, sem: testSem(), prof: ttyRich(), size: readline.Size{Cols: 80, Rows: rows}}
 		var buf bytes.Buffer
 		p.render(&buf)
 		wrote := strings.Count(buf.String(), "\r\n")
@@ -134,7 +134,7 @@ func TestPickerLinesTrackedAndBounded(t *testing.T) {
 
 func TestPickerWindowFollowsCursor(t *testing.T) {
 	list := testSessions(40)
-	p := &sessionPicker{items: list, cursor: 35, sem: testSem(), size: readline.Size{Cols: 100, Rows: 32}}
+	p := &sessionPicker{items: list, cursor: 35, sem: testSem(), prof: ttyRich(), size: readline.Size{Cols: 100, Rows: 32}}
 	var buf bytes.Buffer
 	p.render(&buf)
 	s := buf.String()
@@ -162,7 +162,7 @@ func TestPickerAllItemsWhenSizeUnknown(t *testing.T) {
 func TestPickerRowTruncatedToCols(t *testing.T) {
 	list := testSessions(3)
 	list[0].Summary = strings.Repeat("宽", 40)
-	p := &sessionPicker{items: list, sem: testSem(), size: readline.Size{Cols: 30, Rows: 24}}
+	p := &sessionPicker{items: list, sem: testSem(), prof: ttyRich(), size: readline.Size{Cols: 30, Rows: 24}}
 	var buf bytes.Buffer
 	p.render(&buf)
 	for _, line := range strings.Split(buf.String(), "\r\n") {
@@ -233,7 +233,7 @@ func keyEvent(code readline.KeyCode, r rune) readline.Event {
 
 func TestPickSessionEmptyListFallsBack(t *testing.T) {
 	var buf bytes.Buffer
-	idx, ok, keys := pickSession(&pickConsole{}, nil, &buf, testSem())
+	idx, ok, keys := pickSession(&pickConsole{}, nil, &buf, testSem(), ttyRich())
 	if idx != -1 || ok || !keys {
 		t.Fatalf("空列表应直接回落数字选择: idx=%d ok=%v keys=%v", idx, ok, keys)
 	}
@@ -244,7 +244,7 @@ func TestPickSessionEmptyListFallsBack(t *testing.T) {
 
 func TestPickSessionWithoutKeys(t *testing.T) {
 	var buf bytes.Buffer
-	idx, ok, keys := pickSession(&pickConsole{beginErr: readline.ErrUnsupported}, testSessions(3), &buf, testSem())
+	idx, ok, keys := pickSession(&pickConsole{beginErr: readline.ErrUnsupported}, testSessions(3), &buf, testSem(), ttyRich())
 	if idx != -1 || ok || keys {
 		t.Fatalf("非逐键终端应回落数字选择: idx=%d ok=%v keys=%v", idx, ok, keys)
 	}
@@ -260,7 +260,7 @@ func TestPickSessionReadErrorAndInterrupt(t *testing.T) {
 	}
 	for name, c := range cases {
 		var buf bytes.Buffer
-		idx, ok, keys := pickSession(c, testSessions(3), &buf, testSem())
+		idx, ok, keys := pickSession(c, testSessions(3), &buf, testSem(), ttyRich())
 		if idx != -1 || ok || !keys {
 			t.Errorf("%s: 应取消并保留按键能力: idx=%d ok=%v keys=%v", name, idx, ok, keys)
 		}
@@ -270,7 +270,7 @@ func TestPickSessionReadErrorAndInterrupt(t *testing.T) {
 func TestPickSessionCancelKey(t *testing.T) {
 	c := &pickConsole{events: []readline.Event{keyEvent(readline.KeyRune, 'q')}}
 	var buf bytes.Buffer
-	idx, ok, keys := pickSession(c, testSessions(3), &buf, testSem())
+	idx, ok, keys := pickSession(c, testSessions(3), &buf, testSem(), ttyRich())
 	if idx != -1 || ok || !keys {
 		t.Fatalf("q 应取消: idx=%d ok=%v keys=%v", idx, ok, keys)
 	}
@@ -285,7 +285,7 @@ func TestPickSessionSizeChangeRedrawsWithoutStaleUp(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	idx, ok, keys := pickSession(c, testSessions(3), &buf, testSem())
+	idx, ok, keys := pickSession(c, testSessions(3), &buf, testSem(), ttyRich())
 	if !ok || !keys || idx != 1 {
 		t.Fatalf("idx=%d ok=%v keys=%v", idx, ok, keys)
 	}

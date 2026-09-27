@@ -93,10 +93,9 @@ func archiveOldSession(t *testing.T, a *agent.Agent, dataDir, id string) string 
 
 func newArchiveREPL(t *testing.T, a *agent.Agent, keys ...readline.KeyEvent) (*REPL, *fakeTerm, *syncBuf, *syncBuf) {
 	t.Helper()
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.LevelNone})
 	dev := newFakeTerm(keys...)
 	out, errb := &syncBuf{}, &syncBuf{}
-	r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, modeRich)), WithConsole(dev))
+	r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, modeRich)), WithProfile(plainProf), WithConsole(dev))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,9 +130,8 @@ func TestHandleCommandArchiveNonInteractive(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			ttyProfile(t, c.prof)
 			out, errb := &syncBuf{}, &syncBuf{}
-			r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, c.mode)), WithConsole(&fakeTerm{keys: []readline.KeyEvent{line("y")}, noKeys: !c.raw}))
+			r, err := NewREPL(a, "› ", WithStreams(NewStreams(out, errb, c.mode)), WithProfile(c.prof), WithConsole(&fakeTerm{keys: []readline.KeyEvent{line("y")}, noKeys: !c.raw}))
 			if err != nil {
 				t.Fatal(err)
 			}

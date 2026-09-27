@@ -17,12 +17,6 @@ type Profile struct {
 	Colors ColorLevel
 }
 
-var current = Profile{TTY: true, Colors: Level16}
-
-func SetProfile(p Profile) { current = p }
-
-func GetProfile() Profile { return current }
-
 func DetectProfile(isTTY, vt bool) Profile {
 	p := Profile{TTY: isTTY, Colors: Level16}
 	if !isTTY || !vt {

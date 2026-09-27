@@ -10,7 +10,6 @@ import (
 )
 
 func TestTurnRendersMarkdownTable(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	r, out, _ := newTestREPL(t, newFakeTerm())
 	turn := r.beginTurn(nil)
 	turn.Handle(agent.Event{Kind: agent.EventContent, Text: "| a | b |\n|---|---|\n| 1 | 2 |\n"})
@@ -23,7 +22,6 @@ func TestTurnRendersMarkdownTable(t *testing.T) {
 }
 
 func TestTurnTableStreamsOnFirstBodyRow(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	r, out, _ := newTestREPL(t, newFakeTerm())
 	turn := r.beginTurn(nil)
 	turn.Handle(agent.Event{Kind: agent.EventContent, Text: "| a | b |\n|---"})
@@ -45,7 +43,6 @@ func TestTurnTableStreamsOnFirstBodyRow(t *testing.T) {
 }
 
 func TestTurnTableNarrowTerminalCompact(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	r, out, _ := newTestREPL(t, newFakeTerm())
 	r.view.width = func() int { return 8 }
 	turn := r.beginTurn(nil)
@@ -57,7 +54,6 @@ func TestTurnTableNarrowTerminalCompact(t *testing.T) {
 }
 
 func TestTurnTablePlainBypass(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: false, Colors: term.LevelNone})
 	r, out, _ := newTestREPLMode(t, newFakeTerm(), modeRich, term.Profile{TTY: false, Colors: term.LevelNone})
 	turn := r.beginTurn(nil)
 	turn.Handle(agent.Event{Kind: agent.EventContent, Text: "| a | b |\n|---|---|\n| 1 | 2 |\n"})

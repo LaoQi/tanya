@@ -1,6 +1,6 @@
 # 分层与模块依赖：评估结论与修正方案
 
-> 状态：**已定稿，分阶段实施**（2026-09-28 评估；S1 已落地、S2–S6 待做）
+> 状态：**实施中**（2026-09-28 评估；S1–S3 已落地，S4–S6 待做）
 > 范围：`ctty` / `render` / `readline` / `repl` / `tools/shell` 的依赖边与职责收口
 > **不动**：`agent`（基线已零内部依赖）、`config`、工具注入与缓存不变性契约
 > 判据：每阶段要么「依赖边消失」（可用 `go list -deps` 断言），要么「行为可观测」（单测 + `render_audit`）；两者都不满足的改动不做
@@ -56,6 +56,10 @@
 - 对照表：`terminal_posix.go`→`device_posix.go`、`terminal_windows.go`→`device_windows.go`、`terminal_io.go`→`device_io.go`、`terminal_stub.go`→`device_stub.go`、`bridge_linux.go`→`lease_linux.go`、`secure.go`/`secure_stub.go` 已整体删除（自愈收敛为 `Console.Sane()` + `device_posix.go` 的 `saneTermios`）、`agent/tty_bridge.go`→`tools/shell/bridge.go`、`agent/shell*.go`→`tools/shell/{shell,tool,platform*}.go`。
 - 验收：`rg 'terminal_posix|bridge_linux|secure\.go|terminal_windows|terminal_io\.go' docs AGENTS.md` 的每处命中，要么已改用现名，要么所在段落有对照注可解析。
 
+### S2+S3 合并落地（`Style` 绑定 profile + 输入层注入样式器；消 P1、P2）
+
+> **执行偏差（2026-09-28）**：原计划 S2 与 S3 分开提交，实际合并为一次——`Style.Sprint`/`Frame` 的签名一变，`readline/editor.go` 的两处样式调用点即无法编译，而最省的修法正是 S3 的 `Styler` 接口，分开做会先把 profile 塞进 `Editor` 再删掉（无谓的中间态）。API 最终形态：`Style.With(prof) Bound` + `Bound.Sprint/Frame`（`Sprint`/`Frame` 不再有无 profile 的重载）、`term.Passthrough(prof, text)`、`render.Sprint(prof, …)`、`Template.Render(prof, …)`；`readline` 侧 `Styler` 接口 + 默认 no-op 样式器。
+
 ### S2 `Style` 显式绑定 profile，删除 `term` 全局 profile（消 P1）
 
 - `render/style`：新增 `func (s Style) With(p term.Profile) Bound` 与 `type Bound`（`Sprint(string) string`）；`Sprint`/`Frame` 改带 `term.Profile` 参数。
@@ -106,6 +110,17 @@
 | D2 | resize **收敛进 `ctty` 的现有信号分发器**，不引入轮询、不单独处理 | 信号已收敛在 `ctty`（`SIGTERM`/`SIGHUP`/`SIGINT` 同源同分发器）；同一件事不该有第二套机制。轮询只是"能在没有信号面的平台上工作"的替代品，而 Windows 本就不产 `SIGWINCH`——那里保持不产出、不假装支持 |
 | D3 | **本次不做**「`repl` 收窄为编排层」（`streams`/`status`/`toolview`/`messages` 移入 `present`） | 该拆分解决的是"体积与职责"，而 S5 已消掉 `repl` 的**入边耦合**（不再认识具体工具）；~1500 行机械搬迁 + 测试跟随的成本换不到新的依赖边改善。留待将来 `repl` 再长出第二个消费者时重估 |
 | D4 | 全局 `Profile` **删除**，不保留"便利入口" | 保留即为隐式参数留后门；`Style.With(prof)` 的显式形式成本仅一次调用点改写，而它同时解掉 S3 的注入需求 |
+
+D4 附带判据——**「第二个消费者」出现的情形**（决定将来是否有人会把全局加回来）：
+
+| 情形 | 触发 | 全局为何不成立 |
+|---|---|---|
+| 第二条输出通道 | out/err 现在同终端（能力同）；一旦出现 `--output` 写文件、tee 日志、把内容交给父代理/插件，那条通道要 `LevelNone` 而 stderr 可能仍要彩色 | 全局只有一个值，**表达不了两个能力**（不是不够用，是形式错） |
+| tanya 作库被嵌入 | `agent` 已是库；`repl`/`readline`/`render` 被宿主复用时，宿主有自己的探测与 `NO_COLOR` 取向 | 宿主与 tanya 冲突时必有一个被破坏 |
+| 测试并行 | 全仓 `t.Parallel()` 当前为 0；引入后全局即数据竞争 | 共享可变状态，且 60 余处 save/restore 样板本身说明"每个用例都是一个消费者" |
+| 运行期改值 | `/colors` 之类运行期切换 | 需要的是"可变持有点"而非全局——`/theme` 已是这个形态（`repl.applyTheme` 改实例字段），profile 走全局属同一包内的不对称 |
+
+结论：全局唯一成立的场景是"进程内单一终端 + 只在启动时判定一次 + 所有消费者接受隐式读取"；出现上表任一行，显式传值都是终态。**`term.Passthrough` 是这条的极端例证**：它把 profile 编进了函数语义（无入参），调用方无从注入——S2 一并改为 `Passthrough(prof, text)`。
 
 ## 4 统一验收清单（每阶段都跑）
 
