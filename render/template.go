@@ -27,15 +27,15 @@ func (t Template) Bind(resolve func(string) (string, bool)) []ir.Inline {
 	return bindInlines(t.inlines, resolve)
 }
 
-func (t Template) Render(resolve func(string) (string, bool)) string {
+func (t Template) Render(prof term.Profile, resolve func(string) (string, bool)) string {
 	if t.passthrough {
 		out := replacePlaceholders(t.raw, resolve)
-		if term.GetProfile().Colors == term.LevelNone {
+		if prof.Colors == term.LevelNone {
 			return term.Strip(out)
 		}
 		return out
 	}
-	return Sprint(t.Bind(resolve)...)
+	return Sprint(prof, t.Bind(resolve)...)
 }
 
 type segment struct {

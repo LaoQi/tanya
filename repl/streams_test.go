@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
-	"github.com/LaoQi/tanya/render/term"
 	"github.com/LaoQi/tanya/tools/shell"
 )
 
@@ -90,10 +89,9 @@ func TestOutputGuardFiresOnEmitNotWrite(t *testing.T) {
 }
 
 func TestOutputAtomicNoInterleave(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	var buf syncBuf
 	st := NewStreams(&buf, &syncBuf{}, modeRich)
-	view := NewToolView(st, term.GetProfile(), testSem(), func() int { return 80 }, 20)
+	view := NewToolView(st, ttyRich(), testSem(), func() int { return 80 }, 20)
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sleep 1"}`})
 
 	stop := make(chan struct{})
@@ -106,7 +104,7 @@ func TestOutputAtomicNoInterleave(t *testing.T) {
 			case <-stop:
 				return
 			default:
-				st.out.emit(KindStatus, statusLine(statusWaiting, testSem(), 0)+".\n")
+				st.out.emit(KindStatus, statusLine(statusWaiting, testSem(), ttyRich(), 0)+".\n")
 				time.Sleep(100 * time.Microsecond)
 			}
 		}
@@ -139,7 +137,6 @@ func TestOutputAtomicNoInterleave(t *testing.T) {
 }
 
 func TestNoticeDecorErrorKinds(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	a := newSessTestAgent(t, t.TempDir())
 	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
 

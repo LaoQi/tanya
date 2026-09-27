@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/LaoQi/tanya/render/style"
+	"github.com/LaoQi/tanya/render/term"
 	"github.com/LaoQi/tanya/render/theme"
 )
 
@@ -57,12 +58,12 @@ func statusLabel(kind statusKind) string {
 	}
 }
 
-func statusLine(kind statusKind, sem theme.Semantics, sec int) string {
-	return statusColor(kind, sem).Sprint(statusLabel(kind)+" "+statusSeconds(sec)) + statusDotGap
+func statusLine(kind statusKind, sem theme.Semantics, prof term.Profile, sec int) string {
+	return statusColor(kind, sem).With(prof).Sprint(statusLabel(kind)+" "+statusSeconds(sec)) + statusDotGap
 }
 
-func statusDot(kind statusKind, sem theme.Semantics) string {
-	return statusColor(kind, sem).Sprint(".")
+func statusDot(kind statusKind, sem theme.Semantics, prof term.Profile) string {
+	return statusColor(kind, sem).With(prof).Sprint(".")
 }
 
 // heartbeat 是追加式心跳：满 span 个点换一行，行首写一次前缀（含开行时的真实等待秒数，之后不变），
@@ -71,6 +72,7 @@ type heartbeat struct {
 	mu       sync.Mutex
 	out      *output
 	sem      theme.Semantics
+	prof     term.Profile
 	interval time.Duration
 	span     int
 	now      func() time.Time
@@ -84,8 +86,8 @@ type heartbeat struct {
 	dots    int
 }
 
-func newHeartbeat(out *output, sem theme.Semantics) *heartbeat {
-	return &heartbeat{out: out, sem: sem, interval: statusTickInterval, span: statusLineSpan, now: time.Now}
+func newHeartbeat(out *output, sem theme.Semantics, prof term.Profile) *heartbeat {
+	return &heartbeat{out: out, sem: sem, prof: prof, interval: statusTickInterval, span: statusLineSpan, now: time.Now}
 }
 
 func (h *heartbeat) setSemantics(sem theme.Semantics) {
@@ -110,7 +112,7 @@ func (h *heartbeat) start(kind statusKind, enabled bool) {
 	h.stopCh = stopCh
 	h.stopped = stopped
 	h.active = true
-	line := statusLine(kind, h.sem, 0)
+	line := statusLine(kind, h.sem, h.prof, 0)
 	h.mu.Unlock()
 	h.out.emit(KindStatus, line)
 	go h.loop(interval, stopCh, stopped)
@@ -147,7 +149,7 @@ func (h *heartbeat) setPhase(kind statusKind) {
 	}
 	h.kind = kind
 	h.dots = 0
-	line := statusLine(kind, h.sem, h.elapsed())
+	line := statusLine(kind, h.sem, h.prof, h.elapsed())
 	h.mu.Unlock()
 	h.out.emit(KindStatus, "\n"+line)
 }
@@ -158,12 +160,12 @@ func (h *heartbeat) live(stopCh chan struct{}) bool {
 
 func (h *heartbeat) tick() string {
 	h.dots++
-	dot := statusDot(h.kind, h.sem)
+	dot := statusDot(h.kind, h.sem, h.prof)
 	if h.dots < h.span {
 		return dot
 	}
 	h.dots = 0
-	return dot + "\n" + statusLine(h.kind, h.sem, h.elapsed())
+	return dot + "\n" + statusLine(h.kind, h.sem, h.prof, h.elapsed())
 }
 
 func (h *heartbeat) elapsed() int {

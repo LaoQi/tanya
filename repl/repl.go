@@ -41,6 +41,7 @@ type REPL struct {
 
 type options struct {
 	st        *streams
+	prof      term.Profile
 	con       readline.Console
 	facts     TermFacts
 	factsSet  bool
@@ -52,6 +53,10 @@ type options struct {
 }
 
 type Option func(*options)
+
+func WithProfile(p term.Profile) Option {
+	return func(o *options) { o.prof = p }
+}
 
 func WithStreams(st *streams) Option {
 	return func(o *options) { o.st = st }
@@ -136,9 +141,9 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 		return nil, err
 	}
 	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
-	r.prof = term.GetProfile()
+	r.prof = o.prof
 	r.rend = render.NewThemedRenderer(r.prof, sch.MD)
-	ed.SetStyles(sem.Dim, sem.Accent)
+	ed.SetStyles(sem.Dim.With(r.prof), sem.Accent.With(r.prof))
 	maxLines := o.maxLines
 	if maxLines < 1 {
 		maxLines = DefaultToolOutputLines
@@ -188,7 +193,7 @@ func turnSep(prof term.Profile, sem theme.Semantics, d time.Duration) string {
 	if d > 0 {
 		text += fmt.Sprintf(TurnSepDurFmt, turnDuration(d))
 	}
-	return "\n" + sem.Ok.Sprint(text) + "\n"
+	return "\n" + sem.Ok.With(prof).Sprint(text) + "\n"
 }
 
 func turnDuration(d time.Duration) string {
@@ -246,7 +251,7 @@ func (r *REPL) noSaveWarn() string {
 	if r.agent == nil || !r.agent.NoSave() {
 		return ""
 	}
-	return r.sem.Warn.Sprint(MsgNoSaveWarn) + "\n"
+	return r.sem.Warn.With(r.prof).Sprint(MsgNoSaveWarn) + "\n"
 }
 
 func (r *REPL) Run() error {
@@ -254,7 +259,7 @@ func (r *REPL) Run() error {
 	r.st.out.emit(KindDecor, welcomeText()+r.noSaveWarn())
 	r.autoArchivePrompt()
 	for {
-		prompt := r.prompt.Render(r.resolveVars())
+		prompt := r.prompt.Render(r.prof, r.resolveVars())
 		line, err := r.ed.Readline(prompt)
 		if err == readline.ErrInterrupt {
 			continue
@@ -529,7 +534,7 @@ func (r *REPL) printThemeSample() {
 	for _, blk := range blocks {
 		b.WriteString(r.rend.Block(blk))
 	}
-	prompt := r.prompt.Render(func(name string) (string, bool) {
+	prompt := r.prompt.Render(r.prof, func(name string) (string, bool) {
 		switch name {
 		case "cwd":
 			return "~/proj", true
@@ -544,7 +549,8 @@ func (r *REPL) printThemeSample() {
 	})
 	b.WriteString(prompt)
 	b.WriteString("\n")
-	b.WriteString(r.sem.Dim.Sprint("工具行 ") + r.sem.Info.Sprint("状态行 ") + r.sem.Warn.Sprint("等待中 ") + r.sem.Think.Sprint("思考中 ") + r.sem.Run.Sprint("执行中 ") + r.sem.Ok.Sprint("成功 ") + r.sem.Error.Sprint("错误") + "\n")
+	p := r.prof
+	b.WriteString(r.sem.Dim.With(p).Sprint("工具行 ") + r.sem.Info.With(p).Sprint("状态行 ") + r.sem.Warn.With(p).Sprint("等待中 ") + r.sem.Think.With(p).Sprint("思考中 ") + r.sem.Run.With(p).Sprint("执行中 ") + r.sem.Ok.With(p).Sprint("成功 ") + r.sem.Error.With(p).Sprint("错误") + "\n")
 	r.st.out.emit(KindNotice, b.String())
 }
 
@@ -555,7 +561,7 @@ func (r *REPL) applyTheme(s theme.Scheme) {
 	r.promptTpl = s.Prompt
 	r.prompt, _ = render.ParseTemplate(s.Prompt, r.sem)
 	r.rend = render.NewThemedRenderer(r.prof, s.MD)
-	r.ed.SetStyles(r.sem.Dim, r.sem.Accent)
+	r.ed.SetStyles(r.sem.Dim.With(r.prof), r.sem.Accent.With(r.prof))
 	r.view.setSemantics(r.sem)
 }
 
@@ -649,7 +655,7 @@ func (r *REPL) printHistoryFull(n int, m agent.Message) {
 		r.printRendered(m.Content)
 	} else if text := historyText(m); text != "" {
 		if m.Role == "tool" {
-			r.st.out.emit(KindToolBlock, r.sem.Dim.Frame(text)+"\n")
+			r.st.out.emit(KindToolBlock, r.sem.Dim.With(r.prof).Frame(text)+"\n")
 		} else {
 			r.st.out.emitText(KindNotice, text+"\n")
 		}
@@ -695,7 +701,7 @@ func (r *REPL) loadSessionInteractive() {
 		r.st.out.emit(KindNotice, MsgNoSessions)
 		return
 	}
-	idx, ok, keys := pickSession(r.con, list, r.st.out, r.sem)
+	idx, ok, keys := pickSession(r.con, list, r.st.out, r.sem, r.prof)
 	if !keys {
 		idx, ok = pickByNumber(list, r.st.out)
 	}

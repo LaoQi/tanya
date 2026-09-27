@@ -27,7 +27,6 @@ func initWorkdir(t *testing.T) string {
 
 func initStreams(t *testing.T, mode outMode) (*streams, *syncBuf, *syncBuf) {
 	t.Helper()
-	ttyProfile(t, plainProf)
 	out, errb := &syncBuf{}, &syncBuf{}
 	return NewStreams(out, errb, mode), out, errb
 }
@@ -43,7 +42,7 @@ func runInitStrip(t *testing.T, mode outMode, tty string) (string, error) {
 	if tty != "" {
 		r = strings.NewReader(tty)
 	}
-	err = runInit(st, testSem(), &cfg.Config, r)
+	err = runInit(st, testSem(), plainProf, &cfg.Config, r)
 	return out.String(), err
 }
 

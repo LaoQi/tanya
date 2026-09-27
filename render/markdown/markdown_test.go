@@ -14,7 +14,7 @@ func blocksText(t *testing.T, buf *MarkdownBuf, delta string) string {
 	t.Helper()
 	var b strings.Builder
 	for _, blk := range buf.Write(delta) {
-		b.WriteString(render.NewRenderer(term.GetProfile()).Block(blk))
+		b.WriteString(render.NewRenderer(testProf()).Block(blk))
 	}
 	return b.String()
 }
@@ -23,7 +23,7 @@ func closeText(t *testing.T, buf *MarkdownBuf) string {
 	t.Helper()
 	var b strings.Builder
 	for _, blk := range buf.Close() {
-		b.WriteString(render.NewRenderer(term.GetProfile()).Block(blk))
+		b.WriteString(render.NewRenderer(testProf()).Block(blk))
 	}
 	return b.String()
 }
@@ -165,7 +165,7 @@ func TestParseInline(t *testing.T) {
 		{"粗体含中文", "**你好**世界", "\x1b[1m你好\x1b[0m世界"},
 	}
 	for _, c := range cases {
-		got := render.Sprint(ParseInline(c.in)...)
+		got := render.Sprint(testProf(), ParseInline(c.in)...)
 		if got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
@@ -187,7 +187,7 @@ func TestParseInlineSpanStructure(t *testing.T) {
 }
 
 func TestInlineMergeAcrossCodeSpan(t *testing.T) {
-	got := render.Sprint(
+	got := render.Sprint(testProf(),
 		ir.Span{Style: rstyle.Style{Attr: rstyle.AttrBold}, Text: "a"},
 		ir.CodeSpan{Text: "c"},
 		ir.Span{Style: rstyle.Style{Attr: rstyle.AttrBold}, Text: "b"},
@@ -208,11 +208,11 @@ func TestMarkdownClosePendingStripsANSI(t *testing.T) {
 }
 
 func TestInlineCodeBrightAndDistinct(t *testing.T) {
-	inline := render.Sprint(ir.CodeSpan{Text: "x"})
+	inline := render.Sprint(testProf(), ir.CodeSpan{Text: "x"})
 	if strings.Contains(inline, "\x1b[90m") {
 		t.Errorf("行内 code 不应使用暗色: %q", inline)
 	}
-	block := render.NewRenderer(term.GetProfile()).Block(ir.CodeBlock{Lines: []string{"x"}})
+	block := render.NewRenderer(testProf()).Block(ir.CodeBlock{Lines: []string{"x"}})
 	if inline == block {
 		t.Errorf("行内 code 与代码块应有不同配色: %q", inline)
 	}
@@ -601,3 +601,5 @@ func TestMarkdownInputLimit(t *testing.T) {
 		t.Errorf("重放后上限应仍生效（只含限内前缀）: %q", got)
 	}
 }
+
+func testProf() term.Profile { return term.Profile{TTY: true, Colors: term.Level16} }

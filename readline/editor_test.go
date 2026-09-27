@@ -59,7 +59,8 @@ func (f *fakeTerm) ReadEvent() (Event, error) {
 func newFakeEditor(events ...KeyEvent) (*Editor, *fakeTerm, *bytes.Buffer) {
 	f := &fakeTerm{events: events, out: &bytes.Buffer{}}
 	ed := NewEditor(f)
-	ed.SetStyles(rstyle.Style{Fg: rstyle.Color16(8)}, rstyle.Style{Attr: rstyle.AttrReverse})
+	prof := term.Profile{TTY: true, Colors: term.Level16}
+	ed.SetStyles(rstyle.Style{Fg: rstyle.Color16(8)}.With(prof), rstyle.Style{Attr: rstyle.AttrReverse}.With(prof))
 	return ed, f, f.out
 }
 

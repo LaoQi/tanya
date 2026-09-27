@@ -191,16 +191,16 @@ func toolEndBody(res agent.ToolResult, width, maxLines int) (string, string) {
 }
 
 // RenderToolEndAppend 追加工具正文块与状态行：标题已由 RenderToolStart 打出一次，此处不重复。
-func RenderToolEndAppend(sem theme.Semantics, res agent.ToolResult, width, maxLines int) string {
+func RenderToolEndAppend(sem theme.Semantics, prof term.Profile, res agent.ToolResult, width, maxLines int) string {
 	out, status := toolEndBody(res, width, maxLines)
 	var b strings.Builder
 	if term.HasSGR(out) {
-		b.WriteString(term.Passthrough(out))
+		b.WriteString(term.Passthrough(prof, out))
 	} else {
-		b.WriteString(sem.Dim.Frame(out))
+		b.WriteString(sem.Dim.With(prof).Frame(out))
 	}
 	if status != "" {
-		b.WriteString(sem.Info.Sprint("  ↳ "+term.Strip(status)) + "\n")
+		b.WriteString(sem.Info.With(prof).Sprint("  ↳ "+term.Strip(status)) + "\n")
 	}
 	return b.String()
 }
@@ -433,7 +433,7 @@ type toolView struct {
 func NewToolView(st *streams, prof term.Profile, sem theme.Semantics, width func() int, maxLines int) *toolView {
 	return &toolView{
 		st:       st,
-		heart:    newHeartbeat(st.out, sem),
+		heart:    newHeartbeat(st.out, sem, prof),
 		prof:     prof,
 		sem:      sem,
 		width:    width,
@@ -484,15 +484,15 @@ func (v *toolView) Handle(e agent.Event) {
 			if dirty {
 				io.WriteString(w, "\n")
 			}
-			io.WriteString(w, v.sem.Info.Sprint(RenderResponseInfo(e.Response, v.width())))
+			io.WriteString(w, v.sem.Info.With(v.prof).Sprint(RenderResponseInfo(e.Response, v.width())))
 		})
 		v.dirty = false
 	case agent.EventToolStart:
 		v.heart.stop()
 		v.st.out.atomic(KindToolBlock, func(w io.Writer) {
-			io.WriteString(w, v.sem.Dim.Frame(RenderToolStart(e.ToolName, e.ToolArgs, v.width())))
+			io.WriteString(w, v.sem.Dim.With(v.prof).Frame(RenderToolStart(e.ToolName, e.ToolArgs, v.width())))
 			if e.Interactive {
-				io.WriteString(w, v.sem.Info.Sprint(MsgInteractiveHint))
+				io.WriteString(w, v.sem.Info.With(v.prof).Sprint(MsgInteractiveHint))
 			}
 		})
 		v.dirty = false
@@ -503,7 +503,7 @@ func (v *toolView) Handle(e agent.Event) {
 		v.heart.stop()
 		// 工具块被屏蔽时不置 justEnded：否则下一条正文前会留下孤立空行。
 		if v.st.out.allows(KindToolBlock) {
-			block := RenderToolEndAppend(v.sem, e.Result, v.width(), v.maxLines)
+			block := RenderToolEndAppend(v.sem, v.prof, e.Result, v.width(), v.maxLines)
 			if e.Interactive {
 				block = "\n" + block
 			}

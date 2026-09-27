@@ -70,7 +70,7 @@ agent           → ∅（零表现层依赖）
 
 ### 3.2 为什么 `style → term` 而不是零依赖
 
-`Style.Sprint/Frame` 是方法，必须与 `Style` 同包；它们需要颜色档位（`term.ColorLevel`）与清洗（`term.Sanitize`）。
+`Style.Sprint/Frame` 是方法，必须与 `Style` 同包；它们需要颜色档位（`term.ColorLevel`）与清洗（`term.Sanitize`）。（2026-09-28 起档位不再读全局：`Style.With(prof)` 绑定后调用 `Bound.Sprint/Frame`，见 `docs/layering-refactor.md`。）
 Go 不能跨包定义方法，若坚持 style 零依赖就得把 `Sprint/Frame` 变成 `render.Renderer` 方法，
 把约 130 处 `theme.X.Sprint(...)` 调用点全部改写。取舍：**style 依赖 term，方法留在 style**。
 
@@ -83,8 +83,8 @@ Go 不能跨包定义方法，若坚持 style 零依赖就得把 `Sprint/Frame` 
 
 | 目标包 | 内容（来源） |
 |---|---|
-| `render/term` | `ColorLevel/LevelNone/Level16/Profile/DetectProfile/Current/Use`（term.go）、`runeWidth/Width/Strip/Truncate`（text.go）、`seqKind/scanSequence/sgrLeavesState/Sanitize/HasSGR/Passthrough/OneLine`（filter.go）、`ClearLine/ClearLineHome/CursorUp/ScreenHome` + 新增 `CursorForward/CursorDown/ClearToEOL`（control.go） |
-| `render/style` | `ColorKind/KindNone/Kind16/Color/Color16/Attr/AttrBold…Italic/Style`（color.go）、`ColorByName`（markup.go 的 colorNames + palette.go 的 ParseColorName）、`(Style).SGR/Sprint/Frame`（原 Profile.sgr / Style.Sprint / Style.Frame） |
+| `render/term` | `ColorLevel/LevelNone/Level16/Profile/DetectProfile`（term.go；`Current/Use` 与 2026-09-28 删除的进程级全局同源，已不存在）、`runeWidth/Width/Strip/Truncate`（text.go）、`seqKind/scanSequence/sgrLeavesState/Sanitize/HasSGR/Passthrough/OneLine`（filter.go）、`ClearLine/ClearLineHome/CursorUp/ScreenHome` + 新增 `CursorForward/CursorDown/ClearToEOL`（control.go） |
+| `render/style` | `ColorKind/KindNone/Kind16/Color/Color16/Attr/AttrBold…Italic/Style`（color.go）、`ColorByName`（markup.go 的 colorNames + palette.go 的 ParseColorName）、`(Style).SGR/With` + `(Bound).Sprint/Frame`（原 Profile.sgr / Style.Sprint / Style.Frame；2026-09-28 起 profile 作参数绑定） |
 | `render/ir` | `Block/Inline/Paragraph/Heading/CodeBlock/List/ListItem/Quote/Rule/RawText/Span/CodeSpan/SoftBreak`（doc.go） |
 | `render/theme` | `Semantics/Scheme/schemeList/curScheme/ApplyScheme/LookupScheme/SchemeNames/HasScheme/CurrentScheme/CurrentSchemeName`（theme.go）、`userPalette/ApplyPalette/applySemanticPalette`（palette.go）、8 个语义色、`Theme/DefaultTheme/mdTheme`（render.go 的 markdown 样式集）、`semanticByName`→`ByName`（markup.go）、`DefaultPrompt` |
 | `render/markdown` | `MarkdownBuf/NewMarkdownBuf/Write/Close/drain/feedLine/closeGroup/buildList/buildQuote/cleanLine/headingLevel/isRule/listItem/quoteLine/ParseInline`（markdown.go） |

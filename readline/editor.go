@@ -3,7 +3,6 @@ package readline
 import (
 	"errors"
 	"fmt"
-	rstyle "github.com/LaoQi/tanya/render/style"
 	"github.com/LaoQi/tanya/render/term"
 	"io"
 	"os"
@@ -12,6 +11,16 @@ import (
 )
 
 var ErrInterrupt = errors.New("interrupted")
+
+// Styler 是编辑器需要的样式能力（消费者侧接口）：置灰 ghost 与高亮菜单项。
+// 由调用方注入（repl 传 style.Bound），readline 因此不依赖 render 表现层词汇。
+type Styler interface {
+	Sprint(string) string
+}
+
+type nopStyler struct{}
+
+func (nopStyler) Sprint(t string) string { return t }
 
 type Completion struct {
 	Insert  string
@@ -43,12 +52,12 @@ type Editor struct {
 	rowsUsed      int
 	menu          []Completion
 	menuIdx       int
-	dim           rstyle.Style
-	accent        rstyle.Style
+	dim           Styler
+	accent        Styler
 }
 
 func NewEditor(con Console) *Editor {
-	return &Editor{con: con, out: os.Stdout}
+	return &Editor{con: con, out: os.Stdout, dim: nopStyler{}, accent: nopStyler{}}
 }
 
 func (e *Editor) SetComplete(fn func(string) []Completion) { e.complete = fn }
@@ -59,7 +68,7 @@ func (e *Editor) SetHistoryFilter(fn func(string) bool) { e.historyFilter = fn }
 
 func (e *Editor) SetOutput(w io.Writer) { e.out = w }
 
-func (e *Editor) SetStyles(dim, accent rstyle.Style) {
+func (e *Editor) SetStyles(dim, accent Styler) {
 	e.dim, e.accent = dim, accent
 }
 

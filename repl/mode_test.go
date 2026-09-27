@@ -105,7 +105,6 @@ func feedAskPath(st *streams, prof term.Profile) *toolView {
 }
 
 func TestPlainAskStdoutIsAnswerOnly(t *testing.T) {
-	ttyProfile(t, plainProf)
 	var out, errb syncBuf
 	st := NewStreams(&out, &errb, modePlain)
 	feedAskPath(st, plainProf)
@@ -126,7 +125,6 @@ func TestPlainAskStdoutIsAnswerOnly(t *testing.T) {
 }
 
 func TestPlainAskErrorsToStderr(t *testing.T) {
-	ttyProfile(t, plainProf)
 	var out, errb syncBuf
 	st := NewStreams(&out, &errb, modePlain)
 	feedAskPath(st, plainProf)
@@ -141,7 +139,6 @@ func TestPlainAskErrorsToStderr(t *testing.T) {
 }
 
 func TestPlainVerboseKeepsToolText(t *testing.T) {
-	ttyProfile(t, plainProf)
 	var out, errb syncBuf
 	st := NewStreams(&out, &errb, modePlainVerbose)
 	feedAskPath(st, plainProf)
@@ -246,7 +243,6 @@ func TestEndTightensNewlineOnlyInPlain(t *testing.T) {
 
 func TestRichStreamsByteIdentical(t *testing.T) {
 	nonTTY := term.Profile{TTY: false, Colors: term.LevelNone}
-	ttyProfile(t, nonTTY)
 	var out syncBuf
 	st := NewStreams(&out, &syncBuf{}, modeRich)
 	view := NewToolView(st, nonTTY, testSem(), func() int { return 80 }, 20)
@@ -261,7 +257,6 @@ func TestRichStreamsByteIdentical(t *testing.T) {
 	}
 
 	tty := term.Profile{TTY: true, Colors: term.LevelNone}
-	ttyProfile(t, tty)
 	var out2 syncBuf
 	st2 := NewStreams(&out2, &syncBuf{}, modeRich)
 	view2 := NewToolView(st2, tty, testSem(), func() int { return 80 }, 20)

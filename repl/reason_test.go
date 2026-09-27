@@ -19,15 +19,14 @@ func newReasonTestTurn(t *testing.T, mode outMode, prof term.Profile, on bool) (
 func reasonProfile() term.Profile { return term.Profile{TTY: true, Colors: term.LevelNone} }
 
 func TestReasonSep(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	sem := testSem()
-	if got := term.Strip(reasonSep(sem, MsgReasonHead, 0)); got != "─── 思考 ───\n" {
+	if got := term.Strip(reasonSep(sem, ttyRich(), MsgReasonHead, 0)); got != "─── 思考 ───\n" {
 		t.Errorf("上分隔 = %q", got)
 	}
-	if got := term.Strip(reasonSep(sem, MsgReasonTail, 1500*time.Millisecond)); got != "─── 思考结束 · 1.5s ───\n" {
+	if got := term.Strip(reasonSep(sem, ttyRich(), MsgReasonTail, 1500*time.Millisecond)); got != "─── 思考结束 · 1.5s ───\n" {
 		t.Errorf("下分隔 = %q", got)
 	}
-	if got, want := reasonSep(sem, MsgReasonHead, 0), sem.Think.Sprint("─── 思考 ───")+"\n"; got != want {
+	if got, want := reasonSep(sem, ttyRich(), MsgReasonHead, 0), sem.Think.With(ttyRich()).Sprint("─── 思考 ───")+"\n"; got != want {
 		t.Errorf("分隔符应取 Think 语义色: got %q want %q", got, want)
 	}
 }

@@ -2,11 +2,12 @@ package repl
 
 import (
 	"fmt"
-	"github.com/LaoQi/tanya/render/term"
-	"github.com/LaoQi/tanya/render/theme"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/LaoQi/tanya/render/term"
+	"github.com/LaoQi/tanya/render/theme"
 
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/readline"
@@ -34,6 +35,7 @@ type sessionPicker struct {
 	done   bool
 	cancel bool
 	sem    theme.Semantics
+	prof   term.Profile
 }
 
 // visible 报告窗口容纳的项数：标题占一行并预留尾部余量；
@@ -113,7 +115,7 @@ func (p *sessionPicker) render(out io.Writer) {
 		s := p.items[i]
 		mark := MsgMarkPlain
 		if i == p.cursor {
-			mark = p.sem.Ok.Sprint("> ")
+			mark = p.sem.Ok.With(p.prof).Sprint("> ")
 		}
 		line := fmt.Sprintf(SessRow, mark, s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, sessSummary(s))
 		if p.size.Cols > 0 {
@@ -125,7 +127,7 @@ func (p *sessionPicker) render(out io.Writer) {
 	fmt.Fprint(out, b.String())
 }
 
-func pickSession(con readline.Console, list []agent.SessionInfo, out io.Writer, sem theme.Semantics) (idx int, ok bool, keys bool) {
+func pickSession(con readline.Console, list []agent.SessionInfo, out io.Writer, sem theme.Semantics, prof term.Profile) (idx int, ok bool, keys bool) {
 	if len(list) == 0 {
 		return -1, false, true
 	}
@@ -133,7 +135,7 @@ func pickSession(con readline.Console, list []agent.SessionInfo, out io.Writer, 
 		return -1, false, false
 	}
 	defer con.EndRead()
-	p := &sessionPicker{items: list, sem: sem}
+	p := &sessionPicker{items: list, sem: sem, prof: prof}
 	if size, ok := con.Size(); ok {
 		p.size = size
 	}

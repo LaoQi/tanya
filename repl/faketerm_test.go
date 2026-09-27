@@ -193,10 +193,15 @@ func (f *fakeTerm) ReadEvent() (readline.Event, error) {
 }
 
 func newTestREPLAgent(t *testing.T, a *agent.Agent, dev readline.Console) (*REPL, *syncBuf, *syncBuf) {
+	return newTestREPLAgentProf(t, a, dev, ttyRich())
+}
+
+// newTestREPLAgentProf 以给定终端 profile 构造（profile 由调用方显式给出，不再有进程级全局）。
+func newTestREPLAgentProf(t *testing.T, a *agent.Agent, dev readline.Console, prof term.Profile) (*REPL, *syncBuf, *syncBuf) {
 	t.Helper()
 	out, errb := &syncBuf{}, &syncBuf{}
 	st := NewStreams(out, errb, modeRich)
-	r, err := NewREPL(a, "› ", WithStreams(st), WithConsole(dev))
+	r, err := NewREPL(a, "› ", WithStreams(st), WithProfile(prof), WithConsole(dev))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,18 +209,19 @@ func newTestREPLAgent(t *testing.T, a *agent.Agent, dev readline.Console) (*REPL
 }
 
 func newTestREPL(t *testing.T, dev readline.Console) (*REPL, *syncBuf, *syncBuf) {
-	return newTestREPLAgent(t, nil, dev)
+	return newTestREPLAgentProf(t, nil, dev, ttyRich())
 }
 
-// newTestREPLMode 以指定输出模式与 profile 构造（profile 需在建 REPL 之前设置：构造期会快照）。
+func newTestREPLNonTTY(t *testing.T, dev readline.Console) (*REPL, *syncBuf, *syncBuf) {
+	return newTestREPLAgentProf(t, nil, dev, nonTTYProf)
+}
+
+// newTestREPLMode 以指定输出模式与 profile 构造。
 func newTestREPLMode(t *testing.T, dev readline.Console, mode outMode, prof term.Profile) (*REPL, *syncBuf, *syncBuf) {
 	t.Helper()
 	out, errb := &syncBuf{}, &syncBuf{}
 	st := NewStreams(out, errb, mode)
-	old := term.GetProfile()
-	term.SetProfile(prof)
-	t.Cleanup(func() { term.SetProfile(old) })
-	r, err := NewREPL(nil, "› ", WithStreams(st), WithConsole(dev))
+	r, err := NewREPL(nil, "› ", WithStreams(st), WithProfile(prof), WithConsole(dev))
 	if err != nil {
 		t.Fatal(err)
 	}

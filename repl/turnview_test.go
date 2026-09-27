@@ -13,15 +13,7 @@ import (
 	"github.com/LaoQi/tanya/tools/shell"
 )
 
-func ttyProfile(t *testing.T, p term.Profile) {
-	t.Helper()
-	old := term.GetProfile()
-	term.SetProfile(p)
-	t.Cleanup(func() { term.SetProfile(old) })
-}
-
 func TestTurnSepTimeOnly(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	out := turnSep(term.Profile{TTY: true, Colors: term.Level16}, testSem(), 0)
 	plain := term.Strip(out)
 	if !regexp.MustCompile(`^\n──── \d{2}:\d{2}:\d{2}\n$`).MatchString(plain) {
@@ -36,7 +28,6 @@ func TestTurnSepTimeOnly(t *testing.T) {
 }
 
 func TestTurnSepWithDuration(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	plain := term.Strip(turnSep(term.Profile{TTY: true, Colors: term.Level16}, testSem(), 12*time.Second+400*time.Millisecond))
 	if !regexp.MustCompile(`^\n──── \d{2}:\d{2}:\d{2} · 回合 12\.4s\n$`).MatchString(plain) {
 		t.Errorf("带耗时分隔线格式不符: %q", plain)
@@ -44,7 +35,6 @@ func TestTurnSepWithDuration(t *testing.T) {
 }
 
 func TestTurnSepNoColor(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.LevelNone})
 	out := turnSep(term.Profile{TTY: true, Colors: term.LevelNone}, testSem(), time.Second)
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("无色环境不应出现 SGR: %q", out)
@@ -55,7 +45,6 @@ func TestTurnSepNoColor(t *testing.T) {
 }
 
 func TestTurnSepNonTTYBypass(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: false, Colors: term.LevelNone})
 	nonTTY := term.Profile{TTY: false, Colors: term.LevelNone}
 	if out := turnSep(nonTTY, testSem(), 0); out != "" {
 		t.Errorf("非 TTY 不应打印分隔线: %q", out)
@@ -86,7 +75,6 @@ func TestTurnDuration(t *testing.T) {
 }
 
 func TestTurnGapOnce(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	r, buf, _ := newTestREPL(t, newFakeTerm())
 	turn := r.beginTurn(nil)
 	turn.Handle(agent.Event{Kind: agent.EventReasoning})
@@ -105,7 +93,6 @@ func TestTurnGapOnce(t *testing.T) {
 // TestTurnEndStopsHeartbeat 锁住等待期被打断（无 content / 无工具事件）时的收口：
 // turn.End 必须停掉心跳，否则它会一直写到下一次请求、糊掉提示符。
 func TestTurnEndStopsHeartbeat(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.LevelNone})
 	r, out, errb := newTestREPL(t, newFakeTerm())
 	r.view.heart.interval = 2 * time.Millisecond
 	turn := r.beginTurn(nil)
@@ -126,8 +113,7 @@ func TestTurnEndStopsHeartbeat(t *testing.T) {
 }
 
 func TestTurnNonTTYNoGap(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: false, Colors: term.LevelNone})
-	r, buf, _ := newTestREPL(t, newFakeTerm())
+	r, buf, _ := newTestREPLNonTTY(t, newFakeTerm())
 	turn := r.beginTurn(nil)
 	turn.Handle(agent.Event{Kind: agent.EventReasoning})
 	turn.Handle(agent.Event{Kind: agent.EventReasoning})
@@ -137,7 +123,6 @@ func TestTurnNonTTYNoGap(t *testing.T) {
 }
 
 func TestTurnNoGapOnZeroEventTurn(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	r, buf, _ := newTestREPL(t, newFakeTerm())
 	r.beginTurn(nil).End(errors.New("立即失败"))
 	if n := strings.Count(buf.String(), "\n"); n != 2 {
@@ -146,7 +131,6 @@ func TestTurnNoGapOnZeroEventTurn(t *testing.T) {
 }
 
 func TestFlowContextCarriers(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	r, _, _ := newTestREPL(t, newFakeTerm())
 	t1 := r.beginTurn(nil)
 	if !t1.f.prof.TTY || t1.f.md == nil || t1.f.st != r.st {
@@ -171,8 +155,7 @@ func TestFlowContextCarriers(t *testing.T) {
 }
 
 func TestTurnEndSettlesMarkdown(t *testing.T) {
-	withPlainProfile(t)
-	r, buf, _ := newTestREPL(t, newFakeTerm())
+	r, buf, _ := newTestREPLNonTTY(t, newFakeTerm())
 	turn := r.beginTurn(nil)
 	turn.f.md.Write("滞留尾行")
 	if buf.String() != "" {
@@ -185,18 +168,17 @@ func TestTurnEndSettlesMarkdown(t *testing.T) {
 }
 
 func TestTurnInterruptAndErrorPaths(t *testing.T) {
-	withPlainProfile(t)
-	r, out, errb := newTestREPL(t, newFakeTerm())
+	r, out, errb := newTestREPLNonTTY(t, newFakeTerm())
 	r.beginTurn(nil).End(&agent.InterruptError{})
 	if !strings.Contains(errb.String(), MsgInterruptBare) {
 		t.Errorf("裸中断应写 stderr: %q", errb.String())
 	}
-	r2, _, errb2 := newTestREPL(t, newFakeTerm())
+	r2, _, errb2 := newTestREPLNonTTY(t, newFakeTerm())
 	r2.beginTurn(nil).End(&agent.InterruptError{Kept: true})
 	if !strings.Contains(errb2.String(), MsgInterruptKept) {
 		t.Errorf("保留式中断应写 stderr: %q", errb2.String())
 	}
-	r3, out3, errb3 := newTestREPL(t, newFakeTerm())
+	r3, out3, errb3 := newTestREPLNonTTY(t, newFakeTerm())
 	r3.beginTurn(nil).End(errors.New("boom"))
 	if !strings.Contains(errb3.String(), "错误: boom") {
 		t.Errorf("普通错误应写 stderr: %q", errb3.String())

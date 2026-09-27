@@ -130,13 +130,12 @@ func main() {
 	if *f.plain {
 		prof.Colors = term.LevelNone
 	}
-	term.SetProfile(prof)
 	if *f.sessionMode != "" {
 		cfg.SessionMode = *f.sessionMode
 	}
 	applyModel(cfg, *f.model)
 	if cmd == repl.CmdInit {
-		if err := repl.RunInit(st, sem, &cfg.Config); err != nil {
+		if err := repl.RunInit(st, sem, prof, &cfg.Config); err != nil {
 			st.FailErr("", err)
 			exitNow(1)
 		}
@@ -195,7 +194,7 @@ func main() {
 		st.FailErr("", err)
 		exitNow(1)
 	}
-	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithConsole(con))
+	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithProfile(prof), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithConsole(con))
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)

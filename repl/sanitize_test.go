@@ -32,7 +32,6 @@ func assertNoEvil(t *testing.T, s, what string) {
 }
 
 func TestHistoryFullSanitizesUserText(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	r, buf, _ := newTestREPL(t, newFakeTerm())
 	r.printHistoryFull(1, agent.Message{Role: "user", Content: evilText})
 	out := buf.String()
@@ -43,7 +42,6 @@ func TestHistoryFullSanitizesUserText(t *testing.T) {
 }
 
 func TestHistoryFullSanitizesToolCallArgs(t *testing.T) {
-	ttyProfile(t, term.Profile{TTY: true, Colors: term.Level16})
 	var tc agent.ToolCall
 	tc.ID = "1"
 	tc.Type = "function"

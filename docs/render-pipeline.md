@@ -216,12 +216,12 @@ type Profile struct {
 }
 
 func DetectProfile(isTTY bool) Profile
-func SetProfile(p Profile); func GetProfile() Profile   // 进程级默认档案
+func Passthrough(p Profile, text string) string   // profile 一律作参数传入（无进程级全局，2026-09-28 起）
 ```
 
 **落地修订**：原设计的 `Unicode` 字段与 256/truecolor 两档已删除（`Unicode` 只写不读，属死能力；`SGR` 只产 16 色，`Extended256`/`TrueColor` 与 `Level16` 无行为差异）。
 
-探测优先级：`NO_COLOR` 非空 → None > `TERM=dumb` → None > env `TANYA_COLOR`（`1/on/true` 提升、`0/off/false` 关闭）> 非 TTY → None > 否则 Basic16。**`colors` 配置的强制档在 `main.go` 落定**（`on` 时把 None 提到 Level16、`off` 时压到 None），`--plain` 同样压 None，之后 `term.SetProfile` 写入进程级档案。
+探测优先级：`NO_COLOR` 非空 → None > `TERM=dumb` → None > env `TANYA_COLOR`（`1/on/true` 提升、`0/off/false` 关闭）> 非 TTY → None > 否则 Basic16。**`colors` 配置的强制档在 `main.go` 落定**（`on` 时把 None 提到 Level16、`off` 时压到 None），`--plain` 同样压 None，之后由 `main` 经 `repl.WithProfile(prof)` 下传（2026-09-28 前为 `term.SetProfile` 写进程级档案，该全局已删除）。
 
 渲染器按 profile 输出，同一份 IR：
 
@@ -359,8 +359,8 @@ func (b *MarkdownBuf) InputLen() int                // 已留存原文长度
 **机制**：工具块与历史回放的"序列卫生学"，与 IR 渲染并行的独立出口：
 
 - **扫描器**（`scanSequence`）：CSI（终字节 `m` → SGR，其余丢弃）/ OSC（BEL 或 `ESC\` 终止，丢弃）/ 字符集选择（`ESC ( B` 类，丢弃）/ 孤立 ESC（丢弃）；C0 控制符除 `\n` `\t` 外一律丢弃（防进度条 `\r` 破坏行渲染）
-- **`Style.Frame(text)`**：全清洗（SGR/CSI/OSC/C0 全去）+ 基样式包裹。默认单色块出口；块换色只改基样式，机制不变
-- **`Passthrough(text)`**：保色清洗——SGR 原样保留（含 `38;2;r;g;b` 扩展色，参数吞并解析防误判 reset），非 SGR 序列照丢；末尾 SGR 未闭合（`sgrLeavesState` 脏态跟踪，组合序列 `0;31m` 识别为非 reset 结尾）时补 reset 防跨区泄漏；无色 profile 退化为全清洗
+- **`Style.With(prof).Frame(text)`**：全清洗（SGR/CSI/OSC/C0 全去）+ 基样式包裹。默认单色块出口；块换色只改基样式，机制不变
+- **`Passthrough(prof, text)`**：保色清洗——SGR 原样保留（含 `38;2;r;g;b` 扩展色，参数吞并解析防误判 reset），非 SGR 序列照丢；末尾 SGR 未闭合（`sgrLeavesState` 脏态跟踪，组合序列 `0;31m` 识别为非 reset 结尾）时补 reset 防跨区泄漏；无色 profile 退化为全清洗
 - **`HasSGR(text)`**：直显触发检测，仅认 CSI-`m`
 
 **消费方与块组装**（`repl/toolview.go` `renderToolBlock`）：输出区无 SGR → 标题+输出整块 `Dim.Frame` 单点包裹；检测到 SGR → 标题行独立 `Frame`，输出区走 `Passthrough` 直显（用户看到真实颜色），状态行 `Info` 显式后置（不再依赖 SGR 时序）；自产光标控制序列（上移重绘 `lead`）在 `Frame` 之外，不被过滤器吞掉。`/history` 的 tool 正文走 `Dim.Frame`（`repl/repl.go`）。
@@ -403,7 +403,7 @@ ir.Paragraph{Inlines: []ir.Inline{...}}               // 取代 P(...)
 []ir.Block{...}                                       // 取代 Doc(...)
 ```
 
-收编后 `dim("▸ "+name, tty)` → `sem.Dim.Sprint("▸ " + name)`（`Sprint` 读进程 profile 决定是否着色）。
+收编后 `dim("▸ "+name, tty)` → `sem.Dim.With(prof).Sprint("▸ " + name)`（profile 由调用方显式传入决定是否着色）。
 
 ## 13. IR 契约（不变量）
 

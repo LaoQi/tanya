@@ -39,10 +39,3 @@ func TestDetectProfile(t *testing.T) {
 		}
 	}
 }
-
-func TestDefaultProfile(t *testing.T) {
-	p := GetProfile()
-	if !p.TTY || p.Colors != Level16 {
-		t.Errorf("默认 profile 应为彩色 TTY: %+v", p)
-	}
-}
