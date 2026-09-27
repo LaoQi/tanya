@@ -4,6 +4,8 @@
 
 ## 1 问题
 
+> 下述为 2026-09-26 立项时的现状快照（含当时的文件名）。**文件名对照（2026-09-28 补）**：本文提及的 `readline/terminal_posix.go`→`device_posix.go`、`terminal_windows.go`→`device_windows.go`、`terminal_io.go`→`device_io.go`、`terminal_stub.go`→`device_stub.go`、`bridge_linux.go`→`lease_linux.go`、`secure.go`/`secure_stub.go` 整体删除（自愈收敛为 `Console.Sane()` + `device_posix.go` 的 `saneTermios`）、`NewTerminal() (Terminal, bool)`→`NewConsole()`；`agent/tty_bridge.go`→`tools/shell/bridge.go`、`agent/shell*.go`→`tools/shell/{shell,tool,platform*}.go`。本文未改动的历史段落按当时文件名阅读。
+
 ### 1.1 四份「终端模式」定义（同一概念的副本）
 
 | 位置 | 内容 |
@@ -140,6 +142,9 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 - 未落成：Windows 后台读（未实机验证，门禁保持关闭）、多读者通用仲裁（仍只有 Reader↔Lease 两态）。
 
 ## 6 搬迁与下线清单
+
+> 两表的左侧列是**搬迁前**的文件名（即当时现状），右侧是落地后的落点，故左列旧名属表义，不再改为现名。
+> 本文档其余处的 `readline/terminal_posix.go`→`device_posix.go`、`bridge_linux.go`→`lease_linux.go`、`secure.go` 已删除（自愈收敛为 `Console.Sane()` + `device_posix.go` 的 `saneTermios`）、`terminal_windows.go`→`device_windows.go`。
 
 搬迁：
 

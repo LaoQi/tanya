@@ -2,6 +2,8 @@
 
 ## 背景
 
+> **文件名对照（2026-09-28 补）**：本文提及的 `readline/terminal_posix.go`→`device_posix.go`、`terminal_windows.go`→`device_windows.go`、`terminal_io.go`→`device_io.go`、`terminal_stub.go`→`device_stub.go`、`bridge_linux.go`→`lease_linux.go`、`secure.go`/`secure_stub.go` 整体删除（自愈收敛为 `Console.Sane()` + `device_posix.go` 的 `saneTermios`）、`NewTerminal() (Terminal, bool)`→`NewConsole()`；`agent/tty_bridge.go`→`tools/shell/bridge.go`、`agent/shell*.go`→`tools/shell/{shell,tool,platform*}.go`。本文未改动的历史段落按当时文件名阅读。
+>
 > 更正（2026-09-25）：`run_shell` 已从 `agent` 外置到 `tools/shell`（`agent` 本身零内部依赖、不再引用本包）——下文凡指 run_shell 一侧的 `agent`/`agent/shell*.go`，现均指 `tools/shell`（文件名 `platform*.go`/`bridge.go`）；原语与策略的划分不变。
 
 > 控制台层**已实施**（2026-09-26 立项，2026-09-27 S1–S7 完工）：终端持有者、命名模式与 `^C` 归属收敛为三层（消费者 / Console 仲裁 / device 设备面；唯一持有者 + 借出分型 + 事件归一），见 `docs/terminal-console.md`。两项裁决均已落地：**前台组原语（`OwnPgrp`/`ForegroundPgrp`/`SetForeground`/`IsForeground`）与 `run_shell` 的 tty 直通整体删除**（普通命令 stdin = `/dev/null`、不再移交前台，`sudo`/`ssh` 需显式 `interactive: true`），`InputModes`/`SnapshotInput`/`RestoreInput` 随旧租约一并删除；**不做 `^Z` 子进程挂起检测**（`ProtectJobSignals` 的 SIGTSTP 吞没保留）。此后本文件只描述原语：位组合与终端策略收在 `readline` 内，不再新增模式常量。
