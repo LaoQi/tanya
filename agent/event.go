@@ -11,6 +11,7 @@ const (
 	EventToolStart
 	EventToolEnd
 	EventResponse
+	EventReasoningEnd
 )
 
 type Event struct {

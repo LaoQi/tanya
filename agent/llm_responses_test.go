@@ -569,3 +569,185 @@ func TestResponsesOmitsEmptyReasoningID(t *testing.T) {
 		t.Errorf("空 id 不应出现在请求里: %v", reasoning)
 	}
 }
+
+func reasoningDelta(text string) string {
+	return `event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":"` + text + `"}
+
+`
+}
+
+func TestResponsesStreamReasoningEndMultiItem(t *testing.T) {
+	done := `event: response.reasoning_text.done
+data: {"type":"response.reasoning_text.done"}
+
+`
+	itemDone := func(itemType string) string {
+		return `event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"type":"` + itemType + `","id":"rs_x"}}
+
+`
+	}
+	cases := []struct {
+		name string
+		body []string
+	}{
+		{"text.done 分隔两段", []string{
+			reasoningDelta("第一段"), done,
+			reasoningDelta("第二段"), done,
+			"data: [DONE]\n\n",
+		}},
+		{"item.done 分隔两段", []string{
+			reasoningDelta("第一段"), itemDone("reasoning"),
+			reasoningDelta("第二段"), itemDone("reasoning"),
+			"data: [DONE]\n\n",
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, cfg := responsesLLM(t, mockStep{rawSSE: tc.body})
+			var kinds []EventKind
+			if _, err := NewClient(cfg, nil).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, EventSink(func(e Event) {
+				kinds = append(kinds, e.Kind)
+			})); err != nil {
+				t.Fatal(err)
+			}
+			if n := kindCount(kinds, EventReasoningEnd); n != 2 {
+				t.Fatalf("两段思维链应各发一次段结束（实发 %d）: %v", n, kinds)
+			}
+			first, last := -1, -1
+			for i, k := range kinds {
+				if k == EventReasoningEnd {
+					if first < 0 {
+						first = i
+					}
+					last = i
+				}
+			}
+			if first == last {
+				t.Fatalf("两段应各有一个段结束事件: %v", kinds)
+			}
+			if kinds[first-1] != EventReasoning || kinds[first+1] != EventReasoning || kinds[last-1] != EventReasoning {
+				t.Errorf("段结束应夹在两段 delta 之间: %v", kinds)
+			}
+		})
+	}
+	t.Run("工具调用 delta 收尾", func(t *testing.T) {
+		_, cfg := responsesLLM(t, mockStep{rawSSE: []string{
+			reasoningDelta("先想一想"),
+			`event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{}"}
+
+`,
+			"data: [DONE]\n\n",
+		}})
+		var kinds []EventKind
+		if _, err := NewClient(cfg, nil).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, EventSink(func(e Event) {
+			kinds = append(kinds, e.Kind)
+		})); err != nil {
+			t.Fatal(err)
+		}
+		if n := kindCount(kinds, EventReasoningEnd); n != 1 {
+			t.Fatalf("工具调用前应收尾思维链段（实发 %d）: %v", n, kinds)
+		}
+		end := kindIndex(kinds, EventReasoningEnd)
+		if kinds[end-1] != EventReasoning || kinds[end+1] != EventToolCall {
+			t.Errorf("段结束应落在工具调用之前: %v", kinds)
+		}
+	})
+	t.Run("非 reasoning 的 item.done 不切段", func(t *testing.T) {
+		_, cfg := responsesLLM(t, mockStep{rawSSE: []string{
+			reasoningDelta("第一段"), itemDone("message"),
+			reasoningDelta("第二段"), itemDone("reasoning"),
+			"data: [DONE]\n\n",
+		}})
+		var kinds []EventKind
+		if _, err := NewClient(cfg, nil).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, EventSink(func(e Event) {
+			kinds = append(kinds, e.Kind)
+		})); err != nil {
+			t.Fatal(err)
+		}
+		if n := kindCount(kinds, EventReasoningEnd); n != 1 {
+			t.Fatalf("只有 reasoning item 结束才切段（实发 %d）: %v", n, kinds)
+		}
+	})
+	t.Run("空段 done 不发", func(t *testing.T) {
+		_, cfg := responsesLLM(t, mockStep{rawSSE: []string{done, "data: [DONE]\n\n"}})
+		var kinds []EventKind
+		if _, err := NewClient(cfg, nil).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, EventSink(func(e Event) {
+			kinds = append(kinds, e.Kind)
+		})); err != nil {
+			t.Fatal(err)
+		}
+		if n := kindCount(kinds, EventReasoningEnd); n != 0 {
+			t.Errorf("无 delta 的段结束不应外发（实发 %d）: %v", n, kinds)
+		}
+	})
+	t.Run("非 reasoning 的 item.done 不发", func(t *testing.T) {
+		_, cfg := responsesLLM(t, mockStep{rawSSE: []string{itemDone("message"), "data: [DONE]\n\n"}})
+		var kinds []EventKind
+		if _, err := NewClient(cfg, nil).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, EventSink(func(e Event) {
+			kinds = append(kinds, e.Kind)
+		})); err != nil {
+			t.Fatal(err)
+		}
+		if n := kindCount(kinds, EventReasoningEnd); n != 0 {
+			t.Errorf("非思维链 item 结束不应发段结束（实发 %d）: %v", n, kinds)
+		}
+	})
+}
+
+func TestResponsesStreamReasoningEndEvents(t *testing.T) {
+	cases := []struct {
+		name string
+		step mockStep
+	}{
+		{"reasoning_text.done", mockStep{reasoning: "先想了想", content: "答案是 42", reasoningDone: "text"}},
+		{"reasoning_summary_text.done", mockStep{reasoning: "先想了想", content: "答案是 42", reasoningDone: "summary"}},
+		{"output_item.done", mockStep{reasoning: "先想了想", content: "答案是 42", reasoningDone: "item"}},
+		{"无 done 事件靠正文边界", mockStep{reasoning: "先想了想", content: "答案是 42"}},
+		{"仅思考靠流结束兜底", mockStep{reasoning: "只有思考"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, cfg := responsesLLM(t, tc.step)
+			var kinds []EventKind
+			var reasoning strings.Builder
+			if _, err := NewClient(cfg, nil).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, EventSink(func(e Event) {
+				kinds = append(kinds, e.Kind)
+				if e.Kind == EventReasoning {
+					reasoning.WriteString(e.Text)
+				}
+			})); err != nil {
+				t.Fatal(err)
+			}
+			if reasoning.String() != "先想了想" && reasoning.String() != "只有思考" {
+				t.Errorf("思维链 delta 未按序投递: %q", reasoning.String())
+			}
+			if n := kindCount(kinds, EventReasoningEnd); n != 1 {
+				t.Fatalf("应恰发一次段结束事件（实发 %d）: %v", n, kinds)
+			}
+			end := kindIndex(kinds, EventReasoningEnd)
+			if end == 0 || kinds[end-1] != EventReasoning {
+				t.Errorf("段结束应紧随最后一个思维链 delta: %v", kinds)
+			}
+			for _, k := range kinds[:end] {
+				if k != EventReasoning {
+					t.Errorf("段结束前只应有思维链 delta: %v", kinds)
+				}
+			}
+		})
+	}
+	t.Run("无思维链不发", func(t *testing.T) {
+		_, cfg := responsesLLM(t, mockStep{content: "答"})
+		var kinds []EventKind
+		if _, err := NewClient(cfg, nil).ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, EventSink(func(e Event) {
+			kinds = append(kinds, e.Kind)
+		})); err != nil {
+			t.Fatal(err)
+		}
+		if n := kindCount(kinds, EventReasoningEnd); n != 0 {
+			t.Errorf("空段不应发结束事件（实发 %d）: %v", n, kinds)
+		}
+	})
+}

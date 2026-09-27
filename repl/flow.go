@@ -97,6 +97,8 @@ func (t *turn) Handle(e agent.Event) {
 		}
 		t.reasonBuf.Write(e.Text)
 		t.r.view.Handle(e)
+	case agent.EventReasoningEnd:
+		t.endReasonSeg()
 	case agent.EventContent:
 		t.endReasonSeg()
 		t.writeContent(e.Text)

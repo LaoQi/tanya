@@ -217,6 +217,14 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventS
 	accs := map[int]*toolAcc{}
 	start := time.Now()
 
+	reasonOpen := false
+	endReason := func() {
+		if reasonOpen {
+			reasonOpen = false
+			sink.Emit(Event{Kind: EventReasoningEnd})
+		}
+	}
+
 	err := c.streamSSE(ctx, "/chat/completions", chatRequest{
 		Model:           c.cfg.Model,
 		Messages:        wire,
@@ -243,15 +251,20 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventS
 				if firstReasoning == 0 {
 					firstReasoning = time.Since(start)
 				}
+				reasonOpen = true
 				reasoning.WriteString(ch.Delta.ReasoningContent)
 				sink.Emit(Event{Kind: EventReasoning, Text: ch.Delta.ReasoningContent})
 			}
 			if ch.Delta.Content != "" {
+				endReason()
 				if firstContent == 0 {
 					firstContent = time.Since(start)
 				}
 				msg.Content += ch.Delta.Content
 				sink.Emit(Event{Kind: EventContent, Text: ch.Delta.Content})
+			}
+			if len(ch.Delta.ToolCalls) > 0 {
+				endReason()
 			}
 			for _, tc := range ch.Delta.ToolCalls {
 				a := accs[tc.Index]
@@ -277,6 +290,7 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventS
 	if err != nil {
 		return nil, err
 	}
+	endReason()
 	if reasoning.Len() > 0 {
 		msg.ReasoningItems = append(msg.ReasoningItems, ReasoningItem{Content: reasoning.String()})
 	}
