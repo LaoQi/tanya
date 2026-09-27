@@ -15,7 +15,7 @@
 
 ## 2 渲染状态机（已定稿）
 
-段（segment）定义：两次段边界之间连续到达的 reasoning delta 序列；段边界 = `EventRequestStart` / `EventContent` / `EventToolStart` / `EventToolEnd` / `EventResponse` / `turn.End`（即现有 `flushReason` 的触发点集合）。一个回合可含多段（工具循环每轮一段）。
+段（segment）定义：两次段边界之间连续到达的 reasoning delta 序列；段边界 = `EventRequestStart` / `EventContent` / `EventToolStart` / `EventToolEnd` / `EventResponse` / `turn.End`（即现有 `flushReason` 的触发点集合）。**更正 2026-09-27（P2 落地）**：段边界改由 `agent` 显式上报的 `EventReasoningEnd` 表示（chat 在 reasoning→content/tool_call 切换与流结束处、responses 另接 `_text.done`/`item.done`），上列按事件种类推断的集合退为 `repl` 侧的幂等兜底，见 `docs/stream-input-events.md` §7 P2。一个回合可含多段（工具循环每轮一段）。
 
 状态（turn 级，3 个字段）：
 

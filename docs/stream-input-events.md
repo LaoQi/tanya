@@ -1,6 +1,6 @@
 # 流式期输入与事件合流（架构诊断 + 分阶段方案）
 
-状态：**P1 已实施**（2026-09-27；P4 先行落地）。本文件是「流式输出期间的终端输入能力」的架构诊断与分阶段方案，**首个消费者**是思考期 `Ctrl+O` 切换思维链显示（原 `docs/reasoning-live-toggle.md` 的交互设计，已被本文件取代并归档）。文件按阶段组织（P1–P5），每阶段**相互解耦**，可单独评审、单独实施、单独验收。P2–P5 未实施。
+状态：**P1、P2 已实施**（2026-09-27；P4 先行落地）。本文件是「流式输出期间的终端输入能力」的架构诊断与分阶段方案，**首个消费者**是思考期 `Ctrl+O` 切换思维链显示（原 `docs/reasoning-live-toggle.md` 的交互设计，已被本文件取代并归档）。文件按阶段组织（P1–P5），每阶段**相互解耦**，可单独评审、单独实施、单独验收。P3/P5 未实施。
 
 结论摘要：这个功能在现有架构里之所以要写 ~200 行补丁，不是功能复杂，而是**缺三条主抽象**（§5 的 A/B/C）与两条次抽象（D/E）；其中「事件合流」这一条可以在 `repl` 内以 ~30 行补上、并一次性消掉三项额外处理（§6.2）。本文件把「补抽象」与「交功能」拆成阶段，先交功能（P1）、再还债（P2/P3）、最后顺手优化（P4）。
 
@@ -101,7 +101,7 @@ for {
 | A | **Console 常驻读者 + 全事件推送** | Console 拥有读循环；空闲期（无人 `BeginRead`）后台读并把 `Key`/`Interrupt` 推给订阅者；消费者不再需要 `ReadEvent` 才能收键 | 否（P1 可在 repl 内自建），是架构债 |
 | B | **读权仲裁（Reader ↔ Lease）** | 借出时自动挂起读循环并交模式，归还后自动恢复；订阅者零感知 | 否（P1 用「工具期整轮停」规避） |
 | C | **事件合流 / 单点事件循环** | agent 事件与终端事件汇入同一循环，一个 goroutine 顺序消费 | **是**（P1 核心） |
-| D | **段生命周期事件** | `agent` 显式发 reasoned 段边界（`EventReasoningEnd` 等） | 否（可先按种类推断），但消掉易错处理 |
+| D | **段生命周期事件** | `agent` 显式发 reasoned 段边界（`EventReasoningEnd` 等） | 否（可先按种类推断），但消掉易错处理——**已实施**（P2，2026-09-27） |
 | E | **渲染缓冲可重放** | `MarkdownBuf` 自身持有已喂输入并提供重放 | 否（可先自攒 `segBuf`）——**已实施**（P4，2026-09-27，`Rewind`） |
 
 ---
@@ -202,13 +202,24 @@ for {
 
 **待评审决策点**：①工具期「整轮停」是否接受（对照：可恢复但需处理重新 `Raw` 与 `TCSETSF` 丢键）；②`segBuf` 上限取值与降级提示；③提示行两档是否可以（原方案四档）；④`Hotkey` 放在 `turn` 还是 `flow`。
 
-### P2 `agent` 段生命周期事件（消掉边界推断）
+### P2 `agent` 段生命周期事件（消掉边界推断）——**已实施**（2026-09-27）
 
 **目标**：段边界由上游显式给出，P1 的状态机去掉「按事件种类反推」。
 
 **范围**：`agent/event.go` 增 `EventReasoningEnd`（是否携带全文/时长待定，见决策点）；`llm_responses.go` 接 `response.reasoning_text.done` / `response.reasoning_summary_part.done` / `output_item.done`（item type = `reasoning`）；`llm.go` 在 reasoning→content/tool_call 切换处补发；`repl/flow.go` 改用新事件清 `segBuf`（保留按种类兜底）。
 
 **验收**：两协议各自的段边界用例（含「一段内多 item」「段后直接工具调用」「空段」）；`repl` 侧断言不再依赖种类推断（构造只发 `EventReasoningEnd` 的序列）。**风险**：新增事件不改既有语义，`repl` 外的消费者（回放、统计）需确认忽略即可。
+
+**实施记录（与原形态的偏差与补充）**：
+
+- **不带载荷**（决策 5 裁定）：`EventReasoningEnd` 是裸事件，不携带段全文/段时长——`repl` 已持有本段原文（`MarkdownBuf` 留存，P4），时长口径属渲染侧。
+- **常量追加在末尾**：`EventReasoningEnd` 追加在 `EventKind` 常量块末位而非插在 `EventReasoning` 之后，**既有导出常量的数值不变**（`agent` 是库，数值可被外部观察）；该块内的顺序不代表事件时序。
+- **空段门禁**：两条流各自持有 `reasonOpen`，`endReason()` 只在段打开时外发并复位。两个直接收益：①`reasoning_summary_part.done` 之类的空段的 `_done` 事件不会制造幽灵段结束；②段结束事件恰好一次（`_text.done`、`item.done`、正文边界、流结束兜底四条路径互为幂等）。
+- **responses 只接 `_text.done` 变体，不接 `reasoning_summary_part.done`**（与原范围的偏差）：`part.done` 是**段内**边界（一个 summary 可含多个 part），若据此收尾会按 part 把一个段切成多个「思考」块；段收尾由 `response.reasoning_text.done` / `response.reasoning_summary_text.done` / `output_item.done`(reasoning) 覆盖。
+- **`repl` 保留按种类兜底**：`turn.Handle` 新增 `EventReasoningEnd` → `endReasonSeg()`，原有 `EventContent`/`EventToolStart`/`EventResponse` 三处仍调同一方法（幂等），故 provider 未发 `_done` 事件时行为与 P1 完全一致。
+- **多 item 即多段**：一段响应里出现两个 reasoning item（或两段 reasoning 会被 `_done` 分隔）时，第一段收尾、第二段另起块——比 P1「同类事件合并为一段」更贴近上游语义，且段结束同时清段缓冲，第二段的重放不会带出第一段。
+
+**测试**（按上文「测试」口径）：`agent/llm_test.go` 的 `TestChatStreamReasoningEndEvents`（正文边界 / 工具调用边界 / 流结束兜底 / 无思维链不发，断言段结束恰好一次且紧随最后一个 delta），`agent/llm_responses_test.go` 的 `TestResponsesStreamReasoningEndEvents`（`_text.done` / `_summary_text.done` / `item.done` / 靠正文边界 / 仅思考靠流结束 / 无思维链不发）与 `TestResponsesStreamReasoningEndMultiItem`（`_text.done` 与 `item.done` 各分隔两段、空段 `done` 不发、非 reasoning 的 `item.done` 不切段、工具调用 delta 收尾）；`repl/turnloop_test.go` 增 `TestTurnReasoningEndClosesSeg`（段结束收尾、其后 delta 另起一段且不重放旧段）与 `TestTurnReasoningEndResetsSegBuf`（只发段结束事件的序列即清段缓冲、开档回落「下一段生效」——不依赖种类推断）。mock 侧 `mockStep` 增 `reasoningDone`（`text`/`summary`/`item` 三种收尾事件与 summary delta 变体）与 `rawSSE`（逐条原样写出的流，用于多 item/无 delta 等精确序列）。**变异复验 11 处**（chat 原文两跳 + 三处边界、responses 四个分支 + item type 过滤 + 流结束兜底 + 空段门禁、repl 不识事件）全部由对应用例拦下；其中「done 与正文边界相邻」的用例起初区分不出分支，据此补了多 item 与「非 reasoning item.done」两条精确序列用例。
 
 ### P3 `Console` 常驻 reader 与借出仲裁（还 `terminal-console.md` 的债）
 
@@ -235,12 +246,12 @@ for {
 | 阶段 | 依赖 | 估算规模 | 可独立实施 | 可独立验收 |
 |---|---|---|---|---|
 | P1 | 无 | 中（~200 行 + 测试）——**已实施**（2026-09-27，含评审补充的 ack 握手与 `EventIdle`） | ✅ | ✅ |
-| P2 | 无（P1 受益） | 小（~40 行 + 测试） | ✅ | ✅ |
+| P2 | 无（P1 受益） | 小（~40 行 + 测试）——**已实施**（2026-09-27） | ✅ | ✅ |
 | P3 | 无（与 P1/P2 互不影响） | 中偏大（console/device/lease + 分片） | ✅ | ✅ |
 | P4 | 无（P1 受益） | 小——**机制已实施**（2026-09-27），余上限待 P1 决策 | ✅ | ✅ |
 | P5 | P1 | 小（文档） | ✅ | — |
 
-顺序建议：~~**P1 单独一个会话**~~（已完成）→ **P2 一个会话**（上游语义）→ **P3 一个会话**（最重的架构债，独立评审；P1 的 `EventIdle` 与 Windows 门禁随其一并复核）→ P5 文档收尾（P4 已先行落地）。
+顺序建议：~~**P1 单独一个会话**~~（已完成）→ ~~**P2 一个会话**~~（已完成）→ **P3 一个会话**（最重的架构债，独立评审；P1 的 `EventIdle` 与 Windows 门禁随其一并复核）→ P5 文档收尾（P4 已先行落地）。
 
 ---
 
@@ -252,7 +263,7 @@ for {
 | 2 | P1 | `Ctrl+O` 提示行档数（两档 vs 原方案四档） | **已裁定并实施**（两档 + 空段「下一段生效」提示） |
 | 3 | P1 | `segBuf` 上限与超限行为 | **已裁定并实施**（1 MB，落 `MarkdownBuf.SetInputLimit`，正文与思维链两缓冲同设；超限停累积、流式渲染不受影响、`Rewind` 降级为前缀、下一段恢复） |
 | 4 | P1 | 「段已结束时按开」是否给提示行 | **已裁定并实施**（给一行「下一段生效」） |
-| 5 | P2 | `EventReasoningEnd` 是否携带段全文/段时长 | 不带（`repl` 已持有全文；时长口径属渲染侧） |
+| 5 | P2 | `EventReasoningEnd` 是否携带段全文/段时长 | **已裁定并实施**（不带；`repl` 已持有全文，时长口径属渲染侧） |
 | 6 | P3 | Idle 期常驻 `Keys` 模式是否可接受（改变回合期终端模式与 `^C` 路径观察） | 需实机确认 `stty`、`^C`、子进程继承三处 |
 | 7 | P3 | pipe 设备 Idle 期不后台读（避免吃光 stdin） | 确定 |
 | 8 | P3 | 是否保留 `ReadEvent` 公开面 | 保留（编辑器/picker 的独占形态仍需要） |
@@ -284,8 +295,8 @@ for {
 - 拉取式读：`readline/device_io.go:16-77`（`keySource.readKey`）、`:27`（唯一调用点）
 - 租约与自持泵：`readline/lease.go:41-46`、`readline/lease_linux.go:21-44`（`bridgeTTY` 字段）、`:79-160`（`prepare`/`attach`/`stop`）、`readline/lease_posix.go:9-29`
 - 消费者：`readline/editor.go:51`（`out: os.Stdout` 硬编码，另一条待办）、`:68-117`（独占同步环）、`repl/picker.go:128-155`
-- 回合渲染：`repl/flow.go:30-53`（`flow`/`turn` 字段）、`:76-137`（`Handle`/`writeReasoning`/`flushReason`）
+- 回合渲染：`repl/flow.go:30-53`（`flow`/`turn` 字段）、`:84-115`（`Handle`，`EventReasoningEnd` 于 `:100`）、`:117-163`（`writeReasoning`/`flushReason`/`endReasonSeg`）
 - 输出与记账：`repl/toolview.go:422-479`、`repl/streams.go:80-104`、`repl/status.go:70-110`
 - REPL 与中断：`repl/repl.go:26-38`、`:300-320`
-- agent 事件源：`agent/event.go:3-31`、`agent/agent.go:280-316`、`agent/llm.go:239-272`、`agent/llm_responses.go:191-228`
+- agent 事件源：`agent/event.go:3-31`（`EventKind` 词汇表，`EventReasoningEnd` 于 `:14`）、`agent/agent.go:280-316`、`agent/llm.go:239-293`（chat 的 reasoning delta 与 `endReason` 四处触发点）、`agent/llm_responses.go:191-278`（responses 的 delta / `_text.done` / `item.done` / 正文边界 / 流结束）
 - 渲染缓冲：`render/markdown/markdown.go:48-73`（`NewMarkdownBuf`/`SetWidth`/`Rewind`/`Write`/`Close`）

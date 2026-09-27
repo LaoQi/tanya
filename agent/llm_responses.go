@@ -171,6 +171,14 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 	var hasDelta bool
 	start := time.Now()
 
+	reasonOpen := false
+	endReason := func() {
+		if reasonOpen {
+			reasonOpen = false
+			sink.Emit(Event{Kind: EventReasoningEnd})
+		}
+	}
+
 	err := c.streamSSE(ctx, "/responses", responsesRequest{
 		Model:        c.cfg.Model,
 		Instructions: instructions,
@@ -196,7 +204,19 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 			if firstReasoning == 0 {
 				firstReasoning = time.Since(start)
 			}
+			reasonOpen = true
 			sink.Emit(Event{Kind: EventReasoning, Text: d.Delta})
+		case "response.reasoning_text.done", "response.reasoning_summary_text.done":
+			endReason()
+		case "response.output_item.done":
+			var d struct {
+				Item struct {
+					Type string `json:"type"`
+				} `json:"item"`
+			}
+			if json.Unmarshal([]byte(data), &d) == nil && d.Item.Type == "reasoning" {
+				endReason()
+			}
 		case "response.function_call_arguments.delta":
 			var d struct {
 				ItemID string `json:"item_id"`
@@ -205,12 +225,14 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 			if json.Unmarshal([]byte(data), &d) != nil || d.Delta == "" {
 				return nil
 			}
+			endReason()
 			sink.Emit(Event{Kind: EventToolCall, ToolID: d.ItemID, ToolArgs: d.Delta})
 		case "response.output_text.delta":
 			var d responsesTextDelta
 			if json.Unmarshal([]byte(data), &d) != nil || d.Delta == "" {
 				return nil
 			}
+			endReason()
 			if firstContent == 0 {
 				firstContent = time.Since(start)
 			}
@@ -253,6 +275,7 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 		}
 		return nil, err
 	}
+	endReason()
 	msg.Usage = usage
 	msg.Stat = &RequestStat{Duration: time.Since(start), FirstEvent: firstEvent, FirstReasoning: firstReasoning, FirstContent: firstContent}
 	return msg, nil

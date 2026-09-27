@@ -356,3 +356,70 @@ func TestChatStreamReasoningTokens(t *testing.T) {
 		t.Errorf("completion_tokens_details 应映射到 Usage.ReasoningTokens: %+v", msg.Usage)
 	}
 }
+
+func kindIndex(kinds []EventKind, k EventKind) int {
+	for i, got := range kinds {
+		if got == k {
+			return i
+		}
+	}
+	return -1
+}
+
+func kindCount(kinds []EventKind, k EventKind) int {
+	n := 0
+	for _, got := range kinds {
+		if got == k {
+			n++
+		}
+	}
+	return n
+}
+
+func TestChatStreamReasoningEndEvents(t *testing.T) {
+	cases := []struct {
+		name string
+		step mockStep
+	}{
+		{"正文边界", mockStep{reasoning: "先想一想", content: "答案是 42"}},
+		{"工具调用边界", mockStep{reasoning: "先想一想", toolCalls: []mockToolCall{{id: "c1", name: "get_time", args: `{}`}}}},
+		{"流结束兜底", mockStep{reasoning: "只有思考"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newMockLLM(t, tc.step)
+			c := NewClient(m.config(), nil)
+			var kinds []EventKind
+			if _, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, EventSink(func(e Event) {
+				kinds = append(kinds, e.Kind)
+			})); err != nil {
+				t.Fatal(err)
+			}
+			if n := kindCount(kinds, EventReasoningEnd); n != 1 {
+				t.Fatalf("应恰发一次段结束事件（实发 %d）: %v", n, kinds)
+			}
+			end := kindIndex(kinds, EventReasoningEnd)
+			if end == 0 || kinds[end-1] != EventReasoning {
+				t.Errorf("段结束应紧随最后一个思维链 delta: %v", kinds)
+			}
+			for _, k := range kinds[:end] {
+				if k != EventReasoning {
+					t.Errorf("段结束前只应有思维链 delta: %v", kinds)
+				}
+			}
+		})
+	}
+	t.Run("无思维链不发", func(t *testing.T) {
+		m := newMockLLM(t, mockStep{content: "答"})
+		c := NewClient(m.config(), nil)
+		var kinds []EventKind
+		if _, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, EventSink(func(e Event) {
+			kinds = append(kinds, e.Kind)
+		})); err != nil {
+			t.Fatal(err)
+		}
+		if n := kindCount(kinds, EventReasoningEnd); n != 0 {
+			t.Errorf("空段不应发结束事件（实发 %d）: %v", n, kinds)
+		}
+	})
+}

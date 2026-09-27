@@ -117,7 +117,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
   → 有 tool_calls：逐个 dispatch 执行 → tool 结果回填 history → 再次请求
 ```
 
-本地不设轮数上限，依赖模型终止。每轮请求发事件：`EventRequestStart`（请求前）/ `EventResponse`（响应后，含出错路径，携带 `ResponseInfo`：Duration/TTFT/Usage/ContextTokens）；事件词汇表见 `agent/event.go`，渲染侧以 `agent.EventSink` 单通道接收。
+本地不设轮数上限，依赖模型终止。每轮请求发事件：`EventRequestStart`（请求前）/ `EventResponse`（响应后，含出错路径，携带 `ResponseInfo`：Duration/TTFT/Usage/ContextTokens）；事件词汇表见 `agent/event.go`，渲染侧以 `agent.EventSink` 单通道接收。思维链段边界由 **`EventReasoningEnd`** 显式上报（2026-09-27，P2）：chat 在 reasoning→content/tool_call 切换处与流结束处补发，responses 另接 `response.reasoning_text.done` / `response.reasoning_summary_text.done` / `response.output_item.done`（`item.type == "reasoning"`）；**空段不发**（`reasonOpen` 门禁），故该事件可安全用于「段已收尾」判定。`response.reasoning_summary_part.done` **刻意不接**——part 是段内边界（一个 summary 可含多个 part），收尾由 `_text.done` / `item.done` 覆盖。
 
 回合非正常结束（`Ask`，按"有无产出"分派，产出 = 本回合出现过完整 assistant/tool 消息）：
 
@@ -208,7 +208,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 门禁：`KindStatus` 仅 rich 档可见——plain / plain+verbose / stdout 非终端均无状态行与心跳，`ask` 单发默认档行为不变。
 - 每轮请求完成打印状态行 `  ↳ TTFT 0.8s · 3.2s · prompt 12.3k · completion 1.2k · 缓存 81.67%`（字段缺失自动省略；无 usage 时显示本地估算上下文）。
 - 方案、取舍与实测见 `docs/repl-status-append.md`（其中 09-15《取舍》对"思考中"的删除已被 09-16 的思考相位回补取代）。
-- **思维链显示（`show_reasoning` / `/reasoning`，2026-09-17）**：开关打开且 `KindReasoning` 过门禁（TTY + rich 档）时 `EventReasoning` 不再切思考相位——首个 delta 先 `view.Stop()` 收尾 `» 等待响应` 行，再打印上分隔 `─── 思考 ───`（`Think` 色，前后各三条横线），delta 走与正文同一 markdown 管线（`turn.reasonBuf` → `Renderer.Block` 逐块上屏）；`EventContent` / 工具起止 / `EventResponse` / `turn.End` 调 `flushReason` 结算残留块并补下分隔 `─── 思考结束 · 3.2s ───`（时长同 `turnDuration`），正文之后再现 reasoning 则重开一段。开关关闭或门禁外走原相位路径，plain / `-p --verbose` / `ask` / 非终端一律不显示（`KindReasoning` 不在其可见集）。思维链与正文共用 markdown 缓冲的 hold 看门狗（`fenceLineLimit` 2000 行 / `fenceByteLimit` 256 KB / `pendingByteLimit` 64 KB）：畸形输入（漏闭合围栏、超长单行）与超阈值的长代码块/长段落都就地降级为 `CodeBlock` / `Paragraph`（文本不丢、只丢代码块归属与格式），影响止于局部、后续 delta 立即恢复流式解析，见 `docs/render-pipeline.md` §10
+- **思维链显示（`show_reasoning` / `/reasoning`，2026-09-17）**：开关打开且 `KindReasoning` 过门禁（TTY + rich 档）时 `EventReasoning` 不再切思考相位——首个 delta 先 `view.Stop()` 收尾 `» 等待响应` 行，再打印上分隔 `─── 思考 ───`（`Think` 色，前后各三条横线），delta 走与正文同一 markdown 管线（`turn.reasonBuf` → `Renderer.Block` 逐块上屏）；`EventReasoningEnd`（段边界事件，2026-09-27 起由 `agent` 显式上报）/ `EventContent` / 工具起止 / `EventResponse` / `turn.End` 调 `endReasonSeg`（内含幂等的 `flushReason`）结算残留块并补下分隔 `─── 思考结束 · 3.2s ───`（时长同 `turnDuration`），正文之后再现 reasoning 则重开一段；段结束事件同时清本段留存的原文（`reasonBuf` 重建），故上一段不会被下一次开档重放。开关关闭或门禁外走原相位路径，plain / `-p --verbose` / `ask` / 非终端一律不显示（`KindReasoning` 不在其可见集）。思维链与正文共用 markdown 缓冲的 hold 看门狗（`fenceLineLimit` 2000 行 / `fenceByteLimit` 256 KB / `pendingByteLimit` 64 KB）：畸形输入（漏闭合围栏、超长单行）与超阈值的长代码块/长段落都就地降级为 `CodeBlock` / `Paragraph`（文本不丢、只丢代码块归属与格式），影响止于局部、后续 delta 立即恢复流式解析，见 `docs/render-pipeline.md` §10
 
 ### builtin（`tools/builtin`）
 

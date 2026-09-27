@@ -232,3 +232,45 @@ func TestRunTurnTailResponseRendered(t *testing.T) {
 		t.Errorf("回合末 EventResponse 应渲染状态行（尾事件不丢）: %q", got)
 	}
 }
+
+func TestTurnReasoningEndClosesSeg(t *testing.T) {
+	r, out, _ := newTestREPL(t, newFakeTerm())
+	r.showReasoning = true
+	tn := r.beginTurn(func() {})
+	tn.Handle(agent.Event{Kind: agent.EventReasoning, Text: "第一段\n"})
+	if got := term.Strip(out.String()); !strings.Contains(got, "第一段") {
+		t.Fatalf("段内 delta 应上屏: %q", got)
+	}
+	tn.Handle(agent.Event{Kind: agent.EventReasoningEnd})
+	if got := term.Strip(out.String()); !strings.Contains(got, "思考结束") {
+		t.Fatalf("段结束事件应收尾当前块: %q", got)
+	}
+	out.Reset()
+	tn.Handle(agent.Event{Kind: agent.EventReasoning, Text: "第二段\n"})
+	got := term.Strip(out.String())
+	if !strings.Contains(got, "思考") || !strings.Contains(got, "第二段") {
+		t.Errorf("段结束后新 delta 应另起一段: %q", got)
+	}
+	if strings.Contains(got, "第一段") {
+		t.Errorf("新段不应重放旧段内容: %q", got)
+	}
+	tn.End(nil)
+}
+
+func TestTurnReasoningEndResetsSegBuf(t *testing.T) {
+	r, out, _ := newTestREPL(t, newFakeTerm())
+	r.showReasoning = false
+	tn := r.beginTurn(func() {})
+	tn.Handle(agent.Event{Kind: agent.EventReasoning, Text: "旧段思考"})
+	tn.Handle(agent.Event{Kind: agent.EventReasoningEnd})
+	out.Reset()
+	tn.Hotkey(readline.KeyEvent{Code: readline.KeyCtrlO})
+	got := term.Strip(out.String())
+	if strings.Contains(got, "旧段思考") {
+		t.Errorf("段结束事件应清本段留存的原文、开档不再重放: %q", got)
+	}
+	if !strings.Contains(got, "下一段生效") {
+		t.Errorf("段已结束应按空段提示: %q", got)
+	}
+	tn.End(nil)
+}

@@ -18,12 +18,14 @@ type mockToolCall struct {
 }
 
 type mockStep struct {
-	status    int
-	content   string
-	toolCalls []mockToolCall
-	usage     *Usage
-	reasoning string
-	hold      time.Duration
+	status        int
+	content       string
+	toolCalls     []mockToolCall
+	usage         *Usage
+	reasoning     string
+	reasoningDone string
+	rawSSE        []string
+	hold          time.Duration
 }
 
 type mockLLM struct {
@@ -197,14 +199,38 @@ func (m *mockLLM) handleResponses(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if len(step.rawSSE) > 0 {
+		for _, line := range step.rawSSE {
+			fmt.Fprint(w, line)
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return
+	}
+
 	if step.reasoning != "" {
+		variant := "response.reasoning_text"
+		if step.reasoningDone == "summary" {
+			variant = "response.reasoning_summary_text"
+		}
 		runes := []rune(step.reasoning)
 		for i := 0; i < len(runes); i += 2 {
 			end := i + 2
 			if end > len(runes) {
 				end = len(runes)
 			}
-			send("response.reasoning_text.delta", map[string]any{"delta": string(runes[i:end])})
+			send(variant+".delta", map[string]any{"delta": string(runes[i:end])})
+		}
+		switch step.reasoningDone {
+		case "text", "summary":
+			send(variant+".done", map[string]any{"text": step.reasoning})
+		case "item":
+			send("response.output_item.done", map[string]any{"item": map[string]any{
+				"type":    "reasoning",
+				"id":      "rs_test",
+				"content": []map[string]any{{"type": "reasoning_text", "text": step.reasoning}},
+			}})
 		}
 	}
 	runes := []rune(step.content)
