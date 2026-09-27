@@ -280,6 +280,7 @@ func TestPickSessionSizeChangeRedrawsWithoutStaleUp(t *testing.T) {
 	c := &pickConsole{
 		sizes: []readline.Size{{Cols: 100, Rows: 32}, {Cols: 60, Rows: 20}},
 		events: []readline.Event{
+			{Kind: readline.EventResize},
 			keyEvent(readline.KeyDown, 0),
 			keyEvent(readline.KeyEnter, 0),
 		},
@@ -289,10 +290,11 @@ func TestPickSessionSizeChangeRedrawsWithoutStaleUp(t *testing.T) {
 	if !ok || !keys || idx != 1 {
 		t.Fatalf("idx=%d ok=%v keys=%v", idx, ok, keys)
 	}
-	if n := strings.Count(buf.String(), PickTitle[:len("选择会话")]); n != 2 {
-		t.Errorf("尺寸变化后应重绘一次（共两帧），实际 %d 帧: %q", n, buf.String())
+	frames := strings.Split(buf.String(), PickTitle[:len("选择会话")])
+	if len(frames)-1 != 3 {
+		t.Fatalf("应有 3 帧（初始/尺寸变化/按键后），实际 %d 帧: %q", len(frames)-1, buf.String())
 	}
-	if re := regexp.MustCompile(`\x1b\[[0-9]*A`); re.MatchString(buf.String()) {
-		t.Errorf("尺寸变化后不应按旧行数上移光标: %q", buf.String())
+	if re := regexp.MustCompile(`\x1b\[[0-9]*A`); re.MatchString(frames[1]) {
+		t.Errorf("尺寸变化帧不应按旧行数上移光标: %q", frames[1])
 	}
 }

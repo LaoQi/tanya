@@ -80,6 +80,57 @@ func TestConsoleReadEventDispatchesToSubscribers(t *testing.T) {
 	cancel()
 }
 
+func TestConsoleResizeCoalescesIntoReadEvent(t *testing.T) {
+	dev := &fakeDevice{err: errIdle}
+	c := newConsole(dev)
+	c.signalResize()
+	c.signalResize()
+	ev, err := c.ReadEvent()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.Kind != EventResize {
+		t.Fatalf("期望 EventResize: %+v", ev)
+	}
+	next, err := c.ReadEvent()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Kind == EventResize {
+		t.Fatal("多次缩放应合并为一次事件")
+	}
+}
+
+func TestConsoleResizeDispatchesToSubscribers(t *testing.T) {
+	dev := &fakeDevice{err: errIdle}
+	c := newConsole(dev)
+	var got []EventKind
+	cancel := c.Subscribe(func(ev Event) { got = append(got, ev.Kind) })
+	defer cancel()
+	c.signalResize()
+	if len(got) != 1 || got[0] != EventResize {
+		t.Fatalf("订阅者应收尺寸事件: %v", got)
+	}
+}
+
+func TestConsoleResizeQuietWhileLent(t *testing.T) {
+	dev := &fakeDevice{err: errIdle}
+	c := newConsole(dev)
+	var n int32
+	cancel := c.Subscribe(func(Event) { atomic.AddInt32(&n, 1) })
+	defer cancel()
+	c.mu.Lock()
+	c.state = stateLent
+	c.mu.Unlock()
+	c.signalResize()
+	if got := atomic.LoadInt32(&n); got != 0 {
+		t.Fatalf("借出期不应推订阅者，实际 %d 次", got)
+	}
+	if !c.takeResize() {
+		t.Fatal("借出期的尺寸变化应保留给归还后的 ReadEvent")
+	}
+}
+
 func TestConsoleSubscribeCancel(t *testing.T) {
 	dev := &fakeDevice{events: []Event{{Kind: EventKey}, {Kind: EventKey}}}
 	con := newConsole(dev)

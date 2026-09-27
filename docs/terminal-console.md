@@ -69,7 +69,7 @@
 | 控制台（Console） | 进程内唯一终端持有者，启动时创建、进程存活期内常驻 |
 | 租约（Lease） | 终端借出句柄，两型意图：**LendStdin**（子进程吃 stdin，普通 `run_shell`）与 **LendFull**（子进程独占整个终端，`interactive`） |
 | 模式（Mode） | device 内部命名模式（位组合单点定义），不对消费者暴露 |
-| 事件（Event） | `Key` / `Interrupt` / `Resize` / `Hangup`（后两者按 device 能力可选） |
+| 事件（Event） | `Key` / `Interrupt` / `Resize` / ~~`Hangup`~~（`Hangup` 已于 2026-09-28 删除——挂断从走 `io.EOF`、从未产出；`Resize` 由 posix 经 `ctty.OnResize` 实际产出，windows 缺来源） |
 
 命名说明：定名 `Console`（控制台）。该层并无「会话」语义——无起止、无轮转、进程存活期常驻单例；曾拟名 `Session`，与 agent 侧会话（会话存储、归档会话、`/load` 会话）概念冲突，废止。
 

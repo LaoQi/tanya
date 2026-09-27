@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,8 +30,11 @@ type bridgeTTY struct {
 
 	wakeR int
 	wakeW int
-	winch chan os.Signal
 	done  chan struct{}
+
+	resizeCancel func()
+	fdMu         sync.Mutex
+	closed       bool
 
 	wg       sync.WaitGroup
 	stopOnce sync.Once
@@ -147,21 +149,26 @@ func (b *bridgeTTY) attach(capture io.Writer) error {
 	if ws, err := unix.IoctlGetWinsize(b.ttyFd, unix.TIOCGWINSZ); err == nil {
 		_ = unix.IoctlSetWinsize(b.masterFd, unix.TIOCSWINSZ, ws)
 	}
-	b.winch = make(chan os.Signal, 1)
-	signal.Notify(b.winch, syscall.SIGWINCH)
+	b.fdMu.Lock()
+	b.closed = false
+	b.fdMu.Unlock()
 	b.done = make(chan struct{})
-	b.wg.Add(3)
+	b.resizeCancel = ctty.OnResize(b.syncWinsize)
+	b.wg.Add(2)
 	go b.pumpInput()
 	go b.pumpOutput(capture)
-	go b.watchWinch()
 	return nil
 }
 
 func (b *bridgeTTY) stop() {
 	b.stopOnce.Do(func() {
-		if b.winch != nil {
-			signal.Stop(b.winch)
+		if b.resizeCancel != nil {
+			b.resizeCancel()
+			b.resizeCancel = nil
 		}
+		b.fdMu.Lock()
+		b.closed = true
+		b.fdMu.Unlock()
 		if b.done != nil {
 			close(b.done)
 		}
@@ -304,17 +311,15 @@ func (b *bridgeTTY) drainOutput(capture io.Writer) {
 	}
 }
 
-func (b *bridgeTTY) watchWinch() {
-	defer b.wg.Done()
-	for {
-		select {
-		case <-b.done:
-			return
-		case <-b.winch:
-			if ws, err := unix.IoctlGetWinsize(b.ttyFd, unix.TIOCGWINSZ); err == nil {
-				_ = unix.IoctlSetWinsize(b.masterFd, unix.TIOCSWINSZ, ws)
-			}
-		}
+// syncWinsize 把宿主终端尺寸写给子进程 pty（fdMu 与拆除串行，避免回调落到已关闭的 fd 号）。
+func (b *bridgeTTY) syncWinsize() {
+	b.fdMu.Lock()
+	defer b.fdMu.Unlock()
+	if b.closed {
+		return
+	}
+	if ws, err := unix.IoctlGetWinsize(b.ttyFd, unix.TIOCGWINSZ); err == nil {
+		_ = unix.IoctlSetWinsize(b.masterFd, unix.TIOCSWINSZ, ws)
 	}
 }
 

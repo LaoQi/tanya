@@ -19,6 +19,7 @@ type fakeTerm struct {
 	rawCalls int
 	cols     int
 	rows     int
+	resizes  int
 }
 
 func (f *fakeTerm) BeginRead() error { f.raw = true; f.rawCalls++; return nil }
@@ -45,6 +46,10 @@ func (f *fakeTerm) LendFull(cmd *exec.Cmd, capture io.Writer) (Lease, error) {
 	return nil, ErrUnsupported
 }
 func (f *fakeTerm) ReadEvent() (Event, error) {
+	if f.resizes > 0 {
+		f.resizes--
+		return Event{Kind: EventResize}, nil
+	}
 	if len(f.events) == 0 {
 		return Event{}, io.EOF
 	}
@@ -80,6 +85,26 @@ func TestEditorTypeAndEnter(t *testing.T) {
 	}
 	if len(ed.History()) != 1 || ed.History()[0] != "hello" {
 		t.Errorf("history: %v", ed.History())
+	}
+}
+
+func TestEditorRedrawsOnResize(t *testing.T) {
+	count := func(resizes int) int {
+		f := &fakeTerm{events: append(runes("ab"), KeyEvent{Code: KeyEnter}), out: &bytes.Buffer{}, cols: 40, resizes: resizes}
+		ed := NewEditor(f)
+		ed.SetOutput(f.out)
+		line, err := ed.Readline("> ")
+		if err != nil || line != "ab" {
+			t.Fatalf("line=%q err=%v", line, err)
+		}
+		if f.raw {
+			t.Fatal("编辑器应归还终端")
+		}
+		return strings.Count(f.out.String(), "> ")
+	}
+	with, without := count(1), count(0)
+	if with <= without {
+		t.Fatalf("尺寸变化应触发额外重绘: 有 resize=%d 无 resize=%d", with, without)
 	}
 }
 

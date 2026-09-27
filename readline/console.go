@@ -26,7 +26,6 @@ const (
 	EventKey EventKind = iota
 	EventInterrupt
 	EventResize
-	EventHangup
 	EventIdle
 )
 
@@ -100,13 +99,18 @@ type consoleImpl struct {
 	subs      []*consoleSub
 	pending   bool
 
+	resizePending bool
+	resizeCancel  func()
+
 	state  consoleState
 	reader *consoleReader
 	broken bool
 }
 
 func newConsole(dev device) *consoleImpl {
-	return &consoleImpl{dev: dev, interrupt: ctty.Interrupted()}
+	c := &consoleImpl{dev: dev, interrupt: ctty.Interrupted()}
+	c.resizeCancel = ctty.OnResize(c.signalResize)
+	return c
 }
 
 func (c *consoleImpl) signalInterrupt() {
@@ -117,6 +121,32 @@ func (c *consoleImpl) signalInterrupt() {
 	for _, fn := range fns {
 		fn(Event{Kind: EventInterrupt})
 	}
+}
+
+// signalResize 记一次尺寸变更：置位供 ReadEvent 消费（多次缩放合并为一次），并推给订阅者。
+// 借出期（stateLent）不推订阅者——终端已归子进程，窗口尺寸由借出方自行传播。
+func (c *consoleImpl) signalResize() {
+	c.mu.Lock()
+	c.resizePending = true
+	lent := c.state == stateLent
+	fns := c.callbacksLocked()
+	c.mu.Unlock()
+	if lent {
+		return
+	}
+	for _, fn := range fns {
+		fn(Event{Kind: EventResize})
+	}
+}
+
+func (c *consoleImpl) takeResize() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.resizePending {
+		return false
+	}
+	c.resizePending = false
+	return true
 }
 
 func (c *consoleImpl) watchSignals() {
@@ -158,6 +188,9 @@ func (c *consoleImpl) Sane() { c.dev.Sane() }
 func (c *consoleImpl) Size() (Size, bool) { return c.dev.Size() }
 
 func (c *consoleImpl) ReadEvent() (Event, error) {
+	if c.takeResize() {
+		return Event{Kind: EventResize}, nil
+	}
 	ev, err := c.dev.readEvent()
 	if err == errIdle {
 		return Event{Kind: EventIdle}, nil
@@ -269,6 +302,10 @@ func (c *consoleImpl) readLoop(r *consoleReader) {
 		case <-r.stop:
 			return
 		default:
+		}
+		if c.takeResize() {
+			c.dispatch(Event{Kind: EventResize})
+			continue
 		}
 		ev, err := c.dev.readEvent()
 		if err == errIdle {

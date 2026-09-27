@@ -1,6 +1,6 @@
 # 分层与模块依赖：评估结论与修正方案
 
-> 状态：**实施中**（2026-09-28 评估；S1–S3 已落地，S4–S6 待做）
+> 状态：**实施中**（2026-09-28 评估；S1–S4 已落地，S5–S6 待做）
 > 范围：`ctty` / `render` / `readline` / `repl` / `tools/shell` 的依赖边与职责收口
 > **不动**：`agent`（基线已零内部依赖）、`config`、工具注入与缓存不变性契约
 > 判据：每阶段要么「依赖边消失」（可用 `go list -deps` 断言），要么「行为可观测」（单测 + `render_audit`）；两者都不满足的改动不做
@@ -87,6 +87,13 @@
 - `repl`：工具块宽度改活取——`NewToolView` 的 width 回调改为闭包 `con.Size()`（`TermFacts` 降为无终端时的兜底与测试注入口），`ask` 单发同路径。
 - 验收：新增单测（fakeDevice 改 `Size` → `ReadEvent` 返回 `EventResize`；订阅者收到事件；`editor` 重绘后 `cursorRow/rowsUsed` 与 `render` 后的实际行数一致）；`rg 'os/signal' --glob '!ctty/**'` 零命中；`render_audit` 15 PASS；真终端目视（缩放后工具块宽度跟随、编辑器重绘无残留、`interactive` 借出期子进程窗口跟随）。
 - 风险：中（`Console` 事件面新增一类事件，须与既有 pending/借出挂起语义对齐）。
+
+### S4 落地记录（2026-09-28）
+
+- **`ctty`**：`signals_posix.go` 增 `resizeSignals = []os.Signal{unix.SIGWINCH}`（windows/stub 为空集）；`signals.go` 拆出 `signals()`（单 channel + 单 dispatcher，`watchOnce`）、`watchNotify`（退出/中断清单，`WatchSignals` 用）、`resizeNotify`（resize 清单，`OnResize` 首次订阅时登记），`dispatch` 按信号类分流（resize → `notifyResize()`）。**武装按信号类惰性**的理由见 §3 D2 与 `docs/ctty.md`：`readline` 作为库被嵌入时不应连带装上 SIGTERM/SIGHUP 处置。
+- **`readline`**：`console.go` 在 `newConsole` 期订阅 `ctty.OnResize`（放在纯构造函数里，测试才能验到生产接线），`signalResize` 置位 + 推订阅者（借出期不推），`takeResize` 供 `ReadEvent` 与常驻读者消费；`editor.go` 收 `EventResize` → `render("")`；`picker.go` 改吃事件、删每轮 `Size()` 比对；`lease_linux.go` 删 `os/signal` 与 `winch` 通道，改经 `ctty.OnResize` 传播 `TIOCSWINSZ`（`fdMu` + `closed` 与 fd 拆除串行）；`EventHangup` 删除（挂断走 `io.EOF`，从未产出）。
+- **`repl`**：新增 `LiveWidth(con, facts) func() int`——每次渲染现取 `con.Size()`，取不到回落 `TermFacts`、再回落 80；`NewREPL` 与 `main` 的 `ask` 单发同路径。**无状态**（不缓存宽度、不缓存事件），只有「何时重绘」依赖 `EventResize`。
+- **验收**：`rg 'os/signal'` 仅 `ctty` 命中、`rg 'EventHangup'` 零命中、`-race` 全绿、darwin/windows 交叉编译通过、`render_audit` 15 PASS；新增单测 8 条（ctty SIGWINCH 实测送达与取消、Console 合并/订阅/借出期静默/常驻读者、编辑器重绘计数、picker 事件重排、`LiveWidth` 活取与兜底）。**两个 pty 端到端探针**（临时脚本，未入库）：① 100 列下工具块长行为 97 A，回合中途缩到 60 列后同一块变 57 A → 宽度活取生效；② `interactive: true` 的 `stty size` 在借出期缩放前后分别打印 `30 100` / `30 60` → 窗口尺寸传播生效。
 
 ### S5 工具视图注册点，`repl` 不再认识具体工具（消 P4）
 

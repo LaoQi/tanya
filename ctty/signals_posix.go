@@ -12,6 +12,8 @@ var exitSignals = []os.Signal{unix.SIGTERM, unix.SIGHUP}
 
 var interruptSignals = []os.Signal{unix.SIGINT}
 
+var resizeSignals = []os.Signal{unix.SIGWINCH}
+
 func emergencyRestore() {
 	tty, err := Open()
 	if err != nil {

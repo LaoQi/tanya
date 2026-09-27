@@ -148,15 +148,19 @@ func pickSession(con readline.Console, list []agent.SessionInfo, out io.Writer, 
 		if ev.Kind == readline.EventInterrupt {
 			return -1, false, true
 		}
+		if ev.Kind == readline.EventResize {
+			if size, ok := con.Size(); ok {
+				p.size = size
+			}
+			p.lines = 0 // 尺寸变化：按旧行数上移会错位，放弃锚点另起一块
+			p.render(out)
+			continue
+		}
 		if ev.Kind == readline.EventKey {
 			p.handle(ev.Key)
 		}
 		if p.done {
 			break
-		}
-		if size, ok := con.Size(); ok && size != p.size {
-			p.size = size
-			p.lines = 0 // 尺寸变化：按旧行数上移会错位，放弃锚点另起一块
 		}
 		p.render(out)
 	}

@@ -169,7 +169,7 @@ func main() {
 		exitNow(1)
 	}
 	termFacts := repl.TermFacts{Cols: facts.Cols, ColsOK: facts.SizeOK}
-	sink := repl.NewToolView(st, prof, sem, termFacts.Width, cfg.ToolOutputLines)
+	sink := repl.NewToolView(st, prof, sem, repl.LiveWidth(con, termFacts), cfg.ToolOutputLines)
 
 	if cmd == repl.CmdAsk {
 		ctx, done := repl.InterruptContext(con)
