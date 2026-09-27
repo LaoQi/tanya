@@ -106,6 +106,7 @@
 | API | 语义 |
 |---|---|
 | `WatchSignals()` | `sync.Once` 一次性安装监听（清单 = 关闭信号 + 中断信号），由 `main` 单点调用 |
+| `OnResize(fn) func()` | 订阅终端尺寸变化（SIGWINCH）：**武装按信号类惰性**——只把 resize 清单登记进同一个分发器与同一 channel，不牵动退出/中断监听（`readline` 作为库被嵌入时不应连带装上 SIGTERM/SIGHUP 处置）；无 resize 来源的平台（windows/stub）返回 no-op、永不回调（2026-09-28 增补）|
 | `Exit(sig os.Signal)` | 请求退出：首个来源生效（记住信号号）并广播中断，可重复调用 |
 | `Exiting() bool` | 是否已请求退出；`readline` 轮询此值唤醒阻塞输入 |
 | `ExitSignal() os.Signal` | 触发退出的信号（未触发为 nil）|
@@ -115,8 +116,8 @@
 
 语义与约束：
 
-- 清单：关闭信号 SIGTERM/SIGHUP（`signals_posix.go`）/ `syscall.SIGTERM`（`signals_stub.go`）；中断信号 SIGINT。windows 自 2026-09-17 起有专属分片（清单与原 stub 相同）——Go runtime 把控制台 CLOSE/LOGOFF/SHUTDOWN 事件折为 **SIGTERM** 递送并阻塞等待 handler 收尾（`runtime/os_windows.go` 的 `ctrlHandler`），落进关闭信号路径；`^C`/`^Break` 折为 SIGINT 走中断。**SIGQUIT 不入清单**，保持 Go 默认全栈转储（与 `docs/design.md`《信号》一致）。
-- 关闭信号 → `Exit(sig)` + 广播中断；中断信号 → 只广播，不置退出态。
+- 清单：关闭信号 SIGTERM/SIGHUP（`signals_posix.go`）/ `syscall.SIGTERM`（`signals_stub.go`）；中断信号 SIGINT；尺寸变化 SIGWINCH（posix，`resizeSignals`；windows 无 `SIGWINCH`、清单为空）。windows 自 2026-09-17 起有专属分片（清单与原 stub 相同）——Go runtime 把控制台 CLOSE/LOGOFF/SHUTDOWN 事件折为 **SIGTERM** 递送并阻塞等待 handler 收尾（`runtime/os_windows.go` 的 `ctrlHandler`），落进关闭信号路径；`^C`/`^Break` 折为 SIGINT 走中断。**SIGQUIT 不入清单**，保持 Go 默认全栈转储（与 `docs/design.md`《信号》一致）。
+- 关闭信号 → `Exit(sig)` + 广播中断；中断信号 → 只广播，不置退出态；尺寸变化 → 推给 `OnResize` 订阅者（无订阅者即丢弃）。
 - **重复关闭信号 = 强退**：第二次送达时 `emergencyRestore()`（posix：把 `/dev/tty` 无条件拉回 canonical + `ResetModes`——前台组门控 2026-09-27 删除，tanya 恒为终端持有者；windows：`RestoreUTF8` 复原控制台代码页）后 `os.Exit(ExitStatus())`。之所以不做定时兜底：正常取消路径最坏要 `shellWaitDelay`（2s）才收尾，定时器必须显著大于它，反而容易打断正常退出；而重复信号是显式意图，无隐式时序竞争，且顺带解决「`Notify` 之后普通信号不再有默认处置、用户只能 SIGKILL（必然留 raw）」这一固有缺陷。
 - **订阅点必须同步取快照**：`Interrupted()` 取值要在启动等待 goroutine 之前完成（`repl.InterruptContext` 即此写法）。若在 goroutine 内才取，纯中断广播可能落在快照建立之前而被整轮丢失——该竞态在负载下必现（repl 用例在 `go test -race ./...` 下超时、单包串行却通过），是 2026-09-17 实测修掉的第一个坑。丢失窗口只影响瞬时的中断广播：退出态是持久的，快照时 `Exiting()` 为真则直接拿到已关闭通道（review 2026-09-17 补），回合照样立即取消、`Readline` 照样立即返回 `ErrExited`。
 - 唤醒分工：`readline` 靠轮询 `ctty.Exiting()`（raw 下 `VMIN=0/VTIME=1` 每 ~100ms 一轮），命中即返回 `ErrExited`，且优先于已解析的按键队列（退出不被积压输入拖延）；pipe 设备（管道 stdin）阻塞在 `bufio` 上无法唤醒，但该路径本来就不改 termios，无残留代价，等重复信号强退即可。

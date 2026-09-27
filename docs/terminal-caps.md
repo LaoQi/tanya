@@ -77,7 +77,7 @@ ctty/                     事实与原语（零依赖叶子）
 
 render/term/profile.go     DetectProfile(isTTY, vt bool)（判据链单一入口）
 readline/                  NewTerminal() bool 语义明确为"输入后端可用"；输入判定 = StdinTTY ∧ 后端
-repl/                      TermFacts{Cols, ColsOK} + Width()；WithTermFacts 注入（注入即权威，未注入才回落
+repl/                      TermFacts{Cols, ColsOK} + Width()；LiveWidth 现取 con.Size()（活取优先，2026-09-28 起），TermFacts 降为兜底（未注入才回落
                            Terminal.Size），删除包级
                            toolTerm/toolTTY 懒缓存与 ToolTTY/ToolWidth
 main.go                    唯一探测点：ctty.Probe() → term.DetectProfile → repl.TermFacts
@@ -150,5 +150,5 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 
 - `ctty`：`Probe` 字段自洽（无 tty 环境不 panic、`SizeOK=false` 时尺寸为零值）；`IsTerminal`/`Size` 对非法 fd 返回 false；Windows 分片随交叉编译校验
 - `term.DetectProfile`：表驱动补 `vt=false` 用例
-- `repl`：`TermFacts.Width()` 兜底（`ColsOK=false` → 80）；现有渲染 golden 全部走显式注入 `term.Profile`，不随探测变化
+- `repl`：宽度 `LiveWidth` 现取 `con.Size()`，`TermFacts.Width()` 兜底（`ColsOK=false` → 80）；现有渲染 golden 全部走显式注入 `term.Profile`，不随探测变化
 - 回归：posix 全量测试 + `-race`；`GOOS=windows/darwin/freebsd` 交叉编译与 `go vet`；Windows 实机验证（WT 与 ConPTY 宿主）仅部分完成，未全量覆盖，暂不跟踪

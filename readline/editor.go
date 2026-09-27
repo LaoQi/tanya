@@ -115,6 +115,10 @@ func (e *Editor) Readline(prompt string) (string, error) {
 			e.rowsUsed = 1
 			return "", ErrInterrupt
 		}
+		if ev.Kind == EventResize {
+			e.render("")
+			continue
+		}
 		if ev.Kind != EventKey {
 			continue
 		}

@@ -154,7 +154,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 			facts = TermFacts{Cols: s.Cols, ColsOK: true}
 		}
 	}
-	r.view = NewToolView(o.st, r.prof, r.sem, facts.Width, maxLines)
+	r.view = NewToolView(o.st, r.prof, r.sem, LiveWidth(con, facts), maxLines)
 	return r, nil
 }
 

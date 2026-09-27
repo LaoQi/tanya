@@ -102,6 +102,29 @@ func TestConsoleKeysSubscriptionStartsReader(t *testing.T) {
 	}
 }
 
+func TestReaderDeliversResizeToKeySubscribers(t *testing.T) {
+	dev := newScriptDevice()
+	con := newConsole(dev)
+	got := make(chan EventKind, 4)
+	cancel := con.SubscribeKeys(func(ev Event) { got <- ev.Kind })
+	defer cancel()
+	waitFor(t, "常驻读者就位", func() bool {
+		raw, _ := dev.counts()
+		return raw == 1
+	})
+	con.mu.Lock()
+	con.resizePending = true
+	con.mu.Unlock()
+	select {
+	case kind := <-got:
+		if kind != EventResize {
+			t.Fatalf("读者应推尺寸事件: %v", kind)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("常驻读者未消费尺寸变化")
+	}
+}
+
 func TestConsolePlainSubscriptionKeepsCooked(t *testing.T) {
 	dev := newScriptDevice()
 	con := newConsole(dev)
