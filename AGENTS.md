@@ -6,40 +6,33 @@
 ## 设计约束
 
 - 极简优先：依赖仅 `gopkg.in/yaml.v3` 与 `golang.org/x/sys`，新增依赖需先讨论
-- package 划分见下文《结构》，根目录只放 main.go 与顶级包；`agent` 零内部依赖、`ctty` 零依赖叶子
+- package 划分见下文《结构》，根目录只放 main.go 与顶级包；`agent` 零内部依赖
 - 平台分片一律白名单：`linux`/`darwin`/`windows` 各一个装配文件，posix 共享实现落 `linux || darwin`，其余平台 stub；Linux 为主、macOS 尽力
-- 终端输入层自研（raw mode + ANSI 渲染 + fish 风格 ghost 置灰建议），不引入 TUI 框架；Windows 仅支持 Windows Terminal（输入后端与 interactive 直通已实现，实机验证未全覆盖；不支持 cmd/老 conhost）
-- 终端原语（`/dev/tty` 打开、termios、模式复位与光标锚点、探测）一律走 `ctty`——`ctty` **只有原语、没有前台组概念**（`OwnPgrp`/`ForegroundPgrp`/`SetForeground`/`IsForeground` 与输入模式快照 `SnapshotInput`/`RestoreInput` 已于 2026-09-27 删除）；终端持有者与模式策略归 `readline` 的 `Console`（见下条），`run_shell` 的租约在借出前 `SaveCursor`、`Release` 时「termios 复原 → `ResetModes` → `RestoreCursor`」，见 `docs/ctty.md`、`docs/terminal-console.md`
-- `ctty` 是**零依赖叶子**：任何层可直接依赖它（`tools/shell` 的 `ProtectJobSignals`/`DecodeCP` 即此），不需要注入——注入约定只针对**终端所有权**（`Console`/`Lease`），因为持有者必须唯一。同理 `render/term` 可被 `readline`/`repl` 直连（输出侧原语）
-- 运行期信号统一收敛在 `ctty`（SIGTERM/SIGHUP 关闭、SIGINT 中断、SIGWINCH 尺寸变化、SIGQUIT 保持默认转储），业务层（`repl`/`main`）不出现 `os/signal`；退出统一走 `REPL.quit()`，进程退出码取 `ctty.ExitStatus()`，见 `docs/ctty.md`
-- 终端持有者唯一（`readline` 的 `Console`：L2 仲裁 + L1 device 三实现 + 租约；模式名收在 device 内不暴露，`repl` 只消费事件流与租约，`agent`/`tools` 经注入接口跨界）。借出两型语义固定：`LendStdin`（普通 run_shell）= stdin `os.DevNull` + 终端锚点，不直通终端、不移交前台；`LendFull`（`interactive: true`）= Linux pty 泵（含捕获）/ Windows `CONIN$` 直通（输出直上屏），darwin 与借不出**明确报错**（`ErrNoLend`，不回退）。`^C` 两条规则：tanya 持有期（含普通命令执行期）归一为中断 = 取消回合并杀子进程组，借出期归子进程；不做 `^Z` 检测（tanya 自身吞没 SIGTSTP）。尺寸变化走同一条信号面（`ctty.OnResize`）：`Console` 产出 `EventResize`（多次缩放合并为一次、借出期不推订阅者），编辑器据此重绘、picker 据此重排；**工具块宽度无状态**——每次渲染现取 `con.Size()`，`repl.TermFacts` 只在取不到尺寸（管道）时兜底。**Console 拥有读循环**（状态机 `Idle`/`Exclusive`/`Lent`）：`SubscribeKeys` 才武装**常驻读者**（`Idle` + 有按键订阅 + 设备支持后台读；pipe 与 Windows 不后台读），读者把按键推给订阅者；`BeginRead`/`EndRead`（编辑器、picker 独占）与 `LendStdin`/`LendFull`（借出，`Lease.Release` 归还）**自动挂起/恢复读者**并复原终端；读者用**独立终端模式**——输入侧 raw 但**保留输出处理（OPOST）**，独占 `Raw` 则连 OPOST 一起清（输出链路的逐块换行依赖 `ONLCR`，读者期丢 OPOST 会整屏错位，已由 `render_audit` 抓出并回归守护）。订阅回调可能来自信号协程或读者协程，须自身并发安全且不阻塞。见 `docs/terminal-console.md`
-- 仓库根两份纯文本编译期嵌入、改动需重新编译：`system_prompt.md` 内置提示词与**环境段**（OS/shell 契约，`main.envSection`，无 CWD 行）合成**基座**经 `agent.WithSystemPrompt` 注入——`agent` 侧无内置文本、**无任何 env 概念**（快照 = 基座 + 两层 AGENTS.md）；`config.example.yaml` 由 `tanya config` 原样打到 stdout（不带提示行，可直接写入配置路径），与 `config.Default()` 的一致性由根包测试守护
-- 工具 = **调用方注入**（`agent.WithTools`，保序在前）+ agent 自带的 `agent_custom`（恒末位），装配期一次合成、之后**运行期冻结**；不提供运行期注册 API，不做插件。注册**仅作契约**：不校验重名、不仲裁（重名由调用方保证），`lookup` 首个匹配胜出（注入项在前故可遮蔽 `agent_custom`）；清单顺序即请求 `tools` 顺序（缓存契约）
-- 标准工具集（`run_shell` + `get_time`/`get_env`/`calc`）落在顶级 `tools`，`main` 经 `tools.Standard(tools.Options{...})` 一次取齐并按固定顺序注入；**`agent` 不带任何工具实现**（作库用时默认只有 `agent_custom`），也不认 shell
-- 工具扩展点：`Tool` 三方法（`Name`/`Definition`/`Invoke`）+ 可选 `Interactive`（终端独占标记），结果 `ToolResult{Text; Meta}`（`Text` 回写 history、`Meta` 为表现层载荷，核心不知道任何具体 `Meta` 类型）；外部经 `agent.NewTool`/`agent.NewToolDef` 构造，不依赖包内类型，见 `docs/design.md`《工具》
-- 工具自带**表现层视图**（2026-09-28）：`present.ToolView`（`Args`/`Result` 两个回调，返回 `ok=false` 即回落通用渲染）按工具名注册进 `present.Registry`，由 `main` 装配（`views.Register("run_shell", shellview.View())`）经 `repl.WithToolViews` 注入——与工具注入同语义（装配期一次合成、运行期冻结、不提供运行期注册）。`repl` 因此**不导入任何 `tools/*`**：未注册的工具走通用键值/文本回落，外部工具可自带视图包 + 在自己的装配点注册
-- 工具策略：以 `run_shell` 为核心，新能力优先用 shell 命令组合实现；小型纯计算/查询工具放 `tools/builtin`
+- 终端输入层自研（raw mode + ANSI 渲染 + fish 风格 ghost 建议），不引入 TUI 框架；Windows 只支持 Windows Terminal（不支持 cmd/老 conhost）
+- `ctty` 是**零依赖叶子**、只有原语与信号面：`/dev/tty`、termios、模式与光标、探测、SIGTERM/SIGHUP/SIGINT/SIGWINCH/SIGQUIT 一律收敛在此，任何层可直接依赖、不需注入；注入只针对**终端所有权**（`Console`/`Lease`）。业务层（`repl`/`main`）不出现 `os/signal`，退出走 `REPL.quit()`、退出码取 `ctty.ExitStatus()`，见 `docs/ctty.md`
+- 终端持有者唯一（`readline` 的 `Console`：仲裁 + device + 租约；`repl` 只消费事件流与租约，`agent`/`tools` 经注入接口跨界）。借出两型：`LendStdin`（普通 run_shell）= stdin `os.DevNull` + 终端锚点，不直通终端、不移交前台；`LendFull`（`interactive: true`）= Linux pty 泵 / Windows `CONIN$` 直通，darwin 与借不出**明确报错**（`ErrNoLend`，不回退）。`^C`：tanya 持有期归一为中断（取消回合、杀子进程组），借出期归子进程；不做 `^Z` 检测。**读循环归 Console**：`SubscribeKeys` 才武装常驻读者（pipe 与 Windows 不后台读），`BeginRead`/`EndRead` 与借出（`Lease.Release`）自动挂起/恢复读者、读者保留 OPOST；尺寸消费面无状态（现取 `con.Size()`、只听 `EventResize` 重绘，取不到时回落 `repl.TermFacts`；`ctty.OnResize` → `EventResize`，借出期窗口尺寸转发子进程 pty）。见 `docs/terminal-console.md`
+- 仓库根两份纯文本编译期嵌入、改动需重新编译（`system_prompt.md` 与 `config.example.yaml`，后者即 `tanya config` 的原样输出，与 `config.Default()` 一致性由根包测试守护）。注入基座 = 内置提示词 + **环境段**（`main.envSection`，无 CWD 行）经 `agent.WithSystemPrompt` 注入——`agent` 无内置文本、**无 env 概念**（快照 = 基座 + 两层 AGENTS.md）
+- 工具 = **调用方注入**（`agent.WithTools`，保序在前）+ 自带的 `agent_custom`（恒末位），装配期一次合成、之后**运行期冻结**，无运行期注册 API、不做插件。注册**仅作契约**（不校验重名、不仲裁）：`lookup` 首个匹配胜出，清单顺序即请求 `tools` 顺序。接口：`Tool` 三方法（`Name`/`Definition`/`Invoke`）+ 可选 `Interactive`；结果 `ToolResult{Text; Meta}`（`Text` 回 history、`Meta` 归表现层）；外部经 `agent.NewTool`/`agent.NewToolDef` 构造，见 `docs/design.md`《工具》
+- 标准工具集（`run_shell` + `get_time`/`get_env`/`calc`）落在顶级 `tools`，`main` 经 `tools.Standard(tools.Options{...})` 一次取齐按固定顺序注入；**`agent` 不带任何工具实现**（作库用时只有 `agent_custom`），也不认 shell。策略：以 `run_shell` 为核心，新能力优先用 shell 组合实现，纯计算/查询放 `tools/builtin`
+- 工具自带**表现层视图**：`present.ToolView`（`Args`/`Result` 两回调，`ok=false` 即回落通用渲染）注册进 `present.Registry`，`main` 装配（`views.Register("run_shell", shellview.View())`）经 `repl.WithToolViews` 注入。`repl` 因此**不导入任何 `tools/*`**：未注册者走通用回落，外部工具可自带视图包
 - `agent_custom` 供模型运行时自调与自省：key 表驱动，只写内存、不落盘不入会话，`/load` 或重启后回落配置，见 `docs/agent-control-tool.md`
-- 缓存不变性（history append-only、system 快照冻结、`/load` 还原首行）是命中 provider 前缀缓存的**优化手段**，不是功能红线：保证范围仅限「同一二进制 + 会话首行快照未被改写」（进程内多轮、快照未变的旧会话都命中）；跨版本无此约束——改了默认提示词/工具描述/env 段后 `/load` 旧会话前缀变化属预期，代价只是首轮 cache miss，按 `docs/cache-probe.md` 的台阶估代价即可，不必为字节不变放弃功能。见 `docs/design.md`《系统提示与缓存友好》
-- 启动即拒绝 root：`ctty.IsRoot()`（posix 取 euid 0，含 `sudo`/setuid；其余平台恒 false）为真则整个入口拒绝（`-v`/`config`/`ask`/`init` 无豁免），逃生舱只认 `TANYA_ALLOW_ROOT=1`；判定留在 `main`（`agent` 作库用时不判权限），见 `docs/design.md`《启动安全检查》
-- 启动即要求可用 shell：解析（配置覆盖 > 平台探测）全落空即报错退出、无降级路径；解析点在 `tools.Standard`（`main` 装配点），`agent.New` 不解析也不感知 shell
-- 配置分层：`agent.Config` 只留 agent 运行时核心项（13 项，含调用方填入的 `ConfigPath`），终端表现项整体外移顶级 `config` 包（`config.UI` 以 `yaml:",inline"` 合成 `config.Config`），`shell` 覆盖（`yaml: shell` / `TANYA_SHELL`）为 `config.Config` 顶层字段、由 `main` 读给 `tools.Standard`；**yaml 键名与 `TANYA_*` env 名全程不变**，`config.example.yaml` 与 `tanya config` 输出逐字节不变，见 `docs/design.md`《配置分层》
-- `agent` 不提供任何配置加载机制：无 `LoadConfig`/`DefaultConfig`、不读 yaml/env，**依赖仅标准库**；配置路径由调用方写入 `Config.ConfigPath` 字段直接读取（`agent_custom` 的 `config_path` 键据此回报，未填即 `(未设置)`）
-- `agent.Config.Validate()` 做自洽校验（`agent.New` 入口调用，外部亦可显式调用）：必填非空、`api_protocol`/`session_mode` 合法、归档阈值与保留数在界内，缺失/非法直接报错（`nil` 配置返回 `MsgNilConfig` 而非 panic）；**`api_key` 是唯一豁免**（可启动、首次请求才警告）。默认值填充与 yaml/env 加载归 `config` 包
-- `init` 子命令是新工作区的一次性脚手架（三项动作幂等、不覆盖既有文件），**必须在 `agent.New` 之前执行**；不做项目探测、不调模型，见 `docs/design.md`《init 模式》
-- 会话归档：写入触发点只有 `/archive` 与启动自动归档两处，共用 `REPL.archiveFlow`（先报告再确认）；卷无损、写入后不可变、不做解档；归档会话 `/load` 只读，继续对话一律 `/fork`（通用分支命令，原会话不动），见 `docs/session-archive.md`
-- 回合渲染单 goroutine 事件合流（`repl/turnloop.go`）：agent 事件（sink 包装进 channel，`EventToolStart` 附 ack 同步握手——主循环渲染完工具块再 close，保证工具块先于工具输出上屏）与完成信号（`inDone` 与事件同 channel FIFO，尾事件不丢）与思考期热键（`Ctrl+O` 经 Console 的 `SubscribeKeys` 送键，只投递该键、其余事件丢弃；门禁 posix + keys + 富档，故终端模式变化只发生在富档回合；借出期由 Console 挂起读者、归还自动恢复，故工具后的第二轮思考热键仍可用）；`readline` 的 `ReadEvent` 空闲周期返回 `EventIdle`（`errIdle` 转换，不 dispatch），editor/picker 天然容忍——这是读循环可停止的前提；思维链「关→开」按段首重放走 `MarkdownBuf.Rewind` + `Close`
-- REPL 输入分发（`repl/dispatch.go`）：`/` 白名单斜杠命令、`exit`/`quit` 内建退出、`:`/`：` 显式对话前缀；进程 cwd 恒为启动目录（不 `os.Chdir`），`run_shell` 默认在当前工作区执行、可用 `cwd` 指定单次目录；`/switch <dir>` 换工作区即放弃当前会话、按新目录重建派生态，任一步失败或目标非法（不存在/非目录/等同当前）时原工作区与会话不动；注入工具**不重建**，`run_shell` 默认目录由 `tools.Options.Workspace` 活取跟随
-- `api_protocol` 双通道（yaml/env，默认 `responses`，非法值启动报错）：`responses` 走 `/responses`（reasoning 明文捕获/回传、固定 `store: false`），`chat` 走 `/chat/completions`（思维链经 `reasoning_content`），见 `docs/design.md`《LLM 接入》
+- 缓存不变性（history append-only、system 快照冻结、`/load` 还原首行）是**优化手段**、非红线：只保证「同一二进制 + 首行快照未改写」，跨版本无约束，见 `docs/cache-probe.md`
+- 启动即拒绝 root：`ctty.IsRoot()`（posix 取 euid 0，其余平台恒 false）为真则整个入口拒绝（`-v`/`config`/`ask`/`init` 无豁免），逃生舱只认 `TANYA_ALLOW_ROOT=1`；判定在 `main`
+- 启动即要求可用 shell：解析（配置覆盖 > 平台探测）全落空即报错退出、无降级；解析点在 `tools.Standard`，`agent.New` 不感知 shell
+- 配置分层：`agent.Config` 只留运行时核心项（13 项，含 `ConfigPath`），终端表现项外移顶级 `config` 包（`config.UI` 以 `yaml:",inline"` 合成进 `config.Config`），`shell` 覆盖（`yaml: shell` / `TANYA_SHELL`）为顶层字段、由 `main` 读给 `tools.Standard`；**yaml 键名与 `TANYA_*` env 名全程不变**，`config.example.yaml` 与 `tanya config` 输出逐字节不变。`agent` 无配置加载机制（无 `LoadConfig`/`DefaultConfig`、不读 yaml/env，依赖仅标准库），路径由调用方写入 `Config.ConfigPath`（`config_path` 键据此回报，未填即 `(未设置)`）；`Config.Validate()` 在 `agent.New` 入口调用：必填非空、`api_protocol`/`session_mode` 合法、阈值在界内，非法报错（`MsgNilConfig`），**`api_key` 唯一豁免**；默认值与加载归 `config` 包，见 `docs/design.md`《配置分层》
+- `init` 子命令是新工作区的一次性脚手架（幂等、不覆盖既有文件），**必须在 `agent.New` 之前执行**；不做项目探测、不调模型，见 `docs/design.md`《init 模式》
+- 会话归档：写入触发点只有 `/archive` 与启动自动归档两处，共用 `REPL.archiveFlow`（先报告再确认）；卷无损、写入后不可变、不做解档；归档会话 `/load` 只读、继续对话一律 `/fork`，见 `docs/session-archive.md`
+- 回合渲染单 goroutine 事件合流（`repl/turnloop.go`）：agent 事件与完成信号同 channel FIFO（`inDone` 保尾事件不丢，`EventToolStart` 的 ack 握手保证工具块先于工具输出上屏）；思考期 `Ctrl+O` 经 `Console.SubscribeKeys` 送键（门禁 posix + keys + 富档）；`ReadEvent` 空闲返回 `EventIdle`（不 dispatch）；思维链「关→开」按段首重放走 `MarkdownBuf.Rewind` + `Close`
+- REPL 输入分发（`repl/dispatch.go`）：`/` 白名单斜杠命令、`exit`/`quit` 内建退出、`:`/`：` 显式对话前缀；进程 cwd 恒为启动目录（不 `os.Chdir`），`run_shell` 默认在当前工作区执行、可用 `cwd` 指定单次目录；`/switch <dir>` 即放弃当前会话、按新目录重建，失败或目标非法时原工作区与会话不动；注入工具**不重建**，默认目录由 `tools.Options.Workspace` 活取
+- `api_protocol` 双通道（yaml/env，默认 `responses`，非法值启动报错）：`responses` 走 `/responses`（reasoning 明文捕获/回传、固定 `store: false`），`chat` 走 `/chat/completions`（思维链走 `reasoning_content`），见 `docs/design.md`《LLM 接入》
 - 思考等级只用标准字段 `reasoning_effort`（minimal/low/medium/high/max），不用厂商私有参数；设置后两协议均不发 `temperature`
-- 出站请求 UA 伪装（避免厂商风控）：默认 `pi/0.85.0 (linux; node/v22.14.0; x64)`，yaml `user_agent` / env `TANYA_USER_AGENT` 可配
-- 输出侧动态文本（模型输出、用户输入、工具参数、服务端数据、错误信息）落屏前一律清洗控制序列：多行走 `output.emitText`、单行展示走 `term.OneLine`、错误行走 `errLine`；`emit` 只承载自生成样式文本、不做 emit 级全局 Strip，ask 旁路与 picker 记账见 `docs/design.md`《输出流与 Kind》《斜杠命令》
-- 颜色一律用终端 16 色基本 SGR 码（30-37/90-97），不用 256 色/truecolor
-- 表现层无进程级全局：终端 profile（TTY/色档）以**值**传递——`style.Style.With(prof)` 绑定后 `Sprint`/`Frame`、`term.Passthrough(prof, s)`、`render.Sprint(prof, …)`、`render.Template.Render(prof, …)`；**不存在任何 `SetProfile`/`GetProfile`**（2026-09-28 删除）。唯一探测点在 `main`（`ctty.Probe` + `term.DetectProfile`），`repl` 经 `WithProfile` 收下后逐层下传，测试同样显式传入
-- 样式注入收窄在消费者侧接口：`readline` 只认自己的 `Styler`（`Sprint(string) string`），由 `repl` 传 `style.Bound`；输入层**不依赖 `render/style`**（`render/term` 仍可依赖——它是终端原语，与 `ctty` 同性质）
-- 终端尺寸的消费面无状态：宽度不缓存、不监听事件（渲染时现取 `con.Size()`），只有「何时重绘」依赖 `EventResize`；桥接借出期的窗口尺寸由 `readline` 经 `ctty.OnResize` 转发给子进程 pty（`TIOCSWINSZ`），与宿主渲染互不依赖
-- 注意力通知统一走 `repl` 通知接口：触发语义在 REPL（回合结束 / `interactive` 工具开始两处）、行为在 `Notifier`（`bell`/`notify_osc`/`notify_cmd` fan-out，外部程序走 `shell.Resolve` 同一套 shell 解析；`notify_cmd` 的模板校验/引号规则/命令构造落在 `tools/shell.CommandNotifier`，`repl` 侧只留触发语义与载荷成品化，载荷类型 `present.Notification`）、门禁为交互富档 TTY；**一律尽力而为**——失败静默、不重试、不探测环境、不做 tmux 透传与平台特化，也不得因「没生效」报错或打提示行；载荷只在 `payloadOf` 单点成品化，不得在 `toolView`/`agent` 内直接发声、不探测子进程读取 stdin 的时刻，`ask` 单发不参与，见 `docs/design.md`《终端通知》
-- markdown 表格渲染是尽力而为：三行前瞻（表头/分隔/首数据行）定列宽与对齐，列宽不封顶、超宽单元格不截断，终端宽度只用于撑破时切紧边距；`Table` 块是「IR 无布局」的唯一例外，见 `docs/render-pipeline.md` §10
+- 出站 UA 伪装（避免风控）：默认 `pi/0.85.0 (linux; node/v22.14.0; x64)`，`user_agent` / `TANYA_USER_AGENT` 可配
+- 输出侧动态文本（模型输出、用户输入、工具参数、服务端数据、错误信息）落屏前一律清洗控制序列：多行走 `output.emitText`、单行走 `term.OneLine`、错误行走 `errLine`；`emit` 只承载自生成样式文本、不做 emit 级全局 Strip，见 `docs/design.md`《输出流与 Kind》《斜杠命令》
+- 颜色一律 16 色基本 SGR 码（30-37/90-97），不用 256 色/truecolor
+- 表现层无进程级全局：profile（TTY/色档）以**值**传递——`style.Style.With(prof)` 绑定后 `Bound.Sprint`/`Frame`、`term.Passthrough(prof, s)`、`render.Sprint`/`Template.Render(prof, …)`；**不存在 `SetProfile`/`GetProfile`**；探测点只在 `main`（`ctty.Probe` + `term.DetectProfile`），`repl` 经 `WithProfile` 下传
+- 样式注入收窄在消费者侧接口：`readline` 只认 `Styler`（`Sprint(string) string`），由 `repl` 传 `style.Bound`；输入层**不依赖 `render/style`**（`render/term` 可依赖）
+- 注意力通知统一走 `repl` 通知接口：触发在 REPL（回合结束 / `interactive` 工具开始）、行为在 `Notifier`（`bell`/`notify_osc`/`notify_cmd` 三档 fan-out，外部程序走 `shell.Resolve` + `tools/shell.CommandNotifier`，载荷 `present.Notification`）、门禁为交互富档 TTY；**一律尽力而为**——失败静默、不重试、不探测环境、不做 tmux 透传，不得报错或打提示行；载荷只在 `payloadOf` 单点成品化，不得在 `toolView`/`agent` 内发声，`ask` 不参与，见 `docs/design.md`《终端通知》
+- markdown 表格渲染尽力而为：列宽由三行前瞻定、不封顶、超宽不截断；`Table` 是「IR 无布局」的唯一例外，见 `docs/render-pipeline.md` §10
 - 代码不添加注释，除非用户明确要求
 
 ## 结构
@@ -62,10 +55,12 @@ render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终
 ## 文档
 
 - `docs/design.md` 核心设计与各模块行为细节（权威）；`README.md` 使用说明与配置项
-- 终端：`docs/terminal-console.md` 控制台层（唯一持有者/租约/`^C` 归一，已实施）、`docs/ctty.md` 控制终端抽象、`docs/interactive-tty.md` pty 桥接、`docs/terminal-caps.md` 探测与能力降级
+- 终端：`docs/terminal-console.md` 控制台层（唯一持有者/租约/`^C` 归一，已实施）、`docs/ctty.md` 控制终端抽象、`docs/interactive-tty.md` pty 桥接、`docs/terminal-caps.md` 探测与能力降级、`docs/windows-console-mode-restore.md` Windows 模式复原（已实施，实机回归未全覆盖）
 - 表现层：`docs/style-split.md` 拆包、`docs/render-pipeline.md` 渲染管线、`docs/render-refs-compare.md` 参考对比
 - 工具与缓存：`docs/shell-tool.md` run_shell 组件化、`docs/agent-control-tool.md` agent_custom、`docs/cache-probe.md` prompt cache
-- 会话与 REPL：`docs/session-archive.md` 归档卷、`docs/repl-output-refactor.md` 输出收敛、`docs/repl-status-append.md` 状态追加（未实施：`docs/repl-replay-rendering.md`、`docs/stream-input-events.md` 流式期输入与事件合流（含思考期 `Ctrl+O`，P1–P5 分阶段）；已归档：`docs/probe-redesign.md`、`docs/reasoning-live-toggle.md`）
+- 分层与依赖：`docs/layering-refactor.md`（S1–S6 已落地，S7 按 D3 不做）
+- 会话与 REPL：`docs/session-archive.md` 归档卷、`docs/repl-output-refactor.md` 输出收敛、`docs/stream-input-events.md` 流式期输入与事件合流（P1–P5 已实施，含思考期 `Ctrl+O`）、`docs/repl-status-append.md` 状态追加
+- 归档/未实施：`docs/repl-replay-rendering.md`（未实施，评估结论：建议不做）、`docs/probe-redesign.md`、`docs/reasoning-live-toggle.md`
 
 ## 构建与测试
 
@@ -78,4 +73,4 @@ python3 scripts/render_audit.py         # 渲染审计（pty + VT 回放，需�
 
 **测试包边界**：需要上层包（如 `readline`）的集成用例一律放**外部测试包**（`package X_test`，写在同目录）——内部测试包导入上层包会让上层永远无法依赖本包（测试二进制成环），实例见 `tools/shell/tty_e2e_test.go`。
 
-测试约定见 `docs/design.md`《测试》：`agent`/`repl` 各自 `TestMain` 做包级基线隔离（HOME 与 cwd 指向临时目录），用例不得依赖真实 HOME/配置；LLM mock 用 `newMockLLM` + `mockStep`，readline 用 fakeTerm 注入按键。交互/中断类手工验证用 `make build` 产出的 `./tanya`：**不要用 `go run .`**（`^Z` 会停住 wrapper、`^C` 失效）。
+测试约定见 `docs/design.md`《测试》：`agent`/`repl` 各自 `TestMain` 做包级基线隔离（HOME 与 cwd 指向临时目录），用例不得依赖真实 HOME/配置；LLM mock 用 `newMockLLM` + `mockStep`，readline 用 fakeTerm 注入按键（测试必须显式传 profile）。交互/中断类手工验证用 `make build` 产出的 `./tanya`：**不要用 `go run .`**（`^Z` 会停住 wrapper、`^C` 失效）。
