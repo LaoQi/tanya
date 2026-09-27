@@ -354,6 +354,9 @@ class MockLLM:
                 for chunk in outer.sse(step):
                     self.wfile.write(chunk.encode())
                     self.wfile.flush()
+                    d = step.get("delay", SSE_DELAY)
+                    if d > 0:
+                        time.sleep(d)
                 self.wfile.write(b"data: [DONE]\n\n")
                 self.wfile.flush()
 
@@ -378,6 +381,8 @@ class MockLLM:
 
         if step.get("reasoning"):
             send("response.reasoning_text.delta", {"delta": step["reasoning"]})
+        for piece in step.get("reasoning_deltas") or []:
+            send("response.reasoning_text.delta", {"delta": piece})
         for piece in step.get("chunks") or ([step["content"]] if step.get("content") else []):
             send("response.output_text.delta", {"delta": piece})
         output = []
@@ -398,6 +403,8 @@ class MockLLM:
         send("response.completed", {"response": {"output": output, "status": "completed",
               "usage": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120}}})
         return out
+
+SSE_DELAY = 0.0
 
 # ---------------------------------------------------------------- pty 驱动
 
@@ -591,6 +598,20 @@ SCENARIOS = [
         "screen_has": ["▸ run_shell"],
     },
     {
+        "name": "clean-reasoning-toggle",
+        "want": "clean",
+        "inputs": [
+            {"data": "你好\n", "wait": 1.0},
+            {"data": "\x0f", "wait": 1.2},
+            {"data": "exit\n", "wait": 0.5},
+        ],
+        "steps": [
+            {"reasoning_deltas": ["先想一步", "再想两步", "然后归纳", "得出结论"],
+             "delay": 0.25, "content": "回答完毕。\n"},
+        ],
+        "screen_has": ["─── 思考", "先想一步", "得出结论", "思考结束", "回答完毕"],
+    },
+    {
         "name": "clean-interactive-release",
         "want": "clean",
         "inputs": [
@@ -755,7 +776,11 @@ def main():
     ap.add_argument("--rows", type=int, default=32)
     ap.add_argument("--timeout", type=float, default=40)
     ap.add_argument("--raw", default="", metavar="DIR", help="把每个场景的原始 pty 抓流写入该目录")
+    ap.add_argument("--sse-delay", type=float, default=0, help="每个 SSE chunk 之间的间隔秒数（模拟流式节奏）")
     args = ap.parse_args()
+
+    global SSE_DELAY
+    SSE_DELAY = args.sse_delay
 
     if not os.path.exists(args.bin):
         sys.exit("缺少 %s，先 make build" % args.bin)

@@ -27,6 +27,7 @@ const (
 	EventInterrupt
 	EventResize
 	EventHangup
+	EventIdle
 )
 
 type Event struct {
@@ -110,6 +111,9 @@ func (c *consoleImpl) Size() (Size, bool) { return c.dev.Size() }
 
 func (c *consoleImpl) ReadEvent() (Event, error) {
 	ev, err := c.dev.readEvent()
+	if err == errIdle {
+		return Event{Kind: EventIdle}, nil
+	}
 	if err == nil {
 		c.dispatch(ev)
 	}

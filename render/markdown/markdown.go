@@ -26,6 +26,8 @@ const (
 )
 
 type MarkdownBuf struct {
+	input       strings.Builder
+	inputLimit  int
 	pending     strings.Builder
 	lines       []string
 	kind        groupKind
@@ -48,9 +50,26 @@ func NewMarkdownBuf() *MarkdownBuf { return &MarkdownBuf{} }
 
 func (b *MarkdownBuf) SetWidth(cols int) { b.width = cols }
 
-func (b *MarkdownBuf) Reset() { *b = MarkdownBuf{} }
+func (b *MarkdownBuf) SetInputLimit(n int) { b.inputLimit = n }
+
+func (b *MarkdownBuf) InputLen() int { return b.input.Len() }
+
+func (b *MarkdownBuf) Rewind() []ir.Block {
+	width, in := b.width, b.input.String()
+	*b = MarkdownBuf{}
+	b.width = width
+	b.input.WriteString(in)
+	return b.feed(in)
+}
 
 func (b *MarkdownBuf) Write(delta string) []ir.Block {
+	if b.inputLimit <= 0 || b.input.Len()+len(delta) <= b.inputLimit {
+		b.input.WriteString(delta)
+	}
+	return b.feed(delta)
+}
+
+func (b *MarkdownBuf) feed(delta string) []ir.Block {
 	b.pending.WriteString(delta)
 	b.drain()
 	out := b.closed

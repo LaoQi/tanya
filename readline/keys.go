@@ -22,6 +22,7 @@ const (
 	KeyCtrlY
 	KeyCtrlT
 	KeyCtrlL
+	KeyCtrlO
 	KeyAltB
 	KeyAltF
 	KeyUp
@@ -127,6 +128,8 @@ func (p *keyParser) parse() (*KeyEvent, int, bool) {
 		return &KeyEvent{Code: KeyCtrlT}, 1, false
 	case b == 0x0c:
 		return &KeyEvent{Code: KeyCtrlL}, 1, false
+	case b == 0x0f:
+		return &KeyEvent{Code: KeyCtrlO}, 1, false
 	case b < 0x20:
 		return nil, 1, false
 	case b < 0x80:

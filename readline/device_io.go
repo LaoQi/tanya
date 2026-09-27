@@ -1,9 +1,12 @@
 package readline
 
 import (
+	"errors"
 	"io"
 	"syscall"
 )
+
+var errIdle = errors.New("input: no key this cycle")
 
 type chunkReader interface {
 	readChunk(p []byte) (int, error)
@@ -66,6 +69,9 @@ func (k *keySource) readKey() (KeyEvent, error) {
 		}
 		if h, ok := k.src.(hangUpDetector); ok && h.hungUp() {
 			return KeyEvent{}, io.EOF
+		}
+		if n == 0 {
+			return KeyEvent{}, errIdle
 		}
 	}
 	if len(k.queue) == 0 {

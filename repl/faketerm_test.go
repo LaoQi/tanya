@@ -8,7 +8,9 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/readline"
@@ -74,15 +76,17 @@ func (b *syncBuf) Reset() {
 
 // fakeTerm 是 repl 侧的 readline.Console 替身：按键序列驱动 Run，无需真实终端（模拟真 tty，逐键会话恒可用）。
 type fakeTerm struct {
-	keys   []readline.KeyEvent
-	idx    int
-	raw    bool
-	noKeys bool
-	inKey  bool
-	onKey  func()
-	err    error
-	sane   int
-	subs   int
+	keys     []readline.KeyEvent
+	idx      int
+	raw      bool
+	noKeys   bool
+	inKey    bool
+	onKey    func()
+	err      error
+	sane     int
+	subs     int
+	endReads atomic.Int32
+	park     bool
 }
 
 func newFakeTerm(keys ...readline.KeyEvent) *fakeTerm {
@@ -101,7 +105,7 @@ func (f *fakeTerm) BeginRead() error {
 	return nil
 }
 
-func (f *fakeTerm) EndRead() { f.raw = false }
+func (f *fakeTerm) EndRead() { f.raw = false; f.endReads.Add(1) }
 
 func (f *fakeTerm) Sane() { f.raw = false; f.sane++ }
 
@@ -135,6 +139,10 @@ func (f *fakeTerm) ReadEvent() (readline.Event, error) {
 	if f.idx >= len(f.keys) {
 		if f.err != nil {
 			return readline.Event{}, f.err
+		}
+		if f.park {
+			time.Sleep(10 * time.Millisecond)
+			return readline.Event{}, nil
 		}
 		return readline.Event{}, io.EOF
 	}

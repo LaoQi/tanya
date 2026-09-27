@@ -459,3 +459,139 @@ func TestMarkdownTableClosePendingRow(t *testing.T) {
 		t.Errorf("Close 应先补下框再出残行:\n got %q\nwant %q", got, want)
 	}
 }
+
+func rewindText(t *testing.T, buf *MarkdownBuf) string {
+	t.Helper()
+	r := render.NewRenderer(term.Profile{TTY: true, Colors: term.LevelNone})
+	var b strings.Builder
+	for _, blk := range buf.Rewind() {
+		b.WriteString(r.Block(blk))
+	}
+	return b.String()
+}
+
+func TestMarkdownRewindMatchesStream(t *testing.T) {
+	parts := []string{
+		"Hello **wor",
+		"ld!**\n\n",
+		"| a | b |\n|---|---|\n| 1 | 2 |\n",
+		"```go\nx := 1\n",
+		"```\n",
+		"tail\n",
+	}
+	ref := NewMarkdownBuf()
+	want := ""
+	for _, p := range parts {
+		want += plainBlocks(t, ref, p)
+	}
+	want += plainClose(t, ref)
+
+	buf := NewMarkdownBuf()
+	for _, p := range parts {
+		buf.Write(p)
+	}
+	got := rewindText(t, buf) + plainClose(t, buf)
+	if got != want {
+		t.Errorf("Rewind 块序列与流式不等价:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestMarkdownRewindThenAppend(t *testing.T) {
+	ref := NewMarkdownBuf()
+	want := plainBlocks(t, ref, "first\n") + plainBlocks(t, ref, "second\n") + plainClose(t, ref)
+
+	buf := NewMarkdownBuf()
+	buf.Write("first\n")
+	got := rewindText(t, buf) + plainBlocks(t, buf, "second\n") + plainClose(t, buf)
+	if got != want {
+		t.Errorf("Rewind 后追加不等价:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestMarkdownRewindKeepsWidth(t *testing.T) {
+	content := "| name | qty |\n|---|---|\n| a | 1 |\n"
+	ref := NewMarkdownBuf()
+	ref.SetWidth(6)
+	want := plainBlocks(t, ref, content) + plainClose(t, ref)
+	if !strings.HasPrefix(want, "┌─") {
+		t.Fatalf("窄终端应切紧边距: %q", want)
+	}
+
+	buf := NewMarkdownBuf()
+	buf.SetWidth(6)
+	buf.Write(content)
+	got := rewindText(t, buf) + plainClose(t, buf)
+	if got != want {
+		t.Errorf("Rewind 未保留宽度（紧边距判定依赖 width）:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestMarkdownRewindEmpty(t *testing.T) {
+	if got := rewindText(t, NewMarkdownBuf()); got != "" {
+		t.Errorf("空缓冲 Rewind 应无输出: %q", got)
+	}
+}
+
+func TestMarkdownRewindIsIdempotent(t *testing.T) {
+	buf := NewMarkdownBuf()
+	buf.Write("alpha **b**\n")
+	first := rewindText(t, buf)
+	second := rewindText(t, buf)
+	if first == "" {
+		t.Fatal("Rewind 应重放已喂入内容")
+	}
+	if first != second {
+		t.Errorf("重复 Rewind 结果不一致（输入被重复累积？）:\n%q\n%q", first, second)
+	}
+}
+
+func TestMarkdownRewindAfterClose(t *testing.T) {
+	buf := NewMarkdownBuf()
+	if got := plainBlocks(t, buf, "a\n\n"); got != "a\n\n" {
+		t.Fatalf("Write 输出异常: %q", got)
+	}
+	if got := plainClose(t, buf); got != "" {
+		t.Fatalf("Close 输出异常: %q", got)
+	}
+	got := rewindText(t, buf) + plainClose(t, buf)
+	if got != "a\n\n" {
+		t.Errorf("Close 后 Rewind 应重放整段: %q", got)
+	}
+}
+
+func TestMarkdownRewindResetsOpenState(t *testing.T) {
+	parts := []string{"intro\n\n", "```go\n", "line1\n", "line2\n"}
+	ref := NewMarkdownBuf()
+	want := ""
+	for _, p := range parts {
+		want += plainBlocks(t, ref, p)
+	}
+	want += plainClose(t, ref)
+
+	buf := NewMarkdownBuf()
+	for _, p := range parts {
+		buf.Write(p)
+	}
+	got := rewindText(t, buf) + plainClose(t, buf)
+	if got != want {
+		t.Errorf("尾部留有未闭合 fence 时 Rewind 未重置解析态:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestMarkdownInputLimit(t *testing.T) {
+	buf := NewMarkdownBuf()
+	buf.SetInputLimit(10)
+	if got := plainBlocks(t, buf, "aaaa\n\n"); got != "aaaa\n\n" {
+		t.Fatalf("限内写入异常: %q", got)
+	}
+	if got := plainBlocks(t, buf, "bbbb\n\n"); got != "bbbb\n\n" {
+		t.Fatalf("超限不应影响流式渲染: %q", got)
+	}
+	got := rewindText(t, buf)
+	if got != "aaaa\n\n" {
+		t.Errorf("重放只应含限内前缀: %q", got)
+	}
+	if got := plainClose(t, buf); got != "" {
+		t.Errorf("收尾应无残留: %q", got)
+	}
+}

@@ -90,7 +90,7 @@ Go 不能跨包定义方法，若坚持 style 零依赖就得把 `Sprint/Frame` 
 | `render/markdown` | `MarkdownBuf/NewMarkdownBuf/Write/Close/drain/feedLine/closeGroup/buildList/buildQuote/cleanLine/headingLevel/isRule/listItem/quoteLine/ParseInline`（markdown.go） |
 | `render/markup` | `attrNames/parseStyleNames/mergeStyle/ParseMarkup`（markup.go）、`Template/ParseTemplate/Render/scanSegments/isPlaceholderName/replacePlaceholders/bindInlines`（template.go） |
 | `render` | `Renderer/NewRenderer/NewThemedRenderer/Inline/Block/itemInline`（render.go） |
-| 删除 | `Document/Doc()/P()/Renderer.Doc`、`Template.Bind`、`MarkdownBuf.Reset`、`LineStart`、`KindRGB`、`Color.RGB`、`Profile.Unicode`、`Level256`/`LevelTrue`、`(Style).Text` |
+| 删除 | `Document/Doc()/P()/Renderer.Doc`、`Template.Bind`、`MarkdownBuf.Reset`（2026-09-27 已删除，改由 `Rewind` 重放）、`LineStart`、`KindRGB`、`Color.RGB`、`Profile.Unicode`、`Level256`/`LevelTrue`、`(Style).Text` |
 
 ## 5. 阶段（自底向上，每阶段独立全绿）
 
