@@ -69,6 +69,8 @@
 
 设计原则：
 
+- **零依赖叶子的用法（2026-09-28 明示）**：本包不导入任何 tanya 包，因此**任何层都可以直接依赖它**（`tools/shell` 直连 `ProtectJobSignals`/`DecodeCP` 是允许的，不是分层违规）；需要注入的是**终端所有权**（`readline.Console`/`Lease`），因为持有者必须唯一。
+
 - **以 `fd int` 为原语参数**：readline 的 `secureTerminalFd` 需作用于任意 fd（其单测即作用在 pty slave fd 上），`Open()` 只是便捷入口。
 - **只下沉原语，不下沉策略**：不提供 `Handover/Restore` 组合函数。2026-09-27 后策略只剩一处——`readline` 的 Console/租约（何时借出、切模式、存锚点），`tools/shell` 只表达意图（`LendStdin`/`LendFull`）、`repl` 只消费事件流；与 `docs/design.md`《事实归属》的分工一致：共享原语，策略不回流本包。
 - **termios 原语进 `ctty`（2026-09-15 修订，原结论为"不进"）**：原判断"仅 readline 使用"在 `run_shell` 需要**快照并在子进程结束后复原**控制终端时失效——`agent` 侧持有策略（何时移交、何时复原），原语与 readline 私有实现重复。现由 `ctty` 独占 termios 读写(`Get/Set/SetTermiosFlush`)与模式复位（`ResetModes`），`readline` 删私有 helper 改用 `ctty`，raw mode 的**构造**（flag 组合）仍留各消费方：那是策略，不是原语。跨平台的输入模式快照/复原（`InputModes` + `SnapshotInput`/`RestoreInput`，2026-09-17 引入）已于 2026-09-27 随 stdin 租约删除：posix 租约改为直接用 `GetTermios`/`SetTermios` 复原，Windows 侧不再需要回合末复原（子进程不再接管控制台 stdin）。
