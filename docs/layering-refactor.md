@@ -97,7 +97,7 @@
 
 ### S5 工具视图注册点，`repl` 不再认识具体工具（消 P4）
 
-- 新**叶包** `present`（零内部依赖）：`ArgsView`/`View`/`ToolView` 契约 + 注册表（按工具名索引，装配期注入、运行期冻结——与 `agent.WithTools` 同语义）。
+- 新**叶包** `present`（仅依赖 `render/term`——输出侧原语，与 `ctty` 同性质）：`ArgsView`/`View`/`ToolView` 契约 + 注册表（按工具名索引，装配期注入、运行期冻结——与 `agent.WithTools` 同语义）。
 - 新包 `tools/shell/view`：把 `run_shell` 专属渲染从 `repl` 搬出（`shellArgsView`/`commandLines`/`capLines` 的 shell 部分 + `shellView`/`chunkLines`/`shellStatus` 及其专属文案），导出 `View() present.ToolView`；只依赖 `tools/shell` + `render/term`（**不依赖 `render/theme`**：配色仍由 `repl` 的 `sem.Dim.Frame` 施加）。
 - `repl`：`toolArgsView`/`toolEndBody` 改查注册表（`WithToolView(name, present.ToolView)`），删 `tools/shell` 导入与 `name == "run_shell"` 字符串分派；未注册的工具回落现有通用渲染（行为不变）。
 - `main`：`repl.WithToolView("run_shell", shellview.View())`。
@@ -105,7 +105,7 @@
 
 ### S5 落地记录（2026-09-28）
 
-- **新包 `render/present`（叶：零内部依赖）**：`ArgsView`/`View`/`ToolView`（`Args`/`Result` 两回调，`ok=false` 即回落）+ `Registry`（装配期注册、运行期冻结）+ 共享文本助手（`CapLines`/`Prefixed`/`PlainArgsView`/`ExpandTabs`/`TrimBlankEdges`/`Indent`/`Duration`）+ 通知载荷 `Notification`。**契约不引 `agent`**（回调传 `text string, meta any`），否则 `render` 树要反向依赖核心包。
+- **新包 `render/present`（叶：仅依赖 `render/term`——输出侧原语）**：`ArgsView`/`View`/`ToolView`（`Args`/`Result` 两回调，`ok=false` 即回落）+ `Registry`（装配期注册、运行期冻结）+ 共享文本助手（`CapLines`/`Prefixed`/`PlainArgsView`/`ExpandTabs`/`TrimBlankEdges`/`Indent`/`Duration`）+ 通知载荷 `Notification`。**契约不引 `agent`**（回调传 `text string, meta any`），否则 `render` 树要反向依赖核心包。
 - **新包 `tools/shell/view`**：`run_shell` 参数区（cwd/timeout/命令区/前缀/省略文案）与结果区（stdout+stderr 合并、`2|` 前缀、头尾截断、状态行「状态 · 耗时 · 行数」）及其专属文案；直接依赖仅 `present`/`render/term`/`tools/shell`（**不依赖 `agent`/`render/theme`**，配色仍由 `repl` 的语义色施加）。
 - **`repl`**：`toolArgsView`/`toolEndBody` 改查注册表（`WithToolViews`，装配期冻结），删 `name == "run_shell"` 字符串分派与 `tools/shell` 导入；标题组合（`RenderToolStart`/`toolTitleLines`）与通用回落（`genericArgsView`/`textView`）留在 `repl`，改用 `present` 助手。
 - **扩展（本次一并收掉，否则验收判据不成立）**：`notify_cmd` 的命令构造原本也在 `repl`（认识 `shell.Invocation`/`shell.Kind` + 引号规则），迁到 `tools/shell.CommandNotifier`（`NewCommandNotifier`/`Render`/`Quote`/`ValidateNotifyTemplate`），载荷类型落 `present.Notification`，`repl.Notifier` 接口改为 `Notify(present.Notification)`。
@@ -168,4 +168,4 @@ rg 'EventHangup' -g '*.go' .                    # S4 后必须为空
 
 - `repl` 的体量（3578 行）不属本次范围，见 D3。
 - `render/term` 与 `ctty` 的边界保持现状：前者是**输出侧原语**（宽度/清洗/控制序列），后者是**控制终端原语**（termios/尺寸/信号/代码页）；两侧都只放原语、不放策略，与 `docs/ctty.md`《设计原则》一致。
-- Windows 侧 resize 事件不产出（无 `SIGWINCH`），`repl` 的活取宽度仍会在下次渲染时读到新尺寸；如需实时化，属独立的 Windows 实机课题。
+- Windows 侧 resize 事件不产出（无 `SIGWINCH`）：`repl` 的活取宽度仍会在下次渲染时读到新尺寸，但 picker 的 `p.size` 是打开时快照、只在 `EventResize` 时更新——Windows 会话内缩放不自愈重排（S4 前的每轮 `Size()` 比对兜底已随事件化移除，与 D2「不假装支持」一致，行为退化记档于此）；如需实时化，属独立的 Windows 实机课题。

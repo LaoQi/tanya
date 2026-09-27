@@ -182,7 +182,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 工具视图渲染（repl/toolview.go + render/present + tools/shell/view）
 
-- **分层（2026-09-28）**：`render/present` 是契约与共享文本助手（`ToolView{Args,Result}`、`Registry`、`CapLines`/`Prefixed`/`PlainArgsView`/`ExpandTabs`/`TrimBlankEdges`/`Indent`/`Duration`，零内部依赖、不引 `agent`——回调签名传 `text string, meta any`）；`tools/shell/view` 是 `run_shell` 自带视图（参数区 `argsView` + 结果区 `resultView` + 专属文案，只依赖 `present`/`render/term`/`tools/shell`）；`repl` 只做**标题组合与回落**——`toolArgsView` 查注册表、未注册或视图不认领则走 `genericArgsView`/`textView`。`main` 装配 `views.Register("run_shell", shellview.View())` 后经 `repl.WithToolViews` 注入（装配期冻结，语义同工具注入），`repl` 因此不导入任何 `tools/*`
+- **分层（2026-09-28）**：`render/present` 是契约与共享文本助手（`ToolView{Args,Result}`、`Registry`、`CapLines`/`Prefixed`/`PlainArgsView`/`ExpandTabs`/`TrimBlankEdges`/`Indent`/`Duration`，仅依赖 `render/term`（输出侧原语）、不引 `agent`——回调签名传 `text string, meta any`）；`tools/shell/view` 是 `run_shell` 自带视图（参数区 `argsView` + 结果区 `resultView` + 专属文案，只依赖 `present`/`render/term`/`tools/shell`）；`repl` 只做**标题组合与回落**——`toolArgsView` 查注册表、未注册或视图不认领则走 `genericArgsView`/`textView`。`main` 装配 `views.Register("run_shell", shellview.View())` 后经 `repl.WithToolViews` 注入（装配期冻结，语义同工具注入），`repl` 因此不导入任何 `tools/*`
 
 - `NewToolView` 构造渲染器（`repl/repl.go` 与 `main.go` 各接一处；`Handle(e agent.Event)` 即事件入口，`toolView` 自身即 `agent.EventSink`），块状视图：标题行 + 缩进输出行（stderr 加 `2|` 前缀）+ 亮蓝状态行
 - **标题区参数显示（2026-09-16 命令可读性改造，2026-09-20 全工具覆盖）**：`toolArgsView(name, args, width)` 按工具名分派参数视图（`argsView{inline, body}`：`inline` 是可内联的单行候选，`body` 是块形态的正文行、已带前缀），内联判据统一为「`inline` 非空 && 无换行 && 宽度 ≤ width−3−len(name)−1」，超宽或原本多行转块形态。模型可控的 args 仍是唯一数据源，`toolTitleLines` 只管排版

@@ -54,7 +54,7 @@ repl/               REPL 循环与输入分发、斜杠命令、提示符、ghos
 readline/           终端输入层：Console 仲裁 + device 设备面 + 租约（借出/pty 泵/锚点）、行编辑/历史/补全、按键解析、宽度
 agent/              核心逻辑（config 收窄校验 / llm 双协议 / loop / prompt / session / archive / stats / path / init / tools / control）；零内部依赖
 tools/              外置工具集：根包 tools.Standard 装配标准集与顺序；shell/ = run_shell（含 notify_cmd 的命令构造 `CommandNotifier`）；shell/view/ = run_shell 自带表现层视图（参数区 + 结果区）；builtin/ = get_time/get_env/calc
-render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终端原语、ir/、theme/ 配色、markdown/ 流式解析与整段重放、markup/ 内联标记、present/ 工具视图契约（`ToolView`/`Registry` + 通知载荷 `Notification`，零内部依赖）
+render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终端原语、ir/、theme/ 配色、markdown/ 流式解析与整段重放、markup/ 内联标记、present/ 工具视图契约（`ToolView`/`Registry` + 通知载荷 `Notification`，仅依赖 `render/term` 输出侧原语）
 ```
 
 各模块行为细节见 `docs/design.md`。
