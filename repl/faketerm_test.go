@@ -12,6 +12,8 @@ import (
 
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/readline"
+	"github.com/LaoQi/tanya/render/present"
+	shellview "github.com/LaoQi/tanya/tools/shell/view"
 )
 
 // syncBuf 让测试断言与心跳 goroutine 的写入互斥，-race 下安全。
@@ -192,6 +194,13 @@ func (f *fakeTerm) ReadEvent() (readline.Event, error) {
 	return readline.Event{Kind: readline.EventKey, Key: ev}, nil
 }
 
+// testViews 复刻 main 的装配（run_shell 自带视图），使 repl 侧既有渲染 golden 仍走真实视图。
+func testViews() *present.Registry {
+	r := present.NewRegistry()
+	r.Register("run_shell", shellview.View())
+	return r
+}
+
 func newTestREPLAgent(t *testing.T, a *agent.Agent, dev readline.Console) (*REPL, *syncBuf, *syncBuf) {
 	return newTestREPLAgentProf(t, a, dev, ttyRich())
 }
@@ -201,7 +210,7 @@ func newTestREPLAgentProf(t *testing.T, a *agent.Agent, dev readline.Console, pr
 	t.Helper()
 	out, errb := &syncBuf{}, &syncBuf{}
 	st := NewStreams(out, errb, modeRich)
-	r, err := NewREPL(a, "› ", WithStreams(st), WithProfile(prof), WithConsole(dev))
+	r, err := NewREPL(a, "› ", WithStreams(st), WithProfile(prof), WithToolViews(testViews()), WithConsole(dev))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +230,7 @@ func newTestREPLMode(t *testing.T, dev readline.Console, mode outMode, prof term
 	t.Helper()
 	out, errb := &syncBuf{}, &syncBuf{}
 	st := NewStreams(out, errb, mode)
-	r, err := NewREPL(nil, "› ", WithStreams(st), WithProfile(prof), WithConsole(dev))
+	r, err := NewREPL(nil, "› ", WithStreams(st), WithProfile(prof), WithToolViews(testViews()), WithConsole(dev))
 	if err != nil {
 		t.Fatal(err)
 	}

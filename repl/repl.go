@@ -16,6 +16,7 @@ import (
 
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/readline"
+	"github.com/LaoQi/tanya/render/present"
 )
 
 const DefaultToolOutputLines = 20
@@ -42,6 +43,7 @@ type REPL struct {
 type options struct {
 	st        *streams
 	prof      term.Profile
+	views     *present.Registry
 	con       readline.Console
 	facts     TermFacts
 	factsSet  bool
@@ -53,6 +55,11 @@ type options struct {
 }
 
 type Option func(*options)
+
+// WithToolViews 注入工具自带视图注册表（装配期一次合成、运行期冻结，nil 即全部走通用回落）。
+func WithToolViews(views *present.Registry) Option {
+	return func(o *options) { o.views = views }
+}
 
 func WithProfile(p term.Profile) Option {
 	return func(o *options) { o.prof = p }
@@ -154,7 +161,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 			facts = TermFacts{Cols: s.Cols, ColsOK: true}
 		}
 	}
-	r.view = NewToolView(o.st, r.prof, r.sem, LiveWidth(con, facts), maxLines)
+	r.view = NewToolView(o.st, r.prof, r.sem, LiveWidth(con, facts), maxLines, o.views)
 	return r, nil
 }
 
@@ -178,7 +185,9 @@ func (r *REPL) notify(n Notification) {
 	if r.notifier == nil || !r.prof.TTY || !r.st.decor() {
 		return
 	}
-	r.notifier.Notify(n)
+	if payload, ok := payloadOf(n); ok {
+		r.notifier.Notify(payload)
+	}
 }
 
 func (r *REPL) mdEnabled() bool {

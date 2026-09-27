@@ -53,6 +53,7 @@ render/ir       → render/style
 render/theme    → render/style
 render/markdown → render/ir, render/style, render/term
 render/markup   → render/ir, render/style, render/term, render/theme
+render/present  → render/term（2026-09-28 增补：工具视图契约 + 共享文本助手，零内部依赖）
 render          → render/ir, render/style, render/term, render/theme
 readline        → render/style, render/term
 repl            → render(+子包), readline, agent

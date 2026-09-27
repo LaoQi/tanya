@@ -16,6 +16,7 @@
 - 工具 = **调用方注入**（`agent.WithTools`，保序在前）+ agent 自带的 `agent_custom`（恒末位），装配期一次合成、之后**运行期冻结**；不提供运行期注册 API，不做插件。注册**仅作契约**：不校验重名、不仲裁（重名由调用方保证），`lookup` 首个匹配胜出（注入项在前故可遮蔽 `agent_custom`）；清单顺序即请求 `tools` 顺序（缓存契约）
 - 标准工具集（`run_shell` + `get_time`/`get_env`/`calc`）落在顶级 `tools`，`main` 经 `tools.Standard(tools.Options{...})` 一次取齐并按固定顺序注入；**`agent` 不带任何工具实现**（作库用时默认只有 `agent_custom`），也不认 shell
 - 工具扩展点：`Tool` 三方法（`Name`/`Definition`/`Invoke`）+ 可选 `Interactive`（终端独占标记），结果 `ToolResult{Text; Meta}`（`Text` 回写 history、`Meta` 为表现层载荷，核心不知道任何具体 `Meta` 类型）；外部经 `agent.NewTool`/`agent.NewToolDef` 构造，不依赖包内类型，见 `docs/design.md`《工具》
+- 工具自带**表现层视图**（2026-09-28）：`present.ToolView`（`Args`/`Result` 两个回调，返回 `ok=false` 即回落通用渲染）按工具名注册进 `present.Registry`，由 `main` 装配（`views.Register("run_shell", shellview.View())`）经 `repl.WithToolViews` 注入——与工具注入同语义（装配期一次合成、运行期冻结、不提供运行期注册）。`repl` 因此**不导入任何 `tools/*`**：未注册的工具走通用键值/文本回落，外部工具可自带视图包 + 在自己的装配点注册
 - 工具策略：以 `run_shell` 为核心，新能力优先用 shell 命令组合实现；小型纯计算/查询工具放 `tools/builtin`
 - `agent_custom` 供模型运行时自调与自省：key 表驱动，只写内存、不落盘不入会话，`/load` 或重启后回落配置，见 `docs/agent-control-tool.md`
 - 缓存不变性（history append-only、system 快照冻结、`/load` 还原首行）是命中 provider 前缀缓存的**优化手段**，不是功能红线：保证范围仅限「同一二进制 + 会话首行快照未被改写」（进程内多轮、快照未变的旧会话都命中）；跨版本无此约束——改了默认提示词/工具描述/env 段后 `/load` 旧会话前缀变化属预期，代价只是首轮 cache miss，按 `docs/cache-probe.md` 的台阶估代价即可，不必为字节不变放弃功能。见 `docs/design.md`《系统提示与缓存友好》
@@ -36,7 +37,7 @@
 - 表现层无进程级全局：终端 profile（TTY/色档）以**值**传递——`style.Style.With(prof)` 绑定后 `Sprint`/`Frame`、`term.Passthrough(prof, s)`、`render.Sprint(prof, …)`、`render.Template.Render(prof, …)`；**不存在任何 `SetProfile`/`GetProfile`**（2026-09-28 删除）。唯一探测点在 `main`（`ctty.Probe` + `term.DetectProfile`），`repl` 经 `WithProfile` 收下后逐层下传，测试同样显式传入
 - 样式注入收窄在消费者侧接口：`readline` 只认自己的 `Styler`（`Sprint(string) string`），由 `repl` 传 `style.Bound`；输入层**不依赖 `render/style`**（`render/term` 仍可依赖——它是终端原语，与 `ctty` 同性质）
 - 终端尺寸的消费面无状态：宽度不缓存、不监听事件（渲染时现取 `con.Size()`），只有「何时重绘」依赖 `EventResize`；桥接借出期的窗口尺寸由 `readline` 经 `ctty.OnResize` 转发给子进程 pty（`TIOCSWINSZ`），与宿主渲染互不依赖
-- 注意力通知统一走 `repl` 通知接口：触发语义在 REPL（回合结束 / `interactive` 工具开始两处）、行为在 `Notifier`（`bell`/`notify_osc`/`notify_cmd` fan-out，外部程序走 `shell.Resolve` 同一套 shell 解析）、门禁为交互富档 TTY；**一律尽力而为**——失败静默、不重试、不探测环境、不做 tmux 透传与平台特化，也不得因「没生效」报错或打提示行；载荷只在 `payloadOf` 单点成品化，不得在 `toolView`/`agent` 内直接发声、不探测子进程读取 stdin 的时刻，`ask` 单发不参与，见 `docs/design.md`《终端通知》
+- 注意力通知统一走 `repl` 通知接口：触发语义在 REPL（回合结束 / `interactive` 工具开始两处）、行为在 `Notifier`（`bell`/`notify_osc`/`notify_cmd` fan-out，外部程序走 `shell.Resolve` 同一套 shell 解析；`notify_cmd` 的模板校验/引号规则/命令构造落在 `tools/shell.CommandNotifier`，`repl` 侧只留触发语义与载荷成品化，载荷类型 `present.Notification`）、门禁为交互富档 TTY；**一律尽力而为**——失败静默、不重试、不探测环境、不做 tmux 透传与平台特化，也不得因「没生效」报错或打提示行；载荷只在 `payloadOf` 单点成品化，不得在 `toolView`/`agent` 内直接发声、不探测子进程读取 stdin 的时刻，`ask` 单发不参与，见 `docs/design.md`《终端通知》
 - markdown 表格渲染是尽力而为：三行前瞻（表头/分隔/首数据行）定列宽与对齐，列宽不封顶、超宽单元格不截断，终端宽度只用于撑破时切紧边距；`Table` 块是「IR 无布局」的唯一例外，见 `docs/render-pipeline.md` §10
 - 代码不添加注释，除非用户明确要求
 
@@ -48,11 +49,11 @@ system_prompt.md    内置系统提示词原文（顶层，编译期嵌入）
 config.example.yaml 默认配置示例原文（顶层，编译期嵌入，`tanya config` 输出）
 config/             tanya 作为 CLI 的完整配置：agent.Config + UI(inline) + Shell + Path；yaml 加载、TANYA_* 覆盖、校验（agent 侧零加载机制）
 ctty/               控制终端原语与探测（/dev/tty、termios、模式复位/光标锚点、信号、Facts）；白名单 + stub，零内部依赖
-repl/               REPL 循环与输入分发、斜杠命令、提示符、ghost 补全、picker、工具块渲染、状态行、回合事件合流（turnloop）、退出收尾
+repl/               REPL 循环与输入分发、斜杠命令、提示符、ghost 补全、picker、工具块排版（标题组合 + 通用回落）、状态行、回合事件合流（turnloop）、退出收尾；**不认识任何具体工具**（自带视图经注入）
 readline/           终端输入层：Console 仲裁 + device 设备面 + 租约（借出/pty 泵/锚点）、行编辑/历史/补全、按键解析、宽度
 agent/              核心逻辑（config 收窄校验 / llm 双协议 / loop / prompt / session / archive / stats / path / init / tools / control）；零内部依赖
-tools/              外置工具集：根包 tools.Standard 装配标准集与顺序；shell/ = run_shell；builtin/ = get_time/get_env/calc
-render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终端原语、ir/、theme/ 配色、markdown/ 流式解析与整段重放、markup/ 内联标记
+tools/              外置工具集：根包 tools.Standard 装配标准集与顺序；shell/ = run_shell（含 notify_cmd 的命令构造 `CommandNotifier`）；shell/view/ = run_shell 自带表现层视图（参数区 + 结果区）；builtin/ = get_time/get_env/calc
+render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终端原语、ir/、theme/ 配色、markdown/ 流式解析与整段重放、markup/ 内联标记、present/ 工具视图契约（`ToolView`/`Registry` + 通知载荷 `Notification`，零内部依赖）
 ```
 
 各模块行为细节见 `docs/design.md`。

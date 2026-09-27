@@ -1,6 +1,6 @@
 # 分层与模块依赖：评估结论与修正方案
 
-> 状态：**实施中**（2026-09-28 评估；S1–S4 已落地，S5–S6 待做）
+> 状态：**实施中**（2026-09-28 评估；S1–S5 已落地，S6 待做）
 > 范围：`ctty` / `render` / `readline` / `repl` / `tools/shell` 的依赖边与职责收口
 > **不动**：`agent`（基线已零内部依赖）、`config`、工具注入与缓存不变性契约
 > 判据：每阶段要么「依赖边消失」（可用 `go list -deps` 断言），要么「行为可观测」（单测 + `render_audit`）；两者都不满足的改动不做
@@ -102,6 +102,15 @@
 - `repl`：`toolArgsView`/`toolEndBody` 改查注册表（`WithToolView(name, present.ToolView)`），删 `tools/shell` 导入与 `name == "run_shell"` 字符串分派；未注册的工具回落现有通用渲染（行为不变）。
 - `main`：`repl.WithToolView("run_shell", shellview.View())`。
 - 验收：`go list -deps ./repl` 不含 `tools/shell`；新增「第三方工具自带视图」用例（自定义 `Meta` + 注册渲染器走通、未注册回落通用文本）；`render_audit` 15 PASS（工具块/参数块逐字节不变）。
+
+### S5 落地记录（2026-09-28）
+
+- **新包 `render/present`（叶：零内部依赖）**：`ArgsView`/`View`/`ToolView`（`Args`/`Result` 两回调，`ok=false` 即回落）+ `Registry`（装配期注册、运行期冻结）+ 共享文本助手（`CapLines`/`Prefixed`/`PlainArgsView`/`ExpandTabs`/`TrimBlankEdges`/`Indent`/`Duration`）+ 通知载荷 `Notification`。**契约不引 `agent`**（回调传 `text string, meta any`），否则 `render` 树要反向依赖核心包。
+- **新包 `tools/shell/view`**：`run_shell` 参数区（cwd/timeout/命令区/前缀/省略文案）与结果区（stdout+stderr 合并、`2|` 前缀、头尾截断、状态行「状态 · 耗时 · 行数」）及其专属文案；直接依赖仅 `present`/`render/term`/`tools/shell`（**不依赖 `agent`/`render/theme`**，配色仍由 `repl` 的语义色施加）。
+- **`repl`**：`toolArgsView`/`toolEndBody` 改查注册表（`WithToolViews`，装配期冻结），删 `name == "run_shell"` 字符串分派与 `tools/shell` 导入；标题组合（`RenderToolStart`/`toolTitleLines`）与通用回落（`genericArgsView`/`textView`）留在 `repl`，改用 `present` 助手。
+- **扩展（本次一并收掉，否则验收判据不成立）**：`notify_cmd` 的命令构造原本也在 `repl`（认识 `shell.Invocation`/`shell.Kind` + 引号规则），迁到 `tools/shell.CommandNotifier`（`NewCommandNotifier`/`Render`/`Quote`/`ValidateNotifyTemplate`），载荷类型落 `present.Notification`，`repl.Notifier` 接口改为 `Notify(present.Notification)`。
+- **验收**：`go list -deps ./repl` 不再含任何 `tanya/tools` 包；`tools/shell/view` 直接依赖 = `encoding/json fmt strings present render/term tools/shell`；`gofmt`/`build`/`vet` 干净、`-race` 全绿（18 包）、darwin/windows 交叉编译通过、`render_audit` 15 PASS（工具块与参数块逐字节不变）。新增用例：`repl` 的第三方自带视图（注册走它、未注册回落、视图不认领时回落）、`tools/shell/view` 的结果区四例（状态行/`2|` 前缀/头尾截断/外来 Meta 不认领）。
+- **测试布局偏差**：原计划把 `repl/toolview_test.go` 的 shell 用例整体迁走，实际只迁了 3 个直接引用视图内符号的用例（`ShellArgsView*`/`CommandOmitted`），其余保留在 `repl` 并注入真实 `run_shell` 视图（`testViews()` 复刻 `main` 装配）——这样既有 golden（整块成品形态）继续守着端到端字节，新包另有自身用例；`repl` 测试对 `tools/shell/view` 的依赖属测试二进制，不进生产依赖图。
 
 ### S6 `tools/shell` 依赖边正名与测试边修正
 

@@ -91,7 +91,7 @@ func TestOutputGuardFiresOnEmitNotWrite(t *testing.T) {
 func TestOutputAtomicNoInterleave(t *testing.T) {
 	var buf syncBuf
 	st := NewStreams(&buf, &syncBuf{}, modeRich)
-	view := NewToolView(st, ttyRich(), testSem(), func() int { return 80 }, 20)
+	view := NewToolView(st, ttyRich(), testSem(), func() int { return 80 }, 20, testViews())
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sleep 1"}`})
 
 	stop := make(chan struct{})

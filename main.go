@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/LaoQi/tanya/render/present"
 	"github.com/LaoQi/tanya/render/term"
 
 	"github.com/LaoQi/tanya/agent"
@@ -20,6 +21,7 @@ import (
 	"github.com/LaoQi/tanya/repl"
 	"github.com/LaoQi/tanya/tools"
 	"github.com/LaoQi/tanya/tools/shell"
+	shellview "github.com/LaoQi/tanya/tools/shell/view"
 )
 
 var (
@@ -169,7 +171,9 @@ func main() {
 		exitNow(1)
 	}
 	termFacts := repl.TermFacts{Cols: facts.Cols, ColsOK: facts.SizeOK}
-	sink := repl.NewToolView(st, prof, sem, repl.LiveWidth(con, termFacts), cfg.ToolOutputLines)
+	views := present.NewRegistry()
+	views.Register("run_shell", shellview.View())
+	sink := repl.NewToolView(st, prof, sem, repl.LiveWidth(con, termFacts), cfg.ToolOutputLines, views)
 
 	if cmd == repl.CmdAsk {
 		ctx, done := repl.InterruptContext(con)
@@ -194,7 +198,7 @@ func main() {
 		st.FailErr("", err)
 		exitNow(1)
 	}
-	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithProfile(prof), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithConsole(con))
+	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithProfile(prof), repl.WithToolViews(views), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithConsole(con))
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
@@ -253,7 +257,7 @@ func buildNotifier(ui config.UI, inv shell.Invocation) (repl.Notifier, error) {
 		list = append(list, repl.OSCNotifier())
 	}
 	if ui.NotifyCmd != "" {
-		n, err := repl.NewCommandNotifier(inv, ui.NotifyCmd)
+		n, err := shell.NewCommandNotifier(inv, ui.NotifyCmd)
 		if err != nil {
 			return nil, err
 		}

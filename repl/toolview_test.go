@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/render/present"
 	"github.com/LaoQi/tanya/render/term"
 	"github.com/LaoQi/tanya/render/theme"
 	"github.com/LaoQi/tanya/tools/shell"
@@ -15,12 +16,16 @@ import (
 
 // renderToolEnd 还原一次完整工具块：ToolStart 的着色标题 + 追加式正文与状态行。
 
+// testCommandPrefix 是 run_shell 自带视图的命令行前缀（见 tools/shell/view），
+// 本文件用它断言「标题组合 + 视图正文」的成品形态。
+const testCommandPrefix = "  $ "
+
 func renderToolEnd(prof term.Profile, sem theme.Semantics, name, args string, res agent.ToolResult, width, maxLines int) string {
-	return sem.Dim.With(prof).Frame(RenderToolStart(name, args, width)) + RenderToolEndAppend(sem, prof, res, width, maxLines)
+	return sem.Dim.With(prof).Frame(RenderToolStart(name, args, testViews(), width)) + RenderToolEndAppend(sem, prof, name, res, testViews(), width, maxLines)
 }
 
 func TestRenderToolStart(t *testing.T) {
-	got := RenderToolStart("run_shell", `{"command":"ls -la","timeout":60}`, 80)
+	got := RenderToolStart("run_shell", `{"command":"ls -la","timeout":60}`, testViews(), 80)
 	if !strings.Contains(got, "▸ run_shell") || !strings.Contains(got, "ls -la") {
 		t.Errorf("got %q", got)
 	}
@@ -33,7 +38,7 @@ func TestRenderToolStart(t *testing.T) {
 }
 
 func TestRenderToolStartBadJSON(t *testing.T) {
-	got := RenderToolStart("run_shell", `{bad`, 80)
+	got := RenderToolStart("run_shell", `{bad`, testViews(), 80)
 	if !strings.Contains(got, `{bad`) {
 		t.Errorf("解析失败应原样显示: %q", got)
 	}
@@ -243,7 +248,7 @@ func TestRenderToolBlocksNoWrap(t *testing.T) {
 		name string
 		out  string
 	}{
-		{"start", RenderToolStart("run_shell", long, 80)},
+		{"start", RenderToolStart("run_shell", long, testViews(), 80)},
 		{"end", renderToolEnd(ttyRich(), testSem(), "run_shell", long, res, 80, 20)},
 	} {
 		for _, l := range strings.Split(strings.TrimSuffix(tc.out, "\n"), "\n") {
@@ -269,7 +274,7 @@ func TestRenderResponseInfoNoTTFCWhenImmediate(t *testing.T) {
 func TestToolViewStatusHeartbeat(t *testing.T) {
 	prof := term.Profile{TTY: true, Colors: term.LevelNone}
 	var buf syncBuf
-	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), prof, testSem(), func() int { return 80 }, 20)
+	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), prof, testSem(), func() int { return 80 }, 20, testViews())
 	view.heart.interval = 2 * time.Millisecond
 	view.heart.span = 3
 	view.heart.now = stepClock(3 * time.Second)
@@ -299,7 +304,7 @@ func TestToolViewStatusHeartbeat(t *testing.T) {
 func TestToolViewStopEndsHeartbeat(t *testing.T) {
 	prof := term.Profile{TTY: true, Colors: term.LevelNone}
 	var buf syncBuf
-	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), prof, testSem(), func() int { return 80 }, 20)
+	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), prof, testSem(), func() int { return 80 }, 20, testViews())
 	view.heart.interval = 2 * time.Millisecond
 	view.Handle(agent.Event{Kind: agent.EventRequestStart})
 	waitUntil(t, "出现点", func() bool { return strings.Contains(term.Strip(buf.String()), ".") })
@@ -318,7 +323,7 @@ func TestToolViewStopEndsHeartbeat(t *testing.T) {
 func TestToolViewInteractive(t *testing.T) {
 	prof := term.Profile{TTY: true, Colors: term.LevelNone}
 	var buf syncBuf
-	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), prof, testSem(), func() int { return 80 }, 20)
+	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), prof, testSem(), func() int { return 80 }, 20, testViews())
 	view.heart.interval = 10 * time.Millisecond
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true})
 	time.Sleep(30 * time.Millisecond)
@@ -344,7 +349,7 @@ func TestToolViewInteractive(t *testing.T) {
 func TestToolViewNonInteractive(t *testing.T) {
 	prof := term.Profile{TTY: true, Colors: term.LevelNone}
 	var buf syncBuf
-	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), prof, testSem(), func() int { return 80 }, 20)
+	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), prof, testSem(), func() int { return 80 }, 20, testViews())
 	view.heart.interval = 10 * time.Millisecond
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	time.Sleep(30 * time.Millisecond)
@@ -373,7 +378,7 @@ func TestRenderToolEndAppendNoTitle(t *testing.T) {
 		Stdout:   []shell.Chunk{{Data: "hi\n"}},
 		Duration: 2 * time.Millisecond,
 	}}
-	got := RenderToolEndAppend(testSem(), prof, res, 80, 20)
+	got := RenderToolEndAppend(testSem(), prof, "run_shell", res, testViews(), 80, 20)
 	if strings.Contains(got, "▸") {
 		t.Errorf("追加式 ToolEnd 不应重复标题: %q", got)
 	}
@@ -393,8 +398,8 @@ func TestRenderToolEndAppendKeepsCwdTitleOnlyOnce(t *testing.T) {
 	prof := term.Profile{TTY: true, Colors: term.Level16}
 	args := `{"command":"ls -la","cwd":"/tmp/abc"}`
 	res := agent.ToolResult{Text: "ok"}
-	start := RenderToolStart("run_shell", args, 80)
-	end := RenderToolEndAppend(testSem(), prof, res, 80, 20)
+	start := RenderToolStart("run_shell", args, testViews(), 80)
+	end := RenderToolEndAppend(testSem(), prof, "run_shell", res, testViews(), 80, 20)
 	if n := strings.Count(start+end, "cwd: /tmp/abc"); n != 1 {
 		t.Errorf("cwd 行应只在 ToolStart 出现一次，实际 %d 次: %q", n, start+end)
 	}
@@ -471,59 +476,6 @@ func TestRenderToolEndSGRMixedStderr(t *testing.T) {
 
 // TestShellArgsViewKeepsMultiline 多行命令的折行只切不改：正文行去掉 `  $ ` 前缀后拼回原命令。
 
-func TestShellArgsViewKeepsMultiline(t *testing.T) {
-	args := `{"command":"cat > a <<'EOF'\n  line one \n\nline two\nEOF"}`
-	v := shellArgsView(args, 80)
-	if v.inline != "" {
-		t.Errorf("多行命令不应内联: %q", v.inline)
-	}
-	var body []string
-	for _, l := range v.body {
-		body = append(body, strings.TrimPrefix(l, toolCommandPrefix))
-	}
-	if got, want := strings.Join(body, "\n"), "cat > a <<'EOF'\n  line one \n\nline two\nEOF"; got != want {
-		t.Errorf("多行命令应保留换行与缩进（只去首尾空行）: got %q, want %q", got, want)
-	}
-}
-
-func TestShellArgsViewCwd(t *testing.T) {
-	cases := []struct {
-		label, args string
-		wantCwd     string
-		wantCmd     string
-	}{
-		{"未指定 cwd", `{"command":"ls -la"}`, "", "ls -la"},
-		{"显式 cwd 原样", `{"command":"ls","cwd":"/tmp/abc"}`, "/tmp/abc", "ls"},
-		{"cwd 相对路径", `{"command":"ls","cwd":"sub"}`, "sub", "ls"},
-		{"cwd 带空白", `{"command":"ls","cwd":" /tmp/a "}`, "/tmp/a", "ls"},
-		{"cwd 空串", `{"command":"ls","cwd":""}`, "", "ls"},
-	}
-	for _, c := range cases {
-		v := shellArgsView(c.args, 80)
-		body := strings.Join(v.body, "\n")
-		if c.wantCwd == "" {
-			if strings.Contains(body, "cwd") || strings.Contains(body, "timeout") {
-				t.Errorf("%s: 不应出现 cwd/timeout 行: %q", c.label, body)
-			}
-			if want := "\n▸ run_shell " + c.wantCmd + "\n"; v.inline != c.wantCmd {
-				t.Errorf("%s: 应内联命令: got %q, want %q", c.label, v.inline, want)
-			}
-			continue
-		}
-		want := toolCwdPrefix + c.wantCwd + "\n" + toolCommandPrefix + c.wantCmd
-		if body != want || v.inline != "" {
-			t.Errorf("%s: got (%q, %q), want (%q, 内联为空)", c.label, body, v.inline, want)
-		}
-	}
-	bad := shellArgsView(`{bad`, 80)
-	if bad.inline != `{bad` || len(bad.body) != 1 || bad.body[0] != toolCommandPrefix+`{bad` {
-		t.Errorf("坏 JSON 应原样展示: %+v", bad)
-	}
-	if empty := shellArgsView(`{}`, 80); empty.inline != "" || len(empty.body) != 0 {
-		t.Errorf("空参数不应产生任何行: %+v", empty)
-	}
-}
-
 // TestRenderToolStartTimeout 锁住 timeout 行：显式指定才显示，且与 cwd 一样把命令挤进块形态。
 
 func TestRenderToolStartTimeout(t *testing.T) {
@@ -538,7 +490,7 @@ func TestRenderToolStartTimeout(t *testing.T) {
 		{"默认省略保持内联", `{"command":"ls -la"}`, "\n▸ run_shell ls -la\n"},
 	}
 	for _, c := range cases {
-		if got := RenderToolStart("run_shell", c.args, 80); got != c.want {
+		if got := RenderToolStart("run_shell", c.args, testViews(), 80); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.label, got, c.want)
 		}
 	}
@@ -559,14 +511,14 @@ func TestRenderToolStartNonShellArgs(t *testing.T) {
 		{"布尔与数字原样", "agent_custom", `{"action":"get","flag":true,"n":3}`, "\n▸ agent_custom action: get · flag: true · n: 3\n"},
 	}
 	for _, c := range cases {
-		if got := RenderToolStart(c.name, c.args, 80); got != c.want {
+		if got := RenderToolStart(c.name, c.args, testViews(), 80); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.label, got, c.want)
 		}
 	}
 
 	// 超宽内联候选转块：首行工具名、其后每个参数一行（值本身超出时再按宽度折行）。
 	long := `{"action":"set","key":"model","value":"` + strings.Repeat("m", 80) + `"}`
-	got := term.Strip(RenderToolStart("agent_custom", long, 80))
+	got := term.Strip(RenderToolStart("agent_custom", long, testViews(), 80))
 	lines := strings.Split(strings.Trim(got, "\n"), "\n")
 	if len(lines) < 3 || lines[0] != "▸ agent_custom" || !strings.HasPrefix(lines[1], toolArgsPrefix+"action: set") {
 		t.Fatalf("超宽参数应转块形态逐项一行: %q", lines)
@@ -588,12 +540,12 @@ func TestRenderToolStartNonShellArgs(t *testing.T) {
 // TestRenderToolStartNonShellMultiline 多行值转块形态：逐行折行、只切不改，且每行不超终端宽度。
 
 func TestRenderToolStartNonShellMultiline(t *testing.T) {
-	got := term.Strip(RenderToolStart("agent_custom", `{"key":"a\nb"}`, 80))
+	got := term.Strip(RenderToolStart("agent_custom", `{"key":"a\nb"}`, testViews(), 80))
 	if want := "\n▸ agent_custom\n  key: a\n  b\n"; got != want {
 		t.Errorf("多行值应转块形态: got %q, want %q", got, want)
 	}
 	long := `{"expression":"` + strings.Repeat("中", 200) + `"}`
-	lines := strings.Split(strings.Trim(RenderToolStart("calc", long, 40), "\n"), "\n")
+	lines := strings.Split(strings.Trim(RenderToolStart("calc", long, testViews(), 40), "\n"), "\n")
 	if len(lines) < 3 || lines[0] != "▸ calc" {
 		t.Fatalf("超长值应折行成块形态: %q", lines)
 	}
@@ -610,11 +562,11 @@ func TestRenderToolStartNonShellMultiline(t *testing.T) {
 // TestRenderToolStartNonShellBadJSON 坏 JSON 回退原样展示（不静默丢参数），且内联/块形态都不越界。
 
 func TestRenderToolStartNonShellBadJSON(t *testing.T) {
-	if got := RenderToolStart("calc", `{bad`, 80); got != "\n▸ calc {bad\n" {
+	if got := RenderToolStart("calc", `{bad`, testViews(), 80); got != "\n▸ calc {bad\n" {
 		t.Errorf("坏 JSON 应原样内联: %q", got)
 	}
 	long := "{" + strings.Repeat("z", 120)
-	lines := strings.Split(strings.Trim(RenderToolStart("calc", long, 40), "\n"), "\n")
+	lines := strings.Split(strings.Trim(RenderToolStart("calc", long, testViews(), 40), "\n"), "\n")
 	for _, l := range lines {
 		if w := term.Width(l); w > 40 {
 			t.Errorf("行宽 %d 越界 40: %q", w, l)
@@ -627,21 +579,21 @@ func TestRenderToolStartNonShellBadJSON(t *testing.T) {
 func TestRenderToolStartNonShellArgsOmitted(t *testing.T) {
 	// 反引号里的 \n 是字面两字符，恰为 JSON 转义换行：值解析后是 20 行，走 generic 键值渲染的省略路径。
 	args := `{"key":"` + strings.Repeat(`x\n`, 20) + `"}`
-	got := term.Strip(RenderToolStart("agent_custom", args, 80))
+	got := term.Strip(RenderToolStart("agent_custom", args, testViews(), 80))
 	body := strings.Split(strings.Trim(got, "\n"), "\n")[1:]
-	if len(body) != toolCommandMaxLines {
-		t.Fatalf("参数行数应为上限 %d，实际 %d: %q", toolCommandMaxLines, len(body), body)
+	if len(body) != present.MaxLines {
+		t.Fatalf("参数行数应为上限 %d，实际 %d: %q", present.MaxLines, len(body), body)
 	}
-	want := toolArgsPrefix + fmt.Sprintf(MsgArgsOmittedFmt, 20-toolCommandHeadLines-toolCommandTailLines)
-	if body[toolCommandHeadLines] != want {
-		t.Errorf("省略行 = %q, want %q", body[toolCommandHeadLines], want)
+	want := toolArgsPrefix + fmt.Sprintf(MsgArgsOmittedFmt, 20-present.HeadLines-present.TailLines)
+	if body[present.HeadLines] != want {
+		t.Errorf("省略行 = %q, want %q", body[present.HeadLines], want)
 	}
 	if !strings.Contains(got, "完整参数见 /history") {
 		t.Errorf("非 shell 工具应提示完整参数: %q", got)
 	}
 
 	// 窄终端下省略行同样按可用宽截断：加前缀后不越终端（回归：曾按终端总宽截断，越界 2 列）。
-	narrow := strings.Split(strings.Trim(term.Strip(RenderToolStart("agent_custom", args, 26)), "\n"), "\n")
+	narrow := strings.Split(strings.Trim(term.Strip(RenderToolStart("agent_custom", args, testViews(), 26)), "\n"), "\n")
 	if len(narrow) < 2 {
 		t.Fatalf("窄终端应仍有标题与省略行: %q", narrow)
 	}
@@ -653,12 +605,12 @@ func TestRenderToolStartNonShellArgsOmitted(t *testing.T) {
 
 	// 坏 JSON 走 plainArgsView 兜底：省略行同样不越界。
 	bad := "{" + strings.Repeat("z\n", 20)
-	for _, l := range strings.Split(strings.Trim(term.Strip(RenderToolStart("calc", bad, 26)), "\n"), "\n") {
+	for _, l := range strings.Split(strings.Trim(term.Strip(RenderToolStart("calc", bad, testViews(), 26)), "\n"), "\n") {
 		if w := term.Width(l); w > 26 {
 			t.Errorf("坏 JSON 窄终端行宽 %d 越界 26: %q", w, l)
 		}
 	}
-	if !strings.Contains(term.Strip(RenderToolStart("calc", bad, 80)), "完整参数见 /history") {
+	if !strings.Contains(term.Strip(RenderToolStart("calc", bad, testViews(), 80)), "完整参数见 /history") {
 		t.Error("坏 JSON 的省略行应使用参数专用文案")
 	}
 }
@@ -692,18 +644,18 @@ func TestParseArgPairsKeepsOrder(t *testing.T) {
 }
 
 func TestRenderToolStartCwd(t *testing.T) {
-	got := RenderToolStart("run_shell", `{"command":"ls -la","cwd":"/tmp/abc"}`, 80)
+	got := RenderToolStart("run_shell", `{"command":"ls -la","cwd":"/tmp/abc"}`, testViews(), 80)
 	if !strings.HasPrefix(got, "\n▸ run_shell\n  cwd: /tmp/abc\n  $ ls -la\n") {
 		t.Errorf("应为首行工具名、cwd 与命令各占一行: %q", got)
 	}
-	end := RenderToolEndAppend(testSem(), ttyRich(), agent.ToolResult{Text: "ok"}, 80, 20)
+	end := RenderToolEndAppend(testSem(), ttyRich(), "run_shell", agent.ToolResult{Text: "ok"}, testViews(), 80, 20)
 	if strings.Contains(end, "▸ run_shell") || strings.Contains(end, "cwd: /tmp/abc") {
 		t.Errorf("追加式收尾不应重复标题与 cwd 行: %q", end)
 	}
 	if n := strings.Count(got+end, "cwd: /tmp/abc"); n != 1 {
 		t.Errorf("cwd 行应只出现一次，实际 %d 次", n)
 	}
-	plain := RenderToolStart("run_shell", `{"command":"ls -la"}`, 80)
+	plain := RenderToolStart("run_shell", `{"command":"ls -la"}`, testViews(), 80)
 	if want := "\n▸ run_shell ls -la\n"; plain != want {
 		t.Errorf("got %q, want %q", plain, want)
 	}
@@ -714,7 +666,7 @@ func TestRenderToolStartCwd(t *testing.T) {
 
 func TestRenderToolStartCwdWidth(t *testing.T) {
 	long := `{"command":"` + strings.Repeat("y", 300) + `","cwd":"` + strings.Repeat("/seg", 50) + `"}`
-	lines := strings.Split(strings.Trim(RenderToolStart("run_shell", long, 80), "\n"), "\n")
+	lines := strings.Split(strings.Trim(RenderToolStart("run_shell", long, testViews(), 80), "\n"), "\n")
 	if len(lines) < 3 || lines[0] != "▸ run_shell" || !strings.HasPrefix(lines[1], "  cwd: ") {
 		t.Fatalf("显式 cwd 应为「工具名 / cwd / 命令区」块形态: %q", lines)
 	}
@@ -737,7 +689,7 @@ func TestRenderToolStartInline(t *testing.T) {
 	}
 	for _, c := range cases {
 		args, _ := json.Marshal(map[string]string{"command": c.cmd})
-		got := RenderToolStart("run_shell", string(args), 80)
+		got := RenderToolStart("run_shell", string(args), testViews(), 80)
 		if want := "\n▸ run_shell " + c.cmd + "\n"; got != want {
 			t.Errorf("%s: got %q, want %q", c.name, got, want)
 		}
@@ -757,20 +709,20 @@ func TestRenderToolStartBlockShape(t *testing.T) {
 	}
 	for _, cmd := range cmds {
 		args, _ := json.Marshal(map[string]string{"command": cmd})
-		lines := strings.Split(strings.Trim(term.Strip(RenderToolStart("run_shell", string(args), 80)), "\n"), "\n")
+		lines := strings.Split(strings.Trim(term.Strip(RenderToolStart("run_shell", string(args), testViews(), 80)), "\n"), "\n")
 		if lines[0] != "▸ run_shell" {
 			t.Errorf("块形态首行应只有工具名: %q", lines[0])
 		}
 		var body []string
 		for _, l := range lines[1:] {
-			if !strings.HasPrefix(l, toolCommandPrefix) {
-				t.Errorf("命令行应带 %q 前缀: %q", toolCommandPrefix, l)
+			if !strings.HasPrefix(l, testCommandPrefix) {
+				t.Errorf("命令行应带 %q 前缀: %q", testCommandPrefix, l)
 				continue
 			}
 			if w := term.Width(l); w > 80 {
 				t.Errorf("命令行宽度 %d 越界: %q", w, l)
 			}
-			body = append(body, strings.TrimPrefix(l, toolCommandPrefix))
+			body = append(body, strings.TrimPrefix(l, testCommandPrefix))
 		}
 		if joined := strings.Join(body, ""); joined != strings.ReplaceAll(cmd, "\n", "") {
 			t.Errorf("折行改写了命令内容:\n got %q\nwant %q", joined, strings.ReplaceAll(cmd, "\n", ""))
@@ -780,39 +732,19 @@ func TestRenderToolStartBlockShape(t *testing.T) {
 
 // TestRenderToolStartCommandOmitted 锁住命令行数上限：超上限保留头尾、中段换成省略提示。
 
-func TestRenderToolStartCommandOmitted(t *testing.T) {
-	var lines []string
-	for i := 1; i <= 12; i++ {
-		lines = append(lines, fmt.Sprintf("step-%02d", i))
-	}
-	args, _ := json.Marshal(map[string]string{"command": strings.Join(lines, "\n")})
-	got := term.Strip(RenderToolStart("run_shell", string(args), 80))
-	body := strings.Split(strings.Trim(got, "\n"), "\n")[1:]
-	if len(body) != toolCommandMaxLines {
-		t.Fatalf("命令行数应为上限 %d，实际 %d: %q", toolCommandMaxLines, len(body), body)
-	}
-	wantOmitted := fmt.Sprintf(MsgCmdOmittedFmt, 12-toolCommandHeadLines-toolCommandTailLines)
-	if body[toolCommandHeadLines] != toolCommandPrefix+wantOmitted {
-		t.Errorf("省略行 = %q, want %q", body[toolCommandHeadLines], toolCommandPrefix+wantOmitted)
-	}
-	if body[0] != toolCommandPrefix+"step-01" || body[len(body)-1] != toolCommandPrefix+"step-12" {
-		t.Errorf("应保留头尾: %q", body)
-	}
-}
-
 // TestRenderToolStartTabsExpanded 锁住制表符摊平：宽度表把 \t 当单列，不摊平则折行位置与显示不符。
 
 func TestRenderToolStartTabsExpanded(t *testing.T) {
 	args, _ := json.Marshal(map[string]string{"command": "if x; then\n\techo tab\nfi"})
-	got := term.Strip(RenderToolStart("run_shell", string(args), 80))
+	got := term.Strip(RenderToolStart("run_shell", string(args), testViews(), 80))
 	if strings.ContainsRune(got, '\t') {
 		t.Errorf("命令行不应含制表符: %q", got)
 	}
-	if want := "  $ " + strings.Repeat(" ", toolTabWidth) + "echo tab"; !strings.Contains(got, want+"\n") {
-		t.Errorf("制表符应摊平成 %d 空格: %q", toolTabWidth, got)
+	if want := "  $ " + strings.Repeat(" ", present.TabWidth) + "echo tab"; !strings.Contains(got, want+"\n") {
+		t.Errorf("制表符应摊平成 %d 空格: %q", present.TabWidth, got)
 	}
 	// 摊平后宽度计算才准：tab 命令在窄终端里也必须每行不越界
-	for _, line := range strings.Split(strings.Trim(term.Strip(RenderToolStart("run_shell", string(args), 24)), "\n"), "\n") {
+	for _, line := range strings.Split(strings.Trim(term.Strip(RenderToolStart("run_shell", string(args), testViews(), 24)), "\n"), "\n") {
 		if w := term.Width(line); w > 24 {
 			t.Errorf("窄终端行宽 %d 越界: %q", w, line)
 		}
@@ -847,7 +779,7 @@ func TestToolBlockTitleSingleSpaceAndWidth(t *testing.T) {
 func TestToolBlockSingleWrite(t *testing.T) {
 	prof := term.Profile{TTY: true, Colors: term.LevelNone}
 	var wc writeCounter
-	view := NewToolView(NewStreams(&wc, &syncBuf{}, modeRich), prof, testSem(), func() int { return 80 }, 20)
+	view := NewToolView(NewStreams(&wc, &syncBuf{}, modeRich), prof, testSem(), func() int { return 80 }, 20, testViews())
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	before := wc.count()
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
@@ -878,7 +810,7 @@ func TestToolViewStateFields(t *testing.T) {
 	prof := term.Profile{TTY: true, Colors: term.LevelNone}
 	var buf syncBuf
 	st := NewStreams(&buf, &syncBuf{}, modeRich)
-	view := NewToolView(st, prof, testSem(), func() int { return 80 }, 20)
+	view := NewToolView(st, prof, testSem(), func() int { return 80 }, 20, testViews())
 	if view.st != st || view.maxLines != 20 || !view.prof.TTY || view.width() != 80 {
 		t.Errorf("构造应把 writer/profile/宽度/行数写成字段: %+v", view)
 	}
@@ -910,7 +842,7 @@ func TestToolViewStateFields(t *testing.T) {
 func TestToolViewContentSemantics(t *testing.T) {
 	prof := term.Profile{TTY: false, Colors: term.LevelNone}
 	var buf syncBuf
-	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), prof, testSem(), func() int { return 80 }, 20)
+	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), prof, testSem(), func() int { return 80 }, 20, testViews())
 	view.Content(KindContent, "")
 	if buf.String() != "" {
 		t.Errorf("空文本不应输出: %q", buf.String())
@@ -928,7 +860,7 @@ func TestToolViewContentSemantics(t *testing.T) {
 func TestToolStatusLineSanitized(t *testing.T) {
 	var out syncBuf
 	st := NewStreams(&out, &syncBuf{}, modePlainVerbose)
-	view := NewToolView(st, plainProf, testSem(), func() int { return 80 }, 20)
+	view := NewToolView(st, plainProf, testSem(), func() int { return 80 }, 20, testViews())
 	res := agent.ToolResult{Meta: &shell.Result{Cwd: "/tmp/\x1b[2Kx", Err: "cwd 不存在或不是目录: /tmp/\x1b[2Kx"}}
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{}`, Result: res})
 	got := out.String()
@@ -937,5 +869,37 @@ func TestToolStatusLineSanitized(t *testing.T) {
 	}
 	if !strings.Contains(got, "↳ 错误: cwd 不存在或不是目录: /tmp/x") {
 		t.Errorf("状态行缺错误文本: %q", got)
+	}
+}
+
+// TestThirdPartyToolView 锁住可插拔性：注册了自带视图的工具走它，未注册的走通用回落。
+func TestThirdPartyToolView(t *testing.T) {
+	views := present.NewRegistry()
+	views.Register("lookup", present.ToolView{
+		Args: func(args string, width int) (present.ArgsView, bool) {
+			return present.ArgsView{Inline: "Q=" + args}, true
+		},
+		Result: func(_ string, meta any, width, maxLines int) (present.View, bool) {
+			if meta == nil {
+				return present.View{}, false
+			}
+			return present.View{Body: "  [custom] " + fmt.Sprint(meta) + "\n", Status: "custom"}, true
+		},
+	})
+
+	if got := RenderToolStart("lookup", `{"q":"x"}`, views, 80); !strings.Contains(got, "Q=") {
+		t.Errorf("注册的工具应走自带参数视图: %q", got)
+	}
+	if got := RenderToolStart("calc", `{"expression":"1+1"}`, views, 80); !strings.Contains(got, "expression: 1+1") {
+		t.Errorf("未注册的工具应走通用键值渲染: %q", got)
+	}
+
+	block := RenderToolEndAppend(testSem(), ttyRich(), "lookup", agent.ToolResult{Text: "plain", Meta: "M"}, views, 80, 20)
+	if !strings.Contains(block, "[custom] M") || !strings.Contains(block, "custom") {
+		t.Errorf("注册的工具应走自带结果视图: %q", block)
+	}
+	fallback := RenderToolEndAppend(testSem(), ttyRich(), "lookup", agent.ToolResult{Text: "plain text"}, views, 80, 20)
+	if !strings.Contains(fallback, "plain text") || strings.Contains(fallback, "[custom]") {
+		t.Errorf("自带视图不处理时应回落通用文本: %q", fallback)
 	}
 }
