@@ -594,4 +594,10 @@ func TestMarkdownInputLimit(t *testing.T) {
 	if got := plainClose(t, buf); got != "" {
 		t.Errorf("收尾应无残留: %q", got)
 	}
+	if got := plainBlocks(t, buf, "cccc\n\n"); got != "cccc\n\n" {
+		t.Fatalf("重放后超限写入不应影响流式渲染: %q", got)
+	}
+	if got := rewindText(t, buf); got != "aaaa\n\n" {
+		t.Errorf("重放后上限应仍生效（只含限内前缀）: %q", got)
+	}
 }

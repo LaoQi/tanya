@@ -55,9 +55,10 @@ func (b *MarkdownBuf) SetInputLimit(n int) { b.inputLimit = n }
 func (b *MarkdownBuf) InputLen() int { return b.input.Len() }
 
 func (b *MarkdownBuf) Rewind() []ir.Block {
-	width, in := b.width, b.input.String()
+	width, limit, in := b.width, b.inputLimit, b.input.String()
 	*b = MarkdownBuf{}
 	b.width = width
+	b.inputLimit = limit
 	b.input.WriteString(in)
 	return b.feed(in)
 }
