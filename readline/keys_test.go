@@ -139,3 +139,11 @@ func TestStringWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestParseCtrlO(t *testing.T) {
+	p := &keyParser{}
+	evs := feedAll(t, p, "\x0f")
+	if len(evs) != 1 || evs[0].Code != KeyCtrlO {
+		t.Fatalf("0x0f 应解析为 KeyCtrlO: %+v", evs)
+	}
+}

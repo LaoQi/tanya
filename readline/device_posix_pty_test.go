@@ -45,8 +45,13 @@ type keyResult struct {
 func readKeyAsync(term *posixTTY) <-chan keyResult {
 	ch := make(chan keyResult, 1)
 	go func() {
-		ev, err := term.readEvent()
-		ch <- keyResult{ev, err}
+		for {
+			ev, err := term.readEvent()
+			if err != errIdle {
+				ch <- keyResult{ev, err}
+				return
+			}
+		}
 	}()
 	return ch
 }
@@ -104,25 +109,36 @@ func TestReadKeyReturnsEOFAfterHangupReadConsumed(t *testing.T) {
 
 func TestReadKeyIdleIsNotEOF(t *testing.T) {
 	master, term := newPTYTerminal(t)
-	ch := readKeyAsync(term)
-	select {
-	case r := <-ch:
-		t.Fatalf("空闲时 ReadKey 不应返回: ev=%+v err=%v", r.ev, r.err)
-	case <-time.After(350 * time.Millisecond):
+	deadline := time.Now().Add(350 * time.Millisecond)
+	sawIdle := false
+	for time.Now().Before(deadline) {
+		ev, err := term.readEvent()
+		if err != errIdle {
+			t.Fatalf("空闲周期应返回 errIdle（不得是 EOF 等退出性错误）: ev=%+v err=%v", ev, err)
+		}
+		if ev.Kind != EventKey {
+			t.Fatalf("空闲周期零值事件 Kind 异常: %+v", ev)
+		}
+		sawIdle = true
+	}
+	if !sawIdle {
+		t.Fatal("空闲期应观察到至少一个 idle 周期")
 	}
 	if _, err := master.Write([]byte("a")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	select {
-	case r := <-ch:
-		if r.err != nil {
-			t.Fatalf("按键读取失败: %v", r.err)
+	for {
+		ev, err := term.readEvent()
+		if err == errIdle {
+			continue
 		}
-		if r.ev.Kind != EventKey || r.ev.Key.Code != KeyRune || r.ev.Key.Rune != 'a' {
-			t.Fatalf("期望 'a'，得到 %+v", r.ev)
+		if err != nil {
+			t.Fatalf("按键读取失败: %v", err)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("按键后 ReadKey 未返回")
+		if ev.Kind != EventKey || ev.Key.Code != KeyRune || ev.Key.Rune != 'a' {
+			t.Fatalf("期望 'a'，得到 %+v", ev)
+		}
+		break
 	}
 }
 

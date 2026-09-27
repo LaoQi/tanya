@@ -320,6 +320,9 @@ markdown 是"闭合才确定"的语法，REPL 是逐 token 直出，中间放流
 ```go
 func (b *MarkdownBuf) Write(delta string) []Block   // 返回本次新闭合的块
 func (b *MarkdownBuf) Close() []Block               // 收尾：未闭合块降级为纯 Span
+func (b *MarkdownBuf) Rewind() []Block              // 丢弃解析状态、按已喂入原文重放整段（不结束缓冲）
+func (b *MarkdownBuf) SetInputLimit(n int)          // 原文留存上限（0=无限）
+func (b *MarkdownBuf) InputLen() int                // 已留存原文长度
 ```
 
 - `onDelta` 接线：`for _, blk := range md.Write(delta) { r.Block(blk) }`
@@ -328,6 +331,7 @@ func (b *MarkdownBuf) Close() []Block               // 收尾：未闭合块降�
 - 行内未闭合标记按行解析，行尾不闭合自然按原样文本输出（乐观降级，不重绘、不闪屏）
 - 工具调用时序：`EventToolStart`/`EventResponse` 事件链先**结算缓冲**再交渲染——结算走 `Close()`（不只刷完整行），把流式响应滞留的**无 `\n` 尾行**输出为段落并闭合未完结块。若仅按行 flush，末行会滞留到下次写入/`Close()`，状态行与工具块抢先在正文尾行前上屏，把渲染内容从中间劈开；结算保证整条正文先于工具块/状态行输出
 - **流式缓冲看门狗（2026-09-17）**：hold 有界——围栏未闭合超过 `fenceLineLimit`（2000 行）或 `fenceByteLimit`（256 KB）即就地降级为 `CodeBlock` 并恢复普通行解析；无换行 pending 超过 `pendingByteLimit`（64 KB）提前作为 `Paragraph` 输出（处于围栏内则并入代码行、累计超字节上限再关闭）。这是**有界降级而非长度限制**：畸形/失控输入（漏闭合的反引号、超长单行）与**正常但超阈值的长代码块/长段落**都会被降级，超阈值代码块之后的行回到普通行解析——文本不丢，丢的是代码块归属与格式（`#`、`-` 等会被当标题/列表渲染），且原闭合用的 ``` 会被当作新围栏开启、多出一个空代码块壳；影响止于局部，后续 delta 立即恢复流式渲染。正文与思维链共用同一缓冲实现
+- **重放（2026-09-27）**：缓冲持有已喂入的原文，`Rewind()` 把解析状态清回初始并按原文重新解析一遍（宽度保留、可继续 `Write` 追加、可反复调用），返回与流式过程相同的块序列——思维链「关→开」时按段首重放整段即走这条路径（`docs/stream-input-events.md` P4）；`Reset()`（清空全部、含原文）无消费者，随本次落地删除。同日 P1 落地留存上限：`SetInputLimit(n)`（repl 对正文与思维链缓冲均设 1MB）——超限后 `Write` 跳过原文累积但 `feed` 照常，流式渲染不受影响、只降级 `Rewind` 为前缀重放；`Rewind` 只返回已闭合块，消费者（`repl` 的 `replayReason`）以 `Rewind` + `Close` 补齐未闭合尾段
 - markdown 渲染默认开启，非 TTY 与 plain 输出走旁路（原 `/md` 开关已移除）：模型输出原样直出；`/history n|all` 回放的 assistant 正文走同一管线渲染（`mdEnabled` 判断 + 整段 `Write`/`Close` → `Renderer.Block`），消息头 `#N 角色` 因 `#` 与序号连写不构成 markdown 标题语法，单独构造 `Heading{Level:1}` IR 按标题渲染；user/tool 消息与工具参数永远原样（工具输出红线）
 
 ### 表格（2026-09-20）

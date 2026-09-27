@@ -26,6 +26,7 @@
 - `agent.Config.Validate()` 做自洽校验（`agent.New` 入口调用，外部亦可显式调用）：必填非空、`api_protocol`/`session_mode` 合法、归档阈值与保留数在界内，缺失/非法直接报错（`nil` 配置返回 `MsgNilConfig` 而非 panic）；**`api_key` 是唯一豁免**（可启动、首次请求才警告）。默认值填充与 yaml/env 加载归 `config` 包
 - `init` 子命令是新工作区的一次性脚手架（三项动作幂等、不覆盖既有文件），**必须在 `agent.New` 之前执行**；不做项目探测、不调模型，见 `docs/design.md`《init 模式》
 - 会话归档：写入触发点只有 `/archive` 与启动自动归档两处，共用 `REPL.archiveFlow`（先报告再确认）；卷无损、写入后不可变、不做解档；归档会话 `/load` 只读，继续对话一律 `/fork`（通用分支命令，原会话不动），见 `docs/session-archive.md`
+- 回合渲染单 goroutine 事件合流（`repl/turnloop.go`）：agent 事件（sink 包装进 channel，`EventToolStart` 附 ack 同步握手——主循环先停读再渲染后 close，工具执行时终端无并发读者）与完成信号（`inDone` 与事件同 channel FIFO，尾事件不丢）与思考期热键（`Ctrl+O`，读键循环只投递该键、其余消费丢弃；门禁 posix + keys + 富档，工具期整轮停、本回合不恢复）；`readline` 的 `ReadEvent` 空闲周期返回 `EventIdle`（`errIdle` 转换，不 dispatch），editor/picker 天然容忍——这是读循环可停止的前提；思维链「关→开」按段首重放走 `MarkdownBuf.Rewind` + `Close`
 - REPL 输入分发（`repl/dispatch.go`）：`/` 白名单斜杠命令、`exit`/`quit` 内建退出、`:`/`：` 显式对话前缀；进程 cwd 恒为启动目录（不 `os.Chdir`），`run_shell` 默认在当前工作区执行、可用 `cwd` 指定单次目录；`/switch <dir>` 换工作区即放弃当前会话、按新目录重建派生态，任一步失败或目标非法（不存在/非目录/等同当前）时原工作区与会话不动；注入工具**不重建**，`run_shell` 默认目录由 `tools.Options.Workspace` 活取跟随
 - `api_protocol` 双通道（yaml/env，默认 `responses`，非法值启动报错）：`responses` 走 `/responses`（reasoning 明文捕获/回传、固定 `store: false`），`chat` 走 `/chat/completions`（思维链经 `reasoning_content`），见 `docs/design.md`《LLM 接入》
 - 思考等级只用标准字段 `reasoning_effort`（minimal/low/medium/high/max），不用厂商私有参数；设置后两协议均不发 `temperature`
@@ -44,11 +45,11 @@ system_prompt.md    内置系统提示词原文（顶层，编译期嵌入）
 config.example.yaml 默认配置示例原文（顶层，编译期嵌入，`tanya config` 输出）
 config/             tanya 作为 CLI 的完整配置：agent.Config + UI(inline) + Shell + Path；yaml 加载、TANYA_* 覆盖、校验（agent 侧零加载机制）
 ctty/               控制终端原语与探测（/dev/tty、termios、模式复位/光标锚点、信号、Facts）；白名单 + stub，零内部依赖
-repl/               REPL 循环与输入分发、斜杠命令、提示符、ghost 补全、picker、工具块渲染、状态行、退出收尾
+repl/               REPL 循环与输入分发、斜杠命令、提示符、ghost 补全、picker、工具块渲染、状态行、回合事件合流（turnloop）、退出收尾
 readline/           终端输入层：Console 仲裁 + device 设备面 + 租约（借出/pty 泵/锚点）、行编辑/历史/补全、按键解析、宽度
 agent/              核心逻辑（config 收窄校验 / llm 双协议 / loop / prompt / session / archive / stats / path / init / tools / control）；零内部依赖
 tools/              外置工具集：根包 tools.Standard 装配标准集与顺序；shell/ = run_shell；builtin/ = get_time/get_env/calc
-render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终端原语、ir/、theme/ 配色、markdown/ 流式解析、markup/ 内联标记
+render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终端原语、ir/、theme/ 配色、markdown/ 流式解析与整段重放、markup/ 内联标记
 ```
 
 各模块行为细节见 `docs/design.md`。
@@ -59,7 +60,7 @@ render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终
 - 终端：`docs/terminal-console.md` 控制台层（唯一持有者/租约/`^C` 归一，已实施）、`docs/ctty.md` 控制终端抽象、`docs/interactive-tty.md` pty 桥接、`docs/terminal-caps.md` 探测与能力降级
 - 表现层：`docs/style-split.md` 拆包、`docs/render-pipeline.md` 渲染管线、`docs/render-refs-compare.md` 参考对比
 - 工具与缓存：`docs/shell-tool.md` run_shell 组件化、`docs/agent-control-tool.md` agent_custom、`docs/cache-probe.md` prompt cache
-- 会话与 REPL：`docs/session-archive.md` 归档卷、`docs/repl-output-refactor.md` 输出收敛、`docs/repl-status-append.md` 状态追加（未实施：`docs/repl-replay-rendering.md`、`docs/reasoning-live-toggle.md` 流式期 `Ctrl+O` 切换思考显示（后延，阻塞于控制台层）；已归档：`docs/probe-redesign.md`）
+- 会话与 REPL：`docs/session-archive.md` 归档卷、`docs/repl-output-refactor.md` 输出收敛、`docs/repl-status-append.md` 状态追加（未实施：`docs/repl-replay-rendering.md`、`docs/stream-input-events.md` 流式期输入与事件合流（含思考期 `Ctrl+O`，P1–P5 分阶段）；已归档：`docs/probe-redesign.md`、`docs/reasoning-live-toggle.md`）
 
 ## 构建与测试
 

@@ -301,7 +301,7 @@ func (r *REPL) ask(q string) {
 	r.con.Sane()
 	ctx, done := InterruptContext(r.con)
 	t := r.beginTurn(done)
-	err := r.agent.Ask(ctx, q, t.Handle)
+	err := r.runTurn(ctx, q, t)
 	t.End(err)
 }
 

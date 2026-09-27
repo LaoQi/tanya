@@ -18,9 +18,10 @@ type fakeDevice struct {
 	sane   int
 }
 
-func (d *fakeDevice) Raw() error         { d.raw++; return nil }
-func (d *fakeDevice) Restore()           { d.rst++ }
-func (d *fakeDevice) Sane()              { d.sane++ }
+func (d *fakeDevice) Raw() error { d.raw++; return nil }
+func (d *fakeDevice) Restore()   { d.rst++ }
+func (d *fakeDevice) Sane()      { d.sane++ }
+
 func (d *fakeDevice) Size() (Size, bool) { return Size{Cols: 80, Rows: 24}, true }
 
 func (d *fakeDevice) readEvent() (Event, error) {
@@ -33,6 +34,28 @@ func (d *fakeDevice) readEvent() (Event, error) {
 	ev := d.events[0]
 	d.events = d.events[1:]
 	return ev, nil
+}
+
+func TestConsoleReadEventIdleNoDispatch(t *testing.T) {
+	dev := &fakeDevice{err: errIdle}
+	c := newConsole(dev)
+	got := 0
+	cancel := c.Subscribe(func(ev Event) {
+		if ev.Kind == EventIdle {
+			got++
+		}
+	})
+	defer cancel()
+	ev, err := c.ReadEvent()
+	if err != nil {
+		t.Fatalf("errIdle 应转换为空事件而非错误: %v", err)
+	}
+	if ev.Kind != EventIdle {
+		t.Fatalf("期望 EventIdle: %+v", ev)
+	}
+	if got != 0 {
+		t.Fatal("EventIdle 不应推送给订阅者")
+	}
 }
 
 func TestConsoleReadEventDispatchesToSubscribers(t *testing.T) {

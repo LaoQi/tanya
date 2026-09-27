@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/readline"
 )
 
 // Kind 标记每次输出的类别，是噪音门禁与测试断言的把手（不导出包外、不进 agent.Event）。
@@ -50,18 +51,25 @@ type turn struct {
 	reasonBuf   *markdown.MarkdownBuf
 	reasonOpen  bool
 	reasonStart time.Time
+	segActive   bool
+	width       int
 }
+
+const markdownInputLimit = 1 << 20
 
 func (r *REPL) beginTurn(done func()) *turn {
 	width := r.view.width()
 	md := markdown.NewMarkdownBuf()
 	md.SetWidth(width)
+	md.SetInputLimit(markdownInputLimit)
 	reason := markdown.NewMarkdownBuf()
 	reason.SetWidth(width)
+	reason.SetInputLimit(markdownInputLimit)
 	return &turn{
 		r:     r,
 		start: time.Now(),
 		done:  done,
+		width: width,
 		f: &flow{
 			st:   r.st,
 			prof: r.prof,
@@ -82,21 +90,23 @@ func (t *turn) Handle(e agent.Event) {
 	}
 	switch e.Kind {
 	case agent.EventReasoning:
+		t.segActive = true
 		if t.reasonOn() {
 			t.writeReasoning(e.Text)
 			return
 		}
+		t.reasonBuf.Write(e.Text)
 		t.r.view.Handle(e)
 	case agent.EventContent:
-		t.flushReason()
+		t.endReasonSeg()
 		t.writeContent(e.Text)
 	case agent.EventToolStart:
-		t.flushReason()
+		t.endReasonSeg()
 		t.settleMd()
 		t.r.view.Handle(e)
 		t.notifyNeedInput(e)
 	case agent.EventResponse:
-		t.flushReason()
+		t.endReasonSeg()
 		t.settleMd()
 		t.r.view.Handle(e)
 	default:
@@ -136,6 +146,57 @@ func (t *turn) flushReason() {
 	}
 	t.r.print(reasonSep(t.f.sem, MsgReasonTail, time.Since(t.reasonStart)), KindReasoning)
 	t.reasonOpen = false
+}
+
+func (t *turn) endReasonSeg() {
+	t.flushReason()
+	if t.segActive {
+		t.segActive = false
+		t.resetReasonBuf()
+	}
+}
+
+func (t *turn) resetReasonBuf() {
+	buf := markdown.NewMarkdownBuf()
+	buf.SetWidth(t.width)
+	buf.SetInputLimit(markdownInputLimit)
+	t.reasonBuf = buf
+}
+
+func (t *turn) Hotkey(k readline.KeyEvent) {
+	if k.Code != readline.KeyCtrlO {
+		return
+	}
+	was := t.reasonOn()
+	t.r.showReasoning = !t.r.showReasoning
+	now := t.reasonOn()
+	switch {
+	case !was && now:
+		if t.segActive && t.reasonBuf.InputLen() > 0 {
+			t.replayReason()
+			return
+		}
+		t.f.emit(KindNotice, MsgReasonOnNext)
+	case was && !now:
+		if t.reasonOpen {
+			t.flushReason()
+			return
+		}
+		t.f.emit(KindNotice, MsgReasoningOff)
+	}
+}
+
+func (t *turn) replayReason() {
+	t.r.view.Stop()
+	t.reasonOpen = true
+	t.reasonStart = time.Now()
+	t.r.print(reasonSep(t.f.sem, MsgReasonHead, 0), KindReasoning)
+	for _, blk := range t.reasonBuf.Rewind() {
+		t.r.print(t.f.rend.Block(blk), KindReasoning)
+	}
+	for _, blk := range t.reasonBuf.Close() {
+		t.r.print(t.f.rend.Block(blk), KindReasoning)
+	}
 }
 
 func (t *turn) writeContent(s string) {

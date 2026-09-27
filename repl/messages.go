@@ -57,6 +57,7 @@ const (
 	MsgReasoningBad    = "无效参数 %q（可用: on / off）"
 	MsgReasoningOnTag  = "开"
 	MsgReasoningOffTag = "关"
+	MsgReasonOnNext    = "思维链显示已开启（下一段生效）\n"
 	MsgReasonHead      = "思考"
 	MsgReasonTail      = "思考结束"
 	MsgReasonDurFmt    = " · %s"
