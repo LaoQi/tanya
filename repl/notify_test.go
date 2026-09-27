@@ -1,23 +1,19 @@
 package repl
 
 import (
-	"context"
 	"errors"
-	"slices"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/render/present"
 	"github.com/LaoQi/tanya/render/term"
-	"github.com/LaoQi/tanya/tools/shell"
 )
 
-type fakeNotifier struct{ got []Notification }
+type fakeNotifier struct{ got []present.Notification }
 
-func (f *fakeNotifier) Notify(n Notification) { f.got = append(f.got, n) }
+func (f *fakeNotifier) Notify(n present.Notification) { f.got = append(f.got, n) }
 
 func withBellREPL(t *testing.T, mode outMode, prof term.Profile) (*REPL, *fakeNotifier) {
 	t.Helper()
@@ -36,15 +32,15 @@ func TestNotifyTurnDone(t *testing.T) {
 	if len(n.got) != 1 {
 		t.Fatalf("成功回合应通知一次: %+v", n.got)
 	}
-	if got := n.got[0]; got.Reason != NotifyTurnDone || got.Failed {
+	if got := n.got[0]; got.Kind != notifyKindDone || !strings.HasPrefix(got.Content, "回合结束 · ") {
 		t.Errorf("载荷不符: %+v", got)
 	}
 	r.beginTurn(nil).End(errors.New("boom"))
-	if len(n.got) != 2 || !n.got[1].Failed {
-		t.Errorf("报错回合同样通知且 Failed 为真: %+v", n.got)
+	if len(n.got) != 2 || n.got[1].Kind != notifyKindFailed {
+		t.Errorf("报错回合同样通知且类别为 failed: %+v", n.got)
 	}
-	if d := n.got[1].Duration; d <= 0 || d > time.Minute {
-		t.Errorf("耗时应为本次回合的正值: %v", d)
+	if !strings.HasPrefix(n.got[1].Content, "回合失败 · ") {
+		t.Errorf("失败文案不符: %q", n.got[1].Content)
 	}
 }
 
@@ -65,7 +61,7 @@ func TestNotifyNeedInput(t *testing.T) {
 	if len(n.got) != 1 {
 		t.Fatalf("只有 interactive 工具应通知: %+v", n.got)
 	}
-	if got := n.got[0]; got.Reason != NotifyNeedInput || got.Tool != "run_shell" {
+	if got := n.got[0]; got.Kind != notifyKindInput || got.Content != "run_shell 等待输入" {
 		t.Errorf("载荷不符: %+v", got)
 	}
 }
@@ -118,6 +114,16 @@ func TestNotifySlashCommandQuiet(t *testing.T) {
 	}
 }
 
+// notifyPayload 走生产链路（payloadOf 成品化 → 行为）投递一次通知。
+func notifyPayload(t *testing.T, n Notifier, in Notification) {
+	t.Helper()
+	p, ok := payloadOf(in)
+	if !ok {
+		t.Fatalf("载荷应可成品化: %+v", in)
+	}
+	n.Notify(p)
+}
+
 func oscCapture() (oscNotifier, *[]string) {
 	var got []string
 	return oscNotifier{write: func(s string) error {
@@ -129,8 +135,8 @@ func oscCapture() (oscNotifier, *[]string) {
 // 载荷在我们的组装点就已是成品：单行、无控制序列、已截断，两条行为拿到的是同一份文本。
 func TestNotifyPayloadSanitized(t *testing.T) {
 	o, got := oscCapture()
-	o.Notify(Notification{Reason: NotifyNeedInput, Tool: "run\x1b]9;evil\a\nshell"})
-	o.Notify(Notification{Reason: NotifyTurnDone, Duration: 3200 * time.Millisecond})
+	notifyPayload(t, o, Notification{Reason: NotifyNeedInput, Tool: "run\x1b]9;evil\a\nshell"})
+	notifyPayload(t, o, Notification{Reason: NotifyTurnDone, Duration: 3200 * time.Millisecond})
 	if len(*got) != 2 {
 		t.Fatalf("应写入两条: %+v", *got)
 	}
@@ -150,7 +156,7 @@ func TestNotifyPayloadSanitized(t *testing.T) {
 
 func TestNotifyPayloadTruncated(t *testing.T) {
 	o, got := oscCapture()
-	o.Notify(Notification{Reason: NotifyNeedInput, Tool: strings.Repeat("宽", 300)})
+	notifyPayload(t, o, Notification{Reason: NotifyNeedInput, Tool: strings.Repeat("宽", 300)})
 	if len(*got) != 1 {
 		t.Fatalf("应写入一条: %+v", *got)
 	}
@@ -191,147 +197,6 @@ func TestNotifyOSCGated(t *testing.T) {
 	}
 }
 
-var testShellInv = shell.Invocation{Argv: []string{"/bin/bash", "-c"}, Kind: shell.KindPosix}
-
-func captureCommandNotifier(t *testing.T, inv shell.Invocation, tmpl string) (*commandNotifier, *[][]string, chan struct{}) {
-	t.Helper()
-	c := mustCommandNotifier(t, inv, tmpl)
-	var mu sync.Mutex
-	var got [][]string
-	done := make(chan struct{}, 8)
-	c.run = func(_ context.Context, argv []string) error {
-		mu.Lock()
-		got = append(got, argv)
-		mu.Unlock()
-		done <- struct{}{}
-		return nil
-	}
-	return c, &got, done
-}
-
-func mustCommandNotifier(t *testing.T, inv shell.Invocation, tmpl string) *commandNotifier {
-	t.Helper()
-	n, err := NewCommandNotifier(inv, tmpl)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, ok := n.(*commandNotifier)
-	if !ok {
-		t.Fatalf("应返回 *commandNotifier: %T", n)
-	}
-	return c
-}
-
-func waitNotify(t *testing.T, done chan struct{}) {
-	t.Helper()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("通知命令未执行")
-	}
-}
-
-func TestCommandNotifierArgv(t *testing.T) {
-	c, got, done := captureCommandNotifier(t, testShellInv, "notify-send -a {title} {content}")
-	c.Notify(Notification{Reason: NotifyTurnDone, Duration: 12*time.Second + 300*time.Millisecond, Failed: true})
-	waitNotify(t, done)
-	argv := (*got)[0]
-	want := []string{"/bin/bash", "-c", "notify-send -a 'tanya' '回合失败 · 12.3s'"}
-	if !slices.Equal(argv, want) {
-		t.Errorf("argv 不符:\n got %q\nwant %q", argv, want)
-	}
-}
-
-func TestCommandNotifierKindPlaceholder(t *testing.T) {
-	c, got, done := captureCommandNotifier(t, testShellInv, "hook {kind} {content}")
-	c.Notify(Notification{Reason: NotifyNeedInput, Tool: "run_shell"})
-	waitNotify(t, done)
-	if argv := (*got)[0]; argv[len(argv)-1] != "hook 'input' 'run_shell 等待输入'" {
-		t.Errorf("类别占位符不符: %q", argv[len(argv)-1])
-	}
-}
-
-func TestCommandNotifierSingleFlight(t *testing.T) {
-	c, _, _ := captureCommandNotifier(t, testShellInv, "hook {kind}")
-	entered, release := make(chan struct{}), make(chan struct{})
-	var calls int32
-	c.run = func(context.Context, []string) error {
-		if atomic.AddInt32(&calls, 1) == 1 {
-			close(entered)
-			<-release
-		}
-		return nil
-	}
-	c.Notify(Notification{Reason: NotifyTurnDone})
-	<-entered
-	c.Notify(Notification{Reason: NotifyTurnDone})
-	c.Notify(Notification{Reason: NotifyNeedInput})
-	time.Sleep(50 * time.Millisecond)
-	if n := atomic.LoadInt32(&calls); n != 1 {
-		t.Errorf("单飞应丢弃并发通知，实际执行 %d 次", n)
-	}
-	close(release)
-	deadline := time.Now().Add(3 * time.Second)
-	for atomic.LoadInt32(&calls) < 2 {
-		if time.Now().After(deadline) {
-			t.Fatalf("首次结束后未释放单飞名额，调用数仍为 %d", atomic.LoadInt32(&calls))
-		}
-		c.Notify(Notification{Reason: NotifyTurnDone})
-		time.Sleep(5 * time.Millisecond)
-	}
-}
-
-func TestCommandNotifierTimeout(t *testing.T) {
-	c, _, _ := captureCommandNotifier(t, testShellInv, "hook {kind}")
-	c.timeout = 20 * time.Millisecond
-	seen := make(chan error, 1)
-	c.run = func(ctx context.Context, _ []string) error {
-		<-ctx.Done()
-		seen <- ctx.Err()
-		return ctx.Err()
-	}
-	c.Notify(Notification{Reason: NotifyTurnDone})
-	select {
-	case err := <-seen:
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Errorf("超时应取消上下文: %v", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("超时未生效")
-	}
-}
-
-func TestCommandNotifierTemplateValidation(t *testing.T) {
-	bad := []string{"notify-send {body}", "notify-send {title", "notify-send title}", `notify-send "{title}"`, "notify-send '{content}'"}
-	for _, tmpl := range bad {
-		if _, err := NewCommandNotifier(testShellInv, tmpl); err == nil {
-			t.Errorf("模板应被拒绝: %q", tmpl)
-		}
-	}
-	for _, tmpl := range []string{"notify-send {title} {content}", "notify-send --text=tanya:{content}", "hook {kind}"} {
-		if _, err := NewCommandNotifier(testShellInv, tmpl); err != nil {
-			t.Errorf("合法模板被拒绝 %q: %v", tmpl, err)
-		}
-	}
-}
-
-func TestShellQuote(t *testing.T) {
-	cases := []struct {
-		kind shell.Kind
-		in   string
-		want string
-	}{
-		{shell.KindPosix, "it's ok", `'it'\''s ok'`},
-		{shell.KindPowerShell, "it's ok", `'it''s ok'`},
-		{shell.KindCmd, `say "hi"`, `"say ""hi"""`},
-	}
-	for _, c := range cases {
-		if got := shellQuote(c.kind, c.in); got != c.want {
-			t.Errorf("kind %v 引号不符: got %q want %q", c.kind, got, c.want)
-		}
-	}
-}
-
 func TestNotifiersFanOut(t *testing.T) {
 	if n := Notifiers(nil, nil); n != nil {
 		t.Errorf("全空应返回 nil: %T", n)
@@ -342,7 +207,7 @@ func TestNotifiersFanOut(t *testing.T) {
 	if n == nil {
 		t.Fatal("有行为时不应为 nil")
 	}
-	n.Notify(Notification{Reason: NotifyTurnDone})
+	n.Notify(present.Notification{Kind: notifyKindDone})
 	for i, f := range []*fakeNotifier{a, b, c} {
 		if len(f.got) != 1 {
 			t.Errorf("第 %d 个行为应各收一条: %+v", i, f.got)

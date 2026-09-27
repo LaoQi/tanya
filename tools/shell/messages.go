@@ -6,6 +6,12 @@ import (
 	"github.com/LaoQi/tanya/agent"
 )
 
+const (
+	msgNotifyPlaceholderFmt = "notify_cmd 含未知占位符 %s（可用: {title} {content} {kind}）"
+	msgNotifyBraceFmt       = "notify_cmd 花括号不配对: %s"
+	msgNotifyQuotedFmt      = "notify_cmd 的占位符 %s 紧邻引号：占位符自带引号，去掉外层引号"
+)
+
 var ErrNoLend = errors.New(agent.MsgErrPrefix + "interactive 不支持（无法借出终端）")
 
 const (

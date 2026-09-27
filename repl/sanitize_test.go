@@ -100,7 +100,7 @@ func TestSanitizeKeepsWideTextIntact(t *testing.T) {
 func TestToolViewHandleContentSanitizes(t *testing.T) {
 	out, errb := &syncBuf{}, &syncBuf{}
 	st := NewStreams(out, errb, modePlainVerbose)
-	v := NewToolView(st, term.Profile{TTY: false, Colors: term.LevelNone}, testSem(), func() int { return 80 }, 8)
+	v := NewToolView(st, term.Profile{TTY: false, Colors: term.LevelNone}, testSem(), func() int { return 80 }, 8, testViews())
 	v.Handle(agent.Event{Kind: agent.EventContent, Text: evilText})
 	got := out.String()
 	assertNoControl(t, got, "ask 旁路正文")

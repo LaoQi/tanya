@@ -94,7 +94,7 @@ func TestVisSetMatrix(t *testing.T) {
 }
 
 func feedAskPath(st *streams, prof term.Profile) *toolView {
-	view := NewToolView(st, prof, testSem(), func() int { return 80 }, 20)
+	view := NewToolView(st, prof, testSem(), func() int { return 80 }, 20, testViews())
 	view.Handle(agent.Event{Kind: agent.EventRequestStart})
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
@@ -161,7 +161,7 @@ func TestPlainVerboseKeepsToolText(t *testing.T) {
 }
 
 func TestPlainVerboseNoStatusEvenOnTTY(t *testing.T) {
-	view := NewToolView(NewStreams(&syncBuf{}, &syncBuf{}, modePlainVerbose), plainProf, testSem(), func() int { return 80 }, 20)
+	view := NewToolView(NewStreams(&syncBuf{}, &syncBuf{}, modePlainVerbose), plainProf, testSem(), func() int { return 80 }, 20, testViews())
 	var out syncBuf
 	view.st.out.setWriter(&out)
 	view.Handle(agent.Event{Kind: agent.EventRequestStart})
@@ -245,7 +245,7 @@ func TestRichStreamsByteIdentical(t *testing.T) {
 	nonTTY := term.Profile{TTY: false, Colors: term.LevelNone}
 	var out syncBuf
 	st := NewStreams(&out, &syncBuf{}, modeRich)
-	view := NewToolView(st, nonTTY, testSem(), func() int { return 80 }, 20)
+	view := NewToolView(st, nonTTY, testSem(), func() int { return 80 }, 20, testViews())
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
 		Result: agent.ToolResult{Meta: &shell.Result{Command: "echo hi", Stdout: []shell.Chunk{{Data: "hi\n"}}, ExitCode: 0}}})
@@ -259,7 +259,7 @@ func TestRichStreamsByteIdentical(t *testing.T) {
 	tty := term.Profile{TTY: true, Colors: term.LevelNone}
 	var out2 syncBuf
 	st2 := NewStreams(&out2, &syncBuf{}, modeRich)
-	view2 := NewToolView(st2, tty, testSem(), func() int { return 80 }, 20)
+	view2 := NewToolView(st2, tty, testSem(), func() int { return 80 }, 20, testViews())
 	view2.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
 		Result: agent.ToolResult{Meta: &shell.Result{Command: "echo hi", Stdout: []shell.Chunk{{Data: "hi\n"}}, ExitCode: 0}}})
 	want2 := "  hi\n  ↳ exit 0 · 0ms · 1 行\n"

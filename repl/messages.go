@@ -29,10 +29,6 @@ const (
 	MsgNotifyDoneFmt   = "回合结束 · %s"
 	MsgNotifyFailedFmt = "回合失败 · %s"
 	MsgNotifyInputFmt  = "%s 等待输入"
-
-	MsgNotifyPlaceholderFmt = "notify_cmd 含未知占位符 %s（可用: {title} {content} {kind}）"
-	MsgNotifyBraceFmt       = "notify_cmd 花括号不配对: %s"
-	MsgNotifyQuotedFmt      = "notify_cmd 的占位符 %s 紧邻引号：占位符自带引号，去掉外层引号"
 )
 
 const (
@@ -137,20 +133,12 @@ const (
 
 const (
 	MsgLinesTotal = "共 %d 行"
-	MsgLines      = "%d 行"
 	MsgCachePct   = "缓存 %s"
 	MsgCtxTokens  = "上下文 ~%s"
-	MsgTruncNote  = "…中间省略 %d 字节…"
-	MsgInterrupt  = "已中断"
-	MsgNotStarted = "未执行"
-	MsgTimeout    = "执行超时"
-	MsgToolErr    = "错误: %s"
 
 	MsgInteractiveHint = "  ⏎ 等待终端输入，请在下方直接应答\n"
-	MsgCmdOmittedFmt   = "… 省略 %d 行（完整命令见 /history）"
 	MsgArgsOmittedFmt  = "… 省略 %d 行（完整参数见 /history）"
 	MsgArgPairFmt      = "%s: %s"
-	MsgTimeoutSecFmt   = "%ds"
 )
 
 const (

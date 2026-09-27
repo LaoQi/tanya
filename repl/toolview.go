@@ -11,32 +11,16 @@ import (
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
-	"github.com/LaoQi/tanya/tools/shell"
+	"github.com/LaoQi/tanya/render/present"
 )
 
 const (
-	toolHeadLines = 3
-	toolTailLines = 2
-
-	toolCommandMaxLines  = 8
-	toolCommandHeadLines = 6
-	toolCommandTailLines = 1
-
-	toolCommandPrefix = "  $ "
-	toolCwdPrefix     = "  cwd: "
-	toolTimeoutPrefix = "  timeout: "
-	toolArgsPrefix    = "  "
-	toolArgsSep       = " · "
-	toolTabWidth      = 4
+	toolArgsPrefix = "  "
+	toolArgsSep    = " · "
 )
 
-type tagLine struct {
-	text   string
-	stderr bool
-}
-
-func RenderToolStart(name, args string, width int) string {
-	lines := toolTitleLines(name, args, width)
+func RenderToolStart(name, args string, views *present.Registry, width int) string {
+	lines := toolTitleLines(name, args, views, width)
 	var b strings.Builder
 	b.WriteString("\n▸ " + lines[0] + "\n")
 	for _, l := range lines[1:] {
@@ -48,67 +32,34 @@ func RenderToolStart(name, args string, width int) string {
 // toolTitleLines 组装标题区：参数短到能与工具名同行时内联单行（`▸ run_shell ls -la`、`▸ calc expression: 6*7`），
 // 放不下或参数多行/多值时转块形态——首行工具名，其后是参数区（run_shell 为 cwd/timeout 行加 `  $ ` 命令行，
 // 其余工具为 `  key: value` 行）。width 是终端总列数，各前缀宽度在此扣除。
-func toolTitleLines(name, args string, width int) []string {
-	v := toolArgsView(name, args, width)
-	if v.inline != "" {
-		if inner := width - 3 - term.Width(name) - 1; inner > 0 && term.Width(v.inline) <= inner {
-			return []string{term.Truncate(name+" "+v.inline, width-3)}
+func toolTitleLines(name, args string, views *present.Registry, width int) []string {
+	v := toolArgsView(name, args, views, width)
+	if v.Inline != "" {
+		if inner := width - 3 - term.Width(name) - 1; inner > 0 && term.Width(v.Inline) <= inner {
+			return []string{term.Truncate(name+" "+v.Inline, width-3)}
 		}
 	}
-	return append([]string{term.Truncate(name, width-3)}, v.body...)
+	return append([]string{term.Truncate(name, width-3)}, v.Body...)
 }
 
-// argsView 是参数视图：inline 为可与工具名同行的单行候选（空串表示不可内联），body 为块形态的正文行（已带前缀）。
-type argsView struct {
-	inline string
-	body   []string
-}
-
-// toolArgsView 按工具名分派参数视图：run_shell 认识 command/cwd/timeout（命令语义、`  $ ` 前缀与命令省略文案），
-// 其余工具（含未来的新工具）走通用键值渲染。JSON 解析失败一律退回原样展示，参数为空则只显示工具名。
-func toolArgsView(name, args string, width int) argsView {
-	if name == "run_shell" {
-		return shellArgsView(args, width)
+// toolArgsView 按工具名分派参数视图：注册了自带视图的工具（如 run_shell）走它的实现，
+// 其余（含未来的新工具）走通用键值渲染。JSON 解析失败一律退回原样展示，参数为空则只显示工具名。
+func toolArgsView(name, args string, views *present.Registry, width int) present.ArgsView {
+	if v, ok := views.Args(name, args, width); ok {
+		return v
 	}
 	return genericArgsView(args, width)
 }
 
-// shellArgsView 渲染 run_shell：cwd 行（显式指定时）、timeout 行（显式指定时）与折行的命令区。
-// 内联只在「无 cwd、无 timeout、命令单行且非空」时成立，其余情形转块形态——附加参数是块形态的判据。
-func shellArgsView(args string, width int) argsView {
-	var a struct {
-		Command string `json:"command"`
-		Cwd     string `json:"cwd"`
-		Timeout int    `json:"timeout"`
-	}
-	if err := json.Unmarshal([]byte(args), &a); err != nil {
-		return plainArgsView(trimBlankEdges(args), toolCommandPrefix, MsgCmdOmittedFmt, width)
-	}
-	cwd := strings.TrimSpace(a.Cwd)
-	cmd := expandTabs(trimBlankEdges(a.Command))
-	var opts []string
-	if cwd != "" {
-		opts = append(opts, term.Truncate(toolCwdPrefix+cwd, width-2))
-	}
-	if a.Timeout > 0 {
-		opts = append(opts, term.Truncate(toolTimeoutPrefix+fmt.Sprintf(MsgTimeoutSecFmt, a.Timeout), width-2))
-	}
-	v := argsView{body: append(opts, prefixed(commandLines(cmd, width-len(toolCommandPrefix)), toolCommandPrefix)...)}
-	if cwd == "" && a.Timeout <= 0 && cmd != "" && !strings.Contains(cmd, "\n") {
-		v.inline = cmd
-	}
-	return v
-}
-
 // genericArgsView 渲染非 shell 工具的参数：按模型给出的键序逐项 `key: value`，内联用 ` · ` 连接，
 // 放不下或多行时转块形态（每项一行、按宽度折行）。
-func genericArgsView(args string, width int) argsView {
+func genericArgsView(args string, width int) present.ArgsView {
 	pairs, ok := parseArgPairs(args)
 	if !ok {
-		return plainArgsView(trimBlankEdges(args), toolArgsPrefix, MsgArgsOmittedFmt, width)
+		return present.PlainArgsView(present.TrimBlankEdges(args), toolArgsPrefix, MsgArgsOmittedFmt, width)
 	}
 	if len(pairs) == 0 {
-		return argsView{}
+		return present.ArgsView{}
 	}
 	parts := make([]string, len(pairs))
 	var wrapped []string
@@ -116,83 +67,24 @@ func genericArgsView(args string, width int) argsView {
 		parts[i] = fmt.Sprintf(MsgArgPairFmt, p.key, p.value)
 		wrapped = append(wrapped, term.Wrap(parts[i], width-len(toolArgsPrefix))...)
 	}
-	v := argsView{body: prefixed(capLines(wrapped, width-len(toolArgsPrefix), MsgArgsOmittedFmt), toolArgsPrefix)}
+	v := present.ArgsView{Body: present.Prefixed(present.CapLines(wrapped, width-len(toolArgsPrefix), MsgArgsOmittedFmt), toolArgsPrefix)}
 	if inline := strings.Join(parts, toolArgsSep); !strings.Contains(inline, "\n") {
-		v.inline = inline
+		v.Inline = inline
 	}
 	return v
 }
 
-// plainArgsView 原样展示参数文本：单行可内联，否则按前缀折行（坏 JSON 的兜底通道）。
-func plainArgsView(text, prefix, omitFmt string, width int) argsView {
-	if text == "" {
-		return argsView{}
+func toolEndBody(name string, res agent.ToolResult, views *present.Registry, width, maxLines int) (string, string) {
+	if v, ok := views.Result(name, res.Text, res.Meta, width, maxLines); ok {
+		return v.Body, v.Status
 	}
-	v := argsView{body: prefixed(capLines(term.Wrap(text, width-len(prefix)), width-len(prefix), omitFmt), prefix)}
-	if !strings.Contains(text, "\n") {
-		v.inline = text
-	}
-	return v
-}
-
-func prefixed(lines []string, prefix string) []string {
-	out := make([]string, len(lines))
-	for i, l := range lines {
-		out[i] = prefix + l
-	}
-	return out
-}
-
-// commandLines 把命令折成显示行（制表符已摊平、保留原换行结构）；超过上限时保留头尾，
-// 中段换成省略提示——命令是有序脚本，省略中段比省略尾部更不易误读收尾的 done/EOF。
-func commandLines(cmd string, width int) []string {
-	if cmd == "" {
-		return nil
-	}
-	return capLines(term.Wrap(cmd, width), width, MsgCmdOmittedFmt)
-}
-
-// capLines 行数超上限时保留头 6 行 + 省略行 + 尾 1 行；命令与通用参数共用，省略文案由调用方给出。
-// width 是不含前缀的可用正文宽（省略行同样在此宽度内截断，加前缀后不越终端）。
-func capLines(lines []string, width int, omitFmt string) []string {
-	if len(lines) <= toolCommandMaxLines {
-		return lines
-	}
-	omitted := len(lines) - toolCommandHeadLines - toolCommandTailLines
-	out := make([]string, 0, toolCommandMaxLines)
-	out = append(out, lines[:toolCommandHeadLines]...)
-	out = append(out, term.Truncate(fmt.Sprintf(omitFmt, omitted), width))
-	return append(out, lines[len(lines)-toolCommandTailLines:]...)
-}
-
-func toolEndBody(res agent.ToolResult, width, maxLines int) (string, string) {
-	var b strings.Builder
-	var lines []string
-	status := ""
-	if sh, ok := res.Meta.(*shell.Result); ok && sh != nil {
-		var total int
-		var trunc bool
-		lines, status, total, trunc = shellView(sh, width, maxLines)
-		parts := []string{status, respDuration(sh.Duration)}
-		switch {
-		case trunc:
-			parts = append(parts, fmt.Sprintf(MsgLinesTotal, total))
-		case total > 0:
-			parts = append(parts, fmt.Sprintf(MsgLines, total))
-		}
-		status = strings.Join(parts, " · ")
-	} else {
-		lines, status = textView(res.Text, width, maxLines)
-	}
-	for _, l := range lines {
-		b.WriteString("  " + l + "\n")
-	}
-	return b.String(), status
+	lines, status := textView(res.Text, width, maxLines)
+	return present.Indent(lines), status
 }
 
 // RenderToolEndAppend 追加工具正文块与状态行：标题已由 RenderToolStart 打出一次，此处不重复。
-func RenderToolEndAppend(sem theme.Semantics, prof term.Profile, res agent.ToolResult, width, maxLines int) string {
-	out, status := toolEndBody(res, width, maxLines)
+func RenderToolEndAppend(sem theme.Semantics, prof term.Profile, name string, res agent.ToolResult, views *present.Registry, width, maxLines int) string {
+	out, status := toolEndBody(name, res, views, width, maxLines)
 	var b strings.Builder
 	if term.HasSGR(out) {
 		b.WriteString(term.Passthrough(prof, out))
@@ -234,12 +126,7 @@ func RenderResponseInfo(info agent.ResponseInfo, width int) string {
 	return "  ↳ " + term.Truncate(strings.Join(parts, " · "), width-4) + "\n"
 }
 
-func respDuration(d time.Duration) string {
-	if d >= time.Second {
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	}
-	return fmt.Sprintf("%dms", d.Milliseconds())
-}
+func respDuration(d time.Duration) string { return present.Duration(d) }
 
 type argPair struct {
 	key   string
@@ -299,7 +186,7 @@ func argDisplayValue(raw json.RawMessage) string {
 		if s == "" {
 			return `""`
 		}
-		return expandTabs(trimBlankEdges(s))
+		return present.ExpandTabs(present.TrimBlankEdges(s))
 	case t[0] == '[':
 		var list []json.RawMessage
 		if err := json.Unmarshal(raw, &list); err != nil || len(list) == 0 {
@@ -329,74 +216,6 @@ func compactJSON(raw json.RawMessage) string {
 // trimBlankEdges 去掉首尾空行但保留行首缩进——heredoc/多行脚本的缩进是命令结构的一部分。
 func trimBlankEdges(s string) string { return strings.Trim(s, "\n\r") }
 
-// expandTabs 展开制表符：宽度表把 \t 当单列，与终端制表位不符，折行前必须先摊平，否则折行位置与显示不符。
-func expandTabs(s string) string {
-	if !strings.Contains(s, "\t") {
-		return s
-	}
-	return strings.ReplaceAll(s, "\t", strings.Repeat(" ", toolTabWidth))
-}
-
-func shellView(r *shell.Result, width, maxLines int) ([]string, string, int, bool) {
-	stdoutLines := chunkLines(r.Stdout)
-	stderrLines := chunkLines(r.Stderr)
-	total := len(stdoutLines) + len(stderrLines)
-	tagged := make([]tagLine, 0, total)
-	for _, l := range stdoutLines {
-		tagged = append(tagged, tagLine{l, false})
-	}
-	for _, l := range stderrLines {
-		tagged = append(tagged, tagLine{l, true})
-	}
-	view := tagged
-	trunc := false
-	if total > maxLines {
-		if toolHeadLines+toolTailLines >= total {
-			view = tagged
-		} else {
-			view = append(append([]tagLine{}, tagged[:toolHeadLines]...), tagged[total-toolTailLines:]...)
-			trunc = true
-		}
-	}
-	lines := make([]string, 0, len(view))
-	for _, t := range view {
-		s := t.text
-		if t.stderr {
-			s = "2| " + s
-		}
-		lines = append(lines, term.Truncate(s, width-2))
-	}
-	return lines, shellStatus(r), total, trunc
-}
-
-func chunkLines(chunks []shell.Chunk) []string {
-	var out []string
-	for _, c := range chunks {
-		if c.Truncated > 0 {
-			out = append(out, fmt.Sprintf(MsgTruncNote, c.Truncated))
-		}
-		if c.Data == "" {
-			continue
-		}
-		out = append(out, strings.Split(strings.TrimRight(c.Data, "\n"), "\n")...)
-	}
-	return out
-}
-
-func shellStatus(r *shell.Result) string {
-	switch {
-	case r.Interrupted && r.NotStarted:
-		return MsgNotStarted
-	case r.Interrupted:
-		return MsgInterrupt
-	case r.TimedOut:
-		return MsgTimeout
-	case r.Err != "":
-		return fmt.Sprintf(MsgToolErr, r.Err)
-	}
-	return fmt.Sprintf("exit %d", r.ExitCode)
-}
-
 func textView(text string, width, maxLines int) ([]string, string) {
 	text = strings.TrimRight(text, "\n")
 	if strings.TrimSpace(text) == "" {
@@ -420,6 +239,7 @@ func textView(text string, width, maxLines int) ([]string, string) {
 
 // toolView 是工具区渲染器：闭包状态提为字段，仍是 agent.EventSink（Handle 即签名匹配）。
 type toolView struct {
+	views     *present.Registry
 	st        *streams
 	heart     *heartbeat
 	prof      term.Profile
@@ -430,8 +250,9 @@ type toolView struct {
 	dirty     bool
 }
 
-func NewToolView(st *streams, prof term.Profile, sem theme.Semantics, width func() int, maxLines int) *toolView {
+func NewToolView(st *streams, prof term.Profile, sem theme.Semantics, width func() int, maxLines int, views *present.Registry) *toolView {
 	return &toolView{
+		views:    views,
 		st:       st,
 		heart:    newHeartbeat(st.out, sem, prof),
 		prof:     prof,
@@ -490,7 +311,7 @@ func (v *toolView) Handle(e agent.Event) {
 	case agent.EventToolStart:
 		v.heart.stop()
 		v.st.out.atomic(KindToolBlock, func(w io.Writer) {
-			io.WriteString(w, v.sem.Dim.With(v.prof).Frame(RenderToolStart(e.ToolName, e.ToolArgs, v.width())))
+			io.WriteString(w, v.sem.Dim.With(v.prof).Frame(RenderToolStart(e.ToolName, e.ToolArgs, v.views, v.width())))
 			if e.Interactive {
 				io.WriteString(w, v.sem.Info.With(v.prof).Sprint(MsgInteractiveHint))
 			}
@@ -503,7 +324,7 @@ func (v *toolView) Handle(e agent.Event) {
 		v.heart.stop()
 		// 工具块被屏蔽时不置 justEnded：否则下一条正文前会留下孤立空行。
 		if v.st.out.allows(KindToolBlock) {
-			block := RenderToolEndAppend(v.sem, v.prof, e.Result, v.width(), v.maxLines)
+			block := RenderToolEndAppend(v.sem, v.prof, e.ToolName, e.Result, v.views, v.width(), v.maxLines)
 			if e.Interactive {
 				block = "\n" + block
 			}

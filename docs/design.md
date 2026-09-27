@@ -9,7 +9,7 @@
 ```
 main.go            package main：入口、flag 子命令、ask 单发
 config/            package config：CLI 完整配置（agent.Config inline + UI 段 inline + Path），yaml 加载、TANYA_* env 覆盖、值域校验
-repl/              package repl：REPL 循环、斜杠命令、补全、工具视图渲染、状态行心跳
+repl/              package repl：REPL 循环、斜杠命令、补全、工具块排版（标题组合 + 通用回落）、状态行心跳（不认识具体工具，自带视图经 `present.Registry` 注入）
 agent/             package agent：全部核心逻辑（config / llm / llm_http / agent / tools 协议与注册表 / prompt / session / session_archive / stats / control）；零内部依赖
 tools/             package tools：外置工具集（根包 tools.Standard 装配标准集与顺序）+ tools/shell（run_shell：profile 解析、普通/交互执行、平台分片）+ tools/builtin（get_time/get_env/calc）
 readline/          package readline：终端输入层（Console 仲裁 + device 设备面 + 租约），editor / keys / 借出与终端自愈
@@ -180,7 +180,9 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 事件：`EventToolStart`（dispatch 前触发）/ `EventToolEnd`（携带 `ToolResult{Text, Meta}`——`Text` 即发回模型的 content，`Meta` 供渲染方类型断言），渲染在 repl 包 `toolview.go`
 - **免确认直接执行**（早期版本有 y/n/a 确认机制，已移除）
 
-### 工具视图渲染（repl/toolview.go）
+### 工具视图渲染（repl/toolview.go + render/present + tools/shell/view）
+
+- **分层（2026-09-28）**：`render/present` 是契约与共享文本助手（`ToolView{Args,Result}`、`Registry`、`CapLines`/`Prefixed`/`PlainArgsView`/`ExpandTabs`/`TrimBlankEdges`/`Indent`/`Duration`，零内部依赖、不引 `agent`——回调签名传 `text string, meta any`）；`tools/shell/view` 是 `run_shell` 自带视图（参数区 `argsView` + 结果区 `resultView` + 专属文案，只依赖 `present`/`render/term`/`tools/shell`）；`repl` 只做**标题组合与回落**——`toolArgsView` 查注册表、未注册或视图不认领则走 `genericArgsView`/`textView`。`main` 装配 `views.Register("run_shell", shellview.View())` 后经 `repl.WithToolViews` 注入（装配期冻结，语义同工具注入），`repl` 因此不导入任何 `tools/*`
 
 - `NewToolView` 构造渲染器（`repl/repl.go` 与 `main.go` 各接一处；`Handle(e agent.Event)` 即事件入口，`toolView` 自身即 `agent.EventSink`），块状视图：标题行 + 缩进输出行（stderr 加 `2|` 前缀）+ 亮蓝状态行
 - **标题区参数显示（2026-09-16 命令可读性改造，2026-09-20 全工具覆盖）**：`toolArgsView(name, args, width)` 按工具名分派参数视图（`argsView{inline, body}`：`inline` 是可内联的单行候选，`body` 是块形态的正文行、已带前缀），内联判据统一为「`inline` 非空 && 无换行 && 宽度 ≤ width−3−len(name)−1」，超宽或原本多行转块形态。模型可控的 args 仍是唯一数据源，`toolTitleLines` 只管排版
@@ -391,7 +393,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - **尽力而为是总原则**：通知只是加成——失败静默、不重试、不探测终端/桌面环境、不做 tmux 透传、不做平台特化适配，也不向用户报错。终端不认 OSC、桌面没有通知服务、外部程序不存在，都表现为"没有效果"，不是错误路径。因此新增行为不得引入探测分支，也不得因为"没生效"而返回错误或打提示行。
 - **载荷成品化**：`payloadOf` 是唯一组装点，产出 `(title, content, kind)` 三元组——`title` 固定 `tanya`、`kind` 为 `done`/`failed`/`input`（供外部程序分流）、`content` 是文案模板生成后经 `term.OneLine` 压成单行并截断（标题 40 列、内容 200 列）的成品。行为实现拿到的就是"能直接落屏/直接喂程序"的文本，不再自行清洗；两种原因也不做音高/视觉区分（BEL 无音高，连响两声在部分终端被合并）。
 - **终端原语在 `ctty`**：`ctty.Bell()` 写 `\a`、`ctty.NotifyOSC(text)` 写 `ESC ] 9 ; text BEL`（`oscFrame` 纯函数拼帧），二者共用 `writeTTY`——posix 写 `/dev/tty`、Windows 写 `CONOUT$`、其余平台 stub 恒错；失败静默。都不进 stdout、不沾 `output` 的 Kind 门禁与行首记账（`emit` 会把尾字节 0x07 记成"非行首"，打歪 `streams.End` 的补换行判定），故 `-p` 与重定向都不会被污染。
-- **外部程序行为**（`commandNotifier`）：`notify_cmd` 是单条字符串，启动时经 `shell.Resolve(cfg.Shell)`（与 `run_shell` 同一套 profile：配置覆盖 > 平台探测）解析出的 shell 执行（posix `bash -c`、Windows `pwsh -Command`），命令原样交给 shell，需要管道的人自己写。执行契约：异步（不阻塞 REPL）、**单飞**（上一次未结束就丢弃本次，防堆积）、固定 3s 超时（超时取消上下文、只杀直接子进程，孙进程可能残留——接受）、stdio 接空设备（绝不沾 stdout 与 readline 帧）、错误静默。
+- **外部程序行为**（`tools/shell.CommandNotifier`，2026-09-28 从 `repl` 迁出）：`notify_cmd` 是单条字符串，启动时经 `shell.Resolve(cfg.Shell)`（与 `run_shell` 同一套 profile：配置覆盖 > 平台探测）解析出的 shell 执行（posix `bash -c`、Windows `pwsh -Command`），命令原样交给 shell，需要管道的人自己写。执行契约：异步（不阻塞 REPL）、**单飞**（上一次未结束就丢弃本次，防堆积）、固定 3s 超时（超时取消上下文、只杀直接子进程，孙进程可能残留——接受）、stdio 接空设备（绝不沾 stdout 与 readline 帧）、错误静默。
 - **占位符与引号契约**：只有 `{title}`、`{content}`、`{kind}` 三个；替换值按目标 shell 的引号规则包成字面量（posix `'…'` 且 `'`→`'\''`、powershell `'…'` 且 `'`→`''`、cmd `"…"` 且 `"`→`""`），**值自带引号，配置里不该再加**（`"{content}"` 会多出一层字面引号）。替换用 `strings.NewReplacer` 单趟完成、不递归（值里出现 `{…}` 不会被二次展开）。启动即校验三项：未知占位符、花括号不配对、占位符紧邻引号——配错在启动时报错退出，不留到静默不响。
 - **门禁**（`REPL.notify`）：`notifier != nil && prof.TTY && st.decor()`。注意力通知只在交互富档 TTY 会话有意义，`-p` 是用户显式要求安静，且 plain 档下 `MsgInteractiveHint` 本来就被 `visSet` 屏蔽——plain 档门禁与提示可见性一致（不会“响了但屏上没提示”）；`-p --verbose` 档提示可见而不响（有提示、无声音），这是刻意的：注意力通知只在 rich 档生效。
 - **开关**：yaml `bell`、`notify_osc`（bool）、`notify_cmd`（字符串，空 = 关闭），全部默认关闭、opt-in；无 env、无 REPL 命令。`main` 的 `buildNotifier` 按开关组装，未开启时 notifier 为 nil、判定零开销。`notify_osc` 用 OSC 9（iTerm2 / WezTerm / Ghostty / Windows Terminal 系支持）单帧携带 `title: content`。
