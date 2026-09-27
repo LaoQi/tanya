@@ -213,9 +213,6 @@ func compactJSON(raw json.RawMessage) string {
 	return b.String()
 }
 
-// trimBlankEdges 去掉首尾空行但保留行首缩进——heredoc/多行脚本的缩进是命令结构的一部分。
-func trimBlankEdges(s string) string { return strings.Trim(s, "\n\r") }
-
 func textView(text string, width, maxLines int) ([]string, string) {
 	text = strings.TrimRight(text, "\n")
 	if strings.TrimSpace(text) == "" {

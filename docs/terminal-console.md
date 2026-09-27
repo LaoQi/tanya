@@ -105,7 +105,7 @@ L2 对消费者的面（`tools/shell` 经注入接口消费，与现有 `Bridge`
 
 ```go
 type Event struct {
-    Kind EventKind // EventKey / EventInterrupt / EventResize / EventHangup
+    Kind EventKind // EventKey / EventInterrupt / EventResize
     Key  KeyEvent
 }
 
@@ -129,7 +129,7 @@ type Lease interface {
 
 落地记录：S5 落地 `Sane`（device 三实现：posix 幂等置回 sane 位、windows 复原开终端时的 console mode、pipe no-op）与 `LendStdin` 的最终语义（stdin=`os.DevNull`，posix 另持终端锚点：借出前 `SaveCursor`、`Release` 时 termios 复原 + `ResetModes` + `RestoreCursor`，无前台移交、无 isForeground 门控）；S2 实现 `BeginRead`/`EndRead`/`ReadEvent`/`Subscribe`/`Size`；S4 实现 `LendStdin`/`LendFull`（`readline/lease*.go` 平台分片，pty 泵自 `bridge_linux.go` 收编；`Lender` 未单列接口，`Console` 直接含之）。`Console` 的实现值满足 `tools/shell` 的同名 `Console`/`Lease` 接口，因 Go 接口方法签名要求精确匹配，`main` 以 `consoleForShell` 薄适配器完成跨包注入（同 `Bridge` 先例）。
 
-L1 device 职责（接口包内私有，各分片一份完整实现）：模式切换、单读者读 + 唤醒、**中断归一**（`0x03` 字节与信号面汇成同一通知）、`Resize`/`Hangup` 产出（能力可选，产不出就是没有该事件）、`LendStdin`/`LendFull` 的机制实现、紧急复原。读循环只在 Reader 活跃期存在（空转期读会抢走子进程输入），唤醒用现有机制收敛（编辑器 `VMIN=0/VTIME=1` 轮询、桥接 wake pipe，二者归一为 device 内部实现细节）。
+L1 device 职责（接口包内私有，各分片一份完整实现）：模式切换、单读者读 + 唤醒、**中断归一**（`0x03` 字节与信号面汇成同一通知）、`Resize` 产出（能力可选，产不出就是没有该事件；`Hangup` 已删——挂断走 `io.EOF`，从未产出）、`LendStdin`/`LendFull` 的机制实现、紧急复原。读循环只在 Reader 活跃期存在（空转期读会抢走子进程输入），唤醒用现有机制收敛（编辑器 `VMIN=0/VTIME=1` 轮询、桥接 wake pipe，二者归一为 device 内部实现细节）。
 
 **S8 落地记录（2026-09-27，P3：常驻读者与借出仲裁——§6 遗留的「未落成的设计意图」到位）**：
 
@@ -155,7 +155,7 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 | `readline/secure.go` 的 sane 位 | posix device（`Sane` 单点） |
 | `readline/terminal_windows.go` console mode 位 | windows device |
 | `Terminal` 接口 + `Degraded` 双实现 | device 三实现（posixTTY/windowsConsole/pipe）；`NewTerminal() (Terminal, bool)` 与 `editor.raw` 分支消失 |
-| `repl/picker.go` 的 `Raw`/`Restore`/`ReadKey`/`Size` | `ReadEvent` 循环 + 按键时轮询 `Size`（不依赖 EventResize） |
+| `repl/picker.go` 的 `Raw`/`Restore`/`ReadKey`/`Size` | `ReadEvent` 循环 + 按键时轮询 `Size`（不依赖 EventResize；**2026-09-28 S4 更正**：picker 已改吃 `EventResize`，轮询移除） |
 | `repl.InterruptContext`（订阅 `ctty.Interrupted`） | `Subscribe(EventInterrupt)`；「同步取快照」竞态语义保持 |
 | `repl/repl.go` 的 `readline.SecureTerminal()` | Console 自愈（`Sane`，纯模式复原） |
 | `readline/editor.go` 的 `Raw`/`Restore`/`ReadKey` | `ReadEvent` 循环 |
@@ -186,10 +186,10 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 
 ## 7 平台
 
-- **posix/linux**：device 完整——`Keys`/`Sane`/`Pump`、中断归一、`Resize`=SIGWINCH、`Hangup`=POLLHUP、LendFull=pty 泵。
+- **posix/linux**：device 完整——`Keys`/`Sane`/`Pump`、中断归一、`Resize`=SIGWINCH（经 `ctty.OnResize` 收敛）、LendFull=pty 泵。`Hangup` 已删（挂断走 `io.EOF`，从未产出）。
 - **posix/darwin**：同 linux，但 LendFull 不支持（不做 pty 泵；interactive 在 darwin 明确不支持，工具侧报错）。
-- **windows**：`Keys`=console mode 映射（**关 `ENABLE_PROCESSED_INPUT`**、开 VT 输入模式，`^C` 与 posix 同走字节路径在 device 归一——与现状实现一致）、`Resize`/`Hangup` 暂缺（picker 轮询 `Size` 兜底）、LendFull=`CONIN$` 直通+掩蔽（capture 不支持，输出直上屏）、LendStdin=null 且**不掩蔽**（`^C` 双方收到，等价中断回合）。未实机验证，验收底线=与现状行为一致。
-- **pipe**（全部非 tty 环境：CI/重定向/全部单测/stub 平台）：读=合成整行 `Key` 事件、无模式、无 `Resize`/`Hangup`、中断走信号面——device 一等实现，非降级分支。
+- **windows**：`Keys`=console mode 映射（**关 `ENABLE_PROCESSED_INPUT`**、开 VT 输入模式，`^C` 与 posix 同走字节路径在 device 归一——与现状实现一致）、`Resize` 暂缺（无 `SIGWINCH` 来源；S4 后 picker 改事件驱动，Windows 会话内缩放不自愈重排——见 `docs/layering-refactor.md` §5）、LendFull=`CONIN$` 直通+掩蔽（capture 不支持，输出直上屏）、LendStdin=null 且**不掩蔽**（`^C` 双方收到，等价中断回合）。未实机验证，验收底线=与现状行为一致。
+- **pipe**（全部非 tty 环境：CI/重定向/全部单测/stub 平台）：读=合成整行 `Key` 事件、无模式、无 `Resize`、中断走信号面——device 一等实现，非降级分支。
 
 ## 8 行为变化（S5 已落地，独立验收、独立提交）
 
