@@ -107,6 +107,45 @@ func TestUsageListsAllFlags(t *testing.T) {
 	})
 }
 
+func TestApplyModel(t *testing.T) {
+	base := config.Default().Model
+	cases := []struct{ name, in, want string }{
+		{"空串不覆盖", "", base},
+		{"纯空白不覆盖", "  \t ", base},
+		{"有值覆盖", "gpt-5", "gpt-5"},
+		{"去首尾空白", "  gpt-5  ", "gpt-5"},
+	}
+	for _, c := range cases {
+		cfg := config.Default()
+		cfg.ConfigPath = cfg.Path
+		applyModel(cfg, c.in)
+		if cfg.Model != c.want {
+			t.Errorf("%s: Model = %q, want %q", c.name, cfg.Model, c.want)
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("%s: 覆盖后应通过校验: %v", c.name, err)
+		}
+	}
+}
+
+func TestApplyModelBeatsEnv(t *testing.T) {
+	t.Setenv("TANYA_MODEL", "env-model")
+	cfg, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"))
+	if err != nil {
+		t.Fatalf("加载配置: %v", err)
+	}
+	if cfg.Model != "env-model" {
+		t.Fatalf("env 应先于默认值生效: %q", cfg.Model)
+	}
+	applyModel(cfg, "cli-model")
+	if cfg.Model != "cli-model" {
+		t.Errorf("命令行应覆盖 env: %q", cfg.Model)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("覆盖后应通过校验: %v", err)
+	}
+}
+
 func TestRootRefusalMatrix(t *testing.T) {
 	refusedByDefault := ctty.IsRoot()
 	cases := []struct {

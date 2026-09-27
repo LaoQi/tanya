@@ -223,6 +223,7 @@ const UsageHead = `用法: tanya [模式] [选项]
 const (
 	FlagConfig  = "配置文件路径（默认 ~/.config/tanya/config.yaml）"
 	FlagMode    = "会话存储模式 local/global/auto（默认 auto）"
+	FlagModel   = "本次运行使用的模型（默认取配置 model / TANYA_MODEL）"
 	FlagNoSave  = "会话只读：不写入会话文件（历史会话仍可列出与载入）"
 	FlagPlain   = "纯文本输出：无颜色/无动画/无工具块与状态行，stdout 只留答案与命令反馈（供父代理解析）"
 	FlagVerbose = "与 --plain 同用：恢复工具块与状态行的纯文本形态"
