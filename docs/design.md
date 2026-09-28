@@ -89,7 +89,7 @@ OpenAI 兼容 Chat Completions API（`/chat/completions`，SSE 流式），一�
 
 思维链按 DeepSeek 思考模式文档处理：响应侧 `delta.reasoning_content` 增量累积为单条 `ReasoningItem`（`ID` 空）随会话落盘（`reasoning_items` 字段）；请求侧 `chatWireMessages` 把 `ReasoningItems` 顺序拼接折叠为 assistant 消息顶层 `reasoning_content` 回传（带 `tools` 时官方要求历史推理链完整回传，缺失属未定义行为），wire 上不出现 `reasoning_items`，历史无思维链的轮次省略该字段。第三方端点对缺失 `reasoning_content` 的宽容度不一，四场景探测脚本见 `scripts/chat_reason_probe.py`（自建透传网关实测四种形状均 200，未执行该硬校验）。
 
-流式解析要点：`data:` 行逐条解析 JSON chunk；content 直接拼接并经回调输出；tool_calls 按 `index` 分组做增量合并（id/type/name 覆盖、arguments 拼接），`[DONE]` 结束。`stream_options.include_usage` 捕获 usage（`completion_tokens_details.reasoning_tokens` 经 `Usage.normalize()` 归一为 `Usage.ReasoningTokens`，与 responses 口径对齐）；首个 chunk 时刻记 TTFT、流结束记总耗时，存于 `Message.Stat`（`json:"-"` 不落盘）。
+流式解析要点：`data:` 行逐条解析 JSON chunk；content 直接拼接并经回调输出；tool_calls 按 `index` 分组做增量合并（id/type/name 覆盖、arguments 拼接），`[DONE]` 结束。`stream_options.include_usage` 捕获 usage（`completion_tokens_details.reasoning_tokens` 经 `Usage.normalize()` 归一为 `Usage.ReasoningTokens`，与 responses 口径对齐）；流结束记总耗时，存于 `Message.Duration`（`json:"-"` 不落盘）。**首字延迟不在 `agent` 侧记录**（2026-09-28）：它可由事件流重建，属渲染侧现算的派生量，见《状态行》与 `docs/agent-event-seams.md`。
 
 ### responses 协议（llm_responses.go `responsesStream`）
 
@@ -97,7 +97,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 - **请求构造**：`messages[0]`(system) → 顶层 `instructions`；历史 `Message` 确定性映射为 input items——user/assistant 文本 → `message` item（content 分段 `input_text`/`output_text`）、assistant `tool_calls` → `function_call` item、tool 结果 → `function_call_output` item、assistant `ReasoningItems` → `reasoning` item（content 为明文 `reasoning_text`，输出在关联的 function_call/message 之前；`Content` 为空的 reasoning item 跳过不回传）。工具定义为内部 chat 嵌套形状，此处拍平为 `{type:"function",name,description,parameters}`。`reasoning_effort` → `reasoning.effort`；设置后 `temperature` 不发送（同 chat 协议）。
 - **固定参数**：`store: false`。不携带 `include` / `encrypted_content` / reasoning `summary`（DeepSeek 均不支持）。
-- **流式解析**：只解析 `data:` 行按 JSON `type` 分发。首个有效 data 事件记 TTFT（与 chat 协议对齐，纯 tool_call 响应也有 TTFT）；`response.output_text.delta` 驱动 onDelta 并置 `hasDelta`；最终 Message 以 `response.completed`（及 `response.incomplete`）事件的 `response.output[]` 终态构建——`message` 拼接 Content（收到过 text delta 则整体跳过，未收到才从 message items 拼接 output_text 补齐）、`function_call` → ToolCalls（call_id/args 整体取用）、`reasoning` → `ReasoningItems`（`id` + 明文 `content`，取终态 `reasoning_text` 原文拼接）。`response.failed`/`error` 事件返回错误。
+- **流式解析**：只解析 `data:` 行按 JSON `type` 分发。`response.output_text.delta` 驱动 onDelta 并置 `hasDelta`；最终 Message 以 `response.completed`（及 `response.incomplete`）事件的 `response.output[]` 终态构建——`message` 拼接 Content（收到过 text delta 则整体跳过，未收到才从 message items 拼接 output_text 补齐）、`function_call` → ToolCalls（call_id/args 整体取用）、`reasoning` → `ReasoningItems`（`id` + 明文 `content`，取终态 `reasoning_text` 原文拼接）。`response.failed`/`error` 事件返回错误。
 - **usage 映射**：`input_tokens`→PromptTokens、`output_tokens`→CompletionTokens、`input_tokens_details.cached_tokens`→`CacheHit()` 既有通道、`output_tokens_details.reasoning_tokens`→`Usage.ReasoningTokens`。
 - **404 提示**：第三方端点不支持时错误文案附带切换 `api_protocol: chat` 的指引。
 
@@ -128,7 +128,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
   → 有 tool_calls：逐个 dispatch 执行 → tool 结果回填 history → 再次请求
 ```
 
-本地不设轮数上限，依赖模型终止。每轮请求发事件：`EventRequestStart`（请求前）/ `EventResponse`（响应后，含出错路径，携带 `ResponseInfo`：Duration/TTFT/Usage/ContextTokens）；事件词汇表见 `agent/event.go`，渲染侧以 `agent.EventSink` 单通道接收。思维链段边界由 **`EventReasoningEnd`** 显式上报（2026-09-27，P2）：chat 在 reasoning→content/tool_call 切换处与流结束处补发，responses 另接 `response.reasoning_text.done` / `response.reasoning_summary_text.done` / `response.output_item.done`（`item.type == "reasoning"`）；**空段不发**（`reasonOpen` 门禁），故该事件可安全用于「段已收尾」判定。`response.reasoning_summary_part.done` **刻意不接**——part 是段内边界（一个 summary 可含多个 part），收尾由 `_text.done` / `item.done` 覆盖。
+本地不设轮数上限，依赖模型终止。每轮请求发事件：`EventRequestStart`（请求前）/ `EventResponse`（响应后，含出错路径，携带 `ResponseInfo`：Duration/Usage/ContextTokens）；回合结束另有 **`EventTurnEnd`**（载荷 `TurnInfo`：Duration/Failed/Interrupted），由 `Ask` 在唯一出口发出，覆盖成功/失败/中断三条路径。事件词汇表见 `agent/event.go`；渲染侧与旁路消费者都以 `agent.EventSink` 接收，多消费者用 **`agent.Sinks(...)`** 组合（装配期固定、同步串行、顺序即因果；消费者不得阻塞、不得 panic 逃逸、不得反向调用 `agent`；无运行期订阅/退订）。**事件只装事实**：`Duration` 的起点只有 `Ask`/LLM 层知道，故属事实；TTFT/TTFC 可由事件流重建，属派生量，由渲染侧现算。新增事件必须同批带上消费者——`EventUsage` 因零消费者已删，`EventToolCall` 保留并注明是并行工具的预留，见 `docs/agent-event-seams.md`。思维链段边界由 **`EventReasoningEnd`** 显式上报（2026-09-27，P2）：chat 在 reasoning→content/tool_call 切换处与流结束处补发，responses 另接 `response.reasoning_text.done` / `response.reasoning_summary_text.done` / `response.output_item.done`（`item.type == "reasoning"`）；**空段不发**（`reasonOpen` 门禁），故该事件可安全用于「段已收尾」判定。`response.reasoning_summary_part.done` **刻意不接**——part 是段内边界（一个 summary 可含多个 part），收尾由 `_text.done` / `item.done` 覆盖。
 
 回合非正常结束（`Ask`，按"有无产出"分派，产出 = 本回合出现过完整 assistant/tool 消息）：
 
@@ -219,7 +219,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - `stop()`：`close(stopCh)` → 等 loop 退出（沿用有界 200ms）→ 当前行未收尾时补**一个换行**；未起心跳时不写任何字节（幂等，可重复调用）。重复 `start()` 先收尾上一行再开新行。
 - 回合收口：`turn.End` 调 `toolView.Stop()`——等待期被打断（无 content、无工具事件）时没有别的停止点，否则心跳会一直写到下一次请求、糊掉在途的 readline 提示符。
 - 门禁：`KindStatus` 仅 rich 档可见——plain / plain+verbose / stdout 非终端均无状态行与心跳，`ask` 单发默认档行为不变。
-- 每轮请求完成打印状态行 `  ↳ TTFT 0.8s · 3.2s · prompt 12.3k · completion 1.2k · 缓存 81.67%`（字段缺失自动省略；无 usage 时显示本地估算上下文）。
+- 每轮请求完成打印状态行 `  ↳ TTFT 0.8s · 3.2s · prompt 12.3k · completion 1.2k · 缓存 81.67%`（字段缺失自动省略；无 usage 时显示本地估算上下文）。`TTFT`/`TTFC` 由**看见完整事件流的那一层现算**（2026-09-28）：REPL 路径是 `turn`（它拦截 `EventContent`/`EventReasoning` 走 markdown 管线，`toolView` 看不到），`ask` 单发路径是 `toolView`——二者共用 `respTiming`（按 `EventKind` 推进：`EventRequestStart` 重置、首个流式事件记 TTFT、首个正文 delta 记 TTFC）。时钟可注入（`timing.now`，同 `heartbeat.now` 的先例），故字节基线仍可确定。
 - 方案、取舍与实测见 `docs/repl-status-append.md`（其中 09-15《取舍》对"思考中"的删除已被 09-16 的思考相位回补取代）。
 - **思维链显示（`show_reasoning` / `/reasoning`，2026-09-17）**：开关打开且 `KindReasoning` 过门禁（TTY + rich 档）时 `EventReasoning` 不再切思考相位——首个 delta 先 `view.Stop()` 收尾 `» 等待响应` 行，再打印上分隔 `─── 思考 ───`（`Think` 色，前后各三条横线），delta 走与正文同一 markdown 管线（`turn.reasonBuf` → `Renderer.Block` 逐块上屏）；`EventReasoningEnd`（段边界事件，2026-09-27 起由 `agent` 显式上报）/ `EventContent` / 工具起止 / `EventResponse` / `turn.End` 调 `endReasonSeg`（内含幂等的 `flushReason`）结算残留块并补下分隔 `─── 思考结束 · 3.2s ───`（时长同 `turnDuration`），正文之后再现 reasoning 则重开一段；段结束事件同时清本段留存的原文（`reasonBuf` 重建），故上一段不会被下一次开档重放。开关关闭或门禁外走原相位路径，plain / `-p --verbose` / `ask` / 非终端一律不显示（`KindReasoning` 不在其可见集）。思维链与正文共用 markdown 缓冲的 hold 看门狗（`fenceLineLimit` 2000 行 / `fenceByteLimit` 256 KB / `pendingByteLimit` 64 KB）：畸形输入（漏闭合围栏、超长单行）与超阈值的长代码块/长段落都就地降级为 `CodeBlock` / `Paragraph`（文本不丢、只丢代码块归属与格式），影响止于局部、后续 delta 立即恢复流式解析，见 `docs/render-pipeline.md` §10
 
@@ -398,7 +398,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 注意力通知按三层拆分，换行为不动触发点（`repl/notify.go`）：
 
-- **触发语义在 REPL**，只有两处：`turn.End`（对话回合结束，成功与报错都通知；`agent.InterruptError` 不通知——用户就在终端前按的）与 `turn.Handle` 的 `EventToolStart` + `e.Interactive`（`run_shell` 主动声明交互、终端即将移交）。斜杠命令回合（走 `turnSep` 旁路）、空输入、`/load`、CLI `ask` 单发都不产生通知（REPL 内的对话回合照常）。
+- **触发语义在 REPL（2026-09-28 起由事件流驱动）**：`repl/notify.go` 的 **`notifySink`** 是通知在事件流上的旁路消费者，`repl/turnloop.go` 经 `agent.Sinks(回合渲染 sink, notifySink)` 组合——**渲染在前**：`EventToolStart` 的 ack 握手保证工具块已上屏才响（与改动前的时点一致）。映射两处：`EventTurnEnd` + `!Interrupted`（对话回合结束，成功与报错都通知；中断不通知——用户就在终端前按的）与 `EventToolStart` + `e.Interactive`（`run_shell` 主动声明交互、终端即将移交）。斜杠命令回合（走 `turnSep` 旁路）、空输入、`/load`、CLI `ask` 单发都不产生通知（REPL 内的对话回合照常）。**时长口径**：通知取 `TurnInfo.Duration`（agent 回合口径）；渲染分隔线仍用 `turn` 自己的计时（含渲染收尾），两者差毫秒级，刻意保留两个口径。
 - **行为在 `Notifier`**：`repl.Notifier.Notify(Notification)`，载荷 = 原因 + 信息（`NotifyTurnDone` 带 `Duration`/`Failed`，`NotifyNeedInput` 带 `Tool`）。载荷刻意不带命令原文——通知实现要落屏就得自己清洗外部内容，不如不给。实现有三个，各自独立开关、可同时生效，经 `repl.Notifiers(...)` 做 fan-out（全 nil 时返回 nil，门禁零开销）：`BellNotifier()`（忽略全部字段，终端只有这一种可发声行为）、`OSCNotifier()`、`NewCommandNotifier()`。
 - **尽力而为是总原则**：通知只是加成——失败静默、不重试、不探测终端/桌面环境、不做 tmux 透传、不做平台特化适配，也不向用户报错。终端不认 OSC、桌面没有通知服务、外部程序不存在，都表现为"没有效果"，不是错误路径。因此新增行为不得引入探测分支，也不得因为"没生效"而返回错误或打提示行。
 - **载荷成品化**：`payloadOf` 是唯一组装点，产出 `(title, content, kind)` 三元组——`title` 固定 `tanya`、`kind` 为 `done`/`failed`/`input`（供外部程序分流）、`content` 是文案模板生成后经 `term.OneLine` 压成单行并截断（标题 40 列、内容 200 列）的成品。行为实现拿到的就是"能直接落屏/直接喂程序"的文本，不再自行清洗；两种原因也不做音高/视觉区分（BEL 无音高，连响两声在部分终端被合并）。
@@ -409,7 +409,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - **开关**：yaml `bell`、`notify_osc`（bool）、`notify_cmd`（字符串，空 = 关闭），全部默认关闭、opt-in；无 env、无 REPL 命令。`main` 的 `buildNotifier` 按开关组装，未开启时 notifier 为 nil、判定零开销。`notify_osc` 用 OSC 9（iTerm2 / WezTerm / Ghostty / Windows Terminal 系支持）单帧携带 `title: content`。
 - **已知不生效场景（都接受）**：终端不实现 OSC 9（含 Terminal.app、多数传统 xterm 系，写了就是没有效果）、tmux/screen 未做 DCS 透传故通常被吞、Windows 侧外部程序无 `HideWindow` 可能闪一下窗口、`notify_cmd` 依赖的程序不存在即静默失败。
 - **已决取舍：不监听真实输入开始**。通知时点是 `run_shell` 声明 `interactive` 的那一瞬（`EventToolStart`，`agent/agent.go` 的 `interactiveOf` 在发事件前已判定），不探测子进程真正读取 stdin 的时刻：pty 首输出钩子只在 Linux 桥接下存在、Windows 控制台直通无此旁路，会造成行为分裂；代价是 `make` 编译两分钟后才提问、`cat` 这类静默阻塞等场景会早响/虚响，接受。
-- 测试：`repl/notify_test.go` 用 fake `Notifier` 断言触发与门禁（中断 0 次、非 TTY/plain 0 次、非 interactive 工具 0 次、interactive 工具 1 次；未装配路径锁住 notifier 为 nil 且两条触发照常执行；分发层经 `Run()` 锁住「斜杠命令、空行不通知」），并覆盖载荷清洗与截断、三种 shell 的引号替换、模板校验三类错误、单飞丢弃、超时取消、fan-out 与 OSC 门禁；`ctty/notify_test.go` 断言 OSC 帧字节与无控制终端时 `Bell`/`NotifyOSC` 返回错误且不 panic。
+- 测试：`repl/notify_test.go` 用 fake `Notifier` 驱动 `notifySink` 断言映射与门禁（中断 0 次、非 TTY/plain 0 次、非 interactive 工具 0 次、interactive 工具 1 次；分发层经 `Run()` 锁住「斜杠命令、空行不通知」），`repl/turnloop_test.go` 另有真实回合经 `r.ask` 锁住「事件 → 组合 sink → 通知」这条接线，并覆盖载荷清洗与截断、三种 shell 的引号替换、模板校验三类错误、单飞丢弃、超时取消、fan-out 与 OSC 门禁；`ctty/notify_test.go` 断言 OSC 帧字节与无控制终端时 `Bell`/`NotifyOSC` 返回错误且不 panic。
 
 ### 终端输入（readline 包）
 

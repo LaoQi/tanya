@@ -53,6 +53,7 @@ type turn struct {
 	reasonStart time.Time
 	segActive   bool
 	width       int
+	timing      respTiming
 }
 
 const markdownInputLimit = 1 << 20
@@ -78,10 +79,12 @@ func (r *REPL) beginTurn(done func()) *turn {
 			rend: r.rend,
 		},
 		reasonBuf: reason,
+		timing:    respTiming{now: time.Now},
 	}
 }
 
 func (t *turn) Handle(e agent.Event) {
+	t.timing.observe(e.Kind)
 	if !t.gap {
 		t.gap = true
 		if t.f.prof.TTY {
@@ -106,11 +109,10 @@ func (t *turn) Handle(e agent.Event) {
 		t.endReasonSeg()
 		t.settleMd()
 		t.r.view.Handle(e)
-		t.notifyNeedInput(e)
 	case agent.EventResponse:
 		t.endReasonSeg()
 		t.settleMd()
-		t.r.view.Handle(e)
+		t.r.view.Response(e.Response, t.timing.ttft, t.timing.ttfc)
 	default:
 		t.r.view.Handle(e)
 	}
@@ -239,18 +241,6 @@ func (t *turn) End(err error) {
 		}
 	}
 	t.f.emit(KindDecor, turnSep(t.f.prof, t.f.sem, dur))
-	if !interrupted {
-		t.r.notify(Notification{Reason: NotifyTurnDone, Duration: dur, Failed: err != nil})
-	}
-}
-
-// notifyNeedInput 在 run_shell 主动声明 interactive（终端即将移交）时通知：
-// 不探测子进程真实读取 stdin 的时刻，静默阻塞（如 cat）的虚报接受。
-func (t *turn) notifyNeedInput(e agent.Event) {
-	if !e.Interactive {
-		return
-	}
-	t.r.notify(Notification{Reason: NotifyNeedInput, Tool: e.ToolName})
 }
 
 // mdBlocks 把整段文本按 markdown 管线解析为块（回放等一次性展示用，不复用回合缓冲）。

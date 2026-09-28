@@ -31,9 +31,8 @@ func newSettleAgent(t *testing.T) *agent.Agent {
 
 func infoWithUsage() agent.ResponseInfo {
 	return agent.ResponseInfo{
-		Duration:   1200 * time.Millisecond,
-		FirstEvent: 300 * time.Millisecond,
-		Usage:      &agent.Usage{PromptTokens: 1500, CompletionTokens: 10, TotalTokens: 1510},
+		Duration: 1200 * time.Millisecond,
+		Usage:    &agent.Usage{PromptTokens: 1500, CompletionTokens: 10, TotalTokens: 1510},
 	}
 }
 

@@ -1,7 +1,6 @@
 package repl
 
 import (
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -28,14 +27,15 @@ func ttyRich() term.Profile { return term.Profile{TTY: true, Colors: term.Level1
 
 func TestNotifyTurnDone(t *testing.T) {
 	r, n := withBellREPL(t, modeRich, ttyRich())
-	r.beginTurn(nil).End(nil)
+	sink := notifySink{r: r}
+	sink.Emit(agent.Event{Kind: agent.EventTurnEnd, Turn: agent.TurnInfo{Duration: 1500 * time.Millisecond}})
 	if len(n.got) != 1 {
 		t.Fatalf("成功回合应通知一次: %+v", n.got)
 	}
 	if got := n.got[0]; got.Kind != notifyKindDone || !strings.HasPrefix(got.Content, "回合结束 · ") {
 		t.Errorf("载荷不符: %+v", got)
 	}
-	r.beginTurn(nil).End(errors.New("boom"))
+	sink.Emit(agent.Event{Kind: agent.EventTurnEnd, Turn: agent.TurnInfo{Duration: 1500 * time.Millisecond, Failed: true}})
 	if len(n.got) != 2 || n.got[1].Kind != notifyKindFailed {
 		t.Errorf("报错回合同样通知且类别为 failed: %+v", n.got)
 	}
@@ -46,8 +46,7 @@ func TestNotifyTurnDone(t *testing.T) {
 
 func TestNotifyTurnDoneSkipsInterrupt(t *testing.T) {
 	r, n := withBellREPL(t, modeRich, ttyRich())
-	r.beginTurn(nil).End(&agent.InterruptError{})
-	r.beginTurn(nil).End(&agent.InterruptError{Kept: true})
+	notifySink{r: r}.Emit(agent.Event{Kind: agent.EventTurnEnd, Turn: agent.TurnInfo{Duration: time.Second, Interrupted: true}})
 	if len(n.got) != 0 {
 		t.Errorf("中断（用户就在终端前）不应通知: %+v", n.got)
 	}
@@ -55,9 +54,9 @@ func TestNotifyTurnDoneSkipsInterrupt(t *testing.T) {
 
 func TestNotifyNeedInput(t *testing.T) {
 	r, n := withBellREPL(t, modeRich, ttyRich())
-	turn := r.beginTurn(nil)
-	turn.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true})
-	turn.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"ls"}`})
+	sink := notifySink{r: r}
+	sink.Emit(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"sudo -S true"}`, Interactive: true})
+	sink.Emit(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"ls"}`})
 	if len(n.got) != 1 {
 		t.Fatalf("只有 interactive 工具应通知: %+v", n.got)
 	}
@@ -174,9 +173,9 @@ func TestNotifyOSCViaREPL(t *testing.T) {
 	r, _, _ := newTestREPLMode(t, newFakeTerm(), modeRich, ttyRich())
 	r.notifier = o
 	t.Cleanup(r.view.Stop)
-	r.beginTurn(nil).End(nil)
-	turn := r.beginTurn(nil)
-	turn.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", Interactive: true})
+	sink := notifySink{r: r}
+	sink.Emit(agent.Event{Kind: agent.EventTurnEnd, Turn: agent.TurnInfo{Duration: 1500 * time.Millisecond}})
+	sink.Emit(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", Interactive: true})
 	if len(*got) != 2 {
 		t.Fatalf("回合结束与等待输入各一条: %+v", *got)
 	}
@@ -190,8 +189,9 @@ func TestNotifyOSCGated(t *testing.T) {
 	r, _, _ := newTestREPLMode(t, newFakeTerm(), modePlain, ttyRich())
 	r.notifier = o
 	t.Cleanup(r.view.Stop)
-	r.beginTurn(nil).End(nil)
-	r.beginTurn(nil).Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", Interactive: true})
+	sink := notifySink{r: r}
+	sink.Emit(agent.Event{Kind: agent.EventTurnEnd, Turn: agent.TurnInfo{Duration: time.Second}})
+	sink.Emit(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", Interactive: true})
 	if len(*got) != 0 {
 		t.Errorf("plain 档不应写 OSC: %+v", *got)
 	}

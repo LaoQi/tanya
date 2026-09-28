@@ -166,7 +166,6 @@ type responsesError struct {
 func (c *Client) responsesStream(ctx context.Context, messages []Message, sink EventSink) (*Message, error) {
 	instructions, input := buildResponsesInput(messages)
 	msg := &Message{Role: "assistant"}
-	var firstEvent, firstReasoning, firstContent time.Duration
 	var usage *Usage
 	var hasDelta bool
 	start := time.Now()
@@ -192,17 +191,11 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
 			return nil
 		}
-		if firstEvent == 0 {
-			firstEvent = time.Since(start)
-		}
 		switch ev.Type {
 		case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
 			var d responsesTextDelta
 			if json.Unmarshal([]byte(data), &d) != nil || d.Delta == "" {
 				return nil
-			}
-			if firstReasoning == 0 {
-				firstReasoning = time.Since(start)
 			}
 			reasonOpen = true
 			sink.Emit(Event{Kind: EventReasoning, Text: d.Delta})
@@ -233,9 +226,6 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 				return nil
 			}
 			endReason()
-			if firstContent == 0 {
-				firstContent = time.Since(start)
-			}
 			hasDelta = true
 			msg.Content += d.Delta
 			sink.Emit(Event{Kind: EventContent, Text: d.Delta})
@@ -247,7 +237,6 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 			applyCompletedOutput(msg, &cc.Response.Output, hasDelta)
 			if cc.Response.Usage != nil {
 				usage = usageFromResponses(cc.Response.Usage)
-				sink.Emit(Event{Kind: EventUsage, Usage: usage})
 			}
 			if ev.Type == "response.completed" && cc.Response.Error != nil {
 				return fmt.Errorf(MsgRespFailed, cc.Response.Error.Message)
@@ -277,7 +266,7 @@ func (c *Client) responsesStream(ctx context.Context, messages []Message, sink E
 	}
 	endReason()
 	msg.Usage = usage
-	msg.Stat = &RequestStat{Duration: time.Since(start), FirstEvent: firstEvent, FirstReasoning: firstReasoning, FirstContent: firstContent}
+	msg.Duration = time.Since(start)
 	return msg, nil
 }
 

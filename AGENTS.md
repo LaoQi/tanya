@@ -31,7 +31,8 @@
 - 颜色一律 16 色基本 SGR 码（30-37/90-97），不用 256 色/truecolor
 - 表现层无进程级全局：profile（TTY/色档）以**值**传递——`style.Style.With(prof)` 绑定后 `Bound.Sprint`/`Frame`、`term.Passthrough(prof, s)`、`render.Sprint`/`Template.Render(prof, …)`；**不存在 `SetProfile`/`GetProfile`**；探测点只在 `main`（`ctty.Probe` + `term.DetectProfile`），`repl` 经 `WithProfile` 下传
 - 样式注入收窄在消费者侧接口：`readline` 只认 `Styler`（`Sprint(string) string`），由 `repl` 传 `style.Bound`；输入层**不依赖 `render/style`**（`render/term` 可依赖）
-- 注意力通知统一走 `repl` 通知接口：触发在 REPL（回合结束 / `interactive` 工具开始）、行为在 `Notifier`（`bell`/`notify_osc`/`notify_cmd` 三档 fan-out，外部程序走 `shell.Resolve` + `tools/shell.CommandNotifier`，载荷 `present.Notification`）、门禁为交互富档 TTY；**一律尽力而为**——失败静默、不重试、不探测环境、不做 tmux 透传，不得报错或打提示行；载荷只在 `payloadOf` 单点成品化，不得在 `toolView`/`agent` 内发声，`ask` 不参与，见 `docs/design.md`《终端通知》
+- 注意力通知统一走 `repl` 通知接口：触发由事件流驱动（`repl/notify.go` 的 `notifySink` 消费 `EventTurnEnd` / `EventToolStart{Interactive}`，经 `agent.Sinks` 与渲染 sink 并列）、行为在 `Notifier`（`bell`/`notify_osc`/`notify_cmd` 三档 fan-out，外部程序走 `shell.Resolve` + `tools/shell.CommandNotifier`，载荷 `present.Notification`）、门禁为交互富档 TTY；**一律尽力而为**——失败静默、不重试、不探测环境、不做 tmux 透传，不得报错或打提示行；载荷只在 `payloadOf` 单点成品化，不得在 `toolView`/`agent` 内发声，`ask` 不参与，见 `docs/design.md`《终端通知》
+- 事件扇出只有 `agent.Sinks` 一个机制：装配期固定、同步串行、顺序即因果；消费者不得阻塞、不得 panic 逃逸、不得反向调用 `agent`；**无运行期订阅/退订**。事件只装**事实**（`EventTurnEnd.Duration` 的起点只有 `Ask` 知道），派生量（TTFT/TTFC）由渲染侧现算；**新增事件必须同批带上消费者**，见 `docs/agent-event-seams.md`
 - markdown 表格渲染尽力而为：列宽由三行前瞻定、不封顶、超宽不截断；`Table` 是「IR 无布局」的唯一例外，见 `docs/render-pipeline.md` §10
 - 代码不添加注释，除非用户明确要求
 

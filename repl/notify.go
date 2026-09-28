@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/render/present"
 	"github.com/LaoQi/tanya/render/term"
@@ -27,6 +28,22 @@ type Notification struct {
 
 type Notifier interface {
 	Notify(present.Notification)
+}
+
+// notifySink 是通知在事件流上的旁路消费者：触发语义由事实驱动，不再由 turn 内的硬编码分支发起。
+type notifySink struct{ r *REPL }
+
+func (n notifySink) Emit(e agent.Event) {
+	switch e.Kind {
+	case agent.EventToolStart:
+		if e.Interactive {
+			n.r.notify(Notification{Reason: NotifyNeedInput, Tool: e.ToolName})
+		}
+	case agent.EventTurnEnd:
+		if !e.Turn.Interrupted {
+			n.r.notify(Notification{Reason: NotifyTurnDone, Duration: e.Turn.Duration, Failed: e.Turn.Failed})
+		}
+	}
 }
 
 const (

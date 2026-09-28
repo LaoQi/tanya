@@ -5,6 +5,7 @@ import (
 	"github.com/LaoQi/tanya/render/term"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/tools/shell"
@@ -95,11 +96,15 @@ func TestVisSetMatrix(t *testing.T) {
 
 func feedAskPath(st *streams, prof term.Profile) *toolView {
 	view := NewToolView(st, prof, testSem(), func() int { return 80 }, 20, testViews())
+	clock := time.Now()
+	view.timing.now = func() time.Time { return clock }
 	view.Handle(agent.Event{Kind: agent.EventRequestStart})
+	clock = clock.Add(300 * time.Millisecond)
+	view.Handle(agent.Event{Kind: agent.EventReasoning, Text: "想"})
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
 		Result: agent.ToolResult{Meta: &shell.Result{Command: "echo hi", Stdout: []shell.Chunk{{Data: "hi\n"}}, ExitCode: 0}}})
-	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{FirstEvent: 300e6, Duration: 1200e6}})
+	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{Duration: 1200e6}})
 	view.Handle(agent.Event{Kind: agent.EventContent, Text: "答案"})
 	return view
 }
@@ -246,10 +251,15 @@ func TestRichStreamsByteIdentical(t *testing.T) {
 	var out syncBuf
 	st := NewStreams(&out, &syncBuf{}, modeRich)
 	view := NewToolView(st, nonTTY, testSem(), func() int { return 80 }, 20, testViews())
+	clock := time.Now()
+	view.timing.now = func() time.Time { return clock }
+	view.Handle(agent.Event{Kind: agent.EventRequestStart})
+	clock = clock.Add(300 * time.Millisecond)
+	view.Handle(agent.Event{Kind: agent.EventReasoning, Text: "想"})
 	view.Handle(agent.Event{Kind: agent.EventToolStart, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`})
 	view.Handle(agent.Event{Kind: agent.EventToolEnd, ToolName: "run_shell", ToolArgs: `{"command":"echo hi"}`,
 		Result: agent.ToolResult{Meta: &shell.Result{Command: "echo hi", Stdout: []shell.Chunk{{Data: "hi\n"}}, ExitCode: 0}}})
-	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{FirstEvent: 300e6, Duration: 1200e6}})
+	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{Duration: 1200e6}})
 	view.Handle(agent.Event{Kind: agent.EventContent, Text: "答案\n"})
 	want := "\n▸ run_shell echo hi\n  hi\n  ↳ exit 0 · 0ms · 1 行\n  ↳ TTFT 300ms · 1.2s\n\n答案\n"
 	if got := out.String(); got != want {

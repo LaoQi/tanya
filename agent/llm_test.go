@@ -318,25 +318,15 @@ func TestChatStreamReasoningEvents(t *testing.T) {
 	}
 }
 
-func TestChatStreamTimingDimensions(t *testing.T) {
+func TestChatStreamRecordsDuration(t *testing.T) {
 	m := newMockLLM(t, mockStep{reasoning: "想", content: "答"})
 	c := NewClient(m.config(), nil)
 	msg, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := msg.Stat
-	if st == nil {
-		t.Fatal("应记录 Stat")
-	}
-	if st.FirstEvent <= 0 {
-		t.Errorf("FirstEvent 应 >0: %v", st.FirstEvent)
-	}
-	if st.FirstReasoning <= 0 {
-		t.Errorf("FirstReasoning 应 >0: %v", st.FirstReasoning)
-	}
-	if st.FirstContent < st.FirstReasoning {
-		t.Errorf("FirstContent 不应早于 FirstReasoning: %v < %v", st.FirstContent, st.FirstReasoning)
+	if msg.Duration <= 0 {
+		t.Errorf("应记录请求耗时: %v", msg.Duration)
 	}
 }
 
