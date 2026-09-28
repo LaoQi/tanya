@@ -5,7 +5,7 @@
 >
 > **文件名对照（2026-09-28 补）**：本文提及的 `readline/terminal_posix.go`→`device_posix.go`、`terminal_windows.go`→`device_windows.go`、`terminal_io.go`→`device_io.go`、`terminal_stub.go`→`device_stub.go`、`bridge_linux.go`→`lease_linux.go`、`secure.go`/`secure_stub.go` 整体删除（自愈收敛为 `Console.Sane()` + `device_posix.go` 的 `saneTermios`）、`NewTerminal() (Terminal, bool)`→`NewConsole()`；`agent/tty_bridge.go`→`tools/shell/bridge.go`、`agent/shell*.go`→`tools/shell/{shell,tool,platform*}.go`。本文未改动的历史段落按当时文件名阅读。
 >
-> **更正（2026-09-27，控制台层 S5）**：§8.6 关于「普通命令继承控制台 stdin / 前台组语义」的段落已作废——前台组概念整体退出设计，普通命令 stdin = 空设备（`/dev/null`），`interactive` 走 `Console.LendFull`（Linux pty 泵 / Windows `CONIN$` 直通）、借不出即报错；Windows 交互掩蔽（`IgnoreCtrlEvents`）语义不变（借出期子进程独占 `^C`）。现行口径见 `docs/terminal-console.md`。（`ctty` 探测原语 + `Facts`；`main` 单点探测，渲染判定改为 stdout、输入判定保留 stdin）；阶段 B（Windows 输入后端）与 C（Windows 交互命令）已实施，Windows 侧仅部分实机验证（未全量覆盖，暂不跟踪）。本文承载支持范围约定、判定口径与分阶段计划。
+> **更正（2026-09-27，控制台层 S5）**：§8.6 关于「普通命令继承控制台 stdin / 前台组语义」的段落已作废——前台组概念整体退出设计，普通命令 stdin = 空设备（`/dev/null`），`interactive` 走 `Console.LendFull`（Linux pty 泵 / Windows `CONIN$` 直通）、借不出即报错；Windows 交互掩蔽（`IgnoreCtrlEvents`）语义不变（借出期子进程独占 `^C`）。现行口径见 `docs/terminal-console.md`。（`ctty` 探测原语 + `Facts`；`main` 单点探测，渲染判定改为 stdout、输入判定保留 stdin）；阶段 B（Windows 输入后端）与 C（Windows 交互命令）已实施，Windows 侧仅部分实机验证（未全量覆盖，暂不跟踪）。本文承载支持范围约定、判定口径与分阶段计划。阶段表 **B3（编辑器输出切控制终端）于 2026-09-28 裁定不做**，`#2` 盲打与提示符污染保持为已知取舍（§4/§7 T8）。
 
 ## 1. 问题
 
@@ -62,7 +62,7 @@ env 段的 TTY 行保持编译期判据（`ctty.Supported`）：该行文案描�
 | 4 | 非 tty | 非 tty | CI、`cat x \| tanya > y` | 全降级 | 全降级 |
 | 5 | tty | tty（stderr 重定向） | `tanya 2> err.log` | 不受影响 | 不受影响 |
 
-#2 的行编辑是已知取舍：`Editor` 的提示符与重绘写 stdout，stdout 非终端时用户盲打、提示符进文件。彻底解法是把编辑器输出切到控制终端（posix `/dev/tty`、Windows `CONOUT$`），与阶段 B 同批做，本轮不做。
+#2 的行编辑是已知取舍：`Editor` 的提示符与重绘写 stdout，stdout 非终端时用户盲打、提示符进文件。彻底解法是把编辑器输出切到控制终端（posix `/dev/tty`、Windows `CONOUT$`）——**2026-09-28 裁定不做（撤销原 B3）**，理由见 §7 T8。
 
 ## 5. 结构与落点
 
@@ -94,7 +94,7 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 | B0 | 抽平台无关的按键状态机 `keySource`（`readline/device_io.go`，当时名 `terminal_io.go`）：分片只提供 `readChunk` 与可选 `hungUp` | 已实施 |
 | B1 | Windows 输入后端（`readline/device_windows.go`，当时名 `terminal_windows.go`）：`Raw` 开 `ENABLE_VIRTUAL_TERMINAL_INPUT` 并清 `ECHO/LINE/PROCESSED`、`readChunk` 用 `GetNumberOfConsoleInputEvents` 轮询 5ms + 1s 超时、`Size` 走 `ctty.Size`、`ctty` 加 `ConsoleMode`/`SetConsoleMode`；仅 VT 路径（范围排除 conhost 与 1809 之前，无需 `ReadConsoleInput` 回退）。ghost、补全菜单、历史随 raw 一并生效 | 已实施（部分实机验证，未全量覆盖） |
 | B2 | Windows 交互命令：`interactive: true` = 控制台继承直通——`ctty.Open` 返回 `CONIN$` 作子进程 stdin、运行期 `IgnoreCtrlEvents` 掩蔽本进程 ^C、interactive 时去除 PowerShell `-NonInteractive`；不做 ConPTY 桥接 | 已实施（部分实机验证，未全量覆盖） |
-| B3 | 编辑器输出切控制终端（解决 #2 盲打与提示符污染） | 待做 |
+| B3 | 编辑器输出切控制终端（解决 #2 盲打与提示符污染） | **不做**（2026-09-28 裁定，见 §7 T8） |
 | B4 | Windows 编码链路：`ctty` 代码页原语（LazyDLL 补 7 个 proc）+ `main` 启动 `EnsureUTF8` 切 65001、退出/紧急路径复原；run_shell 捕获侧 `utf8.Valid` 直通、非法时按 `ctty.FallbackCP()` 兜底转码（`shellPlatform.DecodeOutput`，posix 恒等） | 已实施（部分实机验证，未全量覆盖） |
 
 ## 7. 决策记录
@@ -106,8 +106,9 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 | T3 | `TERM=dumb` 只留颜色判据 | 拆开后各能力各判，不再有跨能力总开关 |
 | T4 | 引入 `x/sys/windows` | 同模块另一包，`SetConsoleMode`/`GetConsoleScreenBufferInfo` 现成封装 |
 | T5 | 不做 conhost/老系统适配分支 | 范围外；阶段 B 因此只写 VT 输入路径 |
-| T6 | `#2` 暂不修行编辑盲打（阶段 D） | 本轮只拉直降级链路；彻底解法与输入后端同批做更省 |
+| T6 | `#2` 暂不修行编辑盲打（阶段 D） | 本轮只拉直降级链路；彻底解法与输入后端同批做更省（后经 T8 终局裁定不做） |
 | T7 | env 段 TTY 行保持 `ctty.Supported` | 该行是 `/dev/tty` 平台文案，不是探测结果 |
+| T8 | **撤销 B3**（编辑器输出切控制终端），`#2` 盲打与提示符污染保持为已知取舍 | ①触发场景窄：仅组合矩阵 #2（stdin 是终端而 stdout 被重定向，如 `tanya > log`），此时显示侧已按 stdout 非终端降级为纯文本，把交互会话输出重定向进文件本属异常用法；②改造面不小：需给编辑器一条独立于 stdout 的控制终端写通道——`ctty` 现只有 `writeTTY(string)` 单向原语（消费者为 `Bell`/`NotifyOSC`），无 `io.Writer`/句柄出口，posix 要开 `/dev/tty`、Windows 要开 `CONOUT$`，还需处理无控制终端时的回落与生命周期；③无法验收：Windows 侧在本机（Linux）无从实机验证，属盲改。见 §4、§6 |
 
 ## 8. Windows 输入后端要点（B1）
 
@@ -143,7 +144,7 @@ main.go                    唯一探测点：ctty.Probe() → term.DetectProfile
 |---|---|---|---|---|
 | A 全 tty | `printf 'exit\n' \| script -qec './tanya' /dev/null` | 10 | 2 | 全功能（颜色 + 行编辑重绘）|
 | B stdin 管道 + stdout tty | `script -qec 'printf "exit\n" \| ./tanya' /dev/null` | 10 | 0 | 着色恢复（新行为），无行编辑故无光标序列 |
-| C stdin tty + stdout 文件 | `printf 'exit\n' \| script -qec './tanya > body' /dev/null` | 0 | 2 | 颜色已关；两处 CSI 为行编辑重绘（阶段 D 缺口）|
+| C stdin tty + stdout 文件 | `printf 'exit\n' \| script -qec './tanya > body' /dev/null` | 0 | 2 | 颜色已关；两处 CSI 为行编辑重绘（B3 已裁定不做，见 §7 T8）|
 | D 全非 tty | `printf 'exit\n' \| ./tanya > out` | 0 | 0 | 全降级（与拆分前一致）|
 
 ## 10. 测试与验收
