@@ -110,6 +110,16 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - `/models` 列表（GET `/models`）与协议无关，按 id 排序返回，供 `/model` 命令与补全
 - HTTP/SSE 公共骨架（`llm_http.go`）：`endpoint`/`newRequest`/`do`/`streamSSE`/`scanSSE` 为两协议共用——POST + 四 header、状态码非 200 时读 4096 字节 body 包成类型化 `httpError`（`Error()` 即 `MsgAPIStatus` 格式）、`data:` 前缀与 `[DONE]` 终止、scanner 错误包 `MsgReadStream`。协议差异只剩 URL 路径、请求体结构、事件分派与 404 hint（responses 独有，在 `responsesStream` 里以 `errors.As` 判定后转换）
 
+### 出站 UA（自报家门，2026-09-28）
+
+默认 `User-Agent` = `tanya/<版本> (+https://github.com/LaoQi/tanya)`。格式源唯一在 `agent.UserAgent(version)`（两个常量 `UserAgentProduct`=`tanya` / `UserAgentURL`=仓库地址 + `fmt.Sprintf("%s/%s (+%s)", …)`，**无 `DefaultUserAgent` 常量**，避免第二处「默认」漂移）；`<版本>` 由 `main` 经 `config.Version` 注入，与 `repl.Version` / `-v` 同源（即 `Makefile`/`install.sh` 的 `git describe --tags --always --dirty`；未注入即 `dev`，仓库无 tag 时是提交短哈希，如 `fe930f1-dirty`）。发送点唯一：`llm_http.go` 的 `newRequest` 对每个出站请求（含 `GET /models`）写同一个头。`user_agent` / `TANYA_USER_AGENT` 显式设置后原样发送，不再套该格式。
+
+- **格式依据 RFC 9110 §10.1.5（`User-Agent`）**：`User-Agent = product *( RWS ( product / comment ) )`、`product = token ["/" product-version]`，注释按 §5.6.5 用括号包裹；该节同时规定「除非被显式配置为不发，UA SHOULD 出现在每个请求上」。`tanya/<版本> (+<仓库 URL>)` 即「一个 product + 一个注释」的最小合规写法（`+URL` 是注释里标识产品的惯用约定，作用是自报家门可溯源）。
+- **参考实现：DeepSeek Harness（dsh，`deepseek-ai/deepseek-harness`）**：`packages/llm/llm/src/attribution.ts` 的 `userAgent(identity)` 返回 `${product}/${version} (+${url})`，`attributionHeaders()` 把同一份 identity 分发给全部 provider 适配器，默认 identity 为 `{product: "deepseek-harness", version: <读 packages/llm/llm/package.json>, url: <仓库地址>}`。其设计文档 `.agents/notes/implemented/architecture/2026-06-21-mandatory-app-attribution-headers.md` 的四条裁定是本条的参照：① **只放公开产品事实**（产品名、版本、仓库 URL），禁 secret / 本地路径 / session id / prompt 文本 / 用户标识，且任何 per-request 因素（模型、提示词、会话、cwd、机器身份）不得影响这些字段；② **版本不手抄**——dsh 从包 manifest 读；Go 无 manifest，等价物即 `-ldflags -X` 注入 `config.Version`，`agent` 因此仍不感知版本、只提供格式构造器；③ **不把 provider 私有头当通用约定**——它显式拒绝实现 OpenRouter 的 App Attribution（`HTTP-Referer` / `X-OpenRouter-Title` / `X-Title` / `X-OpenRouter-Categories`），理由是那是 OpenRouter 的产品面契约、不是 IETF 或 OpenAI 兼容层标准，且会被直连端点、测试服务器与代理长期记录；④ `From`（RFC 9110 §10.1.2，操作员邮箱）可留待将来显式配置，但不得凭空编造。
+- **与 dsh 的差异**：dsh 的 identity 强制且不可关闭（白标只能经函数参数覆盖），tanya 保留 `user_agent` / `TANYA_USER_AGENT` 覆盖口——`agent` 作库用时调用方本就要自填 `agent.Config.UserAgent`（`Validate()` 要求非空），把默认值锁死只会多一层约束。
+- **已观察的其它形态（仅对照，未采纳）**：`pi/0.85.0 (linux; node/v22.14.0; x64)`（product/version + 括号内平台与运行时，即 tanya 2026-09-28 前的伪装值：合规，但注释里放环境信息对服务端诊断价值有限、且暗示默认值随宿主变化）；Anthropic JS SDK 的 `Anthropic/JS <sdk 版本>`（Stainless 生成物按 `constructor.name + "/JS " + version` 构造，另配 `x-stainless-*` 旁路头——SDK 级身份，标识库而非应用）；opencode 不设产品 UA，身份只走 `x-opencode-project` / `-session` / `-ticket` 侧头。
+- **不做的**：不伪造他方身份（伪装口径 2026-09-28 取消）；默认值不带平台/运行时动态段（必须编译期静态：`config.example.yaml` 编译期嵌入且与 `config.Default()` 有比对测试，`agent` 零依赖不读运行时环境）；不发 `From`；不按 provider 特化（无 endpoint → UA 的映射，直连与网关同一份身份）。
+
 ## Agent Loop
 
 ```
@@ -448,7 +458,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `colors` | `auto` | 终端配色 auto（跟随终端能力与 `NO_COLOR`）/ on（强制开色）/ off（强制纯文本） |
 | `theme` | `nord` | 内置配色主题（语义色/提示符/markdown 标题与代码整体切换）：default/minimal/solar/vivid/nord/gruv/dusk，非法值启动报错 |
 | `palette` | 空 | 语义色覆盖（info/warn/ok/error/dim/accent/think/run → 色名），叠加在当前主题之上（切换主题后自动重放） |
-| `user_agent` | `tanya/<版本> (+https://github.com/LaoQi/tanya)` | 出站请求 UA（dsh 式自报家门；`<版本>` 由 `main` 经 `config.Version` 注入，与 `-v` 同源） |
+| `user_agent` | `tanya/<版本> (+https://github.com/LaoQi/tanya)` | 出站请求 UA（dsh 式自报家门；`<版本>` 由 `main` 经 `config.Version` 注入，与 `-v` 同源；依据与参考实现见《LLM 接入》→《出站 UA》） |
 | `data_dir` | `~/.local/share/tanya` | 数据根：global 模式的 workspace 目录为其下 `workspaces/<workspace-id>/`（其内 `sessions/` 与 `archive/`），支持 `~` 展开 |
 | `session_mode` | `auto` | 会话存储模式 auto/local/global |
 | `tool_output_lines` | 20 | 工具输出最多显示行数（1-1000） |
