@@ -44,7 +44,7 @@ func newAskAgent(t *testing.T, baseURL string, tools ...agent.Tool) *agent.Agent
 		BaseURL:          baseURL,
 		APIKey:           "test-key",
 		Model:            "test-model",
-		UserAgent:        agent.DefaultUserAgent,
+		UserAgent:        agent.UserAgent("dev"),
 		ConfigPath:       "/tmp/tanya-test-config.yaml",
 		ApiProtocol:      "chat",
 		DataDir:          t.TempDir(),

@@ -28,7 +28,14 @@ var ApiProtocols = []string{"chat", "responses"}
 
 var SessionModes = []string{"auto", "local", "global"}
 
-const DefaultUserAgent = "pi/0.85.0 (linux; node/v22.14.0; x64)"
+const (
+	UserAgentProduct = "tanya"
+	UserAgentURL     = "https://github.com/LaoQi/tanya"
+)
+
+func UserAgent(version string) string {
+	return fmt.Sprintf("%s/%s (+%s)", UserAgentProduct, version, UserAgentURL)
+}
 
 func NormalizeEffort(v string) string {
 	v = strings.ToLower(strings.TrimSpace(v))

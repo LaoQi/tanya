@@ -49,7 +49,6 @@ func TestConfigExampleMatchesDefaults(t *testing.T) {
 		{"api_key", got.APIKey, want.APIKey},
 		{"model", got.Model, want.Model},
 		{"temperature", strconv.FormatFloat(got.Temperature, 'g', -1, 64), strconv.FormatFloat(want.Temperature, 'g', -1, 64)},
-		{"user_agent", got.UserAgent, want.UserAgent},
 		{"data_dir", expandTilde(got.DataDir), want.DataDir},
 		{"session_mode", got.SessionMode, want.SessionMode},
 		{"tool_output_lines", strconv.Itoa(got.ToolOutputLines), strconv.Itoa(want.ToolOutputLines)},

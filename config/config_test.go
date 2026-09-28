@@ -20,7 +20,7 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Temperature != 0.7 {
 		t.Errorf("默认数值异常: %+v", cfg)
 	}
-	if cfg.UserAgent != agent.DefaultUserAgent || !strings.HasPrefix(cfg.UserAgent, "pi/") {
+	if cfg.UserAgent != agent.UserAgent(Version) || !strings.HasPrefix(cfg.UserAgent, "tanya/") || !strings.Contains(cfg.UserAgent, "(+"+agent.UserAgentURL+")") {
 		t.Errorf("默认 UA 异常: %q", cfg.UserAgent)
 	}
 }
@@ -399,5 +399,19 @@ func TestLoadConfigNotify(t *testing.T) {
 	}
 	if cfg := Default(); cfg.NotifyOSC || cfg.NotifyCmd != "" {
 		t.Errorf("通知默认应为关闭: osc=%v cmd=%q", cfg.NotifyOSC, cfg.NotifyCmd)
+	}
+}
+
+func TestDefaultUserAgentFollowsVersion(t *testing.T) {
+	old := Version
+	defer func() { Version = old }()
+	Version = "v9.9.9"
+	cfg := Default()
+	want := agent.UserAgent("v9.9.9")
+	if cfg.UserAgent != want {
+		t.Errorf("默认 UA 未跟随 Version: %q != %q", cfg.UserAgent, want)
+	}
+	if cfg.UserAgent == agent.UserAgent(old) {
+		t.Errorf("默认 UA 仍为旧版本值: %q", cfg.UserAgent)
 	}
 }

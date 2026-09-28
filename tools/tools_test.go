@@ -66,7 +66,7 @@ func testAgentConfig(t *testing.T) *agent.Config {
 		APIKey:           "test-key",
 		Model:            "test-model",
 		ApiProtocol:      "responses",
-		UserAgent:        agent.DefaultUserAgent,
+		UserAgent:        agent.UserAgent("dev"),
 		DataDir:          dir,
 		SessionMode:      "global",
 		AutoArchive:      true,

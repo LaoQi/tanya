@@ -422,6 +422,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 - **`agent.Config`（13 项，核心）**：`base_url` / `api_key` / `model` / `temperature` / `reasoning_effort` / `api_protocol` / `user_agent` / `data_dir` / `session_mode` / `auto_archive` / `auto_archive_threshold` / `auto_archive_keep` + `config_path`（非 yaml，见下）。**`agent` 不提供任何加载机制**——无 `LoadConfig`/`DefaultConfig`，不读 yaml、不读 env，**依赖仅标准库**（`go list -deps ./agent` 不含任何 tanya 包）。`agent.Config` 保留 yaml tag，供 `config` 包 inline 解析。
 - **`config/Config`（完整 CLI 配置）**：顶层包 `config`，`config.Config = agent.Config(yaml:",inline") + UI(yaml:",inline") + Shell + Path`。`UI` 段是终端表现项：`show_reasoning` / `bell` / `notify_osc` / `notify_cmd` / `colors` / `theme` / `palette` / `tool_output_lines`——agent 包内一次都不读，只由 `main` 分派给 `repl`。`shell`（shell 名字或绝对路径，env `TANYA_SHELL` 覆盖）是**工具侧**配置：随 `run_shell` 外置从 `agent.Config` 移到 `config.Config` 顶层字段，只有 `main` 读它并交给 `tools.Standard`。`config.Load` / `config.Default` 是唯一的加载入口。
+- **`config.Version`**：构建期版本号（`main` 经 `-ldflags -X` 注入，与 `repl.Version`/`-v` 同源），唯一用途是构造 `user_agent` 的默认值（`config.Default()` 与 `config.Load` 的空值兜底都经 `agent.UserAgent(config.Version)`）；未注入即 `dev`。`agent` 仍不感知版本，只提供格式构造器。
 - **`config_path` 传递**：`agent.Config.ConfigPath` 是结构体字段（不是 Option、不是 loader）。`config.Load` 把生效路径写入；`agent_custom` 的 `config_path` 键读它回报（空则 `(未设置)`）。库使用方自行填入该字段，即得到同一份回报能力。
 - **校验**：`Config.Validate()` 对核心项做自洽校验（`base_url`/`model`/`user_agent`/`data_dir`/`config_path` 非空、`api_protocol`/`session_mode` 取值合法、归档阈值与保留数在界内），`agent.New` 入口即调用，缺失/非法直接返回错误；`nil` 配置返回 `MsgNilConfig`（此前会 panic）。**`api_key` 是唯一豁免**：允许空、失败点延迟到首次请求（`MsgAPIKey`），保留 REPL 可启动性。默认值填充与 yaml/env 加载归 `config.Load`——故文件缺失但无 env 时，有默认值的项（`base_url`/`model`/`data_dir`/`user_agent` 等）由 `config.Default()` 兜住，仍能过校验。
 - **不变式**：yaml 键名（含 `shell`）、`TANYA_*` env 名（含 `TANYA_SHELL`）、`config.example.yaml` 全文、`tanya config` 输出**全部不改**，旧配置零迁移；`agent` 侧 `LoadConfig`/`DefaultConfig`/`ToolOutputLines()` 属删除的导出 API（仓外无使用者）。
@@ -447,7 +448,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `colors` | `auto` | 终端配色 auto（跟随终端能力与 `NO_COLOR`）/ on（强制开色）/ off（强制纯文本） |
 | `theme` | `nord` | 内置配色主题（语义色/提示符/markdown 标题与代码整体切换）：default/minimal/solar/vivid/nord/gruv/dusk，非法值启动报错 |
 | `palette` | 空 | 语义色覆盖（info/warn/ok/error/dim/accent/think/run → 色名），叠加在当前主题之上（切换主题后自动重放） |
-| `user_agent` | `pi/0.85.0 (...)` | 出站 UA 伪装 |
+| `user_agent` | `tanya/<版本> (+https://github.com/LaoQi/tanya)` | 出站请求 UA（dsh 式自报家门；`<版本>` 由 `main` 经 `config.Version` 注入，与 `-v` 同源） |
 | `data_dir` | `~/.local/share/tanya` | 数据根：global 模式的 workspace 目录为其下 `workspaces/<workspace-id>/`（其内 `sessions/` 与 `archive/`），支持 `~` 展开 |
 | `session_mode` | `auto` | 会话存储模式 auto/local/global |
 | `tool_output_lines` | 20 | 工具输出最多显示行数（1-1000） |

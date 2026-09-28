@@ -26,7 +26,7 @@
 - REPL 输入分发（`repl/dispatch.go`）：`/` 白名单斜杠命令、`exit`/`quit` 内建退出、`:`/`：` 显式对话前缀；进程 cwd 恒为启动目录（不 `os.Chdir`），`run_shell` 默认在当前工作区执行、可用 `cwd` 指定单次目录；`/switch <dir>` 即放弃当前会话、按新目录重建，失败或目标非法时原工作区与会话不动；注入工具**不重建**，默认目录由 `tools.Options.Workspace` 活取
 - `api_protocol` 双通道（yaml/env，默认 `responses`，非法值启动报错）：`responses` 走 `/responses`（reasoning 明文捕获/回传、固定 `store: false`），`chat` 走 `/chat/completions`（思维链走 `reasoning_content`），见 `docs/design.md`《LLM 接入》
 - 思考等级只用标准字段 `reasoning_effort`（minimal/low/medium/high/max），不用厂商私有参数；设置后两协议均不发 `temperature`
-- 出站 UA 伪装（避免风控）：默认 `pi/0.85.0 (linux; node/v22.14.0; x64)`，`user_agent` / `TANYA_USER_AGENT` 可配
+- 出站 UA：默认 `tanya/<版本> (+https://github.com/LaoQi/tanya)`（不做伪装；格式源 `agent.UserAgent`，`<版本>` 由 `main` 经 `config.Version` 注入、与 `-v` 同源，未注入即 `dev`），`user_agent` / `TANYA_USER_AGENT` 可配（显式设置后原样发送、不再走默认格式）
 - 输出侧动态文本（模型输出、用户输入、工具参数、服务端数据、错误信息）落屏前一律清洗控制序列：多行走 `output.emitText`、单行走 `term.OneLine`、错误行走 `errLine`；`emit` 只承载自生成样式文本、不做 emit 级全局 Strip，见 `docs/design.md`《输出流与 Kind》《斜杠命令》
 - 颜色一律 16 色基本 SGR 码（30-37/90-97），不用 256 色/truecolor
 - 表现层无进程级全局：profile（TTY/色档）以**值**传递——`style.Style.With(prof)` 绑定后 `Bound.Sprint`/`Frame`、`term.Passthrough(prof, s)`、`render.Sprint`/`Template.Render(prof, …)`；**不存在 `SetProfile`/`GetProfile`**；探测点只在 `main`（`ctty.Probe` + `term.DetectProfile`），`repl` 经 `WithProfile` 下传
