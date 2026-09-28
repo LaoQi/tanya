@@ -17,7 +17,7 @@ func newSessTestAgent(t *testing.T, dir string, opts ...agent.Option) *agent.Age
 	cfg := &agent.Config{
 		BaseURL:     "http://127.0.0.1:1",
 		Model:       "test-model",
-		UserAgent:   agent.DefaultUserAgent,
+		UserAgent:   agent.UserAgent("dev"),
 		ConfigPath:  "/tmp/tanya-test-config.yaml",
 		ApiProtocol: "chat",
 		DataDir:     dir,

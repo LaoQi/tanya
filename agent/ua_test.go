@@ -33,7 +33,18 @@ func TestUserAgentHeader(t *testing.T) {
 	if _, err := c.ListModels(); err != nil {
 		t.Fatal(err)
 	}
-	if ua != DefaultUserAgent || modelUA != DefaultUserAgent {
+	if ua != cfg.UserAgent || modelUA != cfg.UserAgent {
 		t.Errorf("UA 头异常: chat=%q models=%q", ua, modelUA)
+	}
+}
+
+func TestUserAgentFormat(t *testing.T) {
+	got := UserAgent("v1.2.3")
+	want := "tanya/v1.2.3 (+https://github.com/LaoQi/tanya)"
+	if got != want {
+		t.Errorf("UA 格式异常: %q != %q", got, want)
+	}
+	if UserAgent("") != "tanya/ (+https://github.com/LaoQi/tanya)" {
+		t.Errorf("空版本应原样留空: %q", UserAgent(""))
 	}
 }

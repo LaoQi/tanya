@@ -7,7 +7,7 @@ func defaultConfig() *Config {
 		Temperature:      0.7,
 		ApiProtocol:      "responses",
 		SessionMode:      "auto",
-		UserAgent:        DefaultUserAgent,
+		UserAgent:        UserAgent("dev"),
 		DataDir:          "/tmp/tanya-test-data",
 		ConfigPath:       "/tmp/tanya-test-config.yaml",
 		AutoArchive:      true,

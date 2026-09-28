@@ -30,6 +30,8 @@ type Config struct {
 	Path         string `yaml:"-"`
 }
 
+var Version = "dev"
+
 const (
 	DefaultToolOutputLines  = 20
 	DefaultTheme            = "nord"
@@ -56,7 +58,7 @@ func Default() *Config {
 			Temperature:      0.7,
 			ApiProtocol:      "responses",
 			SessionMode:      DefaultSessionMode,
-			UserAgent:        agent.DefaultUserAgent,
+			UserAgent:        agent.UserAgent(Version),
 			DataDir:          defaultDataDir(),
 			AutoArchive:      true,
 			ArchiveThreshold: agent.DefaultArchiveThreshold,
@@ -133,7 +135,7 @@ func Load(path string) (*Config, error) {
 		cfg.ToolOutputLines = DefaultToolOutputLines
 	}
 	if cfg.UserAgent == "" {
-		cfg.UserAgent = agent.DefaultUserAgent
+		cfg.UserAgent = agent.UserAgent(Version)
 	}
 	cfg.NotifyCmd = strings.TrimSpace(cfg.NotifyCmd)
 	cfg.ReasoningEffort = agent.NormalizeEffort(cfg.ReasoningEffort)

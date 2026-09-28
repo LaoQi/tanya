@@ -108,6 +108,7 @@ func main() {
 
 	repl.Version = version
 	repl.BuildTime = buildTime
+	config.Version = version
 
 	cfg, err := config.Load(*f.configPath)
 	if err != nil {
