@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAskSingleTurn(t *testing.T) {
@@ -142,9 +144,6 @@ func TestAskRequestCallbacks(t *testing.T) {
 		if info.Duration <= 0 {
 			t.Errorf("infos[%d] Duration 应 >0: %v", i, info.Duration)
 		}
-		if info.FirstEvent <= 0 {
-			t.Errorf("infos[%d] FirstEvent 应 >0: %v", i, info.FirstEvent)
-		}
 	}
 	if infos[0].Usage != nil {
 		t.Errorf("首轮无 usage，应本地估算: %+v", infos[0].Usage)
@@ -253,11 +252,8 @@ func TestAskReasoningPhaseEvents(t *testing.T) {
 	if order[len(order)-1] != EventContent {
 		t.Errorf("末尾应为正文事件: %v", order)
 	}
-	if info.FirstReasoning <= 0 {
-		t.Errorf("FirstReasoning 应 >0: %v", info.FirstReasoning)
-	}
-	if info.FirstContent < info.FirstReasoning {
-		t.Errorf("FirstContent 不应早于 FirstReasoning: %v < %v", info.FirstContent, info.FirstReasoning)
+	if info.Duration <= 0 {
+		t.Errorf("Duration 应 >0: %v", info.Duration)
 	}
 }
 
@@ -385,5 +381,71 @@ func TestAskChatReplaysReasoningContent(t *testing.T) {
 	}
 	if len(second[2].ReasoningItems) != 0 {
 		t.Errorf("wire 上不应出现 reasoning_items: %+v", second[2])
+	}
+}
+
+func TestAskEmitsTurnEndOnce(t *testing.T) {
+	m := newMockLLM(t,
+		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "run_shell", args: `{"command":"echo turn-end"}`}}},
+		mockStep{content: "完成"},
+	)
+	a := newAgent(t, m)
+	var ends []TurnInfo
+	var order []EventKind
+	sink := EventSink(func(e Event) {
+		order = append(order, e.Kind)
+		if e.Kind == EventTurnEnd {
+			ends = append(ends, e.Turn)
+		}
+	})
+	if err := a.Ask(context.Background(), "跑", sink); err != nil {
+		t.Fatal(err)
+	}
+	if len(ends) != 1 {
+		t.Fatalf("含工具调用的回合（两次请求）应恰好一次回合结束事件: %d", len(ends))
+	}
+	if ends[0].Duration <= 0 || ends[0].Failed || ends[0].Interrupted {
+		t.Errorf("成功回合的结算异常: %+v", ends[0])
+	}
+	if order[len(order)-1] != EventTurnEnd {
+		t.Errorf("回合结束事件应是最后一个: %v", order)
+	}
+}
+
+func TestAskTurnEndFlagsOnFailureAndInterrupt(t *testing.T) {
+	m := newMockLLM(t, mockStep{status: 500})
+	a := newAgent(t, m)
+	var got []TurnInfo
+	sink := EventSink(func(e Event) {
+		if e.Kind == EventTurnEnd {
+			got = append(got, e.Turn)
+		}
+	})
+	if err := a.Ask(context.Background(), "问题", sink); err == nil {
+		t.Fatal("应返回错误")
+	}
+	if len(got) != 1 || !got[0].Failed || got[0].Interrupted {
+		t.Errorf("失败回合应标 Failed 且非 Interrupted: %+v", got)
+	}
+
+	m2 := newMockLLM(t, mockStep{toolCalls: []mockToolCall{{id: "c1", name: "run_shell", args: `{"command":"sleep 30"}`}}})
+	a2 := newAgent(t, m2)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		cancel()
+	}()
+	got = nil
+	err := a2.Ask(ctx, "问题", EventSink(func(e Event) {
+		if e.Kind == EventTurnEnd {
+			got = append(got, e.Turn)
+		}
+	}))
+	var ie *InterruptError
+	if !errors.As(err, &ie) {
+		t.Fatalf("应返回中断错误: %v", err)
+	}
+	if len(got) != 1 || !got[0].Interrupted || got[0].Failed {
+		t.Errorf("中断回合应标 Interrupted 且非 Failed: %+v", got)
 	}
 }

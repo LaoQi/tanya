@@ -316,3 +316,27 @@ func TestTurnReasoningEndResetsSegBuf(t *testing.T) {
 	}
 	tn.End(nil)
 }
+
+func TestRunTurnNotifiesThroughSink(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		sseChunk(w, map[string]any{"content": "答案"})
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	a := newAskAgent(t, srv.URL)
+	r, _, _ := newTestREPLAgent(t, a, newFakeTerm())
+	t.Cleanup(r.view.Stop)
+	n := &fakeNotifier{}
+	r.notifier = n
+	r.ask("你好")
+	if len(n.got) != 1 {
+		t.Fatalf("回合结束通知应经 notifySink 在真实回合里发出一次: %+v", n.got)
+	}
+	if n.got[0].Kind != notifyKindDone {
+		t.Errorf("载荷类别应为 done: %+v", n.got[0])
+	}
+	if !strings.HasPrefix(n.got[0].Content, "回合结束 · ") {
+		t.Errorf("载荷应带回合时长: %q", n.got[0].Content)
+	}
+}

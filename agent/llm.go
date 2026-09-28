@@ -24,14 +24,7 @@ type Message struct {
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
 	ReasoningItems   []ReasoningItem `json:"reasoning_items,omitempty"`
 	Usage            *Usage          `json:"-"`
-	Stat             *RequestStat    `json:"-"`
-}
-
-type RequestStat struct {
-	Duration       time.Duration
-	FirstEvent     time.Duration
-	FirstReasoning time.Duration
-	FirstContent   time.Duration
+	Duration         time.Duration   `json:"-"`
 }
 
 type Usage struct {
@@ -208,7 +201,6 @@ func joinReasoning(items []ReasoningItem) string {
 func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventSink) (*Message, error) {
 	wire := chatWireMessages(messages)
 	msg := &Message{Role: "assistant"}
-	var firstEvent, firstReasoning, firstContent time.Duration
 	var usage *Usage
 	var reasoning strings.Builder
 	type toolAcc struct {
@@ -238,28 +230,18 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventS
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return nil
 		}
-		if firstEvent == 0 && (len(chunk.Choices) > 0 || chunk.Usage != nil) {
-			firstEvent = time.Since(start)
-		}
 		if chunk.Usage != nil {
 			usage = chunk.Usage
 			usage.normalize()
-			sink.Emit(Event{Kind: EventUsage, Usage: usage})
 		}
 		for _, ch := range chunk.Choices {
 			if ch.Delta.ReasoningContent != "" {
-				if firstReasoning == 0 {
-					firstReasoning = time.Since(start)
-				}
 				reasonOpen = true
 				reasoning.WriteString(ch.Delta.ReasoningContent)
 				sink.Emit(Event{Kind: EventReasoning, Text: ch.Delta.ReasoningContent})
 			}
 			if ch.Delta.Content != "" {
 				endReason()
-				if firstContent == 0 {
-					firstContent = time.Since(start)
-				}
 				msg.Content += ch.Delta.Content
 				sink.Emit(Event{Kind: EventContent, Text: ch.Delta.Content})
 			}
@@ -295,7 +277,7 @@ func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventS
 		msg.ReasoningItems = append(msg.ReasoningItems, ReasoningItem{Content: reasoning.String()})
 	}
 	msg.Usage = usage
-	msg.Stat = &RequestStat{Duration: time.Since(start), FirstEvent: firstEvent, FirstReasoning: firstReasoning, FirstContent: firstContent}
+	msg.Duration = time.Since(start)
 	if len(accs) > 0 {
 		idxs := make([]int, 0, len(accs))
 		for i := range accs {

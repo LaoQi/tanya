@@ -198,9 +198,7 @@ func TestSemanticColors(t *testing.T) {
 
 func TestRenderResponseInfoFull(t *testing.T) {
 	info := agent.ResponseInfo{
-		Duration:     3200 * time.Millisecond,
-		FirstEvent:   800 * time.Millisecond,
-		FirstContent: 3200 * time.Millisecond,
+		Duration: 3200 * time.Millisecond,
 		Usage: &agent.Usage{
 			PromptTokens:     12300,
 			CompletionTokens: 1200,
@@ -208,7 +206,7 @@ func TestRenderResponseInfoFull(t *testing.T) {
 		},
 		ContextTokens: 12300,
 	}
-	got := RenderResponseInfo(info, 80)
+	got := RenderResponseInfo(info, 800*time.Millisecond, 3200*time.Millisecond, 80)
 	for _, want := range []string{"↳", "TTFT 800ms", "TTFC 3.2s", "3.2s", "prompt 12.3k", "completion 1.2k", "缓存 81.67%"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("缺少 %q: %q", want, got)
@@ -218,7 +216,7 @@ func TestRenderResponseInfoFull(t *testing.T) {
 
 func TestRenderResponseInfoEstimate(t *testing.T) {
 	info := agent.ResponseInfo{Duration: 1500 * time.Millisecond, ContextTokens: 800}
-	got := RenderResponseInfo(info, 80)
+	got := RenderResponseInfo(info, 0, 0, 80)
 	if !strings.Contains(got, "上下文 ~800") {
 		t.Errorf("无 usage 应显示本地估算: %q", got)
 	}
@@ -228,11 +226,11 @@ func TestRenderResponseInfoEstimate(t *testing.T) {
 }
 
 func TestRenderResponseInfoErrorPath(t *testing.T) {
-	got := RenderResponseInfo(agent.ResponseInfo{Duration: 500 * time.Millisecond}, 80)
+	got := RenderResponseInfo(agent.ResponseInfo{Duration: 500 * time.Millisecond}, 0, 0, 80)
 	if !strings.Contains(got, "↳ 500ms") {
 		t.Errorf("出错路径应仅显示耗时: %q", got)
 	}
-	if got := RenderResponseInfo(agent.ResponseInfo{}, 80); got != "" {
+	if got := RenderResponseInfo(agent.ResponseInfo{}, 0, 0, 80); got != "" {
 		t.Errorf("全空 info 应无输出: %q", got)
 	}
 }
@@ -261,8 +259,8 @@ func TestRenderToolBlocksNoWrap(t *testing.T) {
 }
 
 func TestRenderResponseInfoNoTTFCWhenImmediate(t *testing.T) {
-	info := agent.ResponseInfo{Duration: 800 * time.Millisecond, FirstEvent: 800 * time.Millisecond, FirstContent: 800 * time.Millisecond}
-	got := RenderResponseInfo(info, 80)
+	info := agent.ResponseInfo{Duration: 800 * time.Millisecond}
+	got := RenderResponseInfo(info, 800*time.Millisecond, 800*time.Millisecond, 80)
 	if !strings.Contains(got, "TTFT 800ms") {
 		t.Errorf("应显示 TTFT: %q", got)
 	}
@@ -901,5 +899,60 @@ func TestThirdPartyToolView(t *testing.T) {
 	fallback := RenderToolEndAppend(testSem(), ttyRich(), "lookup", agent.ToolResult{Text: "plain text"}, views, 80, 20)
 	if !strings.Contains(fallback, "plain text") || strings.Contains(fallback, "[custom]") {
 		t.Errorf("自带视图不处理时应回落通用文本: %q", fallback)
+	}
+}
+
+func TestToolViewComputesTTFTAndTTFC(t *testing.T) {
+	var out syncBuf
+	st := NewStreams(&out, &syncBuf{}, modeRich)
+	view := NewToolView(st, term.Profile{TTY: false, Colors: term.LevelNone}, testSem(), func() int { return 80 }, 20, testViews())
+	base := time.Now()
+	clock := base
+	view.timing.now = func() time.Time { return clock }
+
+	view.Handle(agent.Event{Kind: agent.EventRequestStart})
+	clock = base.Add(200 * time.Millisecond)
+	view.Handle(agent.Event{Kind: agent.EventReasoning, Text: "想"})
+	clock = base.Add(700 * time.Millisecond)
+	view.Handle(agent.Event{Kind: agent.EventContent, Text: "答"})
+	clock = base.Add(900 * time.Millisecond)
+	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{Duration: 900 * time.Millisecond}})
+
+	got := out.String()
+	for _, want := range []string{"TTFT 200ms", "TTFC 700ms", "900ms"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("缺少 %q: %q", want, got)
+		}
+	}
+
+	out.Reset()
+	clock = base.Add(time.Second)
+	view.Handle(agent.Event{Kind: agent.EventRequestStart})
+	clock = base.Add(1100 * time.Millisecond)
+	view.Handle(agent.Event{Kind: agent.EventContent, Text: "再来"})
+	clock = base.Add(1500 * time.Millisecond)
+	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{Duration: 500 * time.Millisecond}})
+
+	second := out.String()
+	if !strings.Contains(second, "TTFT 100ms") {
+		t.Errorf("新请求应重置计时: %q", second)
+	}
+	if strings.Contains(second, "TTFC") {
+		t.Errorf("正文即首个事件时不应显示 TTFC: %q", second)
+	}
+}
+
+func TestToolViewNoTimingWithoutRequestStart(t *testing.T) {
+	var out syncBuf
+	st := NewStreams(&out, &syncBuf{}, modeRich)
+	view := NewToolView(st, term.Profile{TTY: false, Colors: term.LevelNone}, testSem(), func() int { return 80 }, 20, testViews())
+	view.Handle(agent.Event{Kind: agent.EventContent, Text: "答"})
+	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{Duration: 400 * time.Millisecond}})
+	got := out.String()
+	if strings.Contains(got, "TTFT") || strings.Contains(got, "TTFC") {
+		t.Errorf("未收到请求开始事件时不应有首字延迟: %q", got)
+	}
+	if !strings.Contains(got, "400ms") {
+		t.Errorf("仍应显示 agent 报告的耗时: %q", got)
 	}
 }

@@ -200,20 +200,24 @@ func TestResponsesEffortOmitsTemperature(t *testing.T) {
 	}
 }
 
-func TestResponsesTTFTToolCallOnly(t *testing.T) {
+func TestResponsesToolCallOnlyRecordsDuration(t *testing.T) {
 	_, cfg := responsesLLM(t, mockStep{
 		toolCalls: []mockToolCall{{id: "call_1", name: "calc", args: `{"expression":"1+2"}`}},
 	})
+	var kinds []EventKind
 	msg, err := NewClient(cfg, nil).ChatStream(context.Background(),
-		[]Message{{Role: "user", Content: "hi"}}, nil)
+		[]Message{{Role: "user", Content: "hi"}}, func(e Event) { kinds = append(kinds, e.Kind) })
 	if err != nil {
 		t.Fatal(err)
 	}
 	if msg.Content != "" || len(msg.ToolCalls) != 1 {
 		t.Fatalf("应为纯 tool_call 响应: %+v", msg)
 	}
-	if msg.Stat == nil || msg.Stat.FirstEvent <= 0 {
-		t.Errorf("纯 tool_call 响应也应记录 FirstEvent: %+v", msg.Stat)
+	if msg.Duration <= 0 {
+		t.Errorf("纯 tool_call 响应也应记录请求耗时: %v", msg.Duration)
+	}
+	if len(kinds) == 0 || kinds[0] != EventToolCall {
+		t.Errorf("纯 tool_call 响应也应产出事件（渲染侧据此记 TTFT）: %v", kinds)
 	}
 }
 
@@ -472,8 +476,8 @@ func TestResponsesReasoningDeltaEvents(t *testing.T) {
 	if len(msg.ReasoningItems) != 1 || msg.ReasoningItems[0].Content != "推理过程" {
 		t.Errorf("completed 仍应捕获思维链: %+v", msg.ReasoningItems)
 	}
-	if msg.Stat == nil || msg.Stat.FirstReasoning <= 0 || msg.Stat.FirstContent < msg.Stat.FirstReasoning {
-		t.Errorf("时序维度异常: %+v", msg.Stat)
+	if msg.Duration <= 0 {
+		t.Errorf("应记录请求耗时: %v", msg.Duration)
 	}
 }
 

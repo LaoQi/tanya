@@ -97,13 +97,45 @@ func RenderToolEndAppend(sem theme.Semantics, prof term.Profile, name string, re
 	return b.String()
 }
 
-func RenderResponseInfo(info agent.ResponseInfo, width int) string {
-	var parts []string
-	if info.FirstEvent > 0 {
-		parts = append(parts, "TTFT "+respDuration(info.FirstEvent))
+// respTiming 记录一次出站请求的首字延迟：由看见完整事件流的那一层推进（REPL 是 turn，单发是 toolView）。
+type respTiming struct {
+	now   func() time.Time
+	start time.Time
+	ttft  time.Duration
+	ttfc  time.Duration
+}
+
+// observe 按事件种类推进计时：请求开始重置，首个流式事件记 TTFT，首个正文 delta 记 TTFC。
+func (t *respTiming) observe(k agent.EventKind) {
+	switch k {
+	case agent.EventRequestStart:
+		t.start = t.now()
+		t.ttft, t.ttfc = 0, 0
+	case agent.EventContent:
+		t.first()
+		if t.ttfc == 0 && !t.start.IsZero() {
+			t.ttfc = t.now().Sub(t.start)
+		}
+	case agent.EventReasoning, agent.EventReasoningEnd, agent.EventToolCall:
+		t.first()
 	}
-	if info.FirstContent > info.FirstEvent {
-		parts = append(parts, "TTFC "+respDuration(info.FirstContent))
+}
+
+func (t *respTiming) first() {
+	if t.ttft == 0 && !t.start.IsZero() {
+		t.ttft = t.now().Sub(t.start)
+	}
+}
+
+// RenderResponseInfo 渲染单次请求的状态行；ttft/ttfc 由渲染侧从 EventRequestStart 现算
+// （它们可由事件流重建，不是 agent 的事实）。
+func RenderResponseInfo(info agent.ResponseInfo, ttft, ttfc time.Duration, width int) string {
+	var parts []string
+	if ttft > 0 {
+		parts = append(parts, "TTFT "+respDuration(ttft))
+	}
+	if ttfc > ttft {
+		parts = append(parts, "TTFC "+respDuration(ttfc))
 	}
 	if info.Duration > 0 {
 		parts = append(parts, respDuration(info.Duration))
@@ -245,6 +277,8 @@ type toolView struct {
 	maxLines  int
 	justEnded bool
 	dirty     bool
+
+	timing respTiming
 }
 
 func NewToolView(st *streams, prof term.Profile, sem theme.Semantics, width func() int, maxLines int, views *present.Registry) *toolView {
@@ -256,6 +290,7 @@ func NewToolView(st *streams, prof term.Profile, sem theme.Semantics, width func
 		sem:      sem,
 		width:    width,
 		maxLines: maxLines,
+		timing:   respTiming{now: time.Now},
 	}
 }
 
@@ -287,7 +322,21 @@ func (v *toolView) Content(kind Kind, text string) {
 	v.dirty = !strings.HasSuffix(text, "\n")
 }
 
+// Response 渲染单次请求的状态行；ttft/ttfc 由调用方给出（REPL 由 turn 计时，单发由本视图计时）。
+func (v *toolView) Response(info agent.ResponseInfo, ttft, ttfc time.Duration) {
+	v.heart.stop()
+	dirty := v.dirty
+	v.st.out.atomic(KindToolStatus, func(w io.Writer) {
+		if dirty {
+			io.WriteString(w, "\n")
+		}
+		io.WriteString(w, v.sem.Info.With(v.prof).Sprint(RenderResponseInfo(info, ttft, ttfc, v.width())))
+	})
+	v.dirty = false
+}
+
 func (v *toolView) Handle(e agent.Event) {
+	v.timing.observe(e.Kind)
 	switch e.Kind {
 	case agent.EventRequestStart:
 		v.heart.start(statusWaiting, v.statusOn())
@@ -296,15 +345,7 @@ func (v *toolView) Handle(e agent.Event) {
 	case agent.EventContent:
 		v.Content(KindContent, term.Sanitize(e.Text, false))
 	case agent.EventResponse:
-		v.heart.stop()
-		dirty := v.dirty
-		v.st.out.atomic(KindToolStatus, func(w io.Writer) {
-			if dirty {
-				io.WriteString(w, "\n")
-			}
-			io.WriteString(w, v.sem.Info.With(v.prof).Sprint(RenderResponseInfo(e.Response, v.width())))
-		})
-		v.dirty = false
+		v.Response(e.Response, v.timing.ttft, v.timing.ttfc)
 	case agent.EventToolStart:
 		v.heart.stop()
 		v.st.out.atomic(KindToolBlock, func(w io.Writer) {

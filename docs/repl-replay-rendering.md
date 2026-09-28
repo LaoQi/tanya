@@ -16,7 +16,7 @@
 
 ## 2. 为什么不能直接复用（核心障碍）
 
-`agent.Message`（`agent/llm.go:21`）落盘的字段只有 `role` / `content` / `tool_calls` / `reasoning_items`；`Usage`、`Stat` 标 `json:"-"` 不落盘，`ToolResult`/`ShellResult` 更是从不落盘——工具消息的 `content` 是 `ToolResult.Content()` 即 `ShellResult.String()` 的**扁平文本**（`stdout:` / `stderr:` 分节 + `exit code: N`）。
+`agent.Message`（`agent/llm.go:21`）落盘的字段只有 `role` / `content` / `tool_calls` / `reasoning_items`；`Usage`、`Stat` 标 `json:"-"` 不落盘（**更正 2026-09-28**：`RequestStat` 已随「首字指标移出 `agent`」一并删除，落盘的排除项现为 `Usage` 与 `Message.Duration`，见 `docs/agent-event-seams.md` §14），`ToolResult`/`ShellResult` 更是从不落盘——工具消息的 `content` 是 `ToolResult.Content()` 即 `ShellResult.String()` 的**扁平文本**（`stdout:` / `stderr:` 分节 + `exit code: N`）。
 
 | 维度 | 实时数据 | 回放数据 | 后果 |
 |---|---|---|---|

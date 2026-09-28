@@ -25,12 +25,9 @@ type Agent struct {
 }
 
 type ResponseInfo struct {
-	Duration       time.Duration
-	FirstEvent     time.Duration
-	FirstReasoning time.Duration
-	FirstContent   time.Duration
-	Usage          *Usage
-	ContextTokens  int
+	Duration      time.Duration
+	Usage         *Usage
+	ContextTokens int
 }
 
 type Options struct {
@@ -250,8 +247,21 @@ func (a *Agent) Ask(ctx context.Context, input string, sink EventSink) error {
 	if _, ok := a.ArchiveReadOnly(); ok {
 		return ErrArchiveReadOnly
 	}
+	start := time.Now()
 	mark := len(a.history)
 	a.history = append(a.history, Message{Role: "user", Content: input})
+	err := a.ask(ctx, sink, mark)
+	var ie *InterruptError
+	interrupted := errors.As(err, &ie)
+	sink.Emit(Event{Kind: EventTurnEnd, Turn: TurnInfo{
+		Duration:    time.Since(start),
+		Failed:      err != nil && !interrupted,
+		Interrupted: interrupted,
+	}})
+	return err
+}
+
+func (a *Agent) ask(ctx context.Context, sink EventSink, mark int) error {
 	err := a.runTurn(ctx, sink)
 	if err == nil {
 		return a.save()
@@ -282,11 +292,8 @@ func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
 		resp, err := a.client.ChatStream(ctx, a.buildMessages(), sink)
 		info := ResponseInfo{Duration: time.Since(start)}
 		if err == nil {
-			if resp.Stat != nil {
-				info.Duration = resp.Stat.Duration
-				info.FirstEvent = resp.Stat.FirstEvent
-				info.FirstReasoning = resp.Stat.FirstReasoning
-				info.FirstContent = resp.Stat.FirstContent
+			if resp.Duration > 0 {
+				info.Duration = resp.Duration
 			}
 			info.Usage = resp.Usage
 			if resp.Usage != nil {
