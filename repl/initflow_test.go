@@ -92,17 +92,52 @@ func TestRunInitReportNonInteractive(t *testing.T) {
 	}
 }
 
-func TestRunInitDeclined(t *testing.T) {
+func TestRunInitEnterDefaultsYes(t *testing.T) {
 	dir := initWorkdir(t)
 	got, err := runInitStrip(t, modeRich, "\n")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if want := MsgInitTagNew + "  .tanya/.gitignore"; !strings.Contains(got, want) {
+		t.Errorf("回车应视为同意并新建忽略文件:\n%s", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".tanya", ".gitignore")); err != nil {
+		t.Errorf("回车后应写入忽略文件: %v", err)
+	}
+}
+
+func TestRunInitDeclined(t *testing.T) {
+	dir := initWorkdir(t)
+	for _, in := range []string{"n\n", "no\n"} {
+		got, err := runInitStrip(t, modeRich, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := MsgInitTagSkip + "  .tanya/.gitignore  " + agent.MsgInitSkipDeclined; !strings.Contains(got, want) {
+			t.Errorf("%q 应视为拒绝:\n%s", in, got)
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".tanya", ".gitignore")); !os.IsNotExist(err) {
+			t.Errorf("拒绝后不应写入忽略文件: %v", err)
+		}
+	}
+}
+
+func TestRunInitEOFDeclined(t *testing.T) {
+	dir := initWorkdir(t)
+	st, out, _ := initStreams(t, modeRich)
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runInit(st, testSem(), plainProf, &cfg.Config, strings.NewReader("")); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
 	if want := MsgInitTagSkip + "  .tanya/.gitignore  " + agent.MsgInitSkipDeclined; !strings.Contains(got, want) {
-		t.Errorf("回车应视为拒绝:\n%s", got)
+		t.Errorf("EOF 应视为拒绝:\n%s", got)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".tanya", ".gitignore")); !os.IsNotExist(err) {
-		t.Errorf("拒绝后不应写入忽略文件: %v", err)
+		t.Errorf("EOF 后不应写入忽略文件: %v", err)
 	}
 }
 

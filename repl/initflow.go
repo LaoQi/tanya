@@ -46,9 +46,10 @@ func askIgnore(st *streams, tty io.Reader) bool {
 	line, err := bufio.NewReader(tty).ReadString('\n')
 	if line == "" && err != nil {
 		st.Print("\n")
+		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "y", "yes":
+	case "", "y", "yes":
 		return true
 	default:
 		return false

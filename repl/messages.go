@@ -13,7 +13,7 @@ const (
 
 const (
 	MsgInitHead       = "初始化工作区 %s\n"
-	MsgInitAskIgnore  = "是否为 .tanya/ 建立忽略文件（内容 *，避免会话入库）？[y/N] "
+	MsgInitAskIgnore  = "是否为 .tanya/ 建立忽略文件（内容 *，避免会话入库）？[Y/n] "
 	MsgInitTagNew     = "新建"
 	MsgInitTagOld     = "已有"
 	MsgInitTagSkip    = "跳过"
@@ -79,7 +79,7 @@ const (
 	MsgArchiveNone        = "没有符合条件的会话\n"
 	MsgArchiveNoneKeep    = "没有需要归档的会话（活跃会话数未超过保留数）\n"
 	MsgArchiveNoneWindow  = "没有早于 %s 未活动的会话\n"
-	MsgArchiveConfirm     = "现在归档？[y/N] "
+	MsgArchiveConfirm     = "现在归档？[Y/n] "
 	MsgArchiveCancel      = "已取消，未归档\n"
 	MsgArchiveOnlyTTY     = "归档仅在交互终端下可用（当前为非交互或纯文本模式）\n"
 	MsgArchiveSkipFmt     = "  跳过 %s（%s）\n"

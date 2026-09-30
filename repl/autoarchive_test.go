@@ -65,7 +65,7 @@ func runAutoArchivePrompt(t *testing.T, a *agent.Agent, keys ...readline.KeyEven
 }
 
 func TestAutoArchivePromptAccept(t *testing.T) {
-	for _, answer := range []string{"y", "yes", "YES", " Y "} {
+	for _, answer := range []string{"y", "yes", "YES", " Y ", ""} {
 		t.Run(strings.TrimSpace(answer), func(t *testing.T) {
 			dir := t.TempDir()
 			a := newAutoArchiveAgent(t, dir, 4, 2)
@@ -95,7 +95,7 @@ func TestAutoArchivePromptAccept(t *testing.T) {
 }
 
 func TestAutoArchivePromptDecline(t *testing.T) {
-	for _, answer := range []string{"n", "", "no", "随便"} {
+	for _, answer := range []string{"n", "no", "随便"} {
 		t.Run(strings.TrimSpace(answer), func(t *testing.T) {
 			dir := t.TempDir()
 			a := newAutoArchiveAgent(t, dir, 4, 2)
