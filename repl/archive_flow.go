@@ -35,6 +35,8 @@ func (r *REPL) archiveFlow(opt agent.ArchiveOptions, noneArg string) {
 	line, cerr := r.readConfirm(MsgArchiveConfirm)
 	if cerr != nil && strings.TrimSpace(line) == "" {
 		r.st.out.emit(KindDecor, "\n")
+		r.st.out.emit(KindNotice, MsgArchiveCancel)
+		return
 	}
 	if !archiveConfirmed(line) {
 		r.st.out.emit(KindNotice, MsgArchiveCancel)
@@ -50,7 +52,7 @@ func (r *REPL) archiveFlow(opt agent.ArchiveOptions, noneArg string) {
 
 func archiveConfirmed(line string) bool {
 	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "y", "yes":
+	case "", "y", "yes":
 		return true
 	}
 	return false

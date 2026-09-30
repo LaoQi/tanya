@@ -302,6 +302,38 @@ func volumeSessionIDs(t *testing.T, path string) []string {
 	return ids
 }
 
+func TestHandleCommandArchiveEnterDefaultsYes(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	r, _, out, errb := newArchiveREPL(t, a, typed("")...)
+	seedOldSession(t, dir, "20260101-010000", 40*24*time.Hour)
+
+	r.handleCommand("/archive")
+	got := out.String()
+	if !strings.Contains(got, MsgArchiveConfirm) {
+		t.Errorf("应询问确认: %q", got)
+	}
+	if !strings.Contains(got, "已归档 1 个会话") {
+		t.Errorf("回车应视为同意并归档: %q", got)
+	}
+	if strings.Contains(got, MsgArchiveCancel) {
+		t.Errorf("回车不应取消: %q", got)
+	}
+	if errb.String() != "" {
+		t.Errorf("回车确认不应报错: %q", errb.String())
+	}
+	if len(r.ed.History()) != 0 {
+		t.Errorf("确认答案不应进入输入历史: %v", r.ed.History())
+	}
+	volumes, err := filepath.Glob(filepath.Join(dir, "workspaces", "*", "archive", "archive-*.zip"))
+	if err != nil || len(volumes) != 1 {
+		t.Fatalf("回车后应落一个归档卷: %v %v", volumes, err)
+	}
+	if ids := volumeSessionIDs(t, volumes[0]); len(ids) != 1 || ids[0] != "20260101-010000" {
+		t.Errorf("卷内容异常: %v", ids)
+	}
+}
+
 func TestHandleCommandArchiveCancel(t *testing.T) {
 	dir := t.TempDir()
 	a := newSessTestAgent(t, dir)

@@ -140,14 +140,14 @@ func (s *sessionStore) findArchived(id string) (volume string, ok bool)
 | 位置 | 行为 |
 |---|---|
 | `/archive` | 仅完整交互环境（rich 输出 + `r.raw` + `r.prof.TTY`）启用，其余环境只提示 `MsgArchiveOnlyTTY`；无参 = `Keep=auto_archive_keep`、纯数字 = `Keep=n`（`0` = 除当前会话外全部）、带单位（`7d`/`12h`，单段单单位 `d`/`h`/`m`/`s`）= `OlderThan` |
-| `/archive` 输出 | 两阶段：预览 `当前活跃会话 A 个；将归档 N 个（约 X[，保留最近 K 个]）。` + 跳过/失败行 → `现在归档？[y/N] `，`y`/`yes` 后 `已归档 N 个会话 → <卷名>（<原大小> → <卷大小>）`，其它输入 `已取消，未归档`；`A` = `ArchiveReport.Active`（操作前活跃会话总数），`保留最近 K 个` 仅在 `Keep > 0` 时出现；0 命中按口径给 `MsgArchiveNoneKeep` / `MsgArchiveNoneWindow`（窗口文案直接回显原参数；`Keep=0` 用通用 `没有符合条件的会话`）；确认答案经 `readConfirm` 不入输入历史 |
+| `/archive` 输出 | 两阶段：预览 `当前活跃会话 A 个；将归档 N 个（约 X[，保留最近 K 个]）。` + 跳过/失败行 → `现在归档？[Y/n] `，`y`/`yes` 或空行（直接回车）后 `已归档 N 个会话 → <卷名>（<原大小> → <卷大小>）`，其它输入 `已取消，未归档`；`A` = `ArchiveReport.Active`（操作前活跃会话总数），`保留最近 K 个` 仅在 `Keep > 0` 时出现；0 命中按口径给 `MsgArchiveNoneKeep` / `MsgArchiveNoneWindow`（窗口文案直接回显原参数；`Keep=0` 用通用 `没有符合条件的会话`）；确认答案经 `readConfirm` 不入输入历史 |
 | 解析 | `repl.ParseArchiveArg(arg string, defaultKeep int) (agent.ArchiveOptions, error)`：空参 → `Keep=defaultKeep`、纯数字（`^[0-9]+$`）→ `Keep=n`、单段单单位（`^([0-9]+)(d|h|m|s)$`，`d` 按 24h 换算）→ `OlderThan`，其余（复合时长如 `12h30m`、多段、数值 ≤ 0、溢出）报非法参数；`handleArchive` 把 `parts[1:]` 以空格 join 后传入 |
 | `/load <归档 id>` | `已载入会话 X（归档只读，继续对话请 /fork）`；picker 行摘要前带 `[归档] ` |
 | 只读态对话 | REPL 在对话分支前拦截（含 `:`/`：`）→ `当前为归档只读会话（X）；继续对话请 /fork 开新会话`；`agent.Ask` 兜底 `ErrArchiveReadOnly` |
 | `/fork` | 通用命令（任何会话可用）→ `已 fork 为新会话 <新 id>（继承 N 条历史）`；原会话文件不动、可 `/load` 回切，归档只读态用它解除只读；`-n` 下追加一行 `（不落盘模式，未写入）` |
 | `/stat` | 归档只读态显示 `会话: 归档只读 X（未写入）` |
 | 退出收尾 | 归档只读态文件行显示 `会话文件 未写入（不落盘模式）` |
-| 启动自动归档 | 默认开启（`auto_archive: false` 关闭）；与 `/archive` 共用 `REPL.archiveFlow`（`repl/archive_flow.go`），提示与确认完全同一条：`当前活跃会话 A 个；将归档 C 个（约 X，保留最近 K 个）。` + `现在归档？[y/N] `，`y`/`yes` 归档，其它/空行 → `已取消，未归档`。仅调用时机与触发条件不同：`autoArchivePrompt()` 在欢迎屏后进循环前调用，门禁为 `archiveInteractive()`（rich 输出 + `r.raw` + `r.prof.TTY`，等价于「plain 与 stdout 非终端静默返回」），再过 `SuggestArchive`（`auto_archive` 关闭、`-n`、活跃数 < `auto_archive_threshold` 均不问）；`C/X` 已剔除当前会话（先占 `keep` 名额再剔除，与 `archive()` 同序），`A` 取 `ArchiveReport.Active` |
+| 启动自动归档 | 默认开启（`auto_archive: false` 关闭）；与 `/archive` 共用 `REPL.archiveFlow`（`repl/archive_flow.go`），提示与确认完全同一条：`当前活跃会话 A 个；将归档 C 个（约 X，保留最近 K 个）。` + `现在归档？[Y/n] `，`y`/`yes` 或空行（直接回车）归档，`n`/`no` 与其它输入 → `已取消，未归档`（`^D` 读到 EOF 且无内容亦取消，不进同意分支）。仅调用时机与触发条件不同：`autoArchivePrompt()` 在欢迎屏后进循环前调用，门禁为 `archiveInteractive()`（rich 输出 + `r.raw` + `r.prof.TTY`，等价于「plain 与 stdout 非终端静默返回」），再过 `SuggestArchive`（`auto_archive` 关闭、`-n`、活跃数 < `auto_archive_threshold` 均不问）；`C/X` 已剔除当前会话（先占 `keep` 名额再剔除，与 `archive()` 同序），`A` 取 `ArchiveReport.Active` |
 
 新增常量：`repl/messages.go`（`MsgArchiveDone` / `MsgArchiveNone` / `MsgArchiveSkipFmt` / `MsgArchiveFailFmt` / `MsgArchivePreview` / `MsgForkDone` / `MsgForkNoSave` / `MsgLoadArchived` / `MsgArchiveReadOnlyFmt` / `SessArchMark` / `slashCommands` 增 `/archive` `/fork` / help 文案），`agent/messages.go`（`ErrArchiveReadOnly` / `MsgArchiveVolFailFmt` / `MsgControlStatArchive`）。数字与大小格式化归 repl（沿用 `stats.go` 既有缩写口径）。
 
