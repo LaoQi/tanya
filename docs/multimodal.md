@@ -200,7 +200,7 @@ Images []ImageRef `json:"images,omitempty"`
 | **D6** `ask` 单发 | **支持**，复用 `@path` 解析（不加 CLI flag） |
 | **D7** 外链 / data URL | **支持** |
 
-## 7.5 P4：模型主动读图（`read_image`）——方案已定，**待实施**
+## 7.5 P4：模型主动读图（`read_image`）——已实施（2026-10-09）
 
 > 状态：**已实施（2026-10-09）**。四项决策按推荐值采纳并全部落地，实施记录见本节末尾。
 
@@ -255,6 +255,18 @@ assistant(tool_calls: read_image{path})
 - **测试**：`agent/tool_image_test.go`（桩工具 + mock LLM 三例：两协议各一例断言 tool 消息之后带图 user 消息、文案含工具名与文件名且不含 base64、chat 的 `content` 为数组含 `image_url`、responses 的 `input_image` 为字符串 data URL；并行工具调用例断言图像 user 消息在本轮全部 tool 消息之后且为最后一条）；`tools/image/image_test.go` 7 例（工作区相对 + low 档缩放与 base64 字节自洽、`detail` 覆盖改目标长边、关闭缩放保留原尺寸、`~` 展开、七类错误、definition/required 契约）；`repl/toolimage_test.go` 3 例（结果后占位行且顺序正确、通用回落带占位、无图不出现）。
 - **真机取证（2026-10-09，`make build` + 真实网关 `nas.lan:28149`）**：测试图 400×300 红底（230,30,30）+ 蓝矩形（20,90,220）。① responses（默认配置）：工具块 `▸ read_image path: /tmp/p4_read_image.png` → `已读取 p4_read_image.png（400×300，1.1k）` → `[图 p4_read_image.png 1.1k]`，模型答「背景红色约 #ED1C24、矩形蓝色约 #1560E0、x 100–300 / y 85–220」；② chat（`-c` 临时配置 `api_protocol: chat`）：模型自行传 `detail: high`（标题行显示 `· detail: high`，验证覆盖生效），答「≈ #DC1E1E / ≈ #1C5FD6、水平居中垂直略偏上」。两条线均确实基于图像内容作答。
 - **门禁**：`gofmt -l` 干净、`go build`/`go vet ./...`、`go test ./...` 与 `go test -race ./...` 全绿、`GOOS=darwin|windows go build` 通过、`render_audit` 15 PASS / 0 FAIL。
+
+### 区域读取扩展（2026-10-10）
+
+**动机**：整图读取统一压到目标长边（`low` 512 / 其余 1300），超大图细节被无差别压缩，模型没有手段按原分辨率查看局部。
+
+**语义**：`read_image` 增可选参数 `region{x,y,width,height}`——原图像素坐标、左上原点，与返回文本的宽高同坐标系；`width/height` 非正或字段缺失报错（`MsgRegionInvalid`）；起点为负或越界**裁剪到与图像的交集**（宽松口径，省一轮往返），交集为空报错并附原图尺寸（`MsgRegionOutside`，模型可据此重试）；仅 PNG/JPEG（GIF 截帧、WebP 无标准库解码器 → `MsgRegionUnsupported`，不静默）；裁剪结果超过目标长边才降采样（与整图同管线），区域 ≤ 目标长边则**不缩放返回**（PNG 无损/JPEG q85 重编码，非字节级原样）；`image_resize: false` 只关缩放不关裁剪；`image_max_bytes` 只约束输入文件，裁剪输出为子区域重编码、不复核；格式不支持先于参数校验报错。
+
+**实现**：`agent/image_data.go` 增 `ImageRegion`、`CropImage`（解码 → 按 EXIF 方向**逆映射取源窗口**（`draw.Draw` 拷贝）→ 仅对窗口做 `orientImage` 方向归一 → 复用 `downscale` → PNG 无损/JPEG q85 重编码，一次解码一次编码）与 `orientImage`（8 种方向映射，纯标准库）——带 EXIF 方向的 JPEG 裁剪前先归一化，因为输出重编码后不带 EXIF，不归一就会错向；窗口取源而非整幅归一，oriented JPEG 的小区域读取不再付全图像素拷贝的代价（实测 4000×3000 EXIF o=6 取 500×400：867ms → 153ms）；交集按**显示坐标系**尺寸裁剪（o≥5 宽高交换后）；`ImageDimensions` 对 Orientation≥5 的 JPEG 交换宽高（**显示尺寸**口径），整图读取报告的尺寸从此与 `region` 坐标系一致（token 估算用像素积，不受交换影响）。`tools/image` 增参数解析与错误映射（哨兵 `ErrImageRegionUnsupported`/`ErrImageRegionInvalid`/`ErrImageRegionEmpty` → 中文文案；width/height 非正的校验在 `CropImage` 内、格式不支持优先；其余失败（解码/编码）经 `MsgRegionCropFail` 带底层错误返回），区域成功文本 `已读取 <名> 的区域（原图 W×H，区域 (x,y) w×h，输出 w×h，<大小>）`；整图路径实际发生降采样时文本换缩放提示版（「需要细节可用 region 分块读取」），让模型在压缩发生时知道该能力存在；工具描述与参数 schema 同步。`repl`/`@` 附件不动（用户侧无分块需求）。
+
+**测试**：`agent/image_data_test.go` 新建 9 例（PNG 像素级精确裁剪、交集裁剪三态、不相交报错、GIF 不支持、low/high/关缩放的目标长边行为、方向 6 JPEG 裁剪正确性与显示尺寸交换、`orientImage` 2×2 四色全格锚点表（8 方向两两可区分）、`sourceWindow`+方向变换与全图变换的逐像素对拍（8 方向×3 区域）、`ImageDimensions` 交换含 o=5）；`tools/image/image_test.go` 增 7 例（工具级区域成功含输出像素与文本、区域超长边缩放、关缩放保留原尺寸、缩放提示出现/不出现、错误不附图（含 GIF+非法参数优先报「不支持」、坏图裁剪带底层错误）、schema 的 region 契约、oriented JPEG 工具级区域读取（整图报告显示尺寸、区域左右半区颜色））。既有测试零改动通过（整图缩放文案前缀不变）。**review 变异复验 3 处全灭**：`orientImage` 7/8 映射互换 → 全格锚点与对拍测试失败；`ImageDimensions` 的 `>=5` 改 `>5` → o=5 尺寸断言失败；`sourceWindow` o=6 窗口错一位 → 对拍与 o=6 裁剪测试失败。
+
+**验收**：`gofmt -l` 干净、`go build`/`go vet ./...`、`go test ./...` 全绿、`go test -race ./agent/ ./tools/image/ ./repl/`、`GOOS=darwin|windows go build` 通过。
 
 ## 8 风险与不做项
 

@@ -3,13 +3,28 @@ package agent
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"image"
 	"image/color"
+	"image/draw"
 	_ "image/gif"
 	"image/jpeg"
 	"image/png"
 	"net/http"
 	"strings"
+)
+
+type ImageRegion struct {
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+var (
+	ErrImageRegionUnsupported = errors.New("image region: unsupported format")
+	ErrImageRegionInvalid     = errors.New("image region: invalid rect")
+	ErrImageRegionEmpty       = errors.New("image region: empty intersection")
 )
 
 const (
@@ -61,6 +76,130 @@ func MaybeResizeImage(data []byte, mime, detail string, enabled bool) []byte {
 		return data
 	}
 	return buf.Bytes()
+}
+
+func CropImage(data []byte, mime string, r ImageRegion, detail string, enabled bool) ([]byte, ImageRegion, error) {
+	switch mime {
+	case "image/png", "image/jpeg":
+	default:
+		return nil, r, ErrImageRegionUnsupported
+	}
+	if r.Width <= 0 || r.Height <= 0 {
+		return nil, r, ErrImageRegionInvalid
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, r, err
+	}
+	b := img.Bounds()
+	o := 1
+	if mime == "image/jpeg" {
+		o = JPEGOrientation(data)
+	}
+	dw, dh := b.Dx(), b.Dy()
+	if o >= 5 {
+		dw, dh = dh, dw
+	}
+	x0 := clampInt(r.X, 0, dw)
+	y0 := clampInt(r.Y, 0, dh)
+	x1 := clampInt(r.X+r.Width, 0, dw)
+	y1 := clampInt(r.Y+r.Height, 0, dh)
+	if x1 <= x0 || y1 <= y0 {
+		return nil, r, ErrImageRegionEmpty
+	}
+	crop := image.Image(sourceWindow(img, o, x0, y0, x1, y1))
+	if o > 1 {
+		crop = orientImage(crop, o)
+	}
+	out := crop
+	if enabled {
+		if scaled := downscale(crop, ResizeTargetSide(detail)); scaled != nil {
+			out = scaled
+		}
+	}
+	var buf bytes.Buffer
+	if mime == "image/jpeg" {
+		err = jpeg.Encode(&buf, out, &jpeg.Options{Quality: JPEGQuality})
+	} else {
+		err = png.Encode(&buf, out)
+	}
+	if err != nil {
+		return nil, r, err
+	}
+	return buf.Bytes(), ImageRegion{X: x0, Y: y0, Width: x1 - x0, Height: y1 - y0}, nil
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func sourceWindow(src image.Image, o int, x0, y0, x1, y1 int) *image.RGBA {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	var rx0, rx1, ry0, ry1 int
+	switch o {
+	case 2:
+		rx0, rx1, ry0, ry1 = w-x1, w-x0, y0, y1
+	case 3:
+		rx0, rx1, ry0, ry1 = w-x1, w-x0, h-y1, h-y0
+	case 4:
+		rx0, rx1, ry0, ry1 = x0, x1, h-y1, h-y0
+	case 5:
+		rx0, rx1, ry0, ry1 = y0, y1, x0, x1
+	case 6:
+		rx0, rx1, ry0, ry1 = y0, y1, h-x1, h-x0
+	case 7:
+		rx0, rx1, ry0, ry1 = w-y1, w-y0, h-x1, h-x0
+	case 8:
+		rx0, rx1, ry0, ry1 = w-y1, w-y0, x0, x1
+	default:
+		rx0, rx1, ry0, ry1 = x0, x1, y0, y1
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, rx1-rx0, ry1-ry0))
+	draw.Draw(dst, dst.Bounds(), src, image.Pt(b.Min.X+rx0, b.Min.Y+ry0), draw.Src)
+	return dst
+}
+
+func orientImage(src image.Image, o int) image.Image {
+	if o < 2 || o > 8 {
+		return src
+	}
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	ow, oh := w, h
+	if o >= 5 {
+		ow, oh = h, w
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, ow, oh))
+	for y := 0; y < oh; y++ {
+		for x := 0; x < ow; x++ {
+			var sx, sy int
+			switch o {
+			case 2:
+				sx, sy = w-1-x, y
+			case 3:
+				sx, sy = w-1-x, h-1-y
+			case 4:
+				sx, sy = x, h-1-y
+			case 5:
+				sx, sy = y, x
+			case 6:
+				sx, sy = y, h-1-x
+			case 7:
+				sx, sy = w-1-y, h-1-x
+			case 8:
+				sx, sy = w-1-y, x
+			}
+			dst.Set(x, y, src.At(b.Min.X+sx, b.Min.Y+sy))
+		}
+	}
+	return dst
 }
 
 func downscale(src image.Image, maxSide int) image.Image {
@@ -217,7 +356,11 @@ func ImageDimensions(data []byte, mime string) (int, int) {
 	if err != nil {
 		return 0, 0
 	}
-	return cfg.Width, cfg.Height
+	w, h := cfg.Width, cfg.Height
+	if mime == "image/jpeg" && w > 0 && h > 0 && JPEGOrientation(data) >= 5 {
+		w, h = h, w
+	}
+	return w, h
 }
 
 func WebPDimensions(data []byte) (int, int) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -49,8 +50,9 @@ func (t *Tool) Definition() agent.ToolDef {
 }
 
 type readArgs struct {
-	Path   string `json:"path"`
-	Detail string `json:"detail"`
+	Path   string             `json:"path"`
+	Detail string             `json:"detail"`
+	Region *agent.ImageRegion `json:"region"`
 }
 
 func (t *Tool) Invoke(_ context.Context, argsJSON string) agent.ToolResult {
@@ -97,7 +99,18 @@ func (t *Tool) read(args readArgs) (agent.ToolResult, error) {
 	if mime == "" {
 		return agent.ToolResult{}, fmt.Errorf(MsgImageBadFormat, filepath.Base(full))
 	}
-	data := agent.MaybeResizeImage(raw, mime, detail, t.resize)
+	origW, origH := agent.ImageDimensions(raw, mime)
+	var data []byte
+	var used agent.ImageRegion
+	if args.Region != nil {
+		out, u, err := agent.CropImage(raw, mime, *args.Region, detail, t.resize)
+		if err != nil {
+			return agent.ToolResult{}, regionError(err, raw, mime)
+		}
+		data, used = out, u
+	} else {
+		data = agent.MaybeResizeImage(raw, mime, detail, t.resize)
+	}
 	w, h := agent.ImageDimensions(data, mime)
 	name := filepath.Base(full)
 	ref := agent.ImageRef{
@@ -109,7 +122,27 @@ func (t *Tool) read(args readArgs) (agent.ToolResult, error) {
 		Height: h,
 		Detail: detail,
 	}
+	if args.Region != nil {
+		text := fmt.Sprintf(MsgReadImageRegionFmt, name, dimensionsText(origW, origH), used.X, used.Y, used.Width, used.Height, dimensionsText(w, h), formatBytes(len(data)))
+		return agent.ToolResult{Text: text, Images: []agent.ImageRef{ref}}, nil
+	}
+	if w != origW || h != origH {
+		return agent.ToolResult{Text: fmt.Sprintf(MsgReadImageScaledFmt, name, dimensionsText(w, h), formatBytes(len(data)), dimensionsText(origW, origH)), Images: []agent.ImageRef{ref}}, nil
+	}
 	return agent.ToolResult{Text: fmt.Sprintf(MsgReadImageFmt, name, dimensionsText(w, h), formatBytes(len(data))), Images: []agent.ImageRef{ref}}, nil
+}
+
+func regionError(err error, raw []byte, mime string) error {
+	switch {
+	case errors.Is(err, agent.ErrImageRegionUnsupported):
+		return fmt.Errorf(MsgRegionUnsupported)
+	case errors.Is(err, agent.ErrImageRegionInvalid):
+		return fmt.Errorf(MsgRegionInvalid)
+	case errors.Is(err, agent.ErrImageRegionEmpty):
+		w, h := agent.ImageDimensions(raw, mime)
+		return fmt.Errorf(MsgRegionOutside, dimensionsText(w, h))
+	}
+	return fmt.Errorf(MsgRegionCropFail, err)
 }
 
 func (t *Tool) resolvePath(p string) string {
