@@ -21,6 +21,8 @@ type UI struct {
 	Theme           string            `yaml:"theme"`
 	Palette         map[string]string `yaml:"palette"`
 	ToolOutputLines int               `yaml:"tool_output_lines"`
+	ImageMaxBytes   int               `yaml:"image_max_bytes"`
+	ImageMaxCount   int               `yaml:"image_max_count"`
 }
 
 type Config struct {
@@ -34,6 +36,7 @@ var Version = "dev"
 
 const (
 	DefaultToolOutputLines  = 20
+	DefaultImageDetail      = "low"
 	DefaultTheme            = "nord"
 	DefaultSessionMode      = "auto"
 	DefaultDataDirSuffix    = ".local/share/tanya"
@@ -56,6 +59,7 @@ func Default() *Config {
 			BaseURL:          "https://api.openai.com/v1",
 			Model:            "deepseek-v4-flash",
 			Temperature:      0.7,
+			ImageDetail:      DefaultImageDetail,
 			ApiProtocol:      "responses",
 			SessionMode:      DefaultSessionMode,
 			UserAgent:        agent.UserAgent(Version),
@@ -68,6 +72,8 @@ func Default() *Config {
 		UI: UI{
 			Theme:           DefaultTheme,
 			ToolOutputLines: DefaultToolOutputLines,
+			ImageMaxBytes:   agent.DefaultImageMaxBytes,
+			ImageMaxCount:   agent.DefaultImageMaxCount,
 		},
 	}
 }
@@ -107,6 +113,9 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("TANYA_REASONING_EFFORT"); v != "" {
 		cfg.ReasoningEffort = v
 	}
+	if v := os.Getenv("TANYA_IMAGE_DETAIL"); v != "" {
+		cfg.ImageDetail = v
+	}
 	if v := os.Getenv("TANYA_API_PROTOCOL"); v != "" {
 		cfg.ApiProtocol = v
 	}
@@ -134,11 +143,18 @@ func Load(path string) (*Config, error) {
 	if cfg.ToolOutputLines < 1 || cfg.ToolOutputLines > 1000 {
 		cfg.ToolOutputLines = DefaultToolOutputLines
 	}
+	if cfg.ImageMaxBytes < 1 {
+		cfg.ImageMaxBytes = agent.DefaultImageMaxBytes
+	}
+	if cfg.ImageMaxCount < 1 {
+		cfg.ImageMaxCount = agent.DefaultImageMaxCount
+	}
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = agent.UserAgent(Version)
 	}
 	cfg.NotifyCmd = strings.TrimSpace(cfg.NotifyCmd)
 	cfg.ReasoningEffort = agent.NormalizeEffort(cfg.ReasoningEffort)
+	cfg.ImageDetail = agent.NormalizeImageDetail(cfg.ImageDetail)
 	rawProtocol := cfg.ApiProtocol
 	cfg.ApiProtocol = agent.NormalizeApiProtocol(cfg.ApiProtocol)
 	if cfg.ApiProtocol == "" {

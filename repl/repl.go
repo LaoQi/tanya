@@ -38,6 +38,8 @@ type REPL struct {
 	rend          render.Renderer
 	notifier      Notifier
 	started       time.Time
+	imgBytes      int
+	imgCount      int
 }
 
 type options struct {
@@ -52,6 +54,15 @@ type options struct {
 	reasoning bool
 	notifier  Notifier
 	maxLines  int
+	imgBytes  int
+	imgCount  int
+}
+
+func WithImageLimits(maxBytes, maxCount int) Option {
+	return func(o *options) {
+		o.imgBytes = maxBytes
+		o.imgCount = maxCount
+	}
 }
 
 type Option func(*options)
@@ -147,7 +158,14 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
+	imgBytes, imgCount := o.imgBytes, o.imgCount
+	if imgBytes <= 0 {
+		imgBytes = agent.DefaultImageMaxBytes
+	}
+	if imgCount <= 0 {
+		imgCount = agent.DefaultImageMaxCount
+	}
+	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette, imgBytes: imgBytes, imgCount: imgCount}
 	r.prof = o.prof
 	r.rend = render.NewThemedRenderer(r.prof, sch.MD)
 	ed.SetStyles(sem.Dim.With(r.prof), sem.Accent.With(r.prof))
@@ -311,11 +329,40 @@ func (r *REPL) Run() error {
 	}
 }
 
+func (r *REPL) attachOptions() AttachOptions {
+	return AttachOptions{
+		Workspace: r.cwdBase,
+		MaxBytes:  r.imgBytes,
+		MaxCount:  r.imgCount,
+	}
+}
+
+func (r *REPL) cwdBase() string {
+	if r.agent != nil {
+		if ws := r.agent.Workspace(); ws != "" {
+			return ws
+		}
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return cwd
+}
+
 func (r *REPL) ask(q string) {
+	in, err := PrepareContent(q, r.attachOptions())
+	if err != nil {
+		r.failErr(err)
+		return
+	}
+	if len(in.Images) > 0 {
+		r.st.out.emit(KindDecor, r.sem.Dim.With(r.prof).Frame(imagesText(in.Images))+"\n")
+	}
 	r.con.Sane()
 	ctx, done := InterruptContext(r.con)
 	t := r.beginTurn(done)
-	err := r.runTurn(ctx, q, t)
+	err = r.runTurn(ctx, in, t)
 	t.End(err)
 }
 
@@ -638,6 +685,12 @@ func historyLabel(m agent.Message) string {
 }
 
 func historyText(m agent.Message) string {
+	if len(m.Images) > 0 {
+		if text := strings.TrimSpace(m.Content); text != "" {
+			return imagesText(m.Images) + " " + text
+		}
+		return imagesText(m.Images)
+	}
 	if m.Role == "assistant" && m.Content == "" && len(m.ToolCalls) > 0 {
 		names := make([]string, len(m.ToolCalls))
 		for i, tc := range m.ToolCalls {

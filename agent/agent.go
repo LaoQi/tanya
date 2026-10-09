@@ -243,13 +243,22 @@ func briefErr(err error) string {
 	return s
 }
 
+type Content struct {
+	Text   string
+	Images []ImageRef
+}
+
 func (a *Agent) Ask(ctx context.Context, input string, sink EventSink) error {
+	return a.AskContent(ctx, Content{Text: input}, sink)
+}
+
+func (a *Agent) AskContent(ctx context.Context, in Content, sink EventSink) error {
 	if _, ok := a.ArchiveReadOnly(); ok {
 		return ErrArchiveReadOnly
 	}
 	start := time.Now()
 	mark := len(a.history)
-	a.history = append(a.history, Message{Role: "user", Content: input})
+	a.history = append(a.history, Message{Role: "user", Content: in.Text, Images: in.Images})
 	err := a.ask(ctx, sink, mark)
 	var ie *InterruptError
 	interrupted := errors.As(err, &ie)
@@ -363,6 +372,9 @@ func (a *Agent) totalTokens() int {
 	t := estimateTokens(a.prompt.system())
 	for _, m := range a.history {
 		t += estimateTokens(m.Content)
+		for _, img := range m.Images {
+			t += estimateImageTokens(img.Width, img.Height)
+		}
 		for _, tc := range m.ToolCalls {
 			t += estimateTokens(tc.Function.Arguments)
 		}

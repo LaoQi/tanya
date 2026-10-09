@@ -177,8 +177,17 @@ func main() {
 	sink := repl.NewToolView(st, prof, sem, repl.LiveWidth(con, termFacts), cfg.ToolOutputLines, views)
 
 	if cmd == repl.CmdAsk {
+		in, perr := repl.PrepareContent(rest, repl.AttachOptions{
+			Workspace: a.Workspace,
+			MaxBytes:  cfg.ImageMaxBytes,
+			MaxCount:  cfg.ImageMaxCount,
+		})
+		if perr != nil {
+			st.FailErr("", perr)
+			exitNow(1)
+		}
 		ctx, done := repl.InterruptContext(con)
-		err := a.Ask(ctx, rest, sink.Handle)
+		err := a.AskContent(ctx, in, sink.Handle)
 		done()
 		if err != nil {
 			if ctty.Exiting() {
@@ -199,7 +208,7 @@ func main() {
 		st.FailErr("", err)
 		exitNow(1)
 	}
-	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithProfile(prof), repl.WithToolViews(views), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithConsole(con))
+	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithProfile(prof), repl.WithToolViews(views), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithImageLimits(cfg.ImageMaxBytes, cfg.ImageMaxCount), repl.WithConsole(con))
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)

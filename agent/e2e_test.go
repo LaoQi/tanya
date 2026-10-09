@@ -29,7 +29,7 @@ func TestAskSingleTurn(t *testing.T) {
 	if len(m.reqs) != 1 {
 		t.Fatalf("请求数: %d", len(m.reqs))
 	}
-	if m.reqs[0].Messages[0].Role != "system" {
+	if wireRole(t, m.reqs[0].Messages[0]) != "system" {
 		t.Error("首条应为 system prompt")
 	}
 }
@@ -74,7 +74,7 @@ func TestAskShellToolLoop(t *testing.T) {
 		t.Fatalf("请求数: %d", len(m.reqs))
 	}
 	second := m.reqs[1].Messages
-	if len(second) != 4 || second[3].Role != "tool" {
+	if len(second) != 4 || wireRole(t, second[3]) != "tool" {
 		t.Fatalf("第二次请求应回填 tool 结果: %+v", second)
 	}
 }
@@ -373,13 +373,13 @@ func TestAskChatReplaysReasoningContent(t *testing.T) {
 		t.Fatalf("请求数: %d", len(m.reqs))
 	}
 	second := m.reqs[1].Messages
-	if len(second) != 4 || second[0].Role != "system" || second[2].Role != "assistant" {
+	if len(second) != 4 || wireRole(t, second[0]) != "system" || wireRole(t, second[2]) != "assistant" {
 		t.Fatalf("第二轮请求消息异常: %+v", second)
 	}
-	if second[2].ReasoningContent != "先看看目录" {
-		t.Errorf("第二轮应回传 reasoning_content: %+v", second[2])
+	if got := wireMap(t, second[2])["reasoning_content"]; got != "先看看目录" {
+		t.Errorf("第二轮应回传 reasoning_content: %v", got)
 	}
-	if len(second[2].ReasoningItems) != 0 {
+	if _, ok := wireMap(t, second[2])["reasoning_items"]; ok {
 		t.Errorf("wire 上不应出现 reasoning_items: %+v", second[2])
 	}
 }

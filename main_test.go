@@ -51,6 +51,9 @@ func TestConfigExampleMatchesDefaults(t *testing.T) {
 		{"temperature", strconv.FormatFloat(got.Temperature, 'g', -1, 64), strconv.FormatFloat(want.Temperature, 'g', -1, 64)},
 		{"data_dir", expandTilde(got.DataDir), want.DataDir},
 		{"session_mode", got.SessionMode, want.SessionMode},
+		{"image_detail", got.ImageDetail, want.ImageDetail},
+		{"image_max_bytes", strconv.Itoa(got.ImageMaxBytes), strconv.Itoa(want.ImageMaxBytes)},
+		{"image_max_count", strconv.Itoa(got.ImageMaxCount), strconv.Itoa(want.ImageMaxCount)},
 		{"tool_output_lines", strconv.Itoa(got.ToolOutputLines), strconv.Itoa(want.ToolOutputLines)},
 	}
 	covered := make(map[string]bool, len(checks))

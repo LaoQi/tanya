@@ -278,7 +278,7 @@ func TestChatStreamRequestFormat(t *testing.T) {
 	if len(req.Tools) != len(testToolDefs()) {
 		t.Errorf("工具数: %d", len(req.Tools))
 	}
-	if req.Messages[0].Role != "system" || req.Messages[1].Role != "user" {
+	if wireRole(t, req.Messages[0]) != "system" || wireRole(t, req.Messages[1]) != "user" {
 		t.Error("messages 顺序异常")
 	}
 }

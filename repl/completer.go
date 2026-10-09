@@ -101,7 +101,86 @@ func (c *completer) models() []string {
 	return c.modelCache
 }
 
+func attachQuery(line string) (prefix, head string, ok bool) {
+	if strings.HasPrefix(line, "/") {
+		return "", "", false
+	}
+	head = line
+	if i := strings.LastIndexAny(line, " \t"); i >= 0 {
+		head = line[:i+1]
+	}
+	tok := line[len(head):]
+	if !strings.HasPrefix(tok, "@") {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(tok, "@")
+	if strings.HasPrefix(rest, "\"") || strings.HasPrefix(rest, "'") {
+		return rest[1:], head + tok[:2], true
+	}
+	return rest, head + "@", true
+}
+
+func (c *completer) attachQueryCandidates(line string) ([]switchCandidate, string, string, bool) {
+	prefix, head, ok := attachQuery(line)
+	if !ok {
+		return nil, "", "", false
+	}
+	return c.attachCandidates(prefix), head, prefix, true
+}
+
+func (c *completer) attachCandidates(prefix string) []switchCandidate {
+	base, typedRoot, namePart, ok := c.candidateBase(prefix)
+	if !ok {
+		return nil
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return nil
+	}
+	dot := strings.HasPrefix(namePart, ".")
+	var out []switchCandidate
+	if namePart == ".." {
+		out = append(out, switchCandidate{path: typedRoot + "../", label: "../"})
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !safeSwitchName(name) {
+			continue
+		}
+		if strings.HasPrefix(name, ".") && !dot {
+			continue
+		}
+		if !strings.HasPrefix(name, namePart) {
+			continue
+		}
+		if switchDirEntry(base, e) {
+			out = append(out, switchCandidate{path: typedRoot + name + "/", label: term.OneLine(name + "/")})
+			continue
+		}
+		if !hasImageExt(name) {
+			continue
+		}
+		out = append(out, switchCandidate{path: typedRoot + name, label: term.OneLine(name)})
+	}
+	return out
+}
+
+func hasImageExt(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+		return true
+	}
+	return false
+}
+
 func (c *completer) suggest(line string) string {
+	if cands, _, prefix, ok := c.attachQueryCandidates(line); ok {
+		for _, cand := range cands {
+			if cand.path != prefix {
+				return cand.path[len(prefix):]
+			}
+		}
+	}
 	switch {
 	case c.isCommandContext(line):
 		for _, cmd := range slashCommands {
@@ -156,6 +235,13 @@ func (c *completer) suggest(line string) string {
 }
 
 func (c *completer) complete(line string) []readline.Completion {
+	if cands, head, _, ok := c.attachQueryCandidates(line); ok {
+		var out []readline.Completion
+		for _, cand := range cands {
+			out = append(out, readline.Completion{Insert: head + cand.path, Display: cand.label})
+		}
+		return out
+	}
 	switch {
 	case c.isCommandContext(line):
 		var out []readline.Completion
@@ -249,19 +335,18 @@ type switchCandidate struct {
 	label string
 }
 
-func (c *completer) switchCandidates(prefix string) []switchCandidate {
+func (c *completer) candidateBase(prefix string) (base, typedRoot, namePart string, ok bool) {
 	home, _ := os.UserHomeDir()
-	var base, typedRoot, namePart string
 	switch {
 	case prefix == "~":
 		if home == "" {
-			return nil
+			return "", "", "", false
 		}
 		base, typedRoot, namePart = home, "~/", ""
 	case strings.HasPrefix(prefix, "~"):
 		rest := prefix[1:]
 		if home == "" || !strings.HasPrefix(rest, "/") {
-			return nil
+			return "", "", "", false
 		}
 		dirPart, name := splitSwitchPath(rest)
 		base, typedRoot, namePart = home+dirPart, "~"+dirPart, name
@@ -270,10 +355,18 @@ func (c *completer) switchCandidates(prefix string) []switchCandidate {
 		base, typedRoot, namePart = dirPart, dirPart, name
 	default:
 		if c.workspaceDir == nil || c.workspaceDir() == "" {
-			return nil
+			return "", "", "", false
 		}
 		dirPart, name := splitSwitchPath(prefix)
 		base, typedRoot, namePart = filepath.Join(c.workspaceDir(), dirPart), dirPart, name
+	}
+	return base, typedRoot, namePart, true
+}
+
+func (c *completer) switchCandidates(prefix string) []switchCandidate {
+	base, typedRoot, namePart, ok := c.candidateBase(prefix)
+	if !ok {
+		return nil
 	}
 	entries, err := os.ReadDir(base)
 	if err != nil {
