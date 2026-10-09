@@ -40,7 +40,7 @@ func TestAttachTokens(t *testing.T) {
 		{"没有附件", nil},
 	}
 	for _, c := range cases {
-		got := attachTokens(c.line)
+		got := attachTokens(c.line, AttachOptions{})
 		if len(got) != len(c.want) {
 			t.Errorf("attachTokens(%q) = %v want %v", c.line, got, c.want)
 			continue
@@ -258,10 +258,10 @@ func TestPrepareContentRejectsImageOnly(t *testing.T) {
 }
 
 func TestStripAttachTokensAndImagesText(t *testing.T) {
-	if got := strings.TrimSpace(stripAttachTokens("看图 @a.png 结束")); got != "看图  结束" {
+	if got := strings.TrimSpace(stripAttachTokens("看图 @a.png 结束", AttachOptions{})); got != "看图  结束" {
 		t.Errorf("剥离后: %q", got)
 	}
-	if got := strings.TrimSpace(stripAttachTokens(`看图 @"a b.png"`)); got != "看图" {
+	if got := strings.TrimSpace(stripAttachTokens(`看图 @"a b.png"`, AttachOptions{})); got != "看图" {
 		t.Errorf("引号剥离后: %q", got)
 	}
 	text := imagesText([]agent.ImageRef{{Name: "a.png", Bytes: 1234}, {Name: "b.jpg", Bytes: 2 << 20}})
@@ -311,13 +311,145 @@ func TestAttachCompletion(t *testing.T) {
 	}
 	if cands := c.complete("看图 @\""); len(cands) == 0 {
 		t.Error("引号形态也应有候选")
-	} else if !strings.HasPrefix(cands[0].Insert, `看图 @"`) {
-		t.Errorf("引号应保留: %+v", cands[:1])
+	} else if cands[0].Insert != "看图 @a.png" {
+		t.Errorf("引号形态应统一补成非引号形态: %+v", cands[:1])
 	}
 	if got := c.complete("a@b.com"); len(got) != 0 {
 		t.Errorf("邮箱不应触发补全: %+v", got)
 	}
 	if got := c.suggest("/load @"); got != "" && strings.HasSuffix(got, ".png") {
 		t.Errorf("斜杠命令行不应走 @ 补全: %q", got)
+	}
+}
+
+func TestAttachCompletionSpaceNames(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "my dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := []string{"a.png", "my file.png", "myfile.png", `we"ird.png`, `we'ird.png`}
+	files = append(files, filepath.Join("my dir", "inner.png"))
+	for _, n := range files {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := &completer{workspaceDir: func() string { return dir }}
+
+	inserts := func(line string) []string {
+		var out []string
+		for _, cand := range c.complete(line) {
+			out = append(out, cand.Insert)
+		}
+		return out
+	}
+	has := func(line, want string) bool {
+		for _, got := range inserts(line) {
+			if got == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	if got := c.suggest("@a"); got != ".png" {
+		t.Errorf("行首 token 的 ghost: %q", got)
+	}
+	if !has("@a", "@a.png") {
+		t.Errorf("行首 token 的候选: %v", inserts("@a"))
+	}
+	if !has("@my", "@my file.png") {
+		t.Errorf("含空格名应原样进候选（无引号、无闭合）: %v", inserts("@my"))
+	}
+	if !has("@my", "@my dir/") {
+		t.Errorf("含空格目录应原样进候选: %v", inserts("@my"))
+	}
+	if got := c.suggest("@my fi"); got != "le.png" {
+		t.Errorf("含空格候选的 ghost 应直接可用: %q", got)
+	}
+	if !has(`@"my fi`, "@my file.png") {
+		t.Errorf("引号形态应统一补成非引号形态: %v", inserts(`@"my fi`))
+	}
+	if got := c.suggest(`@"my fi`); got != "" {
+		t.Errorf("引号 token 不给 ghost（ghost 无法去掉已输入的引号）: %q", got)
+	}
+	if !has(`@"my dir/in`, "@my dir/inner.png") {
+		t.Errorf("引号形态下钻: %v", inserts(`@"my dir/in`))
+	}
+	if !has("@we", `@we"ird.png`) || !has("@we", `@we'ird.png`) {
+		t.Errorf("名字含引号字符（非首位）应可补: %v", inserts("@we"))
+	}
+	if got := inserts("a@b"); len(got) != 0 {
+		t.Errorf("邮箱不应触发: %v", got)
+	}
+}
+
+func TestAttachPathLongestMatch(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "my dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"plain.png", "note.png 结束", filepath.Join("my dir", "inner.png")} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "my file.png"), pngBytes(t, 1, 1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plain.png @my file.png"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "note.png"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "my note.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opt := AttachOptions{Workspace: func() string { return dir }}
+
+	tokens := func(line string) []string {
+		return attachTokens(line, opt)
+	}
+	eq := func(line string, want ...string) {
+		t.Helper()
+		got := tokens(line)
+		if len(got) != len(want) {
+			t.Errorf("attachTokens(%q) = %v want %v", line, got, want)
+			return
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Errorf("attachTokens(%q) = %v want %v", line, got, want)
+				return
+			}
+		}
+	}
+
+	eq("看图 @my file.png 这张图里有什么", "my file.png")
+	eq("@my file.png 说明", "my file.png")
+	eq("@my dir/inner.png 看图", "my dir/inner.png")
+	eq("@plain.png @my file.png 说明", "plain.png", "my file.png")
+	eq("@plain.png @my file.png", "plain.png", "my file.png")
+	eq("@note.png 结束", "note.png 结束")
+	eq("@my dir 看图", "my")
+	eq("@nope file.png 看图", "nope")
+	eq("@https://example.com/a.png 看图", "https://example.com/a.png")
+	eq("@data:image/png;base64,AAAA 看图", "data:image/png;base64,AAAA")
+	eq(`@"my file.png`)
+	eq("@ 看图")
+
+	if _, err := ParseAttachments("@my note.txt 看图", opt); err == nil {
+		t.Error("存在的非图像长名应按校验不过报错，而非静默")
+	}
+	if got := strings.TrimSpace(stripAttachTokens("看图 @my file.png 这张图", opt)); got != "看图  这张图" {
+		t.Errorf("stripAttachTokens 应只剥附件: %q", got)
+	}
+	imgs, err := ParseAttachments("@my file.png 说明", opt)
+	if err != nil {
+		t.Fatalf("含空格路径应解析成功: %v", err)
+	}
+	if len(imgs) != 1 || imgs[0].Name != "my file.png" {
+		t.Fatalf("解析结果: %+v", imgs)
 	}
 }

@@ -23,7 +23,7 @@ type AttachOptions struct {
 }
 
 func ParseAttachments(line string, opt AttachOptions) ([]agent.ImageRef, error) {
-	tokens := attachTokens(line)
+	tokens := attachTokens(line, opt)
 	if len(tokens) == 0 {
 		return nil, nil
 	}
@@ -53,7 +53,7 @@ type attachSpan struct {
 	start, end int
 }
 
-func attachSpans(line string) []attachSpan {
+func attachSpans(line string, opt AttachOptions) []attachSpan {
 	var out []attachSpan
 	for i := 0; i < len(line); {
 		if line[i] != '@' || (i > 0 && !isAttachSpace(line[i-1])) {
@@ -75,20 +75,78 @@ func attachSpans(line string) []attachSpan {
 			i = k + 1
 			continue
 		}
-		k := j
-		for k < len(line) && !isAttachSpace(line[k]) {
-			k++
+		if j >= len(line) || isAttachSpace(line[j]) {
+			i = j
+			continue
 		}
-		if k > j {
-			out = append(out, attachSpan{text: line[j:k], start: i, end: k})
+		end := attachWordEnd(line, j)
+		if !isAttachLiteral(line[j:]) {
+			if e, ok := attachPathEnd(line, j, attachTokenLimit(line, j), opt); ok {
+				end = e
+			}
 		}
-		i = k
+		out = append(out, attachSpan{text: line[j:end], start: i, end: end})
+		i = end
 	}
 	return out
 }
 
-func attachTokens(line string) []string {
-	spans := attachSpans(line)
+func isAttachLiteral(s string) bool {
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "data:")
+}
+
+func attachWordEnd(line string, start int) int {
+	end := start
+	for end < len(line) && !isAttachSpace(line[end]) {
+		end++
+	}
+	return end
+}
+
+func attachTokenLimit(line string, start int) int {
+	for k := start + 1; k < len(line); k++ {
+		if line[k] == '@' && isAttachSpace(line[k-1]) {
+			return k - 1
+		}
+	}
+	return len(line)
+}
+
+func attachPathEnd(line string, start, hi int, opt AttachOptions) (int, bool) {
+	ends := attachWordEnds(line, start, hi)
+	for i := len(ends) - 1; i >= 0; i-- {
+		if attachPathExists(line[start:ends[i]], opt) {
+			return ends[i], true
+		}
+	}
+	return 0, false
+}
+
+func attachWordEnds(line string, start, hi int) []int {
+	var ends []int
+	for p := start; p < hi; {
+		for p < hi && isAttachSpace(line[p]) {
+			p++
+		}
+		q := p
+		for q < hi && !isAttachSpace(line[q]) {
+			q++
+		}
+		if q > p {
+			ends = append(ends, q)
+		}
+		p = q
+	}
+	return ends
+}
+
+func attachPathExists(p string, opt AttachOptions) bool {
+	info, err := os.Stat(resolveAttachPath(p, opt))
+	return err == nil && info.Mode().IsRegular()
+}
+
+func attachTokens(line string, opt AttachOptions) []string {
+	spans := attachSpans(line, opt)
 	if len(spans) == 0 {
 		return nil
 	}
@@ -99,10 +157,10 @@ func attachTokens(line string) []string {
 	return out
 }
 
-func stripAttachTokens(line string) string {
+func stripAttachTokens(line string, opt AttachOptions) string {
 	var b strings.Builder
 	prev := 0
-	for _, sp := range attachSpans(line) {
+	for _, sp := range attachSpans(line, opt) {
 		b.WriteString(line[prev:sp.start])
 		prev = sp.end
 	}
@@ -115,7 +173,7 @@ func PrepareContent(line string, opt AttachOptions) (agent.Content, error) {
 	if err != nil {
 		return agent.Content{}, err
 	}
-	if len(imgs) > 0 && strings.TrimSpace(stripAttachTokens(line)) == "" {
+	if len(imgs) > 0 && strings.TrimSpace(stripAttachTokens(line, opt)) == "" {
 		return agent.Content{}, errors.New(MsgImageNoText)
 	}
 	return agent.Content{Text: line, Images: imgs}, nil
