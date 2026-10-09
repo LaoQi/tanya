@@ -62,7 +62,7 @@ render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终
 - 工具与缓存：`docs/shell-tool.md` run_shell 组件化、`docs/agent-control-tool.md` agent_custom、`docs/cache-probe.md` prompt cache
 - 分层与依赖：`docs/layering-refactor.md`（S1–S6 已落地，S7 按 D3 不做）
 - 会话与 REPL：`docs/session-archive.md` 归档卷、`docs/repl-output-refactor.md` 输出收敛、`docs/stream-input-events.md` 流式期输入与事件合流（P1–P5 已实施，含思考期 `Ctrl+O`）、`docs/repl-status-append.md` 状态追加
-- 归档/未实施：`docs/repl-replay-rendering.md`（未实施，评估结论：建议不做）、`docs/multimodal.md`（多模态/图像，进行中：P0 数据模型与两协议 wire 已实施、P1 的 `@path` 解析与校验已实施；补全/回显/接线未做）、`docs/probe-redesign.md`、`docs/reasoning-live-toggle.md`
+- 归档/未实施：`docs/repl-replay-rendering.md`（未实施，评估结论：建议不做）、`docs/multimodal.md`（多模态/图像：P0/P1/预缩放已实施；P4「模型主动读图」方案已定待实施，见其 §7.5）、`docs/probe-redesign.md`、`docs/reasoning-live-toggle.md`
 
 ## 构建与测试
 
