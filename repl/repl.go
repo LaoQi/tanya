@@ -475,6 +475,7 @@ func (r *REPL) handleSwitch(args []string) {
 		r.st.out.emitText(KindNotice, fmt.Sprintf(MsgSwitchUsage, initPath(from)))
 		return
 	}
+	retired := r.farewellData()
 	if err := r.agent.SwitchWorkspace(strings.Join(args, " ")); err != nil {
 		r.failErr(err)
 		return
@@ -484,7 +485,9 @@ func (r *REPL) handleSwitch(args []string) {
 	if dir, ok := r.agent.SessionDir(); ok {
 		out += fmt.Sprintf(MsgSwitchDir, initPath(dir))
 	}
+	r.st.out.emit(KindDecor, farewellText(retired))
 	r.st.out.emitText(KindNotice, out)
+	r.started = time.Now()
 }
 
 func (r *REPL) handleTheme(args []string) {

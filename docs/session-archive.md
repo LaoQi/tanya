@@ -146,7 +146,7 @@ func (s *sessionStore) findArchived(id string) (volume string, ok bool)
 | 只读态对话 | REPL 在对话分支前拦截（含 `:`/`：`）→ `当前为归档只读会话（X）；继续对话请 /fork 开新会话`；`agent.Ask` 兜底 `ErrArchiveReadOnly` |
 | `/fork` | 通用命令（任何会话可用）→ `已 fork 为新会话 <新 id>（继承 N 条历史）`；原会话文件不动、可 `/load` 回切，归档只读态用它解除只读；`-n` 下追加一行 `（不落盘模式，未写入）` |
 | `/stat` | 归档只读态显示 `会话: 归档只读 X（未写入）` |
-| 退出收尾 | 归档只读态文件行显示 `会话文件 未写入（不落盘模式）` |
+| 退出收尾 | 归档只读态无会话 id、文件行省略（会话行退化为 `时长 … · 消息 … 条`，`store.frozen` 不置 `disabled` 故不触发「未写入」；`-n` 模式才显示 `会话文件 未写入（不落盘模式）`，见 §10 `-n` 链路）；`/switch` 成功切换时打印同一收尾块，口径相同 |
 | 启动自动归档 | 默认开启（`auto_archive: false` 关闭）；与 `/archive` 共用 `REPL.archiveFlow`（`repl/archive_flow.go`），提示与确认完全同一条：`当前活跃会话 A 个；将归档 C 个（约 X，保留最近 K 个）。` + `现在归档？[Y/n] `，`y`/`yes` 或空行（直接回车）归档，`n`/`no` 与其它输入 → `已取消，未归档`（`^D` 读到 EOF 且无内容亦取消，不进同意分支）。仅调用时机与触发条件不同：`autoArchivePrompt()` 在欢迎屏后进循环前调用，门禁为 `archiveInteractive()`（rich 输出 + `r.raw` + `r.prof.TTY`，等价于「plain 与 stdout 非终端静默返回」），再过 `SuggestArchive`（`auto_archive` 关闭、`-n`、活跃数 < `auto_archive_threshold` 均不问）；`C/X` 已剔除当前会话（先占 `keep` 名额再剔除，与 `archive()` 同序），`A` 取 `ArchiveReport.Active` |
 
 新增常量：`repl/messages.go`（`MsgArchiveDone` / `MsgArchiveNone` / `MsgArchiveSkipFmt` / `MsgArchiveFailFmt` / `MsgArchivePreview` / `MsgForkDone` / `MsgForkNoSave` / `MsgLoadArchived` / `MsgArchiveReadOnlyFmt` / `SessArchMark` / `slashCommands` 增 `/archive` `/fork` / help 文案），`agent/messages.go`（`ErrArchiveReadOnly` / `MsgArchiveVolFailFmt` / `MsgControlStatArchive`）。数字与大小格式化归 repl（沿用 `stats.go` 既有缩写口径）。
