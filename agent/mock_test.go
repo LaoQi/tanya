@@ -321,3 +321,22 @@ func (m *mockLLM) config() *Config {
 	cfg.ApiProtocol = "chat"
 	return cfg
 }
+
+func wireRole(t *testing.T, v any) string {
+	t.Helper()
+	m, ok := v.(map[string]any)
+	if !ok {
+		t.Fatalf("wire 消息不是对象: %T", v)
+	}
+	r, _ := m["role"].(string)
+	return r
+}
+
+func wireMap(t *testing.T, v any) map[string]any {
+	t.Helper()
+	m, ok := v.(map[string]any)
+	if !ok {
+		t.Fatalf("wire 消息不是对象: %T", v)
+	}
+	return m
+}

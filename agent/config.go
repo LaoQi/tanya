@@ -12,6 +12,7 @@ type Config struct {
 	Model            string  `yaml:"model"`
 	Temperature      float64 `yaml:"temperature"`
 	ReasoningEffort  string  `yaml:"reasoning_effort"`
+	ImageDetail      string  `yaml:"image_detail"`
 	ApiProtocol      string  `yaml:"api_protocol"`
 	UserAgent        string  `yaml:"user_agent"`
 	DataDir          string  `yaml:"data_dir"`
@@ -84,6 +85,9 @@ func (c *Config) Validate() error {
 	}
 	if NormalizeApiProtocol(c.ApiProtocol) == "" {
 		return fmt.Errorf(MsgBadApiProtocol, c.ApiProtocol)
+	}
+	if c.ImageDetail != "" && NormalizeImageDetail(c.ImageDetail) == "" {
+		return fmt.Errorf(MsgBadImageDetail, c.ImageDetail)
 	}
 	if !validSessionMode(c.SessionMode) {
 		return fmt.Errorf(MsgBadSessionMode, c.SessionMode)

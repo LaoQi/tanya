@@ -12,6 +12,7 @@
 - `ctty` 是**零依赖叶子**、只有原语与信号面：`/dev/tty`、termios、模式与光标、探测、SIGTERM/SIGHUP/SIGINT/SIGWINCH/SIGQUIT 一律收敛在此，任何层可直接依赖、不需注入；注入只针对**终端所有权**（`Console`/`Lease`）。业务层（`repl`/`main`）不出现 `os/signal`，退出走 `REPL.quit()`、退出码取 `ctty.ExitStatus()`，见 `docs/ctty.md`
 - 终端持有者唯一（`readline` 的 `Console`：仲裁 + device + 租约；`repl` 只消费事件流与租约，`agent`/`tools` 经注入接口跨界）。借出两型：`LendStdin`（普通 run_shell）= stdin `os.DevNull` + 终端锚点，不直通终端、不移交前台；`LendFull`（`interactive: true`）= Linux pty 泵 / Windows `CONIN$` 直通，darwin 与借不出**明确报错**（`ErrNoLend`，不回退）。`^C`：tanya 持有期归一为中断（取消回合、杀子进程组），借出期归子进程；不做 `^Z` 检测。**读循环归 Console**：`SubscribeKeys` 才武装常驻读者（pipe 与 Windows 不后台读），`BeginRead`/`EndRead` 与借出（`Lease.Release`）自动挂起/恢复读者、读者保留 OPOST；尺寸消费面无状态（现取 `con.Size()`、只听 `EventResize` 重绘，取不到时回落 `repl.TermFacts`；`ctty.OnResize` → `EventResize`，借出期窗口尺寸转发子进程 pty）。见 `docs/terminal-console.md`
 - 仓库根两份纯文本编译期嵌入、改动需重新编译（`system_prompt.md` 与 `config.example.yaml`，后者即 `tanya config` 的原样输出，与 `config.Default()` 一致性由根包测试守护）。注入基座 = 内置提示词 + **环境段**（`main.envSection`，无 CWD 行）经 `agent.WithSystemPrompt` 注入——`agent` 无内置文本、**无 env 概念**（快照 = 基座 + 两层 AGENTS.md）
+- 多模态输入：对话行内 `@<路径|URL>` 即附图（`repl/attach.go`）；只认**行首或空白后的 `@`**、支持 `@"含 空格.png"`、多张按序；**文本保留 `@` 原样**发给模型，**解析不成功静默按普通文本**，**解析成功但校验不过（非 JPEG/PNG/GIF/WebP、超 `image_max_bytes`、超 `image_max_count`、非法 data URL、外链超 8192 字符）报错**；来源支持本地文件（`~`/相对路径按当前工作区）、`http(s)` 外链（只存 URL）、`data:image/...;base64`；`ask` 单发同口径（无额外 flag）；纯图消息不支持；`@` 触发路径补全；图像**内联 base64** 进 history 与会话文件（`Message.Images`，两协议 wire 见 `docs/multimodal.md`），本地估算按 DeepSeek 官方缩放规则 + 兜底 1024
 - 工具 = **调用方注入**（`agent.WithTools`，保序在前）+ 自带的 `agent_custom`（恒末位），装配期一次合成、之后**运行期冻结**，无运行期注册 API、不做插件。注册**仅作契约**（不校验重名、不仲裁）：`lookup` 首个匹配胜出，清单顺序即请求 `tools` 顺序。接口：`Tool` 三方法（`Name`/`Definition`/`Invoke`）+ 可选 `Interactive`；结果 `ToolResult{Text; Meta}`（`Text` 回 history、`Meta` 归表现层）；外部经 `agent.NewTool`/`agent.NewToolDef` 构造，见 `docs/design.md`《工具》
 - 标准工具集（`run_shell` + `get_time`/`get_env`/`calc`）落在顶级 `tools`，`main` 经 `tools.Standard(tools.Options{...})` 一次取齐按固定顺序注入；**`agent` 不带任何工具实现**（作库用时只有 `agent_custom`），也不认 shell。策略：以 `run_shell` 为核心，新能力优先用 shell 组合实现，纯计算/查询放 `tools/builtin`
 - 工具自带**表现层视图**：`present.ToolView`（`Args`/`Result` 两回调，`ok=false` 即回落通用渲染）注册进 `present.Registry`，`main` 装配（`views.Register("run_shell", shellview.View())`）经 `repl.WithToolViews` 注入。`repl` 因此**不导入任何 `tools/*`**：未注册者走通用回落，外部工具可自带视图包
@@ -19,7 +20,7 @@
 - 缓存不变性（history append-only、system 快照冻结、`/load` 还原首行）是**优化手段**、非红线：只保证「同一二进制 + 首行快照未改写」，跨版本无约束，见 `docs/cache-probe.md`
 - 启动即拒绝 root：`ctty.IsRoot()`（posix 取 euid 0，其余平台恒 false）为真则整个入口拒绝（`-v`/`config`/`ask`/`init` 无豁免），逃生舱只认 `TANYA_ALLOW_ROOT=1`；判定在 `main`
 - 启动即要求可用 shell：解析（配置覆盖 > 平台探测）全落空即报错退出、无降级；解析点在 `tools.Standard`，`agent.New` 不感知 shell
-- 配置分层：`agent.Config` 只留运行时核心项（13 项，含 `ConfigPath`），终端表现项外移顶级 `config` 包（`config.UI` 以 `yaml:",inline"` 合成进 `config.Config`），`shell` 覆盖（`yaml: shell` / `TANYA_SHELL`）为顶层字段、由 `main` 读给 `tools.Standard`；**yaml 键名与 `TANYA_*` env 名全程不变**，`config.example.yaml` 与 `tanya config` 输出逐字节不变。`agent` 无配置加载机制（无 `LoadConfig`/`DefaultConfig`、不读 yaml/env，依赖仅标准库），路径由调用方写入 `Config.ConfigPath`（`config_path` 键据此回报，未填即 `(未设置)`）；`Config.Validate()` 在 `agent.New` 入口调用：必填非空、`api_protocol`/`session_mode` 合法、阈值在界内，非法报错（`MsgNilConfig`），**`api_key` 唯一豁免**；默认值与加载归 `config` 包，见 `docs/design.md`《配置分层》
+- 配置分层：`agent.Config` 只留运行时核心项（14 项，含 `ConfigPath`），终端表现项外移顶级 `config` 包（`config.UI` 以 `yaml:",inline"` 合成进 `config.Config`），`shell` 覆盖（`yaml: shell` / `TANYA_SHELL`）为顶层字段、由 `main` 读给 `tools.Standard`；**yaml 键名与 `TANYA_*` env 名全程不变**，`config.example.yaml` 与 `tanya config` 输出逐字节不变。`agent` 无配置加载机制（无 `LoadConfig`/`DefaultConfig`、不读 yaml/env，依赖仅标准库），路径由调用方写入 `Config.ConfigPath`（`config_path` 键据此回报，未填即 `(未设置)`）；`Config.Validate()` 在 `agent.New` 入口调用：必填非空、`api_protocol`/`session_mode` 合法、阈值在界内，非法报错（`MsgNilConfig`），**`api_key` 唯一豁免**；默认值与加载归 `config` 包，见 `docs/design.md`《配置分层》
 - `init` 子命令是新工作区的一次性脚手架（幂等、不覆盖既有文件），**必须在 `agent.New` 之前执行**；不做项目探测、不调模型，见 `docs/design.md`《init 模式》
 - 会话归档：写入触发点只有 `/archive` 与启动自动归档两处，共用 `REPL.archiveFlow`（先报告再确认）；卷无损、写入后不可变、不做解档；归档会话 `/load` 只读、继续对话一律 `/fork`，见 `docs/session-archive.md`
 - 回合渲染单 goroutine 事件合流（`repl/turnloop.go`）：agent 事件与完成信号同 channel FIFO（`inDone` 保尾事件不丢，`EventToolStart` 的 ack 握手保证工具块先于工具输出上屏）；思考期 `Ctrl+O` 经 `Console.SubscribeKeys` 送键（门禁 posix + keys + 富档）；`ReadEvent` 空闲返回 `EventIdle`（不 dispatch）；思维链「关→开」按段首重放走 `MarkdownBuf.Rewind` + `Close`
@@ -61,7 +62,7 @@ render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终
 - 工具与缓存：`docs/shell-tool.md` run_shell 组件化、`docs/agent-control-tool.md` agent_custom、`docs/cache-probe.md` prompt cache
 - 分层与依赖：`docs/layering-refactor.md`（S1–S6 已落地，S7 按 D3 不做）
 - 会话与 REPL：`docs/session-archive.md` 归档卷、`docs/repl-output-refactor.md` 输出收敛、`docs/stream-input-events.md` 流式期输入与事件合流（P1–P5 已实施，含思考期 `Ctrl+O`）、`docs/repl-status-append.md` 状态追加
-- 归档/未实施：`docs/repl-replay-rendering.md`（未实施，评估结论：建议不做）、`docs/probe-redesign.md`、`docs/reasoning-live-toggle.md`
+- 归档/未实施：`docs/repl-replay-rendering.md`（未实施，评估结论：建议不做）、`docs/multimodal.md`（多模态/图像，进行中：P0 数据模型与两协议 wire 已实施、P1 的 `@path` 解析与校验已实施；补全/回显/接线未做）、`docs/probe-redesign.md`、`docs/reasoning-live-toggle.md`
 
 ## 构建与测试
 

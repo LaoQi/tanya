@@ -350,6 +350,10 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 口径与门禁：时长在 `Run` 入口由 `REPL.started` 置位、退出时 `time.Since`（含提示符前的 idle 时间；`/new`/`/load` 不重置，`/switch` 成功后重置为切换时刻，故第二次切换与随后的退出时长都只算当前这段会话），格式化复用 `turnDuration`；`KindDecor` 仅 rich 可见，故 `-p` 与 `-p --verbose` 下退出**完全静默**（此前 plain 面会打「再见」；`MsgBye` 随本次改版删除）；`ask` 单发不经过 `Run`，stdout 契约不变。agent 侧新增只读访问器 `SessionID()`/`SessionFile()`，`store.disabled` 或归档只读态时均返回空串（后者另做 `os.Stat` 存在性判定）；`SessionFile` 与 `/stat` 的「会话文件」（`Stats().Session`，是**预定落点**、只读模式下也非空）刻意不同口径——`/stat` 报落点，退出报已落盘实体。
 
+### 多模态输入（`repl/attach.go`，2026-10-09）
+
+对话行内的 `@<路径|URL>` 即附件（`ask` 单发同口径、无额外 flag）：只认**行首或空白后的 `@`**（`a@b.com` 不触发）、支持 `@"含 空格.png"`、多张按序；**文本保留 `@` 原样**（历史 append-only，前缀一旦写入即固定，不影响缓存不变性）。**解析不成功**（路径不存在/非常规文件/读失败）→ 静默按普通文本；**解析成功但校验不过**（存在却非受支持格式、超 `image_max_bytes`、超 `image_max_count`、非法 data URL、外链超 8192 字符）→ 报错且不发送；**纯图消息**（剥掉附件 token 后无文本）不支持。格式按**内容**嗅探（`http.DetectContentType` 归一）限 JPEG/PNG/GIF/WebP；尺寸解析对 png/jpeg/gif 走标准库、对 WebP 用自写头解析（VP8X/VP8/VP8L，零依赖），供本地 token 估算（DeepSeek 官方缩放规则：像素 clamp 到 [544², 1300²] 后 ÷1650，上界 1024，尺寸未知兜底 1024）。附件成功时先打一行 `[图 <名> <大小>]`（`KindDecor`，plain 档不显示），`/history` 与 `/load` 列表用同一占位（纯图消息的会话摘要回落 `[图 n]`）。`@` 触发路径补全（目录 + 图像扩展名文件，复用 `/switch` 的候选解析）。图像**内联 base64** 落进 `Message.Images`（jsonl 与请求体共用同一结构），归档、`/load`、`/fork`、noSave 自动一致；`scanSessionFile` 的行上限随之提到 `MaxSessionLineBytes`（64 MiB）。协议细节与决策见 `docs/multimodal.md`。
+
 ### 输入分发
 
 输入按前缀分发（`repl/dispatch.go`），判定顺序固定：`exit`/`quit`（首 token 命中即内建退出，等价 `/exit`）→ 已知斜杠命令（`slashCommands` 白名单匹配首 token，故 `/load x` 命中、`/usr/bin/ls` 不命中）→ `:` 或全角 `：` 开头（剥离前缀与空白作为提问，空内容提示 `MsgDialogueEmpty` 不算回合、不打印回合分隔线）→ 其余整行直接作为提问与 AI 对话，与 `:` 前缀写法等价。白名单未命中的 `/` 开头输入（如 `/usr/bin/ls`）不作命令处理，直接作为对话内容。
@@ -432,7 +436,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 配置拆成两层，**目的**：`agent` 是可嵌入核心，只关心自己运行需要什么；终端表现层配置不应出现在核心配置面里。
 
-- **`agent.Config`（13 项，核心）**：`base_url` / `api_key` / `model` / `temperature` / `reasoning_effort` / `api_protocol` / `user_agent` / `data_dir` / `session_mode` / `auto_archive` / `auto_archive_threshold` / `auto_archive_keep` + `config_path`（非 yaml，见下）。**`agent` 不提供任何加载机制**——无 `LoadConfig`/`DefaultConfig`，不读 yaml、不读 env，**依赖仅标准库**（`go list -deps ./agent` 不含任何 tanya 包）。`agent.Config` 保留 yaml tag，供 `config` 包 inline 解析。
+- **`agent.Config`（14 项，核心）**：`base_url` / `api_key` / `model` / `temperature` / `reasoning_effort` / `image_detail` / `api_protocol` / `user_agent` / `data_dir` / `session_mode` / `auto_archive` / `auto_archive_threshold` / `auto_archive_keep` + `config_path`（非 yaml，见下）。**`agent` 不提供任何加载机制**——无 `LoadConfig`/`DefaultConfig`，不读 yaml、不读 env，**依赖仅标准库**（`go list -deps ./agent` 不含任何 tanya 包）。`agent.Config` 保留 yaml tag，供 `config` 包 inline 解析。
 - **`config/Config`（完整 CLI 配置）**：顶层包 `config`，`config.Config = agent.Config(yaml:",inline") + UI(yaml:",inline") + Shell + Path`。`UI` 段是终端表现项：`show_reasoning` / `bell` / `notify_osc` / `notify_cmd` / `colors` / `theme` / `palette` / `tool_output_lines`——agent 包内一次都不读，只由 `main` 分派给 `repl`。`shell`（shell 名字或绝对路径，env `TANYA_SHELL` 覆盖）是**工具侧**配置：随 `run_shell` 外置从 `agent.Config` 移到 `config.Config` 顶层字段，只有 `main` 读它并交给 `tools.Standard`。`config.Load` / `config.Default` 是唯一的加载入口。
 - **`config.Version`**：构建期版本号（`main` 经 `-ldflags -X` 注入，与 `repl.Version`/`-v` 同源），唯一用途是构造 `user_agent` 的默认值（`config.Default()` 与 `config.Load` 的空值兜底都经 `agent.UserAgent(config.Version)`）；未注入即 `dev`。`agent` 仍不感知版本，只提供格式构造器。
 - **`config_path` 传递**：`agent.Config.ConfigPath` 是结构体字段（不是 Option、不是 loader）。`config.Load` 把生效路径写入；`agent_custom` 的 `config_path` 键读它回报（空则 `(未设置)`）。库使用方自行填入该字段，即得到同一份回报能力。
@@ -452,6 +456,9 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `model` | `deepseek-v4-flash` | 模型名（运行时可被 `agent_custom` 工具改写，仅本次会话） |
 | `temperature` | 0.7 | |
 | `reasoning_effort` | 空 | 思考等级 minimal/low/medium/high/max，非法值忽略；空则请求不带 `reasoning_effort` 字段（运行时可被 `agent_custom` 工具改写，仅本次会话） |
+| `image_detail` | `low` | 图像细节档位 low/high/original/auto（随请求下发到 chat 的 `image_url` 对象内 / responses 的 `input_image` 同级；high 与 original 等价、auto 当前等价 original），非法值启动报错，留空 = 不下发该字段；多模态输入面见 `docs/multimodal.md` |
+| `image_max_bytes` | `10485760` | 图像附件（对话行内 `@路径`）的单图大小上限（字节，仅 yaml，输入侧校验，越界报错） |
+| `image_max_count` | `4` | 单条消息的图像张数上限（仅 yaml） |
 | `path`（只读，非 yaml 项） | — | 生效配置文件绝对路径，仅经 `agent_custom get config_path` 暴露给模型；默认 `~/.config/tanya/config.yaml`，`-c` 覆盖 |
 | `notify_osc` | `false` | 终端原生 OSC 9 通知（回合结束/等待输入时写控制终端；尽力而为，终端不认即无效果，无 env） |
 | `notify_cmd` | 空 | 调用外部程序发送通知的 shell 命令字符串，支持 `{title}`/`{content}`/`{kind}` 占位符（`kind` 取 done/failed/input；占位符自带引号，配置里不要加；空 = 关闭，无 env） |

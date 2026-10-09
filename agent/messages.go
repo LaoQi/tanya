@@ -35,6 +35,8 @@ const (
 	MsgSessionGone         = "会话不存在: %s"
 	MsgBadEffort           = "无效思考等级 %q（可选: minimal/low/medium/high/max/off）"
 	MsgBadApiProtocol      = "无效 api_protocol %q（可选: chat/responses）"
+	MsgSessionImageSummary = "[图 %d]"
+	MsgBadImageDetail      = "无效 image_detail %q（可选: low/high/original/auto，留空 = 不下发）"
 	MsgBadArchiveThreshold = "无效 auto_archive_threshold %d（需 ≥ 2）"
 	MsgBadArchiveKeep      = "无效 auto_archive_keep %d（需 ≥ 0 且小于 auto_archive_threshold %d）"
 	MsgEmptyWorkspace      = MsgErrPrefix + "未指定工作区目录"

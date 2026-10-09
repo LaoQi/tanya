@@ -18,6 +18,7 @@ type ReasoningItem struct {
 type Message struct {
 	Role             string          `json:"role"`
 	Content          string          `json:"content,omitempty"`
+	Images           []ImageRef      `json:"images,omitempty"`
 	ToolCalls        []ToolCall      `json:"tool_calls,omitempty"`
 	ToolCallID       string          `json:"tool_call_id,omitempty"`
 	Name             string          `json:"name,omitempty"`
@@ -25,6 +26,17 @@ type Message struct {
 	ReasoningItems   []ReasoningItem `json:"reasoning_items,omitempty"`
 	Usage            *Usage          `json:"-"`
 	Duration         time.Duration   `json:"-"`
+}
+
+type chatContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *chatImageURL `json:"image_url,omitempty"`
+}
+
+type chatImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type Usage struct {
@@ -93,7 +105,7 @@ func NewClient(cfg *Config, tools []ToolDef) *Client {
 
 type chatRequest struct {
 	Model           string         `json:"model"`
-	Messages        []Message      `json:"messages"`
+	Messages        []any          `json:"messages"`
 	Temperature     *float64       `json:"temperature,omitempty"`
 	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
 	Tools           []ToolDef      `json:"tools,omitempty"`
@@ -174,17 +186,56 @@ func temperatureParam(cfg *Config) *float64 {
 	return &cfg.Temperature
 }
 
-func chatWireMessages(messages []Message) []Message {
-	wire := make([]Message, len(messages))
-	copy(wire, messages)
-	for i := range wire {
-		wire[i].ReasoningItems = nil
-		wire[i].ReasoningContent = ""
-		if messages[i].Role == "assistant" {
-			wire[i].ReasoningContent = joinReasoning(messages[i].ReasoningItems)
+func chatWireMessages(messages []Message, detail string) []any {
+	wire := make([]any, len(messages))
+	for i, m := range messages {
+		wm := m
+		wm.ReasoningItems = nil
+		wm.ReasoningContent = ""
+		if m.Role == "assistant" {
+			wm.ReasoningContent = joinReasoning(m.ReasoningItems)
 		}
+		if m.Role == "user" && hasImages(m.Images) {
+			wire[i] = newChatPartsMessage(wm, m.Images, detail)
+			continue
+		}
+		wm.Images = nil
+		wire[i] = wm
 	}
 	return wire
+}
+
+func hasImages(images []ImageRef) bool {
+	for _, img := range images {
+		if img.Present() {
+			return true
+		}
+	}
+	return false
+}
+
+type chatPartsMessage struct {
+	Role    string            `json:"role"`
+	Content []chatContentPart `json:"content"`
+	Name    string            `json:"name,omitempty"`
+}
+
+func newChatPartsMessage(m Message, images []ImageRef, detail string) chatPartsMessage {
+	parts := make([]chatContentPart, 0, len(images)+1)
+	if m.Content != "" {
+		parts = append(parts, chatContentPart{Type: "text", Text: m.Content})
+	}
+	for _, img := range images {
+		url := img.URLValue()
+		if url == "" {
+			continue
+		}
+		parts = append(parts, chatContentPart{
+			Type:     "image_url",
+			ImageURL: &chatImageURL{URL: url, Detail: img.DetailValue(detail)},
+		})
+	}
+	return chatPartsMessage{Role: m.Role, Content: parts, Name: m.Name}
 }
 
 func joinReasoning(items []ReasoningItem) string {
@@ -199,7 +250,7 @@ func joinReasoning(items []ReasoningItem) string {
 }
 
 func (c *Client) chatStream(ctx context.Context, messages []Message, sink EventSink) (*Message, error) {
-	wire := chatWireMessages(messages)
+	wire := chatWireMessages(messages, c.cfg.ImageDetail)
 	msg := &Message{Role: "assistant"}
 	var usage *Usage
 	var reasoning strings.Builder

@@ -374,6 +374,8 @@ func (s *sessionStore) refreshVolumes() error {
 
 const sessionSummaryRunes = 30
 
+const MaxSessionLineBytes = 64 << 20
+
 func scanSession(path, id string, modTime time.Time) SessionInfo {
 	si, _ := scanSessionFile(path, id, modTime, sessionSummaryRunes)
 	return si
@@ -390,7 +392,7 @@ func scanSessionFile(path, id string, modTime time.Time, summaryRunes int) (Sess
 		si.Size = fi.Size()
 	}
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	sc.Buffer(make([]byte, 64*1024), MaxSessionLineBytes)
 	for sc.Scan() {
 		line := sc.Bytes()
 		if len(line) == 0 {
@@ -405,8 +407,13 @@ func scanSessionFile(path, id string, modTime time.Time, summaryRunes int) (Sess
 			continue
 		}
 		si.Msgs++
-		if si.Summary == "" && m.Role == "user" && m.Content != "" {
-			si.Summary = summarize(m.Content, summaryRunes)
+		if si.Summary == "" && m.Role == "user" {
+			switch {
+			case m.Content != "":
+				si.Summary = summarize(m.Content, summaryRunes)
+			case len(m.Images) > 0:
+				si.Summary = fmt.Sprintf(MsgSessionImageSummary, len(m.Images))
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {

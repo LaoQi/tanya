@@ -37,7 +37,31 @@ type responsesContentPart struct {
 	Text string `json:"text"`
 }
 
-func buildResponsesInput(messages []Message) (string, []any) {
+type responsesImagePart struct {
+	Type     string `json:"type"`
+	ImageURL string `json:"image_url"`
+	Detail   string `json:"detail,omitempty"`
+}
+
+func responsesUserContent(m Message, detail string) []any {
+	if !hasImages(m.Images) {
+		return []any{responsesContentPart{Type: "input_text", Text: m.Content}}
+	}
+	parts := make([]any, 0, len(m.Images)+1)
+	if m.Content != "" {
+		parts = append(parts, responsesContentPart{Type: "input_text", Text: m.Content})
+	}
+	for _, img := range m.Images {
+		url := img.URLValue()
+		if url == "" {
+			continue
+		}
+		parts = append(parts, responsesImagePart{Type: "input_image", ImageURL: url, Detail: img.DetailValue(detail)})
+	}
+	return parts
+}
+
+func buildResponsesInput(messages []Message, detail string) (string, []any) {
 	var instructions string
 	rest := messages
 	if len(messages) > 0 && messages[0].Role == "system" {
@@ -49,11 +73,9 @@ func buildResponsesInput(messages []Message) (string, []any) {
 		switch m.Role {
 		case "user":
 			items = append(items, map[string]any{
-				"type": "message",
-				"role": "user",
-				"content": []responsesContentPart{
-					{Type: "input_text", Text: m.Content},
-				},
+				"type":    "message",
+				"role":    "user",
+				"content": responsesUserContent(m, detail),
 			})
 		case "assistant":
 			for _, r := range m.ReasoningItems {
@@ -164,7 +186,7 @@ type responsesError struct {
 }
 
 func (c *Client) responsesStream(ctx context.Context, messages []Message, sink EventSink) (*Message, error) {
-	instructions, input := buildResponsesInput(messages)
+	instructions, input := buildResponsesInput(messages, c.cfg.ImageDetail)
 	msg := &Message{Role: "assistant"}
 	var usage *Usage
 	var hasDelta bool
