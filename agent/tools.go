@@ -16,8 +16,9 @@ type Interactive interface {
 }
 
 type ToolResult struct {
-	Text string
-	Meta any
+	Text   string
+	Meta   any
+	Images []ImageRef
 }
 
 type toolRegistry struct {

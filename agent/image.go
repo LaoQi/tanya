@@ -48,6 +48,21 @@ func (r ImageRef) URLValue() string {
 
 func (r ImageRef) Present() bool { return r.URLValue() != "" }
 
+func ImageNames(images []ImageRef) string {
+	parts := make([]string, 0, len(images))
+	for _, img := range images {
+		name := strings.TrimSpace(img.Name)
+		if name == "" {
+			name = "image"
+		}
+		parts = append(parts, name)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, MsgImageNameSep)
+}
+
 const (
 	DefaultImageMaxBytes = 10 << 20
 	DefaultImageMaxCount = 4

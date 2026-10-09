@@ -75,11 +75,32 @@ func genericArgsView(args string, width int) present.ArgsView {
 }
 
 func toolEndBody(name string, res agent.ToolResult, views *present.Registry, width, maxLines int) (string, string) {
+	var body, status string
 	if v, ok := views.Result(name, res.Text, res.Meta, width, maxLines); ok {
-		return v.Body, v.Status
+		body, status = v.Body, v.Status
+	} else {
+		lines, s := textView(res.Text, width, maxLines)
+		body, status = present.Indent(lines), s
 	}
-	lines, status := textView(res.Text, width, maxLines)
-	return present.Indent(lines), status
+	if line := toolImageLine(res.Images, width); line != "" {
+		body = appendToolImageLine(body, line)
+	}
+	return body, status
+}
+
+func toolImageLine(images []agent.ImageRef, width int) string {
+	line := imagesText(images)
+	if line == "" {
+		return ""
+	}
+	return term.Truncate(line, width-len(toolArgsPrefix))
+}
+
+func appendToolImageLine(body, line string) string {
+	if body != "" && !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	return body + toolArgsPrefix + line + "\n"
 }
 
 // RenderToolEndAppend 追加工具正文块与状态行：标题已由 RenderToolStart 打出一次，此处不重复。

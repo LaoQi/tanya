@@ -1,15 +1,9 @@
 package repl
 
 import (
-	"bytes"
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,10 +12,7 @@ import (
 	"github.com/LaoQi/tanya/render/term"
 )
 
-const (
-	MaxImageURLLen = 8192
-	sniffLen       = 512
-)
+const MaxImageURLLen = 8192
 
 type AttachOptions struct {
 	Workspace func() string
@@ -171,12 +162,12 @@ func attachOne(tok string, opt AttachOptions) (*agent.ImageRef, error) {
 	if err != nil {
 		return nil, nil
 	}
-	mime := SniffImageMIME(data)
+	mime := agent.SniffImageMIME(data)
 	if mime == "" {
 		return nil, fmt.Errorf(MsgImageBadFormat, filepath.Base(path))
 	}
 	data = MaybeResizeImage(data, mime, opt.Detail, opt.Resize)
-	w, h := ImageDimensions(data, mime)
+	w, h := agent.ImageDimensions(data, mime)
 	return &agent.ImageRef{
 		MIME:   mime,
 		Data:   base64.StdEncoding.EncodeToString(data),
@@ -208,11 +199,11 @@ func attachDataURL(tok string, opt AttachOptions) (*agent.ImageRef, error) {
 	if len(raw) > max {
 		return nil, fmt.Errorf(MsgImageTooLarge, "data URL", max)
 	}
-	if SniffImageMIME(raw) == "" {
+	if agent.SniffImageMIME(raw) == "" {
 		return nil, fmt.Errorf(MsgImageBadFormat, "data URL")
 	}
 	payload := MaybeResizeImage(raw, mime, opt.Detail, opt.Resize)
-	w, h := ImageDimensions(payload, mime)
+	w, h := agent.ImageDimensions(payload, mime)
 	return &agent.ImageRef{MIME: mime, Data: base64.StdEncoding.EncodeToString(payload), Name: "data-url", Bytes: len(payload), Width: w, Height: h}, nil
 }
 
@@ -250,64 +241,4 @@ func urlName(u string) string {
 		return "url"
 	}
 	return s
-}
-
-func normImageMIME(mime string) string {
-	switch strings.ToLower(strings.TrimSpace(mime)) {
-	case "image/jpeg", "image/jpg":
-		return "image/jpeg"
-	case "image/png":
-		return "image/png"
-	case "image/gif":
-		return "image/gif"
-	case "image/webp":
-		return "image/webp"
-	}
-	return ""
-}
-
-func SniffImageMIME(data []byte) string {
-	head := data
-	if len(head) > sniffLen {
-		head = head[:sniffLen]
-	}
-	return normImageMIME(http.DetectContentType(head))
-}
-
-func ImageDimensions(data []byte, mime string) (int, int) {
-	if mime == "image/webp" {
-		return webpDimensions(data)
-	}
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return 0, 0
-	}
-	return cfg.Width, cfg.Height
-}
-
-func webpDimensions(data []byte) (int, int) {
-	if len(data) < 21 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
-		return 0, 0
-	}
-	switch string(data[12:16]) {
-	case "VP8X":
-		if len(data) < 30 {
-			return 0, 0
-		}
-		w := int(data[24]) | int(data[25])<<8 | int(data[26])<<16
-		h := int(data[27]) | int(data[28])<<8 | int(data[29])<<16
-		return w + 1, h + 1
-	case "VP8 ":
-		if len(data) < 27 || data[20] != 0x9d || data[21] != 0x01 || data[22] != 0x2a {
-			return 0, 0
-		}
-		return (int(data[23]) | int(data[24])<<8) & 0x3fff, (int(data[25]) | int(data[26])<<8) & 0x3fff
-	case "VP8L":
-		if len(data) < 25 || data[20] != 0x2f {
-			return 0, 0
-		}
-		b := uint32(data[21]) | uint32(data[22])<<8 | uint32(data[23])<<16 | uint32(data[24])<<24
-		return int(b&0x3fff) + 1, int(b>>14&0x3fff) + 1
-	}
-	return 0, 0
 }

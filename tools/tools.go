@@ -3,6 +3,7 @@ package tools
 import (
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/tools/builtin"
+	"github.com/LaoQi/tanya/tools/image"
 	"github.com/LaoQi/tanya/tools/shell"
 )
 
@@ -13,6 +14,9 @@ type Options struct {
 	Console       shell.Console
 	LookPath      func(string) (string, error)
 	Programs      []string
+	ImageMaxBytes int
+	ImageResize   bool
+	ImageDetail   string
 }
 
 func Shell(o Options) (*shell.Tool, error) {
@@ -31,5 +35,12 @@ func Standard(o Options) ([]agent.Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append([]agent.Tool{sh}, builtin.Tools()...), nil
+	list := []agent.Tool{sh, image.New(image.Config{
+		Workspace: o.Workspace,
+		Home:      o.Home,
+		MaxBytes:  o.ImageMaxBytes,
+		Resize:    o.ImageResize,
+		Detail:    o.ImageDetail,
+	})}
+	return append(list, builtin.Tools()...), nil
 }

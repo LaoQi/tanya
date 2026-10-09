@@ -28,7 +28,7 @@ func TestStandardOrderAndDefs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"run_shell", "get_time", "get_env", "calc"}
+	want := []string{"run_shell", "read_image", "get_time", "get_env", "calc"}
 	got := toolNames(list)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("标准工具集顺序应为 %v: %v", want, got)
