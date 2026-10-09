@@ -181,6 +181,8 @@ func main() {
 			Workspace: a.Workspace,
 			MaxBytes:  cfg.ImageMaxBytes,
 			MaxCount:  cfg.ImageMaxCount,
+			Resize:    cfg.ImageResize,
+			Detail:    cfg.ImageDetail,
 		})
 		if perr != nil {
 			st.FailErr("", perr)
@@ -208,7 +210,7 @@ func main() {
 		st.FailErr("", err)
 		exitNow(1)
 	}
-	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithProfile(prof), repl.WithToolViews(views), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithImageLimits(cfg.ImageMaxBytes, cfg.ImageMaxCount), repl.WithConsole(con))
+	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithProfile(prof), repl.WithToolViews(views), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithImageLimits(cfg.ImageMaxBytes, cfg.ImageMaxCount), repl.WithImageBehavior(cfg.ImageResize, cfg.ImageDetail), repl.WithConsole(con))
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)

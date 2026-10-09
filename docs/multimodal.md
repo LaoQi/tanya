@@ -1,6 +1,6 @@
 # 多模态（图像）支持方案
 
-> 状态：**P1 已实施**（P0：数据模型/两协议 wire/扫描缓冲/`AskContent`/`image_detail`；P1：`@path` 解析与校验、对话与 `ask` 接线、附件回显行、`@` 触发补全、`/history` 与列表占位、`image_max_bytes`/`image_max_count`；**未做**：本地预缩放（P3，见 §4.3 评估）。原始状态说明：**P1 进行中**（P0 已完成：数据模型、两协议 wire、扫描缓冲、`AskContent`、`image_detail`；P1 已完成 `@path` 解析器与校验（`repl/attach.go` + `image_max_bytes`/`image_max_count`），**未做**：解析接线到对话/ask、`@` 补全、回显行、`/history` 占位、本地预缩放）。原始状态说明：**P0 已实施**（2026-10-09：数据模型 `ImageRef`/`Message.Images`、两协议 wire、扫描缓冲上限、`AskContent` 入口、`image_detail` 配置与估算函数）；**P1 输入面（`@path` 解析、`@` 补全、回显行）未做**，故用户侧暂不可用。拍定口径见 §7。
+> 状态：**P1 已实施 + 本地预缩放已实施**（P0：数据模型/两协议 wire/扫描缓冲/`AskContent`/`image_detail`；P1：`@path` 解析与校验、对话与 `ask` 接线、附件回显行、`@` 触发补全、`/history` 与列表占位、`image_max_bytes`/`image_max_count`；**未做**：本地预缩放（P3，见 §4.3 评估）。原始状态说明：**P1 进行中**（P0 已完成：数据模型、两协议 wire、扫描缓冲、`AskContent`、`image_detail`；P1 已完成 `@path` 解析器与校验（`repl/attach.go` + `image_max_bytes`/`image_max_count`），**未做**：解析接线到对话/ask、`@` 补全、回显行、`/history` 占位、本地预缩放）。原始状态说明：**P0 已实施**（2026-10-09：数据模型 `ImageRef`/`Message.Images`、两协议 wire、扫描缓冲上限、`AskContent` 入口、`image_detail` 配置与估算函数）；**P1 输入面（`@path` 解析、`@` 补全、回显行）未做**，故用户侧暂不可用。拍定口径见 §7。
 > 依据：① 上游网关的 agent 指南（端点 `GET /api/guide.md`，源文件在网关仓库 `internal/admin/guide.md`；§2.1–2.2 抄录其 2026-10-08 实测口径）；② DeepSeek 官方文档 `guides/vision` 与 `quick_start/token_usage`（§2.3 抄录，2026-10-09 查证）
 > 范围：REPL 用户侧附图 → 两协议（`chat` / `responses`）→ history / 落盘 / 归档 / fork / load / 渲染全链路
 > **不动**：工具产图、模型输出图、音频/视频/file 块、图像缩放压缩、缓存不变性契约（纯文本请求字节零变化）
@@ -185,7 +185,7 @@ Images []ImageRef `json:"images,omitempty"`
 | **P0 ✅** | `Message.Images` + `ImageRef`；`chatWireMessages` / `buildResponsesInput` 转换；`scanSessionFile` 缓冲上限提到独立常量；`Ask` 的带附件入口（`AskContent` 或等价）；`image_detail` 进 `agent.Config`；`estimateImageTokens` | mock LLM 逐字段断言两协议请求体；纯文本路径请求字节与改动前逐字节一致（golden）；旧 jsonl 兼容用例；估算函数表驱动用例（含 544²/1300² 边界与未知尺寸兜底） |
 | **P1 ✅** | `@path` 解析器（token 边界、引号、静默回退、校验报错三分支）；`@` 触发路径补全；附件回显行；`/history` 与列表摘要占位；`ask` 复用同一解析器 | repl 单测（多张/引号/失败静默/超限报错/纯图报错/`:` 前缀行/ask 路径）；补全候选用例；`TestSlashCommandsAllHandled` 不受影响 |
 | **P2** | 文档（`AGENTS.md`、`docs/design.md`、`README.md`、`CHANGELOG.md`）；真机冒烟 | 真图走 `nas.lan:28149` 两协议各一次，模型确实描述图像；`gofmt`/`build`/`vet`/`test -race`/`render_audit` 全绿 |
-| **P3（可选）** | `@path` 内联、`ask -i`、blob 外置、图像压缩、工具产图、多模态 file/音频 | 各自独立评估 |
+| **P3 ✅（预缩放部分）** | `@path` 内联、`ask -i`、blob 外置、图像压缩、工具产图、多模态 file/音频 | 各自独立评估 |
 
 ## 7 决策（2026-10-09 已全部拍定）
 
