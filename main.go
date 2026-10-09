@@ -158,6 +158,9 @@ func main() {
 		Home:          home,
 		Workspace:     func() string { return a.Workspace() },
 		Console:       consoleForShell{con},
+		ImageMaxBytes: cfg.ImageMaxBytes,
+		ImageResize:   cfg.ImageResize,
+		ImageDetail:   cfg.ImageDetail,
 	})
 	if err != nil {
 		st.FailErr("", err)

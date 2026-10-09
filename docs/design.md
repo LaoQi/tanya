@@ -11,7 +11,7 @@ main.go            package main：入口、flag 子命令、ask 单发
 config/            package config：CLI 完整配置（agent.Config inline + UI 段 inline + Path），yaml 加载、TANYA_* env 覆盖、值域校验
 repl/              package repl：REPL 循环、斜杠命令、补全、工具块排版（标题组合 + 通用回落）、状态行心跳（不认识具体工具，自带视图经 `present.Registry` 注入）
 agent/             package agent：全部核心逻辑（config / llm / llm_http / agent / tools 协议与注册表 / prompt / session / session_archive / stats / control）；零内部依赖
-tools/             package tools：外置工具集（根包 tools.Standard 装配标准集与顺序）+ tools/shell（run_shell：profile 解析、普通/交互执行、平台分片）+ tools/builtin（get_time/get_env/calc）
+tools/             package tools：外置工具集（根包 tools.Standard 装配标准集与顺序）+ tools/shell（run_shell：profile 解析、普通/交互执行、平台分片）+ tools/image（read_image：模型主动读图，路径解析/格式校验/缩放，返回文本与 `ToolResult.Images`）+ tools/builtin（get_time/get_env/calc）
 readline/          package readline：终端输入层（Console 仲裁 + device 设备面 + 租约），editor / keys / 借出与终端自愈
 ctty/              package ctty：控制终端原语（/dev/tty 打开、termios 读写、模式复位与光标锚点、SIGTTIN/SIGTTOU 忽略、SIGTSTP 吞没、运行期信号）与终端探测（Facts：isatty/尺寸/VT），白名单 linux/darwin/windows，零依赖叶子；**不含前台组原语**（2026-09-27 下线，见 `docs/terminal-console.md`）
 render/            package render：渲染管线（IR → ANSI：Renderer、提示符模板），可 import 其下子包
@@ -27,7 +27,7 @@ render/markup/     内联标记解析
 设计取舍：
 
 - **不做细粒度拆包**：代码总量小，按包分职责即可
-- **注册只在构造期、运行期冻结**：工具经 `Tool` 接口（`agent/tools.go`）自述名/描述/参数并提供执行；工具集 = 调用方注入（`agent.WithTools`，保序在前）+ agent 自带的 `agent_custom`（恒末位），在 `agent.New` 装配期一次合成、之后不可变（无运行期注册 API、无插件）。注册**仅作契约**：不校验重名，`lookup` 首个匹配胜出（注入项在前故可遮蔽 `agent_custom`）。`toolRegistry.lookup` 线性扫描（N 小、实测快于 map，不做索引）。**工具实现全在 `tools` 包**（`run_shell` + 三件套），agent 只带自己的自省工具，故「哪些工具、什么顺序」完全由装配点（`tools.Standard`）决定
+- **注册只在构造期、运行期冻结**：工具经 `Tool` 接口（`agent/tools.go`）自述名/描述/参数并提供执行；工具集 = 调用方注入（`agent.WithTools`，保序在前）+ agent 自带的 `agent_custom`（恒末位），在 `agent.New` 装配期一次合成、之后不可变（无运行期注册 API、无插件）。注册**仅作契约**：不校验重名，`lookup` 首个匹配胜出（注入项在前故可遮蔽 `agent_custom`）。`toolRegistry.lookup` 线性扫描（N 小、实测快于 map，不做索引）。**工具实现全在 `tools` 包**（`run_shell` / `read_image` + 三件套），agent 只带自己的自省工具，故「哪些工具、什么顺序」完全由装配点（`tools.Standard`）决定
 - **依赖仅 2 个**：`gopkg.in/yaml.v3`（配置）、`golang.org/x/sys`（`unix` 做 termios/pty、`windows` 做控制台探测）；终端输入层与富文本管线自研
 - **颜色铁律**：SGR 与 CSI 仅 `render/style`、`render/term` 产生（业务代码不得出现裸 `\x1b`，readline 的光标操作也走 `term.Cursor*`）；同一 IR 按终端能力档案（`term.Profile`）降级，无色终端自动纯文本。档案由 `main` 单点探测（`ctty.Probe()`）后注入：**渲染类判定看 stdout 是否终端、输入类看 stdin**，见 `docs/terminal-caps.md`
 
@@ -352,7 +352,9 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 多模态输入（`repl/attach.go`，2026-10-09）
 
-对话行内的 `@<路径|URL>` 即附件（`ask` 单发同口径、无额外 flag）：只认**行首或空白后的 `@`**（`a@b.com` 不触发）、支持 `@"含 空格.png"`、多张按序；**文本保留 `@` 原样**（历史 append-only，前缀一旦写入即固定，不影响缓存不变性）。**解析不成功**（路径不存在/非常规文件/读失败）→ 静默按普通文本；**解析成功但校验不过**（存在却非受支持格式、超 `image_max_bytes`、超 `image_max_count`、非法 data URL、外链超 8192 字符）→ 报错且不发送；**纯图消息**（剥掉附件 token 后无文本）不支持。格式按**内容**嗅探（`http.DetectContentType` 归一）限 JPEG/PNG/GIF/WebP；尺寸解析对 png/jpeg/gif 走标准库、对 WebP 用自写头解析（VP8X/VP8/VP8L，零依赖），供本地 token 估算（DeepSeek 官方缩放规则：像素 clamp 到 [544², 1300²] 后 ÷1650，上界 1024，尺寸未知兜底 1024）。附件成功时先打一行 `[图 <名> <大小>]`（`KindDecor`，plain 档不显示），`/history` 与 `/load` 列表用同一占位（纯图消息的会话摘要回落 `[图 n]`）。`@` 触发路径补全（目录 + 图像扩展名文件，复用 `/switch` 的候选解析）。**本地预缩放**（`repl/resize.go`，`image_resize` 默认开）：仅 PNG/JPEG 参与，超过目标长边才缩（`image_detail: low` → 512，否则 1300，只缩不放），box 平均降采样 + 原格式重编码（PNG 无损、JPEG q85），缩放后反而更大则保留原图；**带 EXIF Orientation≠1 的 JPEG 跳过**（标准库不解析方向，缩放会错乱）；GIF（避免只解首帧）与 WebP（无标准库解码器）原样直传。`Bytes`/`Width`/`Height` 一律记为缩放后值，回显与估算随之准确。图像**内联 base64** 落进 `Message.Images`（jsonl 与请求体共用同一结构），归档、`/load`、`/fork`、noSave 自动一致；`scanSessionFile` 的行上限随之提到 `MaxSessionLineBytes`（64 MiB）。协议细节与决策见 `docs/multimodal.md`。
+对话行内的 `@<路径|URL>` 即附件（`ask` 单发同口径、无额外 flag）：只认**行首或空白后的 `@`**（`a@b.com` 不触发）、支持 `@"含 空格.png"`、多张按序；**文本保留 `@` 原样**（历史 append-only，前缀一旦写入即固定，不影响缓存不变性）。**解析不成功**（路径不存在/非常规文件/读失败）→ 静默按普通文本；**解析成功但校验不过**（存在却非受支持格式、超 `image_max_bytes`、超 `image_max_count`、非法 data URL、外链超 8192 字符）→ 报错且不发送；**纯图消息**（剥掉附件 token 后无文本）不支持。格式按**内容**嗅探（`http.DetectContentType` 归一）限 JPEG/PNG/GIF/WebP；尺寸解析对 png/jpeg/gif 走标准库、对 WebP 用自写头解析（VP8X/VP8/VP8L，零依赖），供本地 token 估算（DeepSeek 官方缩放规则：像素 clamp 到 [544², 1300²] 后 ÷1650，上界 1024，尺寸未知兜底 1024）。附件成功时先打一行 `[图 <名> <大小>]`（`KindDecor`，plain 档不显示），`/history` 与 `/load` 列表用同一占位（纯图消息的会话摘要回落 `[图 n]`）。`@` 触发路径补全（目录 + 图像扩展名文件，复用 `/switch` 的候选解析）。**本地预缩放**（实现已下沉 `agent/image_data.go`，`image_resize` 默认开）：仅 PNG/JPEG 参与，超过目标长边才缩（`image_detail: low` → 512，否则 1300，只缩不放），box 平均降采样 + 原格式重编码（PNG 无损、JPEG q85），缩放后反而更大则保留原图；**带 EXIF Orientation≠1 的 JPEG 跳过**（标准库不解析方向，缩放会错乱）；GIF（避免只解首帧）与 WebP（无标准库解码器）原样直传。`Bytes`/`Width`/`Height` 一律记为缩放后值，回显与估算随之准确。图像**内联 base64** 落进 `Message.Images`（jsonl 与请求体共用同一结构），归档、`/load`、`/fork`、noSave 自动一致；`scanSessionFile` 的行上限随之提到 `MaxSessionLineBytes`（64 MiB）。协议细节与决策见 `docs/multimodal.md`。
+
+**模型主动读图（P4，2026-10-09）**：工具 `read_image`（`tools/image`）让模型自己取图——参数 `path`（必填，`~`/相对当前工作区，与 `run_shell` 同口径；范围不限）与 `detail`（可选，覆盖配置 `image_detail`，非法值报错），单次一张；校验与用户附图同口径（`os.Stat` 常规文件、`image_max_bytes`、内容嗅探限 JPEG/PNG/GIF/WebP），随后按 `image_resize`/`detail` 预缩放，结果文本为 `已读取 <名>（<宽>×<高>，<大小>）`（尺寸未知时回落「尺寸未知」）。**机制**：chat 协议的 `role: tool` 消息**不能带图**（官方只允许 user/developer 消息与 responses 线的 `function_call_output`），故不走"工具消息带图"，而是 `ToolResult.Images` 由 `agent` 的回合循环在本轮**全部 tool 消息之后**追加一条 user 图像消息（并行工具调用时聚合为一条，避免 user 消息打断 `tool_calls → tool` 的相邻性；`MsgToolImageNoteFmt` 仅含工具名与文件名、不内联 base64）——两协议一致，不依赖 responses 专有形态。`repl` 的工具块通用渲染在结果后追加 `[图 <名> <大小>]` 占位（复用 `imagesText`，无需新视图包）；`agent` 侧不引入任何具体工具。嗅探/尺寸/缩放/EXIF 探测实现落 `agent/image_data.go`（`agent` 零内部依赖、只用标准库；`tools` 不能依赖 `repl`），`repl` 侧只留薄封装（行为与既有测试不变）。配置**不新增键**（复用 `image_max_bytes`/`image_resize`/`image_detail`）。
 
 ### 输入分发
 

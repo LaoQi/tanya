@@ -6,6 +6,7 @@
 
 - OpenAI 兼容接口（OpenAI / DeepSeek / GLM / Ollama / vLLM 等），SSE 流式输出
 - 以 shell 为核心的工具体系：模型可直接执行 shell 命令（自动适配平台：Linux/macOS bash/sh/ash，Windows pwsh/powershell；`shell` 配置可指定任意 shell）；命令前后保存/复原控制终端状态（交出终端前 `DECSC` 存锚点，结束后复原 termios + 复位屏幕模式：SGR、字符集、滚动区/换行/光标/鼠标等 + `DECRC` 归位，子进程设滚动区或挪走光标都不会把后续输出带到屏幕顶部），被超时强杀的交互程序不会留下坏终端；普通命令的 stdin 是空设备（`/dev/null`），需要应答的程序请用 `interactive: true`
+- 模型可主动读图：`read_image` 工具读取本地图像文件（JPEG/PNG/GIF/WebP，单次一张，路径支持 `~` 与相对工作区，`detail` 可指定），图像经「工具结果 + 紧随一条 user 图像消息」交给模型（两协议一致）；工具块显示 `[图 名 大小]`
 - 内置轻量工具：`get_time` / `get_env` / `calc`
 - 模型可运行时自调与自省：`agent_custom` 按 `key` 读写（可写 `model`、`reasoning_effort`；只读 `models`、`usage`、`stat`、`sessions`、`config_path`），`get sessions` 给出会话列表与 jsonl 文件路径（仅本次会话有效，不写配置文件），`get config_path` 给出生效配置文件路径（模型据此可读取或修改自身配置，改动需重启生效）
 - 会话持久化与恢复（JSONL，记录完整历史，system 快照随会话冻结）
@@ -126,7 +127,7 @@ REPL 输入按前缀分发：
 
 退出（`exit`/`quit`/`/exit`/`/quit`、Ctrl-D 或终端挂断）时打印本次运行的收尾三行：会话 id · 运行时长 · 消息条数、累计用量与缓存命中率、已落盘的会话文件路径（本次没产生对话则不落盘，末行省略；`-n` 只读模式末行改为「会话文件 未写入（不落盘模式）」）。`/switch` 成功切换工作区时也会先打印同一收尾块（旧会话的 id/时长/用量/落盘路径），再打印切换报告，并把「运行时长」的起点重置为切换时刻。收尾块属装饰输出，`-p` 与 `-p --verbose` 下不打印。
 
-图片可按**行内 `@路径`** 附上（对话行与 `tanya ask` 同口径）：`@shot.png 这张图里有什么？`、`@"my shot.png"`（路径含空格）、`@https://example.com/a.png`（外链只传 URL）、`@data:image/png;base64,...`。只认行首或空白后的 `@`，`@` 与路径原样保留在消息文本里；路径不存在时按普通文本处理（静默），而**文件存在但不是图像、或超过大小/张数上限时直接报错**。支持 JPEG/PNG/GIF/WebP（按内容嗅探），默认单图 ≤ 10 MB、单条消息 ≤ 4 张（`image_max_bytes` / `image_max_count`，仅 yaml）。图像以 base64 内联进会话文件，因此含图会话文件会明显变大；附件成功时会先打印一行 `[图 shot.png 541B]` 便于确认（显示的是**实际发送量**）。默认还会先做本地预缩放（`image_resize`，仅 PNG/JPEG、只缩不放：`image_detail: low` 时长边缩到 512，否则 1300；GIF/WebP 原样，带 EXIF 方向的 JPEG 跳过），故 1.6 MB 的截图常以 500 KB 左右发出。`image_detail`（默认 `low`）随请求下发，`low` 时由上游把图降到 512×512 处理。
+图片可按**行内 `@路径`** 附上（对话行与 `tanya ask` 同口径）：`@shot.png 这张图里有什么？`、`@"my shot.png"`（路径含空格）、`@https://example.com/a.png`（外链只传 URL）、`@data:image/png;base64,...`。只认行首或空白后的 `@`，`@` 与路径原样保留在消息文本里；路径不存在时按普通文本处理（静默），而**文件存在但不是图像、或超过大小/张数上限时直接报错**。支持 JPEG/PNG/GIF/WebP（按内容嗅探），默认单图 ≤ 10 MB、单条消息 ≤ 4 张（`image_max_bytes` / `image_max_count`，仅 yaml）。图像以 base64 内联进会话文件，因此含图会话文件会明显变大；附件成功时会先打印一行 `[图 shot.png 541B]` 便于确认（显示的是**实际发送量**）。默认还会先做本地预缩放（`image_resize`，仅 PNG/JPEG、只缩不放：`image_detail: low` 时长边缩到 512，否则 1300；GIF/WebP 原样，带 EXIF 方向的 JPEG 跳过），故 1.6 MB 的截图常以 500 KB 左右发出。`image_detail`（默认 `low`）随请求下发，`low` 时由上游把图降到 512×512 处理。除用户附图外，模型也可**主动读图**：`read_image` 工具按同一套口径（格式/大小上限/预缩放，`detail` 可覆盖配置）读取本地文件，结果里附上图像，工具块在结果后显示 `[图 名 大小]`。
 
 直通 shell 执行面已归档（恢复步骤见 `docs/design.md`）：agent 需要执行命令时经 `run_shell` 工具完成（输出截断与超时策略见其工具说明）。进程 cwd 恒为 tanya 启动目录、全程不变；`run_shell` 默认在**当前工作区**（启动时即启动目录，`/switch` 后可换）执行，也可用 `cwd` 参数为单次命令指定其它目录（不影响后续调用）。
 
@@ -203,6 +204,7 @@ TTY 下的状态展示是**追加式**（不重绘、不移动光标，终端被
 | 工具 | 说明 |
 |---|---|
 | `run_shell` | shell 执行命令（按平台自动选择）；`cwd` 指定执行目录（默认当前工作区，不存在则快速失败）；`timeout` 默认 60s、`interactive: true` 时 300s，上限 900s；输出截断 30000 字节 |
+| `read_image` | 读取本地图像文件交给模型查看（JPEG/PNG/GIF/WebP，单次一张；`path` 支持 `~` 与相对当前工作区，`detail` 缺省用配置）；格式/大小/缩放与用户附图同口径 |
 | `get_time` | 当前时间 |
 | `get_env` | 环境变量查询（敏感变量名拒绝） |
 | `calc` | 四则运算求值 |

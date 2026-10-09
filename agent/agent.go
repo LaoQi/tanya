@@ -322,6 +322,8 @@ func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
 		if len(resp.ToolCalls) == 0 {
 			break
 		}
+		var roundImages []ImageRef
+		var roundImageTools []string
 		for _, tc := range resp.ToolCalls {
 			interactive := false
 			if tool, ok := a.tools.lookup(tc.Function.Name); ok {
@@ -335,6 +337,17 @@ func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
 				ToolCallID: tc.ID,
 				Name:       tc.Function.Name,
 				Content:    res.Text,
+			})
+			if len(res.Images) > 0 {
+				roundImageTools = append(roundImageTools, tc.Function.Name)
+				roundImages = append(roundImages, res.Images...)
+			}
+		}
+		if len(roundImages) > 0 {
+			a.history = append(a.history, Message{
+				Role:    "user",
+				Content: fmt.Sprintf(MsgToolImageNoteFmt, strings.Join(roundImageTools, MsgImageNameSep), ImageNames(roundImages)),
+				Images:  roundImages,
 			})
 		}
 	}

@@ -1,6 +1,6 @@
 # 多模态（图像）支持方案
 
-> 状态：**P1 已实施 + 本地预缩放已实施**（P0：数据模型/两协议 wire/扫描缓冲/`AskContent`/`image_detail`；P1：`@path` 解析与校验、对话与 `ask` 接线、附件回显行、`@` 触发补全、`/history` 与列表占位、`image_max_bytes`/`image_max_count`；**未做**：本地预缩放（P3，见 §4.3 评估）。原始状态说明：**P1 进行中**（P0 已完成：数据模型、两协议 wire、扫描缓冲、`AskContent`、`image_detail`；P1 已完成 `@path` 解析器与校验（`repl/attach.go` + `image_max_bytes`/`image_max_count`），**未做**：解析接线到对话/ask、`@` 补全、回显行、`/history` 占位、本地预缩放）。原始状态说明：**P0 已实施**（2026-10-09：数据模型 `ImageRef`/`Message.Images`、两协议 wire、扫描缓冲上限、`AskContent` 入口、`image_detail` 配置与估算函数）；**P1 输入面（`@path` 解析、`@` 补全、回显行）未做**，故用户侧暂不可用。拍定口径见 §7。
+> 状态：**P1 已实施 + 本地预缩放已实施 + P4（模型主动读图）已实施**（P0：数据模型/两协议 wire/扫描缓冲/`AskContent`/`image_detail`；P1：`@path` 解析与校验、对话与 `ask` 接线、附件回显行、`@` 触发补全、`/history` 与列表占位、`image_max_bytes`/`image_max_count`；**未做**：本地预缩放（P3，见 §4.3 评估）。原始状态说明：**P1 进行中**（P0 已完成：数据模型、两协议 wire、扫描缓冲、`AskContent`、`image_detail`；P1 已完成 `@path` 解析器与校验（`repl/attach.go` + `image_max_bytes`/`image_max_count`），**未做**：解析接线到对话/ask、`@` 补全、回显行、`/history` 占位、本地预缩放）。原始状态说明：**P0 已实施**（2026-10-09：数据模型 `ImageRef`/`Message.Images`、两协议 wire、扫描缓冲上限、`AskContent` 入口、`image_detail` 配置与估算函数）；**P1 输入面（`@path` 解析、`@` 补全、回显行）未做**，故用户侧暂不可用。拍定口径见 §7。
 > 依据：① 上游网关的 agent 指南（端点 `GET /api/guide.md`，源文件在网关仓库 `internal/admin/guide.md`；§2.1–2.2 抄录其 2026-10-08 实测口径）；② DeepSeek 官方文档 `guides/vision` 与 `quick_start/token_usage`（§2.3 抄录，2026-10-09 查证）
 > 范围：REPL 用户侧附图 → 两协议（`chat` / `responses`）→ history / 落盘 / 归档 / fork / load / 渲染全链路
 > **不动**：工具产图、模型输出图、音频/视频/file 块、图像缩放压缩、缓存不变性契约（纯文本请求字节零变化）
@@ -185,7 +185,7 @@ Images []ImageRef `json:"images,omitempty"`
 | **P0 ✅** | `Message.Images` + `ImageRef`；`chatWireMessages` / `buildResponsesInput` 转换；`scanSessionFile` 缓冲上限提到独立常量；`Ask` 的带附件入口（`AskContent` 或等价）；`image_detail` 进 `agent.Config`；`estimateImageTokens` | mock LLM 逐字段断言两协议请求体；纯文本路径请求字节与改动前逐字节一致（golden）；旧 jsonl 兼容用例；估算函数表驱动用例（含 544²/1300² 边界与未知尺寸兜底） |
 | **P1 ✅** | `@path` 解析器（token 边界、引号、静默回退、校验报错三分支）；`@` 触发路径补全；附件回显行；`/history` 与列表摘要占位；`ask` 复用同一解析器 | repl 单测（多张/引号/失败静默/超限报错/纯图报错/`:` 前缀行/ask 路径）；补全候选用例；`TestSlashCommandsAllHandled` 不受影响 |
 | **P2** | 文档（`AGENTS.md`、`docs/design.md`、`README.md`、`CHANGELOG.md`）；真机冒烟 | 真图走 `nas.lan:28149` 两协议各一次，模型确实描述图像；`gofmt`/`build`/`vet`/`test -race`/`render_audit` 全绿 |
-| **P4** | 模型主动读图：`ToolResult.Images` + loop 插入 user 图像消息 + 新工具 `read_image`（`tools/image`）+ 缩放下沉 `agent` + 工具块占位 | 见 §7.5：agent 请求体断言、`tools/image` 单测、repl 渲染断言、真机两协议 |
+| **P4 ✅** | 模型主动读图：`ToolResult.Images` + loop 插入 user 图像消息 + 新工具 `read_image`（`tools/image`）+ 缩放下沉 `agent` + 工具块占位 | 见 §7.5：agent 请求体断言、`tools/image` 单测、repl 渲染断言、真机两协议（均已完成） |
 | **P3 ✅（预缩放部分）** | `@path` 内联、`ask -i`、blob 外置、图像压缩、工具产图、多模态 file/音频 | 各自独立评估 |
 
 ## 7 决策（2026-10-09 已全部拍定）
@@ -202,7 +202,7 @@ Images []ImageRef `json:"images,omitempty"`
 
 ## 7.5 P4：模型主动读图（`read_image`）——方案已定，**待实施**
 
-> 状态：**方案拍定（2026-10-09），未实施**。四项决策按推荐值采纳（见下），下个会话照本节执行。
+> 状态：**已实施（2026-10-09）**。四项决策按推荐值采纳并全部落地，实施记录见本节末尾。
 
 ### 约束（决定了机制）
 
@@ -215,12 +215,14 @@ assistant(tool_calls: read_image{path})
   → 下一轮请求（模型据此作答）
 ```
 
+并行多工具时（如同回合 `read_image` + `run_shell`）：user 图像消息在**本轮全部 tool 消息之后**统一追加、多来源聚合为一条——插在 tool 消息中间会打断 `tool_calls → tool` 的相邻性，严格校验的后端（OpenAI 系）会拒绝。
+
 ### 实现面
 
 | 项 | 内容与落点 |
 |---|---|
 | `ToolResult.Images` | `agent/tools.go` 的 `ToolResult` 增 `Images []ImageRef`（agent 定义、tools 填充、repl 读） |
-| loop 插入 user 消息 | `agent/agent.go` `runTurn` 里 append tool 消息之后：`if len(res.Images) > 0` 再 append `Message{Role: "user", Images: res.Images, Content: <说明>}`；说明文案用 agent 常量（如 `MsgToolImageNoteFmt`），**不放 base64** |
+| loop 插入 user 消息 | `agent/agent.go` `runTurn` 里本轮**全部** tool 消息之后：聚合各结果的 `res.Images` 为一条 `Message{Role: "user", Images: …, Content: <说明>}`（不放中间、不打断 tool 相邻性）；说明文案用 agent 常量（如 `MsgToolImageNoteFmt`），**不放 base64** |
 | 能力下沉 | `repl/resize.go` 的 `ResizeTargetSide`/`MaybeResizeImage`/`downscale`/`jpegOrientation`/`exifOrientation` **移到 `agent`**（`tools` 不能依赖 `repl`；`agent` 零内部依赖、只用标准库，是唯一合适落点），`repl` 侧改为薄封装（行为与测试不变） |
 | 新工具 `read_image` | 新包 `tools/image`（参照 `tools/shell` 的 `Options`）：参数 `{path, detail?}`；路径解析（`~` / 相对 `Workspace` 回调，同 `run_shell`）、`os.Stat` 常规文件、内容嗅探限 JPEG/PNG/GIF/WebP、大小 ≤ `image_max_bytes`、按 `image_resize`/`image_detail` 缩放（`detail` 参数可覆盖）；返回文本 `已读取 <name>（<w>×<h>，<size>）` + `Images`；单次一张 |
 | 装配 | `tools/tools.go` 的 `Standard` 纳入 `image.Tool(...)`（与 `run_shell` 同级），`main` 传 `Workspace`/`MaxBytes`/`Resize`/`Detail` |
@@ -242,6 +244,17 @@ assistant(tool_calls: read_image{path})
 - `repl`：工具块在结果后出现 `[图 …]` 占位（直接构造 `ToolResult` 断言渲染）。
 - 真机：让模型用 `read_image` 读一张图（例如先用 `run_shell` 生成），确认它基于图像内容作答；两协议各验一次。
 - 门禁：`gofmt -l` 干净、`go build`/`go vet ./...`、`go test ./...` 与 `-race`、`GOOS=darwin|windows` 交叉编译、`render_audit` 15 PASS。
+
+### 实施记录（2026-10-09）
+
+- **能力下沉**：新文件 `agent/image_data.go` 承接嗅探/尺寸/缩放/EXIF——导出 `ImageResizeLowSide`/`ImageResizeSide`/`JPEGQuality`、`ResizeTargetSide`、`MaybeResizeImage`、`NormalizeImageMIME`、`SniffImageMIME`、`ImageDimensions`、`WebPDimensions`、`JPEGOrientation`（box 降采样、WebP 头解析、APP1/IFD 方向解析随迁，解码器注册随包走）；`repl/resize.go` 与 `repl/attach.go` 只留薄封装（`ImageResizeLowSide`/`ImageResizeSide` 常量别名、`ResizeTargetSide`/`MaybeResizeImage`/`SniffImageMIME`/`ImageDimensions`/`webpDimensions`/`normImageMIME`/`jpegOrientation` 转发），**现有 `repl` 测试零改动**通过。`agent` 仍只依赖标准库。
+- **`ToolResult.Images`**：`agent/tools.go` 增字段；`agent/agent.go` 的 `runTurn` 在本轮**全部** tool 消息之后按聚合的 `res.Images` 追加 `Message{Role:"user", Images:…, Content:fmt.Sprintf(MsgToolImageNoteFmt, strings.Join(工具名, MsgImageNameSep), ImageNames(…))}`——不放单个 tool 消息之后，否则并行调用时 user 会插进 tool 消息中间、打断 `tool_calls → tool` 相邻性（严格后端 400）；新常量 `MsgToolImageNoteFmt`（`（%s 附图：%s）`）与 `MsgImageNameSep`、新助手 `ImageNames`（缺名回落 `image`）。文案不含 base64；`totalTokens`/回滚/中断逻辑因与内容无关而无需改动。
+- **`tools/image`**：`Config{Workspace, Home, MaxBytes, Resize, Detail}`（`MaxBytes ≤ 0` 回落 `agent.DefaultImageMaxBytes`，`Detail` 装配期归一化），`Invoke` 收 `{path, detail?}`——空 path/不存在/非常规文件/超限/非图像/坏 `detail`/坏 JSON 各自报错（失败不附图），成功返回 `已读取 <名>（<宽>×<高>，<大小>）` + 单张 `ImageRef`（`Bytes`/`Width`/`Height` 记为缩放后值，`Detail` 记生效档位用于 wire）。尺寸不可知（如坏 WebP）回落「尺寸未知」。
+- **装配**：`tools.Standard` 顺序定为 `run_shell` → `read_image` → `get_time` → `get_env` → `calc`（`tools/tools_test.go` 期望值同步），`tools.Options` 增 `ImageMaxBytes`/`ImageResize`/`ImageDetail`，`main` 从 `cfg` 传入（**无新配置键**）。
+- **表现层**：`repl/toolview.go` 的 `toolEndBody` 在结果正文后追加 `  [图 <名> <大小>]`（`imagesText` 复用 + `term.Truncate` 按宽度截断），自带视图工具与通用回落两条路径都生效；`ask` 单发共用同一渲染。
+- **测试**：`agent/tool_image_test.go`（桩工具 + mock LLM 三例：两协议各一例断言 tool 消息之后带图 user 消息、文案含工具名与文件名且不含 base64、chat 的 `content` 为数组含 `image_url`、responses 的 `input_image` 为字符串 data URL；并行工具调用例断言图像 user 消息在本轮全部 tool 消息之后且为最后一条）；`tools/image/image_test.go` 7 例（工作区相对 + low 档缩放与 base64 字节自洽、`detail` 覆盖改目标长边、关闭缩放保留原尺寸、`~` 展开、七类错误、definition/required 契约）；`repl/toolimage_test.go` 3 例（结果后占位行且顺序正确、通用回落带占位、无图不出现）。
+- **真机取证（2026-10-09，`make build` + 真实网关 `nas.lan:28149`）**：测试图 400×300 红底（230,30,30）+ 蓝矩形（20,90,220）。① responses（默认配置）：工具块 `▸ read_image path: /tmp/p4_read_image.png` → `已读取 p4_read_image.png（400×300，1.1k）` → `[图 p4_read_image.png 1.1k]`，模型答「背景红色约 #ED1C24、矩形蓝色约 #1560E0、x 100–300 / y 85–220」；② chat（`-c` 临时配置 `api_protocol: chat`）：模型自行传 `detail: high`（标题行显示 `· detail: high`，验证覆盖生效），答「≈ #DC1E1E / ≈ #1C5FD6、水平居中垂直略偏上」。两条线均确实基于图像内容作答。
+- **门禁**：`gofmt -l` 干净、`go build`/`go vet ./...`、`go test ./...` 与 `go test -race ./...` 全绿、`GOOS=darwin|windows go build` 通过、`render_audit` 15 PASS / 0 FAIL。
 
 ## 8 风险与不做项
 
