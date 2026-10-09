@@ -38,6 +38,8 @@ type REPL struct {
 	rend          render.Renderer
 	notifier      Notifier
 	started       time.Time
+	nextPending   bool
+	nextInput     string
 	imgBytes      int
 	imgCount      int
 	imgResize     bool
@@ -378,11 +380,71 @@ func (r *REPL) ask(q string) {
 	if len(in.Images) > 0 {
 		r.st.out.emit(KindDecor, r.sem.Dim.With(r.prof).Frame(imagesText(in.Images))+"\n")
 	}
+	r.runPrompt(in, false)
+}
+
+func (r *REPL) continueTurn() { r.runPrompt(agent.Content{}, true) }
+
+func (r *REPL) runPrompt(in agent.Content, cont bool) {
 	r.con.Sane()
 	ctx, done := InterruptContext(r.con)
 	t := r.beginTurn(done)
-	err = r.runTurn(ctx, in, t)
+	err := r.runTurn(ctx, in, t, cont)
 	t.End(err)
+	r.afterTurn()
+}
+
+func (r *REPL) afterTurn() {
+	if r.agent == nil {
+		return
+	}
+	h, ok := r.agent.TakeHandoff()
+	if !ok {
+		return
+	}
+	fromNext := r.nextPending
+	input := ""
+	if fromNext {
+		r.nextPending, input = false, r.nextInput
+		r.nextInput = ""
+	}
+	r.st.out.emit(KindDecor, handoffText(farewellInfo{
+		session:  h.OldID,
+		duration: time.Since(r.started),
+		stats:    h.OldStats,
+		file:     h.OldFile,
+		noSave:   h.NoSave,
+	}, h))
+	r.started = time.Now()
+	r.st.out.emit(KindDecor, turnSep(r.prof, r.sem, 0))
+	switch {
+	case input != "":
+		r.ask(input)
+	case fromNext:
+	case h.Continue:
+		r.continueTurn()
+	}
+}
+
+func handoffText(info farewellInfo, h agent.Handoff) string {
+	return farewellText(info) + fmt.Sprintf(MsgHandoffBlockFmt, h.NewID, strings.Count(h.Summary, "\n")+1)
+}
+
+func (r *REPL) handleNext(args []string) {
+	if r.agent == nil {
+		return
+	}
+	if id, ok := r.agent.ArchiveReadOnly(); ok {
+		r.st.out.emit(KindNotice, fmt.Sprintf(MsgHandoffReadOnlyFmt, id))
+		return
+	}
+	r.nextInput = strings.TrimSpace(strings.Join(args, " "))
+	r.nextPending = true
+	r.ask(agent.MsgHandoffPrompt)
+	if r.nextPending {
+		r.nextPending, r.nextInput = false, ""
+		r.st.out.emit(KindNotice, MsgHandoffNone)
+	}
 }
 
 func InterruptContext(con readline.Console) (context.Context, func()) {
@@ -431,6 +493,8 @@ func (r *REPL) handleCommand(line string) bool {
 		r.handleArchive(parts[1:])
 	case "/fork":
 		r.handleFork()
+	case "/next":
+		r.handleNext(parts[1:])
 	case "/stat":
 		r.st.out.emitText(KindNotice, statInfo(r.agent.Stats())+"\n")
 	case "/history":

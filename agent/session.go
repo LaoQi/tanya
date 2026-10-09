@@ -63,21 +63,25 @@ func newSessionStore(dir, archiveDir, workspace string, disabled bool) *sessionS
 	}
 }
 
-func (s *sessionStore) rotate() {
+func (s *sessionStore) nextID() string {
+	base := time.Now().Format("20060102-150405")
+	name := base + ".jsonl"
+	for i := 2; ; i++ {
+		if _, err := os.Stat(filepath.Join(s.dir, name)); err != nil {
+			return strings.TrimSuffix(name, ".jsonl")
+		}
+		name = fmt.Sprintf("%s-%d.jsonl", base, i)
+	}
+}
+
+func (s *sessionStore) rotate() { s.rotateTo(s.nextID()) }
+
+func (s *sessionStore) rotateTo(id string) {
 	s.saved = 0
 	s.systemSaved = false
 	s.frozen = false
 	s.frozenID = ""
-	base := time.Now().Format("20060102-150405")
-	name := base + ".jsonl"
-	for i := 2; ; i++ {
-		p := filepath.Join(s.dir, name)
-		if _, err := os.Stat(p); err != nil {
-			s.file = p
-			return
-		}
-		name = fmt.Sprintf("%s-%d.jsonl", base, i)
-	}
+	s.file = filepath.Join(s.dir, id+".jsonl")
 }
 
 func (s *sessionStore) path() string { return s.file }

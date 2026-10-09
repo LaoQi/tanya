@@ -35,15 +35,20 @@ func (s *stubInteractiveTool) Interactive(argsJSON string) bool {
 
 func newStubTool(name string) *stubTool { return &stubTool{name: name} }
 
+func assembled(registered []Tool) []Tool {
+	tgt := &stubConfigTarget{}
+	return assembleTools(registered, tgt, tgt)
+}
+
 func testToolDefs() []ToolDef {
-	r := newToolRegistry(assembleTools([]Tool{newStubTool("t1")}, &stubConfigTarget{})...)
+	r := newToolRegistry(assembled([]Tool{newStubTool("t1")})...)
 	return r.defs()
 }
 
 func TestAssembleToolsOrderAndDefs(t *testing.T) {
-	r := newToolRegistry(assembleTools([]Tool{newStubTool("t1"), newStubTool("t2")}, &stubConfigTarget{})...)
+	r := newToolRegistry(assembled([]Tool{newStubTool("t1"), newStubTool("t2")})...)
 	defs := r.defs()
-	want := []string{"t1", "t2", "agent_custom"}
+	want := []string{"t1", "t2", "next_session", "agent_custom"}
 	if len(defs) != len(want) {
 		t.Fatalf("工具数 = %d, 期望 %d", len(defs), len(want))
 	}
@@ -64,15 +69,16 @@ func TestAssembleToolsOrderAndDefs(t *testing.T) {
 }
 
 func TestAssembleToolsEmptyKeepsBuiltin(t *testing.T) {
-	got := names(newToolRegistry(assembleTools(nil, &stubConfigTarget{})...).defs())
-	if len(got) != 1 || got[0] != "agent_custom" {
-		t.Fatalf("无注入时清单应只剩 agent_custom: %v", got)
+	got := names(newToolRegistry(assembled(nil)...).defs())
+	want := []string{"next_session", "agent_custom"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("无注入时清单应只剩内置工具 %v: %v", want, got)
 	}
 }
 
 func TestToolRegistryLookup(t *testing.T) {
 	stub := newStubTool("t1")
-	r := newToolRegistry(assembleTools([]Tool{stub}, &stubConfigTarget{})...)
+	r := newToolRegistry(assembled([]Tool{stub})...)
 	tool, ok := r.lookup("t1")
 	if !ok || tool != Tool(stub) {
 		t.Fatalf("t1 应命中同一实例: ok=%v tool=%v", ok, tool)
@@ -138,7 +144,7 @@ func TestWithToolsOrderBeforeBuiltin(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := names(a.tools.defs())
-	want := []string{"t1", "t2", "agent_custom"}
+	want := []string{"t1", "t2", "next_session", "agent_custom"}
 	if len(got) != len(want) {
 		t.Fatalf("清单 = %v, 期望 %v", got, want)
 	}
@@ -158,9 +164,9 @@ func TestWithToolsNoRegistrationKeepsDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := names(a.tools.defs())
-	want := []string{"agent_custom"}
+	want := []string{"next_session", "agent_custom"}
 	if len(got) != len(want) {
-		t.Fatalf("不注册时清单应只剩 agent_custom: %v", got)
+		t.Fatalf("不注册时清单应只剩内置工具: %v", got)
 	}
 	for i := range want {
 		if got[i] != want[i] {
