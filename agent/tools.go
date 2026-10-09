@@ -84,8 +84,8 @@ func NewTool(name, desc, params string, fn func(ctx context.Context, argsJSON st
 	return funcTool{name: name, desc: desc, params: params, fn: fn}
 }
 
-func assembleTools(registered []Tool, ctl configTarget) []Tool {
-	out := make([]Tool, 0, len(registered)+1)
+func assembleTools(registered []Tool, ctl configTarget, h handoffTarget) []Tool {
+	out := make([]Tool, 0, len(registered)+2)
 	out = append(out, registered...)
-	return append(out, newAgentTool(ctl))
+	return append(out, newNextTool(h), newAgentTool(ctl))
 }

@@ -139,7 +139,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ## 工具
 
-工具统一经 `Tool` 接口（`agent/tools.go`）声明：`Name()` 给名字、`Definition()` 给描述与参数 schema（即 wire 上的 function 定义）、`Invoke()` 给执行——**描述、参数与执行同处一个实现**，不再有独立清单文件。结果类型 `ToolResult{Text string; Meta any}`：`Text` 回写 history 的 tool 消息，`Meta` 是表现层结构化载荷（`run_shell` 放 `*shell.Result`，`repl` 类型断言渲染、断言失败回落 `textView(res.Text)`）——核心不引用任何具体 `Meta` 类型。可选能力接口 `Interactive`（终端独占标记，供 `runTurn` 在 `EventToolStart/End` 提前置 `Interactive`；曾短暂声明过 `EnvReporter`，随 B2 环境段移交 `main` 删除，见《系统提示头部（env 段）》）；外部以 `agent.NewTool` 构造闭包式工具、`agent.NewToolDef` 装配结构体式工具的 `Definition`。`assembleTools(registered, ctl)` 一行合成清单：**注入项保序在前、`agent_custom` 恒末尾**，顺序即请求体 `tools` 段顺序（prompt cache 依赖，见 `docs/cache-probe.md`）；`newToolRegistry` 持有该 slice，`defs()` 供 `NewClient` 构造期注入，`lookup` 线性扫描（N 小、实测快于 map，不做索引）。`Agent.dispatch` 退化为查表，未命中回 `MsgUnknownTool`。需要终端直通的工具可额外实现窄接口 `Interactive`（当前仅 `run_shell`），供 `runTurn` 在 `EventToolStart/End` 上提前标记 `Interactive`。代价是 `run_shell` 的参数被解析两次——`interactiveOf`（`runTurn` 取 `Interactive`）与 `Invoke` 各一次；这是「参数对通用 `Tool` 接口不透明」与「`EventToolStart` 必须在执行前携带参数派生字段」两条约束相交的**有意保留**结果（实测单次 678ns，对比一次 `bash -c true` 1.26ms 可忽略），不是待办。
+工具统一经 `Tool` 接口（`agent/tools.go`）声明：`Name()` 给名字、`Definition()` 给描述与参数 schema（即 wire 上的 function 定义）、`Invoke()` 给执行——**描述、参数与执行同处一个实现**，不再有独立清单文件。结果类型 `ToolResult{Text string; Meta any}`：`Text` 回写 history 的 tool 消息，`Meta` 是表现层结构化载荷（`run_shell` 放 `*shell.Result`，`repl` 类型断言渲染、断言失败回落 `textView(res.Text)`）——核心不引用任何具体 `Meta` 类型。可选能力接口 `Interactive`（终端独占标记，供 `runTurn` 在 `EventToolStart/End` 提前置 `Interactive`；曾短暂声明过 `EnvReporter`，随 B2 环境段移交 `main` 删除，见《系统提示头部（env 段）》）；外部以 `agent.NewTool` 构造闭包式工具、`agent.NewToolDef` 装配结构体式工具的 `Definition`。`assembleTools(registered, ctl, h)` 一行合成清单：**注入项保序在前、`next_session` 与 `agent_custom` 恒末尾（后者最末）**，顺序即请求体 `tools` 段顺序（prompt cache 依赖，见 `docs/cache-probe.md`）；`newToolRegistry` 持有该 slice，`defs()` 供 `NewClient` 构造期注入，`lookup` 线性扫描（N 小、实测快于 map，不做索引）。`Agent.dispatch` 退化为查表，未命中回 `MsgUnknownTool`。需要终端直通的工具可额外实现窄接口 `Interactive`（当前仅 `run_shell`），供 `runTurn` 在 `EventToolStart/End` 上提前标记 `Interactive`。代价是 `run_shell` 的参数被解析两次——`interactiveOf`（`runTurn` 取 `Interactive`）与 `Invoke` 各一次；这是「参数对通用 `Tool` 接口不透明」与「`EventToolStart` 必须在执行前携带参数派生字段」两条约束相交的**有意保留**结果（实测单次 678ns，对比一次 `bash -c true` 1.26ms 可忽略），不是待办。
 
 ### interactive 标记的流向
 
@@ -241,15 +241,24 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 `get sessions` 只给列表与文件位置，**不读内容**——读内容交回 `run_shell`（符合「新能力优先用 shell 命令组合实现」）。依赖经窄接口 `configTarget`（`*Agent` 满足，测试可注入替身）注入，与 `shell.Tool` 的构造期注入同一风格。改动只写内存 `Config`：不落盘、不入会话文件，`/load` 或重启后回落配置文件值；`repl` 的 `{model}`/`{effort}` 占位符每轮现读 `Agent`，自动跟上，无需事件通知。`SetModel` 带空值校验（`/model` 命令共用同一路径）。形态选型与偏差记录见 `docs/agent-control-tool.md`。
 
+### next_session（`agent/handoff.go`，会话交接）
+
+`next_session` 是第二个内建工具（恒在 `agent_custom` 之前），也是唯一会**改变会话边界**的工具：`summary`（必填，空/纯空白报错、超 128K 字符报错、`\r\n` 归一）承载交接摘要，`continue`（可省，默认 true）说明交接后是否自动继续执行。工具**只置 pending**（`Agent.RequestHandoff`），不碰 history、不 rotate——就地 rotate 会撕碎 `tool_calls → tool` 相邻性、并行工具安全与 append-only 假设；应用点在**回合出口**（`Agent.settleTurn`，`err == nil` 时调 `applyHandoff`），与 `InterruptError` 同一类出口语义：算新 id（`sessionStore.nextID`）→ 旧 history 追加 user 事实行 `[会话已移交至 <新 id>]` → `save()` → `rotateTo(新 id)` → history 换成单条交接消息（`[会话交接] 上一个会话（<旧 id>）移交的进度摘要：…`）→ `prompt.reset()` + `stats.reset()` → `save()`。中断/报错回合**丢弃 pending**（`settleTurn` 清零），同一回合二次调用报错、首次生效。
+
+- 摘要进 **user 消息**、不进 system：`promptBuilder` 与快照机制零改动，新会话首行 system 仍是当前快照（`/load` 可逐字节还原），旧会话文件仍只追加、不裁剪
+- `Handoff` 结构带 `OldID/NewID/OldMsgs/OldStats/OldFile/Continue/NoSave` 快照（旧会话统计与落盘路径在 rotate 后已不可取），供表现层渲染收尾块；`Agent.TakeHandoff()` 一次性取走，`repl` 在回合后拉取（**不新增事件**——这是状态转移、不是过程事实）
+- 续跑经 `Agent.Continue(ctx, sink)`：不追加 user 消息直接跑一轮；`ask(ctx, sink, rollback, producedFrom)` 的两个界标让 `AskContent`（append 前长度 + 1）与 `Continue`（当前长度）共用同一中断/错误结算
+- 摘要上限 `handoffSummaryLimit = 128 * 1024` rune（兜底防爆，不做配置）
+
 ## 上下文管理
 
-- 本地不设上限、不做裁剪：超出模型上下文时由 API 返回错误，直接暴露给用户（可 `/new` 开新会话）
+- 本地不设上限、不做裁剪：超出模型上下文时由 API 返回错误，直接暴露给用户（可 `/new` 开新会话；上下文攒到一定规模时用 `/next` 或 `next_session` 交接——见《会话交接》，那是模型侧主动转段，不是本地裁剪）
 - 用量统计：捕获响应 usage 作为真实值；对端不返回时降级为本地粗估（CJK 1 token/字，ASCII 0.3/字符）
 - tool 结果在写入 history 前已被 shell 层截断（单项头尾各 30000 字节），避免极端膨胀
 
 ## 会话
 
-- 每次启动/`/new`/`/switch`/`/fork` 开启新会话，id 为启动时间戳（`20060102-150405`）：`time.Now` 就地取、不做时钟注入（与 shell 执行层同一口径；文件名可用正则断言）
+- 每次启动/`/new`/`/switch`/`/fork`/`/next` 开启新会话，id 为启动时间戳（`20060102-150405`）：`time.Now` 就地取、不做时钟注入（与 shell 执行层同一口径；文件名可用正则断言）
 - workspace 目录是会话数据落点，其下固定为并列的 `sessions/`（活动会话）与 `archive/`（归档卷）：
   - `local`：workspace 目录 = `<工作区>/.tanya/`（.tanya 本身即项目隔离，不叠加 workspace-id）
   - `global`：workspace 目录 = `<data_dir>/workspaces/<workspace-id>/`（`data_dir` 默认 `~/.local/share/tanya`），workspace-id 由工作区路径派生（可读路径转义 + 8 位短哈希）
@@ -303,6 +312,16 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 自动归档传 `agent.ArchiveOptions{Keep: auto_archive_keep}`、`/archive` 无参传同一个 `Keep`（`Agent.AutoArchiveKeep()`），故两者除触发条件（`auto_archive` + 阈值）外行为完全一致；确认读与 `/archive` 同走 `readConfirm`（readline + `SetHistoryFilter` 全拒），启动期不再另开 `/dev/tty` 直读
 - 归档执行复用 `ArchiveSessions(ArchiveOptions{Keep|OlderThan, Exclude: 当前会话})`（一卷落定、删源文件），报告经 `formatArchiveReport` 输出，两条入口同一格式
 - `n` 不做「不再询问」记忆，下次启动仍会问；关闭启动询问设 `auto_archive: false`（说明落在 README 与配置注释，不再在跳过文案里回显）
+
+## 会话交接
+
+`next_session`（模型）与 `/next`（用户）是同一条线路的两个入口：把当前会话的进度压成一份**现写的摘要**交给新会话，旧会话就此结束。与 `/fork` 的分工是「摘要继承 vs 全量继承」——fork 是分支（旧会话保留、可回切），交接是转段（旧会话终止、不再追加内容）。
+
+- 三入口与续跑规则：模型自调 `next_session{summary, continue}`（`continue` 默认 true = 交接后自动继续一轮、false = 停在提示符）、`/next` 无参（模型现写摘要，交接后等用户）、`/next <指令>`（摘要轮 + 指令作为新会话第一条 user 输入并立即执行）。命令路径忽略 `continue`
+- 收尾形态：旧会话原文件除追加一行 `[会话已移交至 <新 id>]` 外逐字节不动（append-only 不变量在交接路径上同样成立）；新会话首行 system 快照为当前值、第一条消息是交接摘要（`[会话交接] 上一个会话（<旧 id>）移交的进度摘要：…`），故会话列表摘要与 `/load` 回看都自解释
+- 表现层：REPL 在回合后拉取 `TakeHandoff`，打印旧会话收尾三行（复用 `farewellText`，会话 id/时长/用量/落盘文件）+ `已移交新会话 X（交接 N 行）`（**不重放摘要正文**，摘要本身在新旧两边的 history 里都能查），随后重置 `REPL.started` 并补一个回合分隔线，再按续跑规则决定是否发起下一轮
+- 边界：摘要空/超限、同回合二次调用报错且首次生效；回合中断/报错丢弃 pending；归档只读态拒绝对话故模型不可达、`/next` 直接拒绝；`-n` 允许（内存内交接，收尾块显示未写入）；连续交接不做次数限制（模型显式行为，不做无人值守自动移交）
+- 不做：旧会话裁剪/改写、自动归档旧会话（单会话小卷归 `/archive` 管）、前几轮历史揉成摘要的本地压缩、按 token 阈值自动移交、摘要的二次模型加工、新配置键
 
 ## 系统提示与缓存友好
 
@@ -366,12 +385,13 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### 斜杠命令
 
-`/help` `/new` `/switch` `/load` `/archive` `/fork` `/stat` `/history` `/model` `/think` `/reasoning` `/theme` `/exit`（`/quit` 等价）：
+`/help` `/new` `/switch` `/load` `/archive` `/fork` `/next` `/stat` `/history` `/model` `/think` `/reasoning` `/theme` `/exit`（`/quit` 等价）：
 
 白名单（`slashCommands`，同时驱动 Tab 补全）即分发契约：`Run` 先用 `isSlashCommand` 过滤，未命中的 `/` 开头输入按对话内容处理，因此 `handleCommand` 的 switch 不再有 `default` 分支（原先的 `MsgUnknownCmd` 不可达，已删）。白名单与 case 必须一一对应，`TestSlashCommandsAllHandled` 覆盖该不变量（`/load` 走 stdin 交互路径，单独测试）。
 
 - `/archive [n|<dur>]` 把历史会话打包成归档卷：纯数字 `n` 为保留的最近会话数（`0` = 除当前会话外全部），`<dur>` 形如 `7d`/`12h`，仅接受单段单单位（`d`/`h`/`m`/`s`）按未活动时长筛选，无参取 `auto_archive_keep`；恒排除当前会话；只在完整交互环境（rich 输出 + `r.raw` + `r.prof.TTY`）启用，`-p`/ask/管道/非终端只提示 `MsgArchiveOnlyTTY`；与启动自动归档共用 `archiveFlow`（预览含活跃会话总数、`Y/n` 确认读走 `readConfirm`（空行默认归档，`^D` 无内容视为取消） 且挂 `SetHistoryFilter` 全拒、答案不进输入历史）；只做无损压缩，之后可用 `/load` 只读载入（见《会话归档与 fork》）
 - `/fork` 以当前上下文另开新会话：把现有 history 作为新会话起点并立即落盘（新 id、当前 system 快照、继承历史、报继承条数），原会话文件保持原样、可 `/load` 回切；归档只读态用它解除只读
+- `/next [指令]` 交接上下文并开启新会话：无参时 REPL 先发一轮引导 ask（`agent.MsgHandoffPrompt`）请模型调 `next_session` 写摘要，交接后停在新会话等输入；带指令时把指令作为新会话的**第一条 user 输入**并立即跑一轮（即摘要轮之后紧接一轮，新会话 history = 交接摘要 + 指令两条相邻 user，不合并）。**命令路径一律忽略工具的 `continue`**：续跑与否只由命令参数决定（`REPL.nextPending`/`nextInput` 记录本轮来自命令），模型没调用工具时提示 `未生成交接摘要` 并丢弃指令；归档只读态拒绝（提示先 `/fork`）；`-n` 下交接照常但收尾块显示未写入
 - `/switch <目录>` 切换工作区并**放弃当前会话**（不 fork、不询问，旧会话文件保持原样，append-only 不删不裁）：**先收尾再切换**——`handleSwitch` 在调用 `SwitchWorkspace` 前抓 `r.farewellData()` 快照，切换成功后才打印退出同款的三行收尾块（会话 id · 时长 · 消息条数、用量与缓存、旧会话落盘文件路径；不落盘模式（`-n`）文件行打「未写入（不落盘模式）」，归档只读态则无 id、文件行省略（见《退出与切换收尾》）），再打印 `已切换工作区：<旧> → <新>` 与 `新会话目录: <新落点>`（该行取切换**后**的 `SessionDir()`，措辞点明是**新**会话目录以免误读成旧会话落点），最后把 `REPL.started` 重置为切换时刻；失败路径（含目标等于当前工作区）不打印任何收尾块，只有错误。`Agent.SwitchWorkspace` 先把目标解析为绝对路径（`~`/`~/x` 展开家目录、相对路径按**当前**工作区合成、`os.Stat` 必须是已存在目录；空参数与非目录报错），再按新目录重建派生态——system 提示（重读 `<新工作区>/AGENTS.md`）与会话存储（`resolveWorkspaceDirs(cfg, 新目录)`，`auto` 依新目录的 `.tanya/` 判定 local/global）；注入的工具**不重建**：`run_shell` 的默认目录经 `Workspace` 回调读 `Agent.Workspace()`，换区即跟随（env 段随基座定格，不受换区影响）；全部构建成功后才整体替换并 `NewSession()`（历史清空、stats 归零、会话轮转），任一步失败旧工作区与原会话原样保留。目标等于当前工作区（含 `sub/` 这类等价写法）直接拒绝（`MsgSameWorkspace`），避免误丢会话；无参打印用法与当前工作区。归档卷注释里的 workspace 也改取自 `sessionStore.workspace`（不再读进程 cwd），保证卷内记录的是会话所属工作区。归档只读态下同样可用（切走即离开只读：新工作区的 sessionStore 是全新实例，`frozen` 不继承）。运行期设置（`/model` `/think` `/reasoning` `/theme`）与清屏都不动，进程 cwd 全程不变，提示符 `{cwd}`、`/stat` 工作区行与 `/load` 列表随后即反映新工作区。参数支持目录补全（ghost 与 Tab 菜单同链路，`completer.switchCandidates`）：前缀按 `/switch` 同口径解析基准段（`~`/`~/x` 展开家目录、绝对路径原样、其余按当前工作区合成），`ReadDir` 列其一级子目录——只取目录（符号链接跟随目标 `os.Stat` 判定，与 `resolveWorkspace` 同口径，断链不算）、候选带尾 `/` 便于继续下钻、裸 `..` 补成 `../`（`./` 不补，切当前目录必被拒）；名字含空白或控制符（含 DEL）的目录跳过——补全上下文按空格分词，Insert 出带空格的候选后即无法继续下钻（单空格名可手动 `/switch a b` 敲入切换，连续空格名被 `Fields` 折叠、无法表达）；隐藏目录仅当前缀已敲 `.` 时出现；工作区基准经 `workspaceDir func() string` 活取（换区后补全随之跟随），每次按键一次 `ReadDir`、无缓存，基准不可读即无候选；`~user` 不展开、无候选；Windows 盘符/反斜杠前缀不走绝对分支、无候选（切换本身不受影响）
 
 - `/history` 无参截断列表（`term.OneLine` 先剥离 ANSI 转义与控制字符、压成单行，再按 120 rune 截断，避免 `\r`/`\x1b[K` 覆盖已打印行与未闭合 SGR 泄漏）、`/history n` 全量查看单条、`/history all` 全量显示；全量显示时消息头 `#N 角色` 按一级标题渲染、并按角色着色（user 用 `Ok` 绿、其余用 `Warn` 黄；`#` 与序号连写不构成 markdown 标题，单独构造 Heading IR），assistant 正文走与对话一致的 Markdown 渲染（受 stdout 是否终端与输出模式约束：stdout 非终端、plain 一并旁路；旁路与非 markdown 档下的正文经 `term.Sanitize` 清洗），user/tool 消息正文与 `→ 工具 参数` 行同样清洗控制序列后原样保留文本（模型可经工具参数把转义序列送进回放；工具消息正文另经 `Frame` 清洗）
@@ -492,6 +512,8 @@ repl 输出侧测试方法（输出收敛方案阶段 0-4 建立；流式期热�
 非 gated 补强（2026-09-27，控制台层复核产出）：`readline` 侧 `TestLendFullThroughConsole` 以 `lendPump` 注入 pty、经真实 `Console.LendFull` 入口覆盖 `lendFullImpl`/`fullLease` 生产链（三路接同一 pty slave、子进程 `/dev/tty` 读到输入、捕获流完整、`Release` 幂等 + termios 复原 + pty 释放），`TestKeysTermiosClearsSignalAndCanonical` 锁死 Keys 模式位组合（清 `IGNBRK/BRKINT/PARMRK/ISTRIP/INLCR/IGNCR/ICRNL/IXON`、`ECHO/ICANON/ISIG/IEXTEN`、`OPOST`，`VMIN=0/VTIME=1`，掩码外位不动），`TestSizeFromPTY` 覆盖真实尺寸三态；`repl` 侧 `pickSession` 空列表/非逐键回落/读尽与中断/取消键/尺寸变化重绘五分支与 `ask` 冒烟（回合前 `Sane` 自愈 + 回合订阅中断）、`main` 侧 `consoleForShell` 适配器租约透传与错误回传各有用例。E2E 提示里的 `-run` 名与实参必须一致——`TTY_E2E_REUSE` 用例的输入须**间隔喂入**（一次性写入会被第一个命令的 pty 吃掉）。
 
 输出侧渲染审计（`scripts/render_audit.py`，先 `make build`）：内置 mock LLM（responses 协议 SSE，事件形态对齐 `agent/mock_test.go`）+ pty 驱动真实二进制 + VT 回放（DECSTBM / 自动换行 / 光标可见性 / 备用屏 47·1047·1049 / 保存槽按屏索引 / SGR 状态与 DECRC 属性恢复；DECSTBM 按真终端实测建模——光标一律 home 到绝对 (1,1)，比 xterm 的「夹到上边界」更狠）+ 不变量断言，全量约 15s、无网络依赖。不变量：`overwrite`（写入非空白单元格）、`region_scroll`（只在滚动区内滚动）、`cu_clamped`（相对上移超出光标所在行，会被视口夹到顶行）、结束时 `autowrap_off` / `cursor_hidden` / `margins_set` / `alt_screen_on` / `sgr_open`。场景 want 三档：`clean` 要求不变量全为 0（回归门）、`leak` 断言 `expect` 列出的违反项被复现（已知缺口门，修好后改成 `clean`）、`note` 只报告不断言；`--dump NAME` 打印该场景回放后的屏幕。诊断计数 `cursor_restore`（光标被保存槽恢复且位置确实跳变，**且该槽在本回放中从未被写过**——即陈旧槽值被恢复，裸发 `DECRST 1049` 的典型症状；被 `DECSC`/`1049h` 写过的槽被恢复属预期、不计数）不断言、仅报告，真正的门是 `overwrite` 与结束态不变量。2026-09-20 起已无 leak 门：原 `leak-picker-unpaged`（picker 未按屏幕高度分页，`CursorUp(len(items)+1)` 被夹到顶行）改为 `clean-picker-paged`（40 个会话 + `--dump` 目视：单块 31 行、无重复残影）——picker 分窗 + 上移量按实际写入行数记账后 `cu_clamped` 归零；同日新增两条转义注入门：`clean-history-escape`（`sh_raw` 构造内层含真 ESC 的 tool_call 参数 → `/history 2` 回放 `→ 工具 参数` 行：清洗缺失时 `CSI 2J` 会清屏、屏幕断言失败）与 `clean-picker-escape`（`session_evil` 让种子会话摘要含 ESC → `/load`：清洗缺失时菜单被清屏），两者都以「去掉清洗即变红」实测过；光标锚点类的回归门五条：`clean-tty-scrollregion`（子进程 `printf '\033[20;24r' > /dev/tty` 设滚动区，终端把光标 home 到 (1,1)）、`clean-tty-cup`（子进程 `CSI 3;7H` 直接挪光标）、`clean-alt-screen-exit`（子进程用 `47h` 进备用屏后退出）、`clean-tty-modes`（`?7l`/`?25l` 残留）、`clean-interactive-release`（interactive 密码提示后桥接 release 的 `?1049l` 跳位）——交出终端前 `SaveCursor` 与复位后 `RestoreCursor` 任一步退化成 no-op，这五条连同其余 clean 门都会变红（实测去掉存档得 `overwrite` 44、去掉归位得 `overwrite` 50），故它们是 2026-09-16 光标锚点修复的回归门。note 只剩 `note-partial-line`（子进程直写 `/dev/tty` 的半行残文）
+
+会话交接测试（`agent/handoff_test.go` / `repl/handoff_test.go`）：切换会话（旧文件含 tool_call、工具结果与移交事实行且其后无追加，新文件为 system 快照 + 交接消息）、`TakeHandoff` 一次性、`continue` 缺省 true / 显式 false、`Continue` 的追加与中断/错误回滚、空摘要与超限拒绝、同回合二次调用、错误回合丢弃 pending 且不残留到下一回合、`-n` 不落盘、摘要换行归一、旧会话逐条不被改写、REPL 三入口（`/next` 无参停、`/next <指令>` 参数作为新会话首条 user 输入并立即执行、模型自调缺省续跑）与「未生成交接摘要」提示、命令路径忽略 `continue`（含**带参 + `continue:false`** 仍续跑）、工具清单顺序（注入项 + `next_session` + `agent_custom`）；补强项（2026-10-10，由变异复验找出的洞）：摘要上限**边界**（恰好 `handoffSummaryLimit`）与 **rune 计数口径**（`limit/2` 个中文字符字节数已超仍应通过）、`Continue` 与 `/next` 在**归档只读**态拒绝、交接后 `REPL.started` 重置、收尾块**整行文本**（旧会话 id/用量/文件行 + 精确的「交接 N 行」）与 `-n` 的未写入行、`NewSession`/`Fork`/`LoadSession` 清陈旧 `handoffPend` 与 `lastHandoff`。
 
 会话归档测试：卷往返（entry 字节与源文件一致、entry comment 的条数与摘要与实读扫描一致）、comment 上限（4 KiB 硬上限、多字节截断降级、`trunc` 标记）、筛选（`OlderThan`、`Exclude`、5 分钟空闲保护、`DryRun` 不落盘、已在卷内 id 去重、0 候选不建空卷）、列表分组排序（活动前归档后）、`/archive` 的预览/确认/取消/非交互降级（`MsgArchiveOnlyTTY`）与保留数、窗口两种口径、`/archive` 恒排除当前会话、损坏卷（截断/CRC 错：列表不崩、载入报错且卷不动）、`*.tmp-*` 忽略、同 id 双区取活动、归档只读态不写盘且 `Ask` 报 `ErrArchiveReadOnly`、`Fork` 从活跃会话与归档会话两条路径的落盘内容/后续增量/原文件不被改写、`rotate` 规避同秒占用名、`resolveWorkspaceDirs` 三态推导、`ParseArchiveArg` 表驱动、picker `[归档] ` 标记渲染。
 

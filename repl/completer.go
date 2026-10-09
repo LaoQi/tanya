@@ -13,7 +13,7 @@ import (
 	"github.com/LaoQi/tanya/readline"
 )
 
-var slashCommands = []string{"/help", "/new", "/switch", "/load", "/archive", "/fork", "/stat", "/history", "/model", "/think", "/reasoning", "/theme", "/exit", "/quit"}
+var slashCommands = []string{"/help", "/new", "/switch", "/load", "/archive", "/fork", "/next", "/stat", "/history", "/model", "/think", "/reasoning", "/theme", "/exit", "/quit"}
 
 var onOffCandidates = []string{"on", "off"}
 

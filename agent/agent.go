@@ -11,17 +11,19 @@ import (
 )
 
 type Agent struct {
-	cfg        *Config
-	client     *Client
-	tools      *toolRegistry
-	workspace  string
-	home       string
-	registered []Tool
-	history    []Message
-	basePrompt string
-	prompt     *promptBuilder
-	store      *sessionStore
-	stats      usageStats
+	cfg         *Config
+	client      *Client
+	tools       *toolRegistry
+	workspace   string
+	home        string
+	registered  []Tool
+	history     []Message
+	basePrompt  string
+	prompt      *promptBuilder
+	store       *sessionStore
+	stats       usageStats
+	handoffPend *pendingHandoff
+	lastHandoff *Handoff
 }
 
 type ResponseInfo struct {
@@ -80,7 +82,7 @@ func (a *Agent) loadWorkspace(dir string, noSave bool) error {
 	a.workspace = dir
 	a.prompt = newPromptBuilder(a.basePrompt, dir, globalAgentsPath(), readAgentsFile)
 	a.store = newSessionStore(sessionDir, archiveDir, dir, noSave)
-	a.tools = newToolRegistry(assembleTools(a.registered, a)...)
+	a.tools = newToolRegistry(assembleTools(a.registered, a, a)...)
 	a.client = NewClient(a.cfg, a.tools.defs())
 	a.NewSession()
 	a.store.refresh()
@@ -145,6 +147,8 @@ func (a *Agent) NewSession() {
 	a.history = nil
 	a.stats.reset()
 	a.prompt.reset()
+	a.handoffPend = nil
+	a.lastHandoff = nil
 	a.store.rotate()
 }
 
@@ -160,6 +164,8 @@ func (a *Agent) LoadSession(id string) error {
 	a.prompt.adopt(system)
 	a.history = history
 	a.stats.reset()
+	a.handoffPend = nil
+	a.lastHandoff = nil
 	return nil
 }
 
@@ -218,6 +224,8 @@ func (a *Agent) Fork() (string, error) {
 	a.store.rotate()
 	a.prompt.reset()
 	a.stats.reset()
+	a.handoffPend = nil
+	a.lastHandoff = nil
 	if err := a.save(); err != nil {
 		return "", err
 	}
@@ -257,9 +265,26 @@ func (a *Agent) AskContent(ctx context.Context, in Content, sink EventSink) erro
 		return ErrArchiveReadOnly
 	}
 	start := time.Now()
-	mark := len(a.history)
+	base := len(a.history)
 	a.history = append(a.history, Message{Role: "user", Content: in.Text, Images: in.Images})
-	err := a.ask(ctx, sink, mark)
+	err := a.ask(ctx, sink, base, base+1)
+	a.settleTurn(start, err, sink)
+	return err
+}
+
+// Continue 不追加 user 消息直接跑一轮（交接后的自动续跑由表现层发起）。
+func (a *Agent) Continue(ctx context.Context, sink EventSink) error {
+	if _, ok := a.ArchiveReadOnly(); ok {
+		return ErrArchiveReadOnly
+	}
+	start := time.Now()
+	base := len(a.history)
+	err := a.ask(ctx, sink, base, base)
+	a.settleTurn(start, err, sink)
+	return err
+}
+
+func (a *Agent) settleTurn(start time.Time, err error, sink EventSink) {
 	var ie *InterruptError
 	interrupted := errors.As(err, &ie)
 	sink.Emit(Event{Kind: EventTurnEnd, Turn: TurnInfo{
@@ -267,21 +292,25 @@ func (a *Agent) AskContent(ctx context.Context, in Content, sink EventSink) erro
 		Failed:      err != nil && !interrupted,
 		Interrupted: interrupted,
 	}})
-	return err
+	if err == nil {
+		a.applyHandoff()
+		return
+	}
+	a.handoffPend = nil
 }
 
-func (a *Agent) ask(ctx context.Context, sink EventSink, mark int) error {
+func (a *Agent) ask(ctx context.Context, sink EventSink, rollback, producedFrom int) error {
 	err := a.runTurn(ctx, sink)
 	if err == nil {
 		return a.save()
 	}
-	kept := len(a.history) > mark+1
+	kept := len(a.history) > producedFrom
 	if errors.Is(ctx.Err(), context.Canceled) {
 		if kept {
 			a.history = append(a.history, Message{Role: "user", Content: MsgInterruptNotice})
 			_ = a.save()
 		} else {
-			a.history = a.history[:mark]
+			a.history = a.history[:rollback]
 		}
 		return &InterruptError{Kept: kept}
 	}
@@ -290,7 +319,7 @@ func (a *Agent) ask(ctx context.Context, sink EventSink, mark int) error {
 		_ = a.save()
 		return err
 	}
-	a.history = a.history[:mark]
+	a.history = a.history[:rollback]
 	return err
 }
 
