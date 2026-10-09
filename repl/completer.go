@@ -101,31 +101,53 @@ func (c *completer) models() []string {
 	return c.modelCache
 }
 
-func attachQuery(line string) (prefix, head string, ok bool) {
+func attachQuery(line string) (prefix, head string, quote byte, ok bool) {
 	if strings.HasPrefix(line, "/") {
-		return "", "", false
+		return "", "", 0, false
 	}
-	head = line
-	if i := strings.LastIndexAny(line, " \t"); i >= 0 {
-		head = line[:i+1]
+	start, q := attachTokenStart(line)
+	if start < 0 {
+		return "", "", 0, false
 	}
-	tok := line[len(head):]
-	if !strings.HasPrefix(tok, "@") {
-		return "", "", false
+	if q != 0 {
+		return line[start+2:], line[:start+1], q, true
 	}
-	rest := strings.TrimPrefix(tok, "@")
-	if strings.HasPrefix(rest, "\"") || strings.HasPrefix(rest, "'") {
-		return rest[1:], head + tok[:2], true
-	}
-	return rest, head + "@", true
+	return line[start+1:], line[:start+1], 0, true
 }
 
-func (c *completer) attachQueryCandidates(line string) ([]switchCandidate, string, string, bool) {
-	prefix, head, ok := attachQuery(line)
-	if !ok {
-		return nil, "", "", false
+func attachTokenStart(line string) (int, byte) {
+	start, quote := -1, byte(0)
+	for i := 0; i < len(line); {
+		if line[i] != '@' || (i > 0 && !isAttachSpace(line[i-1])) {
+			i++
+			continue
+		}
+		j := i + 1
+		if j < len(line) && (line[j] == '"' || line[j] == '\'') {
+			q := line[j]
+			k := j + 1
+			for k < len(line) && line[k] != q {
+				k++
+			}
+			if k >= len(line) {
+				return i, q
+			}
+			start, quote = -1, 0
+			i = k + 1
+			continue
+		}
+		start, quote = i, 0
+		i = j
 	}
-	return c.attachCandidates(prefix), head, prefix, true
+	return start, quote
+}
+
+func (c *completer) attachQueryCandidates(line string) ([]switchCandidate, string, byte, bool) {
+	prefix, head, quote, ok := attachQuery(line)
+	if !ok {
+		return nil, "", 0, false
+	}
+	return c.attachCandidates(prefix), head, quote, true
 }
 
 func (c *completer) attachCandidates(prefix string) []switchCandidate {
@@ -144,7 +166,7 @@ func (c *completer) attachCandidates(prefix string) []switchCandidate {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if !safeSwitchName(name) {
+		if !attachSafeName(name) {
 			continue
 		}
 		if strings.HasPrefix(name, ".") && !dot {
@@ -165,6 +187,13 @@ func (c *completer) attachCandidates(prefix string) []switchCandidate {
 	return out
 }
 
+func attachSafeName(name string) bool {
+	if name == "" || name[0] == '"' || name[0] == '\'' {
+		return false
+	}
+	return !strings.ContainsFunc(name, func(r rune) bool { return r < ' ' || r == 0x7f })
+}
+
 func hasImageExt(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
@@ -174,10 +203,14 @@ func hasImageExt(name string) bool {
 }
 
 func (c *completer) suggest(line string) string {
-	if cands, _, prefix, ok := c.attachQueryCandidates(line); ok {
+	if cands, head, quote, ok := c.attachQueryCandidates(line); ok && quote == 0 {
 		for _, cand := range cands {
-			if cand.path != prefix {
-				return cand.path[len(prefix):]
+			full := head + cand.path
+			if !strings.HasPrefix(full, line) {
+				continue
+			}
+			if rest := full[len(line):]; rest != "" {
+				return rest
 			}
 		}
 	}
