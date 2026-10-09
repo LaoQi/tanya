@@ -40,6 +40,8 @@ type REPL struct {
 	started       time.Time
 	imgBytes      int
 	imgCount      int
+	imgResize     bool
+	imgDetail     string
 }
 
 type options struct {
@@ -56,6 +58,17 @@ type options struct {
 	maxLines  int
 	imgBytes  int
 	imgCount  int
+	imgResize bool
+	imgDetail string
+	imgSet    bool
+}
+
+func WithImageBehavior(resize bool, detail string) Option {
+	return func(o *options) {
+		o.imgResize = resize
+		o.imgDetail = detail
+		o.imgSet = true
+	}
 }
 
 func WithImageLimits(maxBytes, maxCount int) Option {
@@ -158,6 +171,10 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if err != nil {
 		return nil, err
 	}
+	imgResize := o.imgResize
+	if !o.imgSet {
+		imgResize = true
+	}
 	imgBytes, imgCount := o.imgBytes, o.imgCount
 	if imgBytes <= 0 {
 		imgBytes = agent.DefaultImageMaxBytes
@@ -165,7 +182,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if imgCount <= 0 {
 		imgCount = agent.DefaultImageMaxCount
 	}
-	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette, imgBytes: imgBytes, imgCount: imgCount}
+	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette, imgBytes: imgBytes, imgCount: imgCount, imgResize: imgResize, imgDetail: o.imgDetail}
 	r.prof = o.prof
 	r.rend = render.NewThemedRenderer(r.prof, sch.MD)
 	ed.SetStyles(sem.Dim.With(r.prof), sem.Accent.With(r.prof))
@@ -334,6 +351,8 @@ func (r *REPL) attachOptions() AttachOptions {
 		Workspace: r.cwdBase,
 		MaxBytes:  r.imgBytes,
 		MaxCount:  r.imgCount,
+		Resize:    r.imgResize,
+		Detail:    r.imgDetail,
 	}
 }
 

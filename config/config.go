@@ -23,6 +23,7 @@ type UI struct {
 	ToolOutputLines int               `yaml:"tool_output_lines"`
 	ImageMaxBytes   int               `yaml:"image_max_bytes"`
 	ImageMaxCount   int               `yaml:"image_max_count"`
+	ImageResize     bool              `yaml:"image_resize"`
 }
 
 type Config struct {
@@ -74,6 +75,7 @@ func Default() *Config {
 			ToolOutputLines: DefaultToolOutputLines,
 			ImageMaxBytes:   agent.DefaultImageMaxBytes,
 			ImageMaxCount:   agent.DefaultImageMaxCount,
+			ImageResize:     true,
 		},
 	}
 }

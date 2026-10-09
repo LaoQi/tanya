@@ -16,6 +16,9 @@ image_detail: low
 # 图像附件（对话行内 @路径）的单图大小上限（字节）与单条消息张数上限（仅 yaml）
 image_max_bytes: 10485760
 image_max_count: 4
+# 本地预缩放：开启后 PNG/JPEG 超过目标长边时先缩再传（GIF/WebP 原样、带 EXIF 方向的 JPEG 跳过，只缩不放）
+# 目标长边：image_detail 为 low 时 512，否则 1300；缩放后同步更新尺寸与字节数（估算与回显都按实际发送量）
+image_resize: true
 # 思维链显示（仅 yaml，默认关闭）：开启后思维链以 markdown 渲染，并夹在 `─── 思考 ───` / `─── 思考结束 · 3.2s ───` 分隔符之间，
 # 同时不再打印 `» 思考中` 状态行（`» 等待响应` 在首个思维链片段到达时收尾）
 # 仅 REPL 的 rich 输出档生效（stdout 非终端 / -p / ask 一律不显示），REPL 内 /reasoning on|off 可运行时切换

@@ -27,6 +27,8 @@ type AttachOptions struct {
 	Workspace func() string
 	MaxBytes  int
 	MaxCount  int
+	Resize    bool
+	Detail    string
 }
 
 func ParseAttachments(line string, opt AttachOptions) ([]agent.ImageRef, error) {
@@ -173,6 +175,7 @@ func attachOne(tok string, opt AttachOptions) (*agent.ImageRef, error) {
 	if mime == "" {
 		return nil, fmt.Errorf(MsgImageBadFormat, filepath.Base(path))
 	}
+	data = MaybeResizeImage(data, mime, opt.Detail, opt.Resize)
 	w, h := ImageDimensions(data, mime)
 	return &agent.ImageRef{
 		MIME:   mime,
@@ -208,8 +211,9 @@ func attachDataURL(tok string, opt AttachOptions) (*agent.ImageRef, error) {
 	if SniffImageMIME(raw) == "" {
 		return nil, fmt.Errorf(MsgImageBadFormat, "data URL")
 	}
-	w, h := ImageDimensions(raw, mime)
-	return &agent.ImageRef{MIME: mime, Data: tok[comma+1:], Name: "data-url", Bytes: len(raw), Width: w, Height: h}, nil
+	payload := MaybeResizeImage(raw, mime, opt.Detail, opt.Resize)
+	w, h := ImageDimensions(payload, mime)
+	return &agent.ImageRef{MIME: mime, Data: base64.StdEncoding.EncodeToString(payload), Name: "data-url", Bytes: len(payload), Width: w, Height: h}, nil
 }
 
 func resolveAttachPath(p string, opt AttachOptions) string {
