@@ -196,15 +196,43 @@ func (r *REPL) mdEnabled() bool {
 	return r.prof.TTY && r.st.decor()
 }
 
-func turnSep(prof term.Profile, sem theme.Semantics, d time.Duration) string {
+// turnSepMinRail 是满宽横线的最小长度：终端过窄（或宽度异常）时不铺线，退回固定短线形态。
+const turnSepMinRail = 4
+
+// termCols 返回终端实际列数；尺寸不可知（非 TTY、管道、Size 失败）时返回 0，
+// 调用方据此保持原样输出——不按宽度猜、也不替终端折行。
+func (r *REPL) termCols() int {
+	if r.con == nil {
+		return 0
+	}
+	if s, ok := r.con.Size(); ok && s.Cols > 0 {
+		return s.Cols
+	}
+	return 0
+}
+
+// turnSep 渲染回合分隔线：**文字前留定长横线做 padding、其后横线补到行尾**
+// （cols <= 0 或宽度不够时退回固定短线 `──── 15:04:05`）。横线补在文字之后而非之前，
+// 是刻意的：宽度有偏差时 term.Truncate 只截行尾横线，时间戳与耗时既不会被切、
+// 也不会被终端 pending-wrap 推到下一行。宽度按显示列计算（时间戳含 CJK，
+// 不能按 rune/字节），并留一列余量——写满最后一列同样会触发 pending-wrap。
+func turnSep(prof term.Profile, sem theme.Semantics, d time.Duration, cols int) string {
 	if !prof.TTY {
 		return ""
 	}
-	text := fmt.Sprintf(TurnSepTimeFmt, time.Now().Format("15:04:05"))
+	text := time.Now().Format("15:04:05")
 	if d > 0 {
 		text += fmt.Sprintf(TurnSepDurFmt, turnDuration(d))
 	}
-	return "\n" + sem.Ok.With(prof).Sprint(text) + "\n"
+	line := fmt.Sprintf(TurnSepTimeFmt, text)
+	if cols > 0 {
+		target := cols - 1
+		if n := target - term.Width(line) - 1; n >= turnSepMinRail {
+			line = line + " " + strings.Repeat("─", n)
+		}
+		line = term.Truncate(line, target)
+	}
+	return "\n" + sem.Ok.With(prof).Sprint(line) + "\n"
 }
 
 func turnDuration(d time.Duration) string {
@@ -292,7 +320,7 @@ func (r *REPL) Run() error {
 			if r.handleCommand(line) {
 				return r.quit()
 			}
-			r.st.out.emit(KindDecor, turnSep(r.prof, r.sem, 0))
+			r.st.out.emit(KindDecor, turnSep(r.prof, r.sem, 0, r.view.width()))
 			continue
 		}
 		if text, ok := dialogueText(line); ok {
@@ -370,7 +398,7 @@ func (r *REPL) afterTurn() {
 		noSave:   h.NoSave,
 	}, h))
 	r.started = time.Now()
-	r.st.out.emit(KindDecor, turnSep(r.prof, r.sem, 0))
+	r.st.out.emit(KindDecor, turnSep(r.prof, r.sem, 0, r.view.width()))
 	switch {
 	case input != "":
 		r.ask(input)
@@ -707,8 +735,9 @@ func (r *REPL) showHistory(args []string) {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, MsgTotalMsgs, len(msgs))
+	cols := r.termCols()
 	for i, m := range msgs {
-		b.WriteString(historyLine(i+1, m))
+		b.WriteString(historyLine(i+1, m, cols))
 		b.WriteString("\n")
 	}
 	r.st.out.emit(KindNotice, b.String())
@@ -738,17 +767,15 @@ func historyText(m agent.Message) string {
 	return m.Content
 }
 
-func truncateRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "..."
-}
-
-func historyLine(n int, m agent.Message) string {
+// historyLine 渲染 /history 列表的一项：截断按终端显示列（cols <= 0 不截断），
+// 列表一项一行，宽度不可知时保持原样而不是按 rune 猜。
+func historyLine(n int, m agent.Message, cols int) string {
 	text := term.OneLine(historyText(m))
-	return fmt.Sprintf("%3d %-9s %s", n, historyLabel(m), truncateRunes(text, 120))
+	line := fmt.Sprintf("%3d %-9s %s", n, historyLabel(m), text)
+	if cols > 0 {
+		line = term.Truncate(line, cols-1)
+	}
+	return line
 }
 
 func (r *REPL) printHistoryFull(n int, m agent.Message) {
@@ -805,7 +832,7 @@ func (r *REPL) loadSessionInteractive() {
 	}
 	idx, ok, keys := pickSession(r.con, list, r.st.out, r.sem, r.prof)
 	if !keys {
-		idx, ok = pickByNumber(list, r.st.out)
+		idx, ok = pickByNumber(list, r.st.out, r.termCols())
 	}
 	if !ok || idx < 0 {
 		r.st.out.emit(KindNotice, MsgCancelled)

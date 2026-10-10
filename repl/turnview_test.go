@@ -14,7 +14,7 @@ import (
 )
 
 func TestTurnSepTimeOnly(t *testing.T) {
-	out := turnSep(term.Profile{TTY: true, Colors: term.Level16}, testSem(), 0)
+	out := turnSep(term.Profile{TTY: true, Colors: term.Level16}, testSem(), 0, 0)
 	plain := term.Strip(out)
 	if !regexp.MustCompile(`^\n──── \d{2}:\d{2}:\d{2}\n$`).MatchString(plain) {
 		t.Errorf("回合分隔线格式不符: %q", plain)
@@ -28,14 +28,14 @@ func TestTurnSepTimeOnly(t *testing.T) {
 }
 
 func TestTurnSepWithDuration(t *testing.T) {
-	plain := term.Strip(turnSep(term.Profile{TTY: true, Colors: term.Level16}, testSem(), 12*time.Second+400*time.Millisecond))
+	plain := term.Strip(turnSep(term.Profile{TTY: true, Colors: term.Level16}, testSem(), 12*time.Second+400*time.Millisecond, 0))
 	if !regexp.MustCompile(`^\n──── \d{2}:\d{2}:\d{2} · 回合 12\.4s\n$`).MatchString(plain) {
 		t.Errorf("带耗时分隔线格式不符: %q", plain)
 	}
 }
 
 func TestTurnSepNoColor(t *testing.T) {
-	out := turnSep(term.Profile{TTY: true, Colors: term.LevelNone}, testSem(), time.Second)
+	out := turnSep(term.Profile{TTY: true, Colors: term.LevelNone}, testSem(), time.Second, 0)
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("无色环境不应出现 SGR: %q", out)
 	}
@@ -46,11 +46,69 @@ func TestTurnSepNoColor(t *testing.T) {
 
 func TestTurnSepNonTTYBypass(t *testing.T) {
 	nonTTY := term.Profile{TTY: false, Colors: term.LevelNone}
-	if out := turnSep(nonTTY, testSem(), 0); out != "" {
+	if out := turnSep(nonTTY, testSem(), 0, 0); out != "" {
 		t.Errorf("非 TTY 不应打印分隔线: %q", out)
 	}
-	if out := turnSep(nonTTY, testSem(), 3*time.Second); out != "" {
+	if out := turnSep(nonTTY, testSem(), 3*time.Second, 0); out != "" {
 		t.Errorf("非 TTY 不应打印带耗时分隔线: %q", out)
+	}
+}
+
+// TestTurnSepFullWidth 锁住满宽形态：整行恰好 cols-1 列——宽度按显示列计算
+// （时间戳含 CJK，按 rune/字节算会多出 2 列并触发终端折行）。
+func TestTurnSepFullWidth(t *testing.T) {
+	prof := term.Profile{TTY: true, Colors: term.LevelNone}
+	plain := term.Strip(turnSep(prof, testSem(), 12*time.Second+400*time.Millisecond, 100))
+	if !strings.HasPrefix(plain, "\n") || !strings.HasSuffix(plain, "\n") {
+		t.Fatalf("分隔线应有前导尾随换行: %q", plain)
+	}
+	line := strings.Trim(plain, "\n")
+	if strings.ContainsRune(line, '\n') {
+		t.Fatalf("满宽分隔线应为单行: %q", line)
+	}
+	if w := term.Width(line); w != 99 {
+		t.Errorf("满宽分隔线应恰好 99 列（cols-1），实际 %d: %q", w, line)
+	}
+	if !regexp.MustCompile(`^──── \d{2}:\d{2}:\d{2} · 回合 12\.4s ─+$`).MatchString(line) {
+		t.Errorf("形态应为「前导横线 + 文字 + 横线补到行尾」: %q", line)
+	}
+}
+
+// TestTurnSepFullWidthAcrossCols 遍历常见列数，断言永不超出 cols-1（写满最后一列会 pending-wrap）。
+func TestTurnSepFullWidthAcrossCols(t *testing.T) {
+	prof := term.Profile{TTY: true, Colors: term.Level16}
+	for _, cols := range []int{1, 10, 20, 40, 60, 100, 268} {
+		line := strings.Trim(term.Strip(turnSep(prof, testSem(), 5*time.Second, cols)), "\n")
+		if strings.ContainsRune(line, '\n') {
+			t.Errorf("cols=%d 分隔线应为单行: %q", cols, line)
+		}
+		if w := term.Width(line); w > cols-1 {
+			t.Errorf("cols=%d 分隔线超宽（%d 列 > %d）: %q", cols, w, cols-1, line)
+		}
+	}
+}
+
+// TestTurnSepFullWidthSingleLine 锁住「时间戳 + 横线」不产生额外折行：整块只有首尾两个换行。
+func TestTurnSepFullWidthSingleLine(t *testing.T) {
+	out := turnSep(term.Profile{TTY: true, Colors: term.Level16}, testSem(), 0, 80)
+	if n := strings.Count(out, "\n"); n != 2 {
+		t.Errorf("满宽分隔线应只有首尾换行，实际 %d 个: %q", n, out)
+	}
+}
+
+// TestTurnSepKeepsTextIntact 锁住「横线只补在文字之后」的核心收益：终端窄到必须截断时，
+// 被截掉的是行尾横线，前导横线与时间戳、耗时完整保留——文字不会被切、也不会被 pending-wrap 挤走。
+func TestTurnSepKeepsTextIntact(t *testing.T) {
+	prof := term.Profile{TTY: true, Colors: term.LevelNone}
+	re := regexp.MustCompile(`^──── \d{2}:\d{2}:\d{2} · 回合 12\.4s`)
+	for _, cols := range []int{30, 40, 60, 268} {
+		line := strings.Trim(term.Strip(turnSep(prof, testSem(), 12*time.Second+400*time.Millisecond, cols)), "\n")
+		if !re.MatchString(line) {
+			t.Errorf("cols=%d 文字应完整保留在行首: %q", cols, line)
+		}
+		if w := term.Width(line); w > cols-1 {
+			t.Errorf("cols=%d 超宽 %d 列: %q", cols, w, line)
+		}
 	}
 }
 

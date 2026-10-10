@@ -240,7 +240,7 @@ func (t *turn) End(err error) {
 			t.r.failErr(err)
 		}
 	}
-	t.f.emit(KindDecor, turnSep(t.f.prof, t.f.sem, dur))
+	t.f.emit(KindDecor, turnSep(t.f.prof, t.f.sem, dur, t.r.view.width()))
 }
 
 // mdBlocks 把整段文本按 markdown 管线解析为块（回放等一次性展示用，不复用回合缓冲）。

@@ -149,7 +149,7 @@ func TestNoticeDecorErrorKinds(t *testing.T) {
 	r.handleCommand("/help")
 	r.st.out.vis = 1 << KindDecor
 	out.Reset()
-	r.st.out.emit(KindDecor, turnSep(r.prof, testSem(), 0))
+	r.st.out.emit(KindDecor, turnSep(r.prof, testSem(), 0, 0))
 	if !strings.Contains(out.String(), "─") {
 		t.Errorf("回合分隔线应归 KindDecor: %q", out.String())
 	}

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LaoQi/tanya/render/term"
+
 	"github.com/LaoQi/tanya/agent"
 )
 
@@ -61,7 +63,7 @@ func TestPickByNumberOutput(t *testing.T) {
 		t.Fatalf("应扫描到 1 个会话: %d", len(list))
 	}
 	out := &syncBuf{}
-	pickByNumber(list, NewStreams(out, &syncBuf{}, modeRich).out)
+	pickByNumber(list, NewStreams(out, &syncBuf{}, modeRich).out, 0)
 	want := "输入序号选择会话（回车取消）:\n  1   20260101-100000  " + list[0].ModTime.Format("01-02 15:04") + "    2条  第一条\n序号: "
 	if out.String() != want {
 		t.Errorf("got %q want %q", out, want)
@@ -101,4 +103,38 @@ func seedIntoSessionDir(t *testing.T, root, name, content string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// TestPickByNumberColumnWidth 锁住序号菜单的按列截断：窄终端下每行不超 cols-1、不折行；
+// 宽度不可知（cols=0）时保持原样输出，不按 rune 猜。
+func TestPickByNumberColumnWidth(t *testing.T) {
+	dir := t.TempDir()
+	seed := `{"role":"user","content":"` + strings.Repeat("长", 200) + `"}` + "\n"
+	a := newSessTestAgent(t, dir)
+	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", seed)
+	list, err := a.ListSessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("应扫描到 1 个会话: %d", len(list))
+	}
+	out := &syncBuf{}
+	pickByNumber(list, NewStreams(out, &syncBuf{}, modeRich).out, 40)
+	for _, l := range strings.Split(out.String(), "\n") {
+		if w := term.Width(l); w > 39 {
+			t.Errorf("菜单行超宽 %d 列: %q", w, l)
+		}
+	}
+	wide := &syncBuf{}
+	pickByNumber(list, NewStreams(wide, &syncBuf{}, modeRich).out, 0)
+	maxw := 0
+	for _, l := range strings.Split(wide.String(), "\n") {
+		if w := term.Width(l); w > maxw {
+			maxw = w
+		}
+	}
+	if maxw <= 39 {
+		t.Errorf("宽度不可知时不应按终端列截断，最长行只有 %d 列", maxw)
+	}
 }
