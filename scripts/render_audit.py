@@ -14,14 +14,19 @@
 
 场景 want 语义：
   clean  全部不变量必须为 0/off（回归门）
-  leak   期望出现 expect 列出的违反项（已知缺口复现；修好后把 want 改成 clean）
+  leak   期望出现 expect 列出的违反项（已知缺口或已裁定的行为差异，见 docs/cursor-anchor-follow.md）
   note   只报告不断言（内容层面的已知限制）
 
 DECSTBM 建模按真实终端实测：光标一律被 home 到绝对 (1,1)（区外/区内同，比 xterm 的「夹到上边界」
-更狠）。子进程一设区，锚点前的位置就丢了，这就是 `clean-tty-scrollregion` / `clean-tty-cup` /
-`clean-alt-screen-exit` 三条门的由来——它们的共同前提是调用方在交出终端前 `SaveCursor`、
-复位后 `RestoreCursor`（`ctty` 原语），复位串内不再自包 DECSC/DECRC（否则会覆盖该存档槽）；
-去掉存档或恢复中的任一步，这三条都会变红。
+更狠）。子进程一设区，借出前的锚点位置就丢了。
+
+终端释放序（`ctty` 原语，见 `docs/ctty.md`）：`SaveCursor`（借出前存一次，供复位串里的 `?1049l`
+恢复）→ 子进程 → `SaveCursor`（2026-10-10 跟随改动：把归位点改写为子进程留下的位置）→ `ResetModes`
+→ `RestoreCursor`；复位串内不自包 DECSC/DECRC（否则会覆盖调用方的存档槽）。回归门：
+`clean-alt-screen-exit` / `clean-tty-modes` / `clean-interactive-release` / `clean-interactive-short` /
+`clean-interactive-long`——去掉存档、跟随重存或归位任一步即变红。`leak-tty-cup` /
+`leak-tty-scrollregion` 是跟随改动的既定代价：子进程只挪光标/设滚动区且不复位时，tanya 会从子进程
+留下的位置续写并覆盖屏幕上方内容；收口需 DSR 判据（方案留档、未实施）。
 
 用法：make build && python3 scripts/render_audit.py
       [--only NAME]        只跑一个场景
@@ -577,15 +582,16 @@ SCENARIOS = [
         "screen_has": ["▸ run_shell", "共 31 行", "exit 0"],
     },
     {
-        "name": "clean-tty-scrollregion",
-        "want": "clean",
+        "name": "leak-tty-scrollregion",
+        "want": "leak",
+        "expect": ["overwrite"],
         "prompt": "用 run_shell 跑一条命令\n",
         "steps": [
             {"tool_calls": [{"name": "run_shell",
                              "args": sh("printf '\\033[20;24r' > /dev/tty; seq 1 12")}]},
             {"content": "命令已执行。\n"},
         ],
-        "screen_has": ["▸ run_shell"],
+        "screen_has": ["exit 0"],
     },
     {
         "name": "clean-tty-modes",
@@ -610,6 +616,26 @@ SCENARIOS = [
              "delay": 0.25, "content": "回答完毕。\n"},
         ],
         "screen_has": ["─── 思考", "先想一步", "得出结论", "思考结束", "回答完毕"],
+    },
+    {
+        "name": "clean-interactive-short",
+        "want": "clean",
+        "prompt": "用 run_shell 跑一条命令\n",
+        "steps": [
+            {"tool_calls": [{"name": "run_shell", "args": shi("seq 1 5")}]},
+            {"content": "命令已执行。\n"},
+        ],
+        "screen_has": ["▸ run_shell", "exit 0", "5 行"],
+    },
+    {
+        "name": "clean-interactive-long",
+        "want": "clean",
+        "prompt": "用 run_shell 跑一条命令\n",
+        "steps": [
+            {"tool_calls": [{"name": "run_shell", "args": shi("seq 1 60")}]},
+            {"content": "命令已执行。\n"},
+        ],
+        "screen_has": ["▸ run_shell", "exit 0", "共 60 行"],
     },
     {
         "name": "clean-interactive-release",
@@ -674,15 +700,16 @@ SCENARIOS = [
         "screen_has": ["done"],
     },
     {
-        "name": "clean-tty-cup",
-        "want": "clean",
+        "name": "leak-tty-cup",
+        "want": "leak",
+        "expect": ["overwrite"],
         "prompt": "用 run_shell 跑一条命令\n",
         "steps": [
             {"tool_calls": [{"name": "run_shell",
                              "args": sh("printf '\\033[3;7H' > /dev/tty; echo done")}]},
             {"content": "命令已执行。\n"},
         ],
-        "screen_has": ["▸ run_shell", "done"],
+        "screen_has": ["done"],
     },
     {
         "name": "note-partial-line",

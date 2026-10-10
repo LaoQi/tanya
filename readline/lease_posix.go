@@ -22,6 +22,7 @@ func anchorTerminal() func() {
 		if hasSaved {
 			_ = ctty.SetTermios(fd, saved)
 		}
+		ctty.SaveCursor(tty)
 		ctty.ResetModes(tty)
 		ctty.RestoreCursor(tty)
 		tty.Close()
