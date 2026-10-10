@@ -117,7 +117,7 @@ type Console interface {
     Subscribe(fn func(Event)) (cancel func())      // 事件通知（InterruptContext 等），不改终端模式
     SubscribeKeys(fn func(Event)) (cancel func())  // 请求按键：武装常驻读者（S8：P3 落地）
     Size() (Size, bool)
-    LendStdin() (Lease, error)     // 普通工具：子进程 stdin=/dev/null + 终端锚点，不直通、不移交（S5）
+    LendStdin() (Lease, error)     // 普通工具：子进程 stdin=/dev/null + 终端锚点（跟随，2026-10-10），不直通、不移交（S5）
     LendFull(cmd *exec.Cmd, capture io.Writer) (Lease, error) // interactive：posix pty 泵+输出捕获 / windows 直通+掩蔽（S4）
 }
 
@@ -127,7 +127,7 @@ type Lease interface {
 }
 ```
 
-落地记录：S5 落地 `Sane`（device 三实现：posix 幂等置回 sane 位、windows 复原开终端时的 console mode、pipe no-op）与 `LendStdin` 的最终语义（stdin=`os.DevNull`，posix 另持终端锚点：借出前 `SaveCursor`、`Release` 时 termios 复原 + `ResetModes` + `RestoreCursor`，无前台移交、无 isForeground 门控）；S2 实现 `BeginRead`/`EndRead`/`ReadEvent`/`Subscribe`/`Size`；S4 实现 `LendStdin`/`LendFull`（`readline/lease*.go` 平台分片，pty 泵自 `bridge_linux.go` 收编；`Lender` 未单列接口，`Console` 直接含之）。`Console` 的实现值满足 `tools/shell` 的同名 `Console`/`Lease` 接口，因 Go 接口方法签名要求精确匹配，`main` 以 `consoleForShell` 薄适配器完成跨包注入（同 `Bridge` 先例）。
+落地记录：S5 落地 `Sane`（device 三实现：posix 幂等置回 sane 位、windows 复原开终端时的 console mode、pipe no-op）与 `LendStdin` 的最终语义（stdin=`os.DevNull`，posix 另持终端锚点：借出前 `SaveCursor`、`Release` 时 termios 复原 + `SaveCursor`（2026-10-10 跟随：归位点改写为子进程留下的位置）+ `ResetModes` + `RestoreCursor`，无前台移交、无 isForeground 门控）；S2 实现 `BeginRead`/`EndRead`/`ReadEvent`/`Subscribe`/`Size`；S4 实现 `LendStdin`/`LendFull`（`readline/lease*.go` 平台分片，pty 泵自 `bridge_linux.go` 收编；`Lender` 未单列接口，`Console` 直接含之）。`Console` 的实现值满足 `tools/shell` 的同名 `Console`/`Lease` 接口，因 Go 接口方法签名要求精确匹配，`main` 以 `consoleForShell` 薄适配器完成跨包注入（同 `Bridge` 先例）。
 
 L1 device 职责（接口包内私有，各分片一份完整实现）：模式切换、单读者读 + 唤醒、**中断归一**（`0x03` 字节与信号面汇成同一通知）、`Resize` 产出（能力可选，产不出就是没有该事件；`Hangup` 已删——挂断走 `io.EOF`，从未产出）、`LendStdin`/`LendFull` 的机制实现、紧急复原。读循环只在 Reader 活跃期存在（空转期读会抢走子进程输入），唤醒用现有机制收敛（编辑器 `VMIN=0/VTIME=1` 轮询、桥接 wake pipe，二者归一为 device 内部实现细节）。
 
@@ -177,7 +177,7 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 
 **S5 落地记录**（2026-09-27，本节清单全部执行；其中「未落成的设计意图」一条已由 S8/P3 补齐，见 §5）：
 
-- 与方案的差异一处：`LendStdin` 的**终端锚点保留**（借出前 `SaveCursor`、`Release` 时 termios 复原 + `ResetModes` + `RestoreCursor`）。锚点是「子进程继承 stdout、可往屏幕写转义」的保护，与 stdin 直通无关——`render_audit` 的 `clean-tty-scrollregion`/`clean-tty-modes`/`clean-alt-screen-exit`/`clean-tty-cup` 四条门正由它把关，一并删掉会全红。删掉的只有直通/移交/isForeground 门控/`ctty.SnapshotInput`-`RestoreInput`（随租约无消费者）。
+- 与方案的差异一处：`LendStdin` 的**终端锚点保留**（借出前 `SaveCursor`、`Release` 时 termios 复原 + `ResetModes` + `RestoreCursor`）。锚点是「子进程继承 stdout、可往屏幕写转义」的保护，与 stdin 直通无关——`render_audit` 的 `clean-tty-modes`/`clean-alt-screen-exit`/`clean-interactive-release`/`clean-interactive-short`/`clean-interactive-long` 五条门正由它把关（`leak-tty-cup`/`leak-tty-scrollregion` 则钉住 2026-10-10 跟随带来的既定代价），一并删掉会全红。删掉的只有直通/移交/isForeground 门控/`ctty.SnapshotInput`-`RestoreInput`（随租约无消费者）。
 - Windows `LendFull` 落地：`CONIN$` 直通 + `IgnoreCtrlEvents` 掩蔽，按 §7 **不接 `capture`**（输出直上屏，`runFull` 的捕获参数在该平台被忽略）；`LendStdin` 按 §7 不掩蔽。未实机验证。
 - 顺带修复两处基线缺陷（S5 暴露、与行为变化无关）：①`Console` 的中断监听改为在 `newConsole` 期捕获 `ctty.Interrupted()` 通道——此前 watcher goroutine 尚未被调度时到达的信号会丢（repl 中断用例在并行跑测下假失败）；②`keyEvent` 从 `device_posix.go` 提到无 tag 的 `keys.go`——S1 拆分 device 后 `GOOS=windows go build` 基线即断（缺该符号）。
 - `interactive` 借不出不再回退前台直通，改为明确报错（`ErrNoLend` → `✗ interactive 不支持（无法借出终端）`）：回退在前台移交下线后已无意义（子进程只会拿到空 stdin 并挂起/失败）。

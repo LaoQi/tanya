@@ -5,7 +5,7 @@
 ## 特性
 
 - OpenAI 兼容接口（OpenAI / DeepSeek / GLM / Ollama / vLLM 等），SSE 流式输出
-- 以 shell 为核心的工具体系：模型可直接执行 shell 命令（自动适配平台：Linux/macOS bash/sh/ash，Windows pwsh/powershell；`shell` 配置可指定任意 shell）；命令前后保存/复原控制终端状态（交出终端前 `DECSC` 存锚点，结束后复原 termios + 复位屏幕模式：SGR、字符集、滚动区/换行/光标/鼠标等 + `DECRC` 归位，子进程设滚动区或挪走光标都不会把后续输出带到屏幕顶部），被超时强杀的交互程序不会留下坏终端；普通命令的 stdin 是空设备（`/dev/null`），需要应答的程序请用 `interactive: true`
+- 以 shell 为核心的工具体系：模型可直接执行 shell 命令（自动适配平台：Linux/macOS bash/sh/ash，Windows pwsh/powershell；`shell` 配置可指定任意 shell）；命令前后保存/复原控制终端状态（交出终端前 `DECSC` 存锚点，结束后复原 termios + 复位屏幕模式：SGR、字符集、滚动区/换行/光标/鼠标等 + `DECRC` 归位到**子进程留下的位置**——子进程显示在屏幕上的输出不会被随后的内容覆盖；反向的代价是子进程只挪光标、设滚动区且不复位时，输出的续写位置会跟随到上方），被超时强杀的交互程序不会留下坏终端；普通命令的 stdin 是空设备（`/dev/null`），需要应答的程序请用 `interactive: true`
 - 模型可主动读图：`read_image` 工具读取本地图像文件（JPEG/PNG/GIF/WebP，单次一张，路径支持 `~` 与相对工作区，`detail` 可指定；超大图可传 `region` 分块读取局部、避免整体压缩丢细节），图像经「工具结果 + 紧随一条 user 图像消息」交给模型（两协议一致）；工具块显示 `[图 名 大小]`
 - 内置轻量工具：`get_time` / `get_env` / `calc`
 - 模型可运行时自调与自省：`agent_custom` 按 `key` 读写（可写 `model`、`reasoning_effort`；只读 `models`、`usage`、`stat`、`sessions`、`config_path`），`get sessions` 给出会话列表与 jsonl 文件路径（仅本次会话有效，不写配置文件），`get config_path` 给出生效配置文件路径（模型据此可读取或修改自身配置，改动需重启生效）

@@ -214,6 +214,7 @@ func (b *bridgeTTY) release() {
 		if b.rawSet {
 			_ = ctty.SetTermios(b.ttyFd, b.saved)
 			if b.tty != nil {
+				ctty.SaveCursor(b.tty)
 				ctty.ResetModes(b.tty)
 				ctty.RestoreCursor(b.tty)
 			}

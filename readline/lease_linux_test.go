@@ -182,6 +182,47 @@ func TestBridgeInteractiveTTY(t *testing.T) {
 	}
 }
 
+func TestBridgeReleaseReanchorsCursor(t *testing.T) {
+	master, slave, err := openPTY()
+	if err != nil {
+		t.Fatalf("openPTY: %v", err)
+	}
+	defer master.Close()
+
+	b := newBridgeTTY(slave)
+	cmd := exec.Command("bash", "-c", "echo CHILD-MARK")
+	var capture bytes.Buffer
+	childSlave, err := b.prepare(cmd)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := b.attach(&capture); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	childSlave.Close()
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	b.stop()
+
+	stream := drainPTY(t, master, time.Second)
+	save := strings.Index(stream, "\x1b7")
+	marker := strings.Index(stream, "CHILD-MARK")
+	reanchor := strings.LastIndex(stream, "\x1b7")
+	resetAt := strings.LastIndex(stream, "\x1b[r")
+	restore := strings.LastIndex(stream, "\x1b8")
+	if save < 0 || marker < 0 || resetAt < 0 || restore < 0 {
+		t.Fatalf("锚点序列不完整: %q", stream)
+	}
+	if !(save < marker && marker < reanchor && reanchor < resetAt && resetAt < restore) {
+		t.Errorf("顺序应为 存档 < 子进程 < 跟随重存 < 滚动区复位 < 归位（得 save=%d marker=%d reanchor=%d reset=%d restore=%d）: %q",
+			save, marker, reanchor, resetAt, restore, stream)
+	}
+}
+
 func TestBridgeOutputWhileChildAlive(t *testing.T) {
 	master, slave, err := openPTY()
 	if err != nil {

@@ -118,6 +118,7 @@ func TestLendStdinAnchorsTerminal(t *testing.T) {
 	stream := drainPTY(t, master, 3*time.Second)
 	save := strings.Index(stream, "\x1b7")
 	marker := strings.Index(stream, "CHILD-MARK")
+	reanchor := strings.LastIndex(stream, "\x1b7")
 	resetAt := strings.LastIndex(stream, "\x1b[r")
 	restore := strings.LastIndex(stream, "\x1b8")
 	if save < 0 || marker < 0 || resetAt < 0 || restore < 0 {
@@ -127,9 +128,9 @@ func TestLendStdinAnchorsTerminal(t *testing.T) {
 	if altExit < 0 {
 		t.Fatalf("复位段缺 ?1049l: %q", stream)
 	}
-	if !(save < marker && marker < altExit && altExit < resetAt && resetAt < restore) {
-		t.Errorf("顺序应为 存档 < 子进程 < 模式复位 < 滚动区复位 < 恢复（得 save=%d marker=%d altExit=%d reset=%d restore=%d）: %q",
-			save, marker, altExit, resetAt, restore, stream)
+	if !(save < marker && marker < reanchor && reanchor < altExit && altExit < resetAt && resetAt < restore) {
+		t.Errorf("顺序应为 存档 < 子进程 < 跟随重存 < 模式复位 < 滚动区复位 < 归位（得 save=%d marker=%d reanchor=%d altExit=%d reset=%d restore=%d）: %q",
+			save, marker, reanchor, altExit, resetAt, restore, stream)
 	}
 }
 
