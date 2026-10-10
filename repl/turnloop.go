@@ -63,7 +63,7 @@ func (r *REPL) startHotkeys() (<-chan readline.KeyEvent, func()) {
 	return keys, cancel
 }
 
-func (r *REPL) runTurn(ctx context.Context, in agent.Content, t *turn, cont bool) error {
+func (r *REPL) runTurn(ctx context.Context, in string, t *turn, cont bool) error {
 	ch := make(chan turnIn, 64)
 	sink := agent.Sinks(sinkWrap{ch: ch, ctx: ctx}.Emit, notifySink{r: r}.Emit)
 	go func() {
@@ -72,7 +72,7 @@ func (r *REPL) runTurn(ctx context.Context, in agent.Content, t *turn, cont bool
 		if cont {
 			err = r.agent.Continue(ctx, sink)
 		} else {
-			err = r.agent.AskContent(ctx, in, sink)
+			err = r.agent.Ask(ctx, in, sink)
 		}
 		ch <- turnIn{kind: inDone, err: err}
 	}()

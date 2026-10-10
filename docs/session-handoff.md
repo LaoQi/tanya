@@ -107,7 +107,7 @@ func (a *Agent) ask(ctx context.Context, sink EventSink, base int) error
 func (a *Agent) Continue(ctx context.Context, sink EventSink) error // 不追加 user 消息，直接跑一轮
 ```
 
-`AskContent` 传 append 前长度并在 `EventTurnEnd` 之后调 `applyHandoff`（仅 `err == nil`）；`Continue` 传 `len(history)`，两者共用中断/错误出口（既有 `ask_rollback_test.go`/`ask_nosave_test.go` 守这次重构的语义等价）。
+`Ask` 传 append 前长度并在 `EventTurnEnd` 之后调 `applyHandoff`（仅 `err == nil`）；`Continue` 传 `len(history)`，两者共用中断/错误出口（既有 `ask_rollback_test.go`/`ask_nosave_test.go` 守这次重构的语义等价）。
 
 `repl`：
 
@@ -179,7 +179,7 @@ func (a *Agent) Continue(ctx context.Context, sink EventSink) error // 不追加
 
 ## 10. 落地偏差（实施中对文档的微调）
 
-1. `Agent.ask` 的签名不是单一 `base`：`AskContent` 会先 append 一条 user 消息（属本回合输入、不算产出），`Continue` 没有，故拆成 `ask(ctx, sink, rollback, producedFrom)` 两个界标——`AskContent` 传 `(base, base+1)`、`Continue` 传 `(base, base)`，两者共用同一 `kept := len(history) > producedFrom` 与 `[:rollback]` 回滚。既有 `ask_rollback_test.go`/`ask_nosave_test.go` 原样通过（语义等价）。
+1. `Agent.ask` 的签名不是单一 `base`：`Ask` 会先 append 一条 user 消息（属本回合输入、不算产出），`Continue` 没有，故拆成 `ask(ctx, sink, rollback, producedFrom)` 两个界标——`Ask` 传 `(base, base+1)`、`Continue` 传 `(base, base)`，两者共用同一 `kept := len(history) > producedFrom` 与 `[:rollback]` 回滚。既有 `ask_rollback_test.go`/`ask_nosave_test.go` 原样通过（语义等价）。
 2. `Handoff` 增 `OldStats Stats` 与 `OldFile string` 两个快照字段（文档只写了 id/条数）：旧会话的统计与落盘路径在 `rotate` 后已不可取，而收尾块要复用 `farewellText` 的三行。
 3. `sessionStore.nextID()` 返回的是**会话 id**（不带 `.jsonl`），`rotate()` 自行拼路径。
 4. 未新增 `MsgHandoffNoSave`：`-n` 下 `farewellText` 的文件行已输出 `未写入（不落盘模式）`，再追加一句是重复。

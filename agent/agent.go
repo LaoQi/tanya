@@ -251,22 +251,13 @@ func briefErr(err error) string {
 	return s
 }
 
-type Content struct {
-	Text   string
-	Images []ImageRef
-}
-
 func (a *Agent) Ask(ctx context.Context, input string, sink EventSink) error {
-	return a.AskContent(ctx, Content{Text: input}, sink)
-}
-
-func (a *Agent) AskContent(ctx context.Context, in Content, sink EventSink) error {
 	if _, ok := a.ArchiveReadOnly(); ok {
 		return ErrArchiveReadOnly
 	}
 	start := time.Now()
 	base := len(a.history)
-	a.history = append(a.history, Message{Role: "user", Content: in.Text, Images: in.Images})
+	a.history = append(a.history, Message{Role: "user", Content: input})
 	err := a.ask(ctx, sink, base, base+1)
 	a.settleTurn(start, err, sink)
 	return err

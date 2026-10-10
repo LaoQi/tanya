@@ -31,7 +31,7 @@ func TestToolImagesAppendUserMessageChat(t *testing.T) {
 		mockStep{content: "看到了"},
 	)
 	a := newAgent(t, m, WithTools(&stubImageTool{}))
-	if err := a.AskContent(context.Background(), Content{Text: "看图"}, func(Event) {}); err != nil {
+	if err := a.Ask(context.Background(), "看图", func(Event) {}); err != nil {
 		t.Fatal(err)
 	}
 	if len(a.history) != 5 {
@@ -95,7 +95,7 @@ func TestToolImagesAppendUserMessageResponses(t *testing.T) {
 	cfg := m.config()
 	cfg.ApiProtocol = "responses"
 	a := newAgentWithCfg(t, cfg, WithTools(&stubImageTool{}))
-	if err := a.AskContent(context.Background(), Content{Text: "看图"}, func(Event) {}); err != nil {
+	if err := a.Ask(context.Background(), "看图", func(Event) {}); err != nil {
 		t.Fatal(err)
 	}
 	if len(m.rawReqs) != 2 {
@@ -158,7 +158,7 @@ func TestToolImagesAfterAllParallelToolMessages(t *testing.T) {
 		mockStep{content: "看到了"},
 	)
 	a := newAgent(t, m, WithTools(&stubImageTool{}))
-	if err := a.AskContent(context.Background(), Content{Text: "看图并跑命令"}, func(Event) {}); err != nil {
+	if err := a.Ask(context.Background(), "看图并跑命令", func(Event) {}); err != nil {
 		t.Fatal(err)
 	}
 	if len(a.history) != 6 {

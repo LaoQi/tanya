@@ -53,7 +53,6 @@ func TestConfigExampleMatchesDefaults(t *testing.T) {
 		{"session_mode", got.SessionMode, want.SessionMode},
 		{"image_detail", got.ImageDetail, want.ImageDetail},
 		{"image_max_bytes", strconv.Itoa(got.ImageMaxBytes), strconv.Itoa(want.ImageMaxBytes)},
-		{"image_max_count", strconv.Itoa(got.ImageMaxCount), strconv.Itoa(want.ImageMaxCount)},
 		{"image_resize", strconv.FormatBool(got.ImageResize), strconv.FormatBool(want.ImageResize)},
 		{"tool_output_lines", strconv.Itoa(got.ToolOutputLines), strconv.Itoa(want.ToolOutputLines)},
 	}

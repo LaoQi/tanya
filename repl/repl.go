@@ -40,10 +40,6 @@ type REPL struct {
 	started       time.Time
 	nextPending   bool
 	nextInput     string
-	imgBytes      int
-	imgCount      int
-	imgResize     bool
-	imgDetail     string
 }
 
 type options struct {
@@ -58,26 +54,6 @@ type options struct {
 	reasoning bool
 	notifier  Notifier
 	maxLines  int
-	imgBytes  int
-	imgCount  int
-	imgResize bool
-	imgDetail string
-	imgSet    bool
-}
-
-func WithImageBehavior(resize bool, detail string) Option {
-	return func(o *options) {
-		o.imgResize = resize
-		o.imgDetail = detail
-		o.imgSet = true
-	}
-}
-
-func WithImageLimits(maxBytes, maxCount int) Option {
-	return func(o *options) {
-		o.imgBytes = maxBytes
-		o.imgCount = maxCount
-	}
 }
 
 type Option func(*options)
@@ -173,18 +149,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if err != nil {
 		return nil, err
 	}
-	imgResize := o.imgResize
-	if !o.imgSet {
-		imgResize = true
-	}
-	imgBytes, imgCount := o.imgBytes, o.imgCount
-	if imgBytes <= 0 {
-		imgBytes = agent.DefaultImageMaxBytes
-	}
-	if imgCount <= 0 {
-		imgCount = agent.DefaultImageMaxCount
-	}
-	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette, imgBytes: imgBytes, imgCount: imgCount, imgResize: imgResize, imgDetail: o.imgDetail}
+	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
 	r.prof = o.prof
 	r.rend = render.NewThemedRenderer(r.prof, sch.MD)
 	ed.SetStyles(sem.Dim.With(r.prof), sem.Accent.With(r.prof))
@@ -348,14 +313,8 @@ func (r *REPL) Run() error {
 	}
 }
 
-func (r *REPL) attachOptions() AttachOptions {
-	return AttachOptions{
-		Workspace: r.cwdBase,
-		MaxBytes:  r.imgBytes,
-		MaxCount:  r.imgCount,
-		Resize:    r.imgResize,
-		Detail:    r.imgDetail,
-	}
+func (r *REPL) refOptions() RefOptions {
+	return RefOptions{Workspace: r.cwdBase}
 }
 
 func (r *REPL) cwdBase() string {
@@ -372,20 +331,15 @@ func (r *REPL) cwdBase() string {
 }
 
 func (r *REPL) ask(q string) {
-	in, err := PrepareContent(q, r.attachOptions())
-	if err != nil {
-		r.failErr(err)
-		return
+	if refs := ParseRefs(q, r.refOptions()); len(refs) > 0 {
+		r.st.out.emit(KindDecor, r.sem.Dim.With(r.prof).Frame(refsText(refs))+"\n")
 	}
-	if len(in.Images) > 0 {
-		r.st.out.emit(KindDecor, r.sem.Dim.With(r.prof).Frame(imagesText(in.Images))+"\n")
-	}
-	r.runPrompt(in, false)
+	r.runPrompt(q, false)
 }
 
-func (r *REPL) continueTurn() { r.runPrompt(agent.Content{}, true) }
+func (r *REPL) continueTurn() { r.runPrompt("", true) }
 
-func (r *REPL) runPrompt(in agent.Content, cont bool) {
+func (r *REPL) runPrompt(in string, cont bool) {
 	r.con.Sane()
 	ctx, done := InterruptContext(r.con)
 	t := r.beginTurn(done)

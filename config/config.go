@@ -22,7 +22,6 @@ type UI struct {
 	Palette         map[string]string `yaml:"palette"`
 	ToolOutputLines int               `yaml:"tool_output_lines"`
 	ImageMaxBytes   int               `yaml:"image_max_bytes"`
-	ImageMaxCount   int               `yaml:"image_max_count"`
 	ImageResize     bool              `yaml:"image_resize"`
 }
 
@@ -74,7 +73,6 @@ func Default() *Config {
 			Theme:           DefaultTheme,
 			ToolOutputLines: DefaultToolOutputLines,
 			ImageMaxBytes:   agent.DefaultImageMaxBytes,
-			ImageMaxCount:   agent.DefaultImageMaxCount,
 			ImageResize:     true,
 		},
 	}
@@ -147,9 +145,6 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.ImageMaxBytes < 1 {
 		cfg.ImageMaxBytes = agent.DefaultImageMaxBytes
-	}
-	if cfg.ImageMaxCount < 1 {
-		cfg.ImageMaxCount = agent.DefaultImageMaxCount
 	}
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = agent.UserAgent(Version)
