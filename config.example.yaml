@@ -9,14 +9,13 @@ temperature: 0.7
 # 留空或注释则不发送；REPL 内 /think 可运行时切换
 # 设置后请求不再发送 temperature（兼容 o 系/gpt-5 等仅支持 temperature=1 的推理模型）
 # reasoning_effort: medium
-# 图像细节档位，随请求发给上游（chat 的 image_url 对象内 / responses 的 input_image 同级）：
+# 读图细节档位（read_image 工具与模型读图时随请求发给上游，chat 的 image_url 对象内 / responses 的 input_image 同级）：
 # low（默认，先降到 512×512，更快更省）/ high / original / auto（high 与 original 等价、auto 当前等价 original）
 # 留空或注释则不发送该字段
 image_detail: low
-# 图像附件（对话行内 @路径）的单图大小上限（字节）与单条消息张数上限（仅 yaml）
+# 读图单文件大小上限（字节，仅 yaml）：超过则 read_image 报错
 image_max_bytes: 10485760
-image_max_count: 4
-# 本地预缩放：开启后 PNG/JPEG 超过目标长边时先缩再传（GIF/WebP 原样、带 EXIF 方向的 JPEG 跳过，只缩不放）
+# 读图预缩放：开启后 read_image 遇 PNG/JPEG 超过目标长边时先缩再传（GIF/WebP 原样、带 EXIF 方向的 JPEG 跳过，只缩不放）
 # 目标长边：image_detail 为 low 时 512，否则 1300；缩放后同步更新尺寸与字节数（估算与回显都按实际发送量）
 image_resize: true
 # 思维链显示（仅 yaml，默认关闭）：开启后思维链以 markdown 渲染，并夹在 `─── 思考 ───` / `─── 思考结束 · 3.2s ───` 分隔符之间，

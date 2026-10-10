@@ -63,10 +63,7 @@ func ImageNames(images []ImageRef) string {
 	return strings.Join(parts, MsgImageNameSep)
 }
 
-const (
-	DefaultImageMaxBytes = 10 << 20
-	DefaultImageMaxCount = 4
-)
+const DefaultImageMaxBytes = 10 << 20
 
 const (
 	imageTokensMax   = 1024

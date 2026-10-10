@@ -50,3 +50,24 @@ func TestRenderToolEndAppendNoImageStaysClean(t *testing.T) {
 		t.Errorf("无图不应出现占位行: %q", got)
 	}
 }
+
+func TestImagesText(t *testing.T) {
+	got := imagesText([]agent.ImageRef{{Name: "a.png", Bytes: 1234}, {Name: "b.jpg", Bytes: 2 << 20}})
+	if !strings.Contains(got, "[图 ") || !strings.Contains(got, "a.png 1.2k") || !strings.Contains(got, "b.jpg 2.0M") {
+		t.Errorf("占位文本: %q", got)
+	}
+	if imagesText(nil) != "" {
+		t.Error("无图应为空串")
+	}
+}
+
+func TestHistoryTextWithImages(t *testing.T) {
+	m := agent.Message{Role: "user", Content: "看图", Images: []agent.ImageRef{{Name: "a.png", Bytes: 100}}}
+	if got := historyText(m); !strings.HasPrefix(got, "[图 ") || !strings.HasSuffix(got, "看图") {
+		t.Errorf("历史文本应带图像占位: %q", got)
+	}
+	only := agent.Message{Role: "user", Images: []agent.ImageRef{{Name: "a.png", Bytes: 100}}}
+	if got := historyText(only); !strings.HasPrefix(got, "[图 ") || strings.Contains(got, "看图") {
+		t.Errorf("纯图历史文本: %q", got)
+	}
+}

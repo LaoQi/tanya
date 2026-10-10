@@ -96,29 +96,21 @@ func TestResponsesInputImageParts(t *testing.T) {
 	}
 }
 
-func TestAskContentCarriesImages(t *testing.T) {
+func TestAskUserInputCarriesNoImages(t *testing.T) {
 	m := newMockLLM(t, mockStep{content: "看到了"})
 	a := newAgent(t, m)
-	img := ImageRef{MIME: "image/png", Data: "AAAA", Name: "a.png", Width: 2000, Height: 2000}
-	if err := a.AskContent(context.Background(), Content{Text: "看图", Images: []ImageRef{img}}, func(Event) {}); err != nil {
+	if err := a.Ask(context.Background(), "看一下 @shot.png 这张图里有什么", func(Event) {}); err != nil {
 		t.Fatal(err)
 	}
-	if len(a.history) != 2 || len(a.history[0].Images) != 1 {
-		t.Fatalf("history 应带图像: %+v", a.history)
-	}
-	if a.totalTokens() <= estimateTokens("看图") {
-		t.Error("本地估算应计入图像 token")
+	if len(a.history) != 2 || len(a.history[0].Images) != 0 {
+		t.Fatalf("用户输入不再附图: %+v", a.history)
 	}
 	if len(m.reqs) != 1 {
 		t.Fatalf("请求数: %d", len(m.reqs))
 	}
-	content, ok := wireMap(t, m.reqs[0].Messages[1])["content"].([]any)
-	if !ok || len(content) != 2 {
-		t.Fatalf("chat 请求应发 content 数组: %#v", wireMap(t, m.reqs[0].Messages[1])["content"])
-	}
-	part := content[1].(map[string]any)
-	if part["type"] != "image_url" {
-		t.Errorf("第二个 part 应为 image_url: %#v", part)
+	content, ok := wireMap(t, m.reqs[0].Messages[1])["content"].(string)
+	if !ok || !strings.Contains(content, "@shot.png") {
+		t.Errorf("chat 请求应为纯文本并保留 @ 原文: %#v", wireMap(t, m.reqs[0].Messages[1])["content"])
 	}
 	file := a.SessionFile()
 	if file == "" {
@@ -128,16 +120,18 @@ func TestAskContentCarriesImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"images"`) || !strings.Contains(string(raw), "AAAA") {
-		t.Errorf("会话文件应含图像字段: %s", raw)
+	if strings.Contains(string(raw), `"images"`) {
+		t.Errorf("会话文件不应出现图像字段: %s", raw)
 	}
 }
 
-func TestLoadSessionKeepsImages(t *testing.T) {
-	m := newMockLLM(t, mockStep{content: "ok"})
-	a := newAgent(t, m)
-	img := ImageRef{MIME: "image/png", Data: "AAAA", Name: "a.png", Width: 544, Height: 544}
-	if err := a.AskContent(context.Background(), Content{Text: "看图", Images: []ImageRef{img}}, func(Event) {}); err != nil {
+func TestLoadSessionKeepsToolImages(t *testing.T) {
+	m := newMockLLM(t,
+		mockStep{toolCalls: []mockToolCall{{id: "c1", name: "read_image", args: `{"path":"a.png"}`}}},
+		mockStep{content: "ok"},
+	)
+	a := newAgent(t, m, WithTools(&stubImageTool{}))
+	if err := a.Ask(context.Background(), "看图", func(Event) {}); err != nil {
 		t.Fatal(err)
 	}
 	id := a.SessionID()
@@ -145,9 +139,14 @@ func TestLoadSessionKeepsImages(t *testing.T) {
 	if err := a.LoadSession(id); err != nil {
 		t.Fatal(err)
 	}
-	h := a.History()
-	if len(h) == 0 || len(h[0].Images) != 1 || h[0].Images[0].Data != "AAAA" {
-		t.Fatalf("载入应保留图像: %+v", h)
+	found := false
+	for _, msg := range a.History() {
+		if len(msg.Images) == 1 && msg.Images[0].Data == "AAAA" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("载入应保留工具图像: %+v", a.History())
 	}
 }
 

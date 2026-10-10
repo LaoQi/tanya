@@ -145,15 +145,14 @@ const (
 )
 
 const (
-	MsgImageNoText     = "仅附图的消息不支持：请在 @ 后随文本一起发送"
-	MsgImageItemFmt    = "%s %s"
-	MsgImageListFmt    = "[图 %s]"
-	MsgImageSep        = ", "
-	MsgImageTooMany    = "图像数量超过上限（最多 %d 张）"
-	MsgImageTooLarge   = "图像 %s 超过大小上限（%d 字节）"
-	MsgImageBadFormat  = "%s 不是受支持的图像（仅 JPEG/PNG/GIF/WebP）"
-	MsgImageURLTooLong = "图像外链长度超过 %d 字符"
-	MsgBadTheme        = "无效主题 %q（可用: %s）"
+	MsgRefItemFmt = "%s %s"
+	MsgRefListFmt = "[引用 %s]"
+	MsgRefSep     = ", "
+
+	MsgImageItemFmt = "%s %s"
+	MsgImageListFmt = "[图 %s]"
+	MsgImageSep     = ", "
+	MsgBadTheme     = "无效主题 %q（可用: %s）"
 )
 
 const (

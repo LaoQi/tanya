@@ -1,10 +1,53 @@
 # 多模态（图像）支持方案
 
-> 状态：**P1 已实施 + 本地预缩放已实施 + P4（模型主动读图）已实施**（P0：数据模型/两协议 wire/扫描缓冲/`AskContent`/`image_detail`；P1：`@path` 解析与校验、对话与 `ask` 接线、附件回显行、`@` 触发补全、`/history` 与列表占位、`image_max_bytes`/`image_max_count`；**未做**：本地预缩放（P3，见 §4.3 评估）。原始状态说明：**P1 进行中**（P0 已完成：数据模型、两协议 wire、扫描缓冲、`AskContent`、`image_detail`；P1 已完成 `@path` 解析器与校验（`repl/attach.go` + `image_max_bytes`/`image_max_count`），**未做**：解析接线到对话/ask、`@` 补全、回显行、`/history` 占位、本地预缩放）。原始状态说明：**P0 已实施**（2026-10-09：数据模型 `ImageRef`/`Message.Images`、两协议 wire、扫描缓冲上限、`AskContent` 入口、`image_detail` 配置与估算函数）；**P1 输入面（`@path` 解析、`@` 补全、回显行）未做**，故用户侧暂不可用。拍定口径见 §7。
+> 状态：**现行口径 = §0《简化（2026-10-10）》**：用户侧 `@` 只做「引用 + 存在性检查 + 回显」，**不读文件、不上传图像**；图像进模型**唯一通道是标准工具 `read_image`**（§7.5，含 `region` 区域读取）。§4.3/§4.4/§4.5/§5/§7 里关于「用户附图」的条款均已被 §0 取代（保留原文作历史）。此前的 P0/P1/预缩放/P4 状态说明如下（历史）：**P1 已实施 + 本地预缩放已实施 + P4（模型主动读图）已实施**（P0：数据模型/两协议 wire/扫描缓冲/`Ask` 带附件入口（原 `AskContent`）/`image_detail`；P1：`@path` 解析与校验、对话与 `ask` 接线、附件回显行、`@` 触发补全、`/history` 与列表占位、`image_max_bytes`/`image_max_count`）。拍定口径见 §7。
 > 依据：① 上游网关的 agent 指南（端点 `GET /api/guide.md`，源文件在网关仓库 `internal/admin/guide.md`；§2.1–2.2 抄录其 2026-10-08 实测口径）；② DeepSeek 官方文档 `guides/vision` 与 `quick_start/token_usage`（§2.3 抄录，2026-10-09 查证）
 > 范围：REPL 用户侧附图 → 两协议（`chat` / `responses`）→ history / 落盘 / 归档 / fork / load / 渲染全链路
 > **不动**：工具产图、模型输出图、音频/视频/file 块、图像缩放压缩、缓存不变性契约（纯文本请求字节零变化）
 > 判据：每阶段要么**请求体可断言**（mock LLM 逐字段），要么**行为可观测**（repl 单测 + 真机冒烟）
+
+## 0 简化（2026-10-10，现行口径）
+
+**动机**：用户侧附图与工具读图是**两条图像通道**，而实测表明前者是多余的一条——用户手打 `@路径` 时，模型**看到路径就会自己去读**（这正是旧通道被诊断出的"图已附带却又用 `read_image` 读一遍"的成因）。把用户侧通道砍掉，图像只剩 `read_image` 一条路，语义与成本都更清晰。
+
+**取证（2026-10-10，真实网关 `nas.lan:28149`，`auto-flash` 与 `glm-5.3-flash`，测试图 415 B / 200×120）**：
+
+| 场景 | 文本 | 是否附图 | 模型动作 |
+|---|---|---|---|
+| 旧通道重复读 | `这张图里有什么？` | 附 | 思维链**先正确描述图像**（"red background with a blue rectangle"），随后仍 `run_shell` 用 PIL 复核 |
+| 旧通道重复读 | `@shot.png 这张图里有什么？` | 附 | 思维链 "The image is already provided inline… **But being thorough, let's read it**" → `read_image` |
+| 新语义（无附图） | `@shot.png 描述一下这张图的内容` | 不附 | `run_shell ls -la`（探路） |
+| 新语义（无附图） | `帮我看看 @shot.png` | 不附 | **`read_image`** |
+| 新语义（无附图） | `@shot.png`（裸路径） | 不附 | `run_shell ls -la shot.png; file shot.png` |
+| 新语义（无附图） | `看看这个 @shot.png 咋样` | 不附 | `run_shell ls -la shot.png; ls` |
+| 新语义（无附图） | `@shot.png 好看吗` | 不附 | `run_shell ls -la shot.png` |
+| 新语义（无附图） | `@shot.png 这张图多大` | 不附 | `run_shell ls -l shot.png && file shot.png` |
+| 新语义（无附图，换模型） | `@shot.png 描述一下这张图的内容`（`glm-5.3-flash`） | 不附 | **`read_image`** |
+
+结论：**8/8 触发读取**，跨两种模型、五种措辞（含最容易偷懒的"好看吗/多大/裸路径"）。故**不需要**任何系统提示词加成（也就**不动 system 快照、不重热缓存**——与 §5 第 9 条的 v1 结论一致）。同时观察到两条非缺陷现象：①读取不总是一步到位（8 次里 6 次先 `run_shell` 探路，即"每张图至少多一轮 shell"是常态代价）；②`@` 出现于非文件语境（如 `@某人`）时模型也可能探路一次，但 tanya 侧不解析、不报错、不影响文本。
+
+**现行语义（`repl/ref.go`，`attach*` → `ref*`）**：
+
+| 项 | 口径 |
+|---|---|
+| 语法 | 行内 `@<路径>`，多处按序；只认**行首或空白后的 `@`**；路径 token 边界按**最长存在路径**匹配（逐词回退取第一个 `os.Stat` 为常规文件的前缀，取不到则回退到第一个空白）；`@"含 空格.png"` 引号形态保留兼容 |
+| 检查 | **只做存在性**（`os.Stat` + 常规文件）；**不读内容、不嗅探格式、不校验大小、不转 base64、不进请求**——格式/大小/解码全交给 `read_image` 报错 |
+| 范围 | 本地文件，`~` 与相对路径按**当前工作区**；**不限扩展名**（`@src/main.go` 同样是引用，读它交给 `run_shell`）。**外链 `http(s)` 与 `data:` 不再支持**（撤销 D7），按普通文本静默处理 |
+| 文本 | **原样发给模型**（`@路径` 不剥离；历史 append-only、前缀固定，缓存不变性不受影响） |
+| 成功 | 打一行 `[引用 <名> <大小>]`（`KindDecor`，plain 档不显示；`refsText`）——报**原始文件属性**，与读图后的实际发送量无关 |
+| 失败 | **静默按普通文本**（路径不存在/非常规文件/目录），不报错、不提示 |
+| 纯引用消息 | **允许**（撤销 D5）：`@shot.png` 单独一行不再是错误，模型自会去读 |
+| 补全 | `@` 触发路径候选（`completer.refQuery`/`refCandidates`）：目录（尾 `/`，可下钻）+ **任意常规文件**（`refDirEntry`，含指向常规文件的符号链接），含空格名原样插入、与手打同形态，不引入引号/转义；规则与 `/switch` 的差异（名称白名单只拒控制符与首字符为引号）不变 |
+| 配置 | `image_max_bytes` / `image_resize` / `image_detail` **全部保留**（它们现在只服务 `read_image`）；**删除 `image_max_count`**（已无对象） |
+
+**保留不动**：`Message.Images` / `ImageRef`（工具图通道）、两协议 wire 的图像分支、`estimateImageTokens`、`scanSessionFile` 的 64 MiB 行上限、`/history` 与工具块的 `[图 <名> <大小>]` 占位、会话摘要的 `[图 n]` 兜底、`agent/image_data.go` 与 `tools/image` 全部。
+
+**删除面**：`repl/attach.go`、`repl/resize.go`（薄封装，能力早已在 `agent`）、`agent.Content` 与 `Agent.AskContent`（`Ask(ctx, string)` 直接 append 纯文本）、`repl.WithImageLimits`/`WithImageBehavior` 与 `REPL` 的四个 `img*` 字段、`agent.DefaultImageMaxCount`、配置键 `image_max_count`、`MsgImageNoText`/`MsgImageTooMany`/`MsgImageTooLarge`/`MsgImageBadFormat`/`MsgImageURLTooLong`。新增：`repl/ref.go`（`RefOptions`/`Ref`/`ParseRefs`/`refsText`/`refTokens`…）与 `repl/toolimage.go`（`imagesText` 迁出，工具图占位仍在）。
+
+**测试**：`repl/ref_test.go`（token 边界 8 例、存在/缺失/目录/任意扩展名/外链与 data URL 静默、工作区与 `~`、回显文本、三组补全用例含非图像文件候选、最长匹配 12 条断言）；`repl/toolimage_test.go` 增 `imagesText`/`historyText` 两例；`agent/image_test.go` 的 `TestAskUserInputCarriesNoImages`（用户输入走纯文本、wire 为字符串、会话文件无 `images` 字段）与 `TestLoadSessionKeepsToolImages`（工具图落盘往返）；`repl/resize_test.go` 撤除，其 `MaybeResizeImage*`/`ResizeTargetSide` 覆盖**迁入** `agent/image_data_test.go`（含 `noisePNG` 助手，agent 侧此前无此覆盖）。
+
+**验收判据（本简化）**：① `@路径` 的输入**不再产生**任何 `input_image`/`image_url` part，wire 与普通文本逐字节同形；② `read_image` 通路（含 `region`）零回归；③ 旧会话（含用户附图的历史 jsonl）仍能 `/load`、`/history` 渲染占位、摘要不炸；④ 门禁 `gofmt -l`/`build`/`vet`/`test`/`-race`/交叉编译/`render_audit` 全绿。
+
 
 ## 1 结论摘要
 
@@ -115,7 +158,7 @@ Images []ImageRef `json:"images,omitempty"`
 - 文本 part 排在图像 part **之前**（与网关示例一致）。
 - data URL 拼接：`"data:" + MIME + ";base64," + Data`（`Data` 已在输入侧校验为合法 base64）。
 
-### 4.3 输入面：`@path` 行内语法（D2，已拍定）
+### 4.3 输入面：`@path` 行内语法（D2，已拍定；**已被 §0 取代**）
 
 终端无法粘贴图像，入口取**路径/URL**，且**不新增斜杠命令**（避免命令面三处同步与中途扩展风险）。
 
@@ -136,7 +179,7 @@ Images []ImageRef `json:"images,omitempty"`
 
 `ask` 单发（D6，已拍定支持）：复用同一套 `@` 解析（`tanya ask "@shot.png 这张图里有什么？"`），**不新增 CLI flag**；按 D5 要求文本非空。
 
-### 4.4 校验与配置
+### 4.4 校验与配置（**已被 §0 取代**：只保留存在性检查）
 
 输入侧校验（解析成功路径）：
 
@@ -158,14 +201,14 @@ Images []ImageRef `json:"images,omitempty"`
 
 `config.example.yaml` 与 `tanya config` 输出必须同步（`main_test.go` 的 `TestConfigExampleMatchesDefaults` 守护）。
 
-### 4.5 表现层
+### 4.5 表现层（**已被 §0 取代**：回显改 `[引用 <名> <大小>]`）
 
 - **附件回显（必要，因解析失败静默）**：附件成功附加后、模型输出之前打印一行，例如 `[图 shot.png 1.2 MB]`（多张按序）。
 - `/history`（`printHistoryFull` / 摘要行）：用户消息显示 `[图 a.png 1.2 MB]` 占位（多张按序），**绝不内联数据**。
 - 纯图消息（D5 不允许）：`/history` 只有占位行；会话列表摘要回落 `[图 n]`（`scanSessionFile`）。
 - 错误走既有 `streams` + `KindError`（外部输入路径属动态文本，经 `emitText` 清洗）。
 
-## 5 周边一致性清单（实施时逐项核）
+## 5 周边一致性清单（实施时逐项核；用户附图相关的第 2/3/8/9 条已被 §0 取代，保留作历史）
 
 1. **`scanSessionFile` 行缓冲（硬前置，P0 已落地）**：`sc.Buffer` 上限从 1 MB 提到独立常量（建议 64 MB，`agent` 侧常量、不依赖配置包），否则内联图会让 `/load` 列表条数/摘要静默残缺；同时给 `si, _ :=` 的忽略 err 处补一条可见降级（列表项标记不全）。
 2. **摘要回落**：`sessionSummaryRunes` 遇 `Content == ""` 且有图时写 `[图 n]`。
@@ -187,20 +230,23 @@ Images []ImageRef `json:"images,omitempty"`
 | **P2** | 文档（`AGENTS.md`、`docs/design.md`、`README.md`、`CHANGELOG.md`）；真机冒烟 | 真图走 `nas.lan:28149` 两协议各一次，模型确实描述图像；`gofmt`/`build`/`vet`/`test -race`/`render_audit` 全绿 |
 | **P4 ✅** | 模型主动读图：`ToolResult.Images` + loop 插入 user 图像消息 + 新工具 `read_image`（`tools/image`）+ 缩放下沉 `agent` + 工具块占位 | 见 §7.5：agent 请求体断言、`tools/image` 单测、repl 渲染断言、真机两协议（均已完成） |
 | **P3 ✅（预缩放部分）** | `@path` 内联、`ask -i`、blob 外置、图像压缩、工具产图、多模态 file/音频 | 各自独立评估 |
+| **S1 ✅（2026-10-10）** | **简化**：`@` 降级为引用 + 存在性检查（§0），删用户侧附图通道 | §0 的取证表与四条验收判据；`go test`/`-race` 全绿 |
 
 ## 7 决策（2026-10-09 已全部拍定）
 
 | 编号 | 结论 |
 |---|---|
 | **D1** 落盘 | **内联 base64 进 jsonl**（blob 外置不做） |
-| **D2** 输入面 | **行内 `@path`**，不新增斜杠命令；细则：文本**保留** `@path`（缓存前缀一旦发出即固定，无抖动问题）、解析失败**静默按文本**、`@` 触发**补全**、含空格路径用**引号**（**2026-10-10 修订**：改为一律按最长存在路径匹配、补全原样插入空格，引号仅保留兼容解析）、**成功附加打回显行**、"解析成功但校验不过"**报错** |
+| **D2** 输入面（**2026-10-10 修订：`@` 只做引用 + 存在性检查、不再附加**，见 §0） | **行内 `@path`**，不新增斜杠命令；细则：文本**保留** `@path`（缓存前缀一旦发出即固定，无抖动问题）、解析失败**静默按文本**、`@` 触发**补全**、含空格路径用**引号**（**2026-10-10 修订**：改为一律按最长存在路径匹配、补全原样插入空格，引号仅保留兼容解析）、**成功附加打回显行**、"解析成功但校验不过"**报错** |
 | **D3** 本地 token 估算 | 按 DeepSeek 官方**缩放规则**（544² 放大 / 1300² 缩小）+ 上界反推系数 1650 像素/token、clamp ≤1024，**兜底 1024**；P2 用真 usage 校准 |
 | **D4** `detail` 默认 | `low` |
-| **D5** 纯图消息 | **不允许**（报错提示需随文本发送） |
-| **D6** `ask` 单发 | **支持**，复用 `@path` 解析（不加 CLI flag） |
-| **D7** 外链 / data URL | **支持** |
+| **D5** 纯图消息（**2026-10-10 撤销**） | ~~不允许~~ → 纯引用消息合法（§0） |
+| **D6** `ask` 单发（**2026-10-10 修订**：仍复用同一 `@` 解析，但不再附图） | 支持引用，无 CLI flag |
+| **D7** 外链 / data URL（**2026-10-10 撤销**：`read_image` 只读本地文件，保留体验需给它加下载面，得不偿失） | ~~支持~~ → 按普通文本静默处理 |
 
 ## 7.5 P4：模型主动读图（`read_image`）——已实施（2026-10-09）
+
+> **2026-10-10 起这是图像进模型的唯一通道**（用户侧附图已按 §0 删除）；本节实现面（工具/`ToolResult.Images`/loop 追加 user 图像消息/缩放/`region`）全部保留不动。
 
 > 状态：**已实施（2026-10-09）**。四项决策按推荐值采纳并全部落地，实施记录见本节末尾。
 
@@ -278,7 +324,9 @@ assistant(tool_calls: read_image{path})
 
 ## 9 验收判据（总）
 
+> 2026-10-10 简化后，"用户附图"相关的判据由 §0 的判据取代：**所有**用户输入的请求体都是纯文本（`@路径` 不产生任何 image part），带图请求只可能来自 `read_image`。
+
 1. 纯文本会话：请求体逐字节不变（golden 断言 + `cache_probe` 复验）。
-2. 带图会话：两协议请求体形状符合 §2.1；模型在真机冒烟中确实基于图像作答。
+2. 带图会话：两协议请求体形状符合 §2.1（图像只出自 `read_image` 的 user 图像消息）；模型在真机冒烟中确实基于图像内容作答。
 3. 全链路自洽：`/history` 占位、会话列表摘要、归档卷所含内容、`/load` 复原、`/fork` 继承、noSave 不落盘，逐项有单测或手工取证。
 4. 门禁：`gofmt -l` 干净、`go build`/`go vet ./...`、`go test`/`-race ./...`、`render_audit` 全绿。

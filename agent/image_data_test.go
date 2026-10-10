@@ -7,6 +7,7 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"math/rand"
 	"strings"
 	"testing"
 )
@@ -343,5 +344,100 @@ func TestCropImageJPEGOrientation(t *testing.T) {
 	_, _, b, _ := img.At(5, 20).RGBA()
 	if b < 200 {
 		t.Errorf("方向 6 旋转后右半应为蓝: %d", b)
+	}
+}
+
+func noisePNG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	rnd := rand.New(rand.NewSource(7))
+	for i := 0; i+3 < len(img.Pix); i += 4 {
+		img.Pix[i] = byte(rnd.Intn(256))
+		img.Pix[i+1] = byte(rnd.Intn(256))
+		img.Pix[i+2] = byte(rnd.Intn(256))
+		img.Pix[i+3] = 255
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestMaybeResizeImageScalesToTarget(t *testing.T) {
+	data := noisePNG(t, 1400, 700)
+	got := MaybeResizeImage(data, "image/png", "", true)
+	if len(got) >= len(data) {
+		t.Errorf("应缩小体积: %d → %d", len(data), len(got))
+	}
+	w, h := ImageDimensions(got, "image/png")
+	if w != ImageResizeSide || h != ImageResizeSide/2 {
+		t.Errorf("目标长边与保比: %d×%d", w, h)
+	}
+
+	low := MaybeResizeImage(data, "image/png", "low", true)
+	w, h = ImageDimensions(low, "image/png")
+	if w != ImageResizeLowSide || h != ImageResizeLowSide/2 {
+		t.Errorf("low 档长边 512: %d×%d", w, h)
+	}
+}
+
+func TestMaybeResizeImageSkipsSmallAndUnsupported(t *testing.T) {
+	small := noisePNG(t, 100, 80)
+	if got := MaybeResizeImage(small, "image/png", "", true); !bytes.Equal(got, small) {
+		t.Error("小于目标不应缩放")
+	}
+	gif := []byte("GIF89a")
+	if got := MaybeResizeImage(gif, "image/gif", "low", true); !bytes.Equal(got, gif) {
+		t.Error("GIF 不应缩放")
+	}
+	webp := []byte("RIFF....WEBPVP8 ")
+	if got := MaybeResizeImage(webp, "image/webp", "low", true); !bytes.Equal(got, webp) {
+		t.Error("WebP 不应缩放")
+	}
+	data := noisePNG(t, 1400, 700)
+	if got := MaybeResizeImage(data, "image/png", "low", false); !bytes.Equal(got, data) {
+		t.Error("关闭开关应原样")
+	}
+}
+
+func TestMaybeResizeImageSkipsRotatedJPEG(t *testing.T) {
+	rotated := orientedJPEG(t, image.NewRGBA(image.Rect(0, 0, 1600, 1000)), 6)
+	if got := JPEGOrientation(rotated); got != 6 {
+		t.Fatalf("应解析出方向 6: %d", got)
+	}
+	if got := MaybeResizeImage(rotated, "image/jpeg", "low", true); !bytes.Equal(got, rotated) {
+		t.Error("带 EXIF 方向的 JPEG 应跳过缩放")
+	}
+	upright := orientedJPEG(t, image.NewRGBA(image.Rect(0, 0, 1600, 1000)), 1)
+	if got := JPEGOrientation(upright); got != 1 {
+		t.Fatalf("方向应为 1: %d", got)
+	}
+	resized := MaybeResizeImage(upright, "image/jpeg", "low", true)
+	if len(resized) >= len(upright) {
+		t.Errorf("正立 JPEG 应缩放: %d → %d", len(upright), len(resized))
+	}
+	w, h := ImageDimensions(resized, "image/jpeg")
+	if w != ImageResizeLowSide || h != ImageResizeLowSide*5/8 {
+		t.Errorf("JPEG 缩放尺寸: %d×%d", w, h)
+	}
+}
+
+func TestJPEGOrientationOnPlainJPEG(t *testing.T) {
+	data := dataJPEG(t, image.NewRGBA(image.Rect(0, 0, 10, 10)))
+	if got := JPEGOrientation(data); got != 1 {
+		t.Errorf("无 EXIF 应为 1: %d", got)
+	}
+	if got := JPEGOrientation([]byte("notjpeg")); got != 1 {
+		t.Errorf("非 JPEG 应为 1: %d", got)
+	}
+}
+
+func TestResizeTargetSide(t *testing.T) {
+	cases := map[string]int{"": ImageResizeSide, "low": ImageResizeLowSide, "high": ImageResizeSide, "original": ImageResizeSide, "bogus": ImageResizeSide}
+	for detail, want := range cases {
+		if got := ResizeTargetSide(detail); got != want {
+			t.Errorf("ResizeTargetSide(%q) = %d want %d", detail, got, want)
+		}
 	}
 }

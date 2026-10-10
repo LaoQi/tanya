@@ -101,11 +101,11 @@ func (c *completer) models() []string {
 	return c.modelCache
 }
 
-func attachQuery(line string) (prefix, head string, quote byte, ok bool) {
+func refQuery(line string) (prefix, head string, quote byte, ok bool) {
 	if strings.HasPrefix(line, "/") {
 		return "", "", 0, false
 	}
-	start, q := attachTokenStart(line)
+	start, q := refTokenStart(line)
 	if start < 0 {
 		return "", "", 0, false
 	}
@@ -115,10 +115,10 @@ func attachQuery(line string) (prefix, head string, quote byte, ok bool) {
 	return line[start+1:], line[:start+1], 0, true
 }
 
-func attachTokenStart(line string) (int, byte) {
+func refTokenStart(line string) (int, byte) {
 	start, quote := -1, byte(0)
 	for i := 0; i < len(line); {
-		if line[i] != '@' || (i > 0 && !isAttachSpace(line[i-1])) {
+		if line[i] != '@' || (i > 0 && !isRefSpace(line[i-1])) {
 			i++
 			continue
 		}
@@ -142,15 +142,15 @@ func attachTokenStart(line string) (int, byte) {
 	return start, quote
 }
 
-func (c *completer) attachQueryCandidates(line string) ([]switchCandidate, string, byte, bool) {
-	prefix, head, quote, ok := attachQuery(line)
+func (c *completer) refQueryCandidates(line string) ([]switchCandidate, string, byte, bool) {
+	prefix, head, quote, ok := refQuery(line)
 	if !ok {
 		return nil, "", 0, false
 	}
-	return c.attachCandidates(prefix), head, quote, true
+	return c.refCandidates(prefix), head, quote, true
 }
 
-func (c *completer) attachCandidates(prefix string) []switchCandidate {
+func (c *completer) refCandidates(prefix string) []switchCandidate {
 	base, typedRoot, namePart, ok := c.candidateBase(prefix)
 	if !ok {
 		return nil
@@ -166,7 +166,7 @@ func (c *completer) attachCandidates(prefix string) []switchCandidate {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if !attachSafeName(name) {
+		if !refSafeName(name) {
 			continue
 		}
 		if strings.HasPrefix(name, ".") && !dot {
@@ -179,7 +179,7 @@ func (c *completer) attachCandidates(prefix string) []switchCandidate {
 			out = append(out, switchCandidate{path: typedRoot + name + "/", label: term.OneLine(name + "/")})
 			continue
 		}
-		if !hasImageExt(name) {
+		if !refDirEntry(base, e) {
 			continue
 		}
 		out = append(out, switchCandidate{path: typedRoot + name, label: term.OneLine(name)})
@@ -187,23 +187,26 @@ func (c *completer) attachCandidates(prefix string) []switchCandidate {
 	return out
 }
 
-func attachSafeName(name string) bool {
+func refSafeName(name string) bool {
 	if name == "" || name[0] == '"' || name[0] == '\'' {
 		return false
 	}
 	return !strings.ContainsFunc(name, func(r rune) bool { return r < ' ' || r == 0x7f })
 }
 
-func hasImageExt(name string) bool {
-	switch strings.ToLower(filepath.Ext(name)) {
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+func refDirEntry(base string, e os.DirEntry) bool {
+	if e.Type().IsRegular() {
 		return true
 	}
-	return false
+	if e.Type()&os.ModeSymlink == 0 {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(base, e.Name()))
+	return err == nil && info.Mode().IsRegular()
 }
 
 func (c *completer) suggest(line string) string {
-	if cands, head, quote, ok := c.attachQueryCandidates(line); ok && quote == 0 {
+	if cands, head, quote, ok := c.refQueryCandidates(line); ok && quote == 0 {
 		for _, cand := range cands {
 			full := head + cand.path
 			if !strings.HasPrefix(full, line) {
@@ -268,7 +271,7 @@ func (c *completer) suggest(line string) string {
 }
 
 func (c *completer) complete(line string) []readline.Completion {
-	if cands, head, _, ok := c.attachQueryCandidates(line); ok {
+	if cands, head, _, ok := c.refQueryCandidates(line); ok {
 		var out []readline.Completion
 		for _, cand := range cands {
 			out = append(out, readline.Completion{Insert: head + cand.path, Display: cand.label})
