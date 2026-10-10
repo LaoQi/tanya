@@ -30,6 +30,7 @@
 - 思考等级只用标准字段 `reasoning_effort`（minimal/low/medium/high/max），不用厂商私有参数；设置后两协议均不发 `temperature`
 - 出站 UA：默认 `tanya/<版本> (+https://github.com/LaoQi/tanya)`（不做伪装；格式源 `agent.UserAgent`，`<版本>` 由 `main` 经 `config.Version` 注入、与 `-v` 同源，未注入即 `dev`），`user_agent` / `TANYA_USER_AGENT` 可配（显式设置后原样发送、不再走默认格式）
 - 输出侧动态文本（模型输出、用户输入、工具参数、服务端数据、错误信息）落屏前一律清洗控制序列：多行走 `output.emitText`、单行走 `term.OneLine`、错误行走 `errLine`；`emit` 只承载自生成样式文本、不做 emit 级全局 Strip，见 `docs/design.md`《输出流与 Kind》《斜杠命令》
+- 宽度只服务于 tanya **自身的排版**：凡宽度参与计算处一律按**显示列**（`render/term.Width`/`Truncate`/`Wrap`，CJK 不按 rune/字节），并留余量（贴边类如回合分隔线取 `cols-1`，避开终端 pending-wrap 折行）；**长文本超出终端宽度的换行交给终端**，tanya 不代劳（唯 markdown 正文与工具命令块自折——它们靠缩进/围栏表达结构，交终端会破形）。宽度来源统一 `LiveWidth`（现取 `Console.Size()` → 启动探测值 → 80）；需要「不可知就保持原样」的位置用 `REPL.termCols()`（取不到返回 0），不按 rune 猜，见 `docs/design.md`《回合视觉分隔》《斜杠命令》
 - 颜色一律 16 色基本 SGR 码（30-37/90-97），不用 256 色/truecolor
 - 表现层无进程级全局：profile（TTY/色档）以**值**传递——`style.Style.With(prof)` 绑定后 `Bound.Sprint`/`Frame`、`term.Passthrough(prof, s)`、`render.Sprint`/`Template.Render(prof, …)`；**不存在 `SetProfile`/`GetProfile`**；探测点只在 `main`（`ctty.Probe` + `term.DetectProfile`），`repl` 经 `WithProfile` 下传
 - 样式注入收窄在消费者侧接口：`readline` 只认 `Styler`（`Sprint(string) string`），由 `repl` 传 `style.Bound`；输入层**不依赖 `render/style`**（`render/term` 可依赖）

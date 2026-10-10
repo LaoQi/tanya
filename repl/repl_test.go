@@ -2,6 +2,7 @@ package repl
 
 import (
 	"github.com/LaoQi/tanya/render"
+	"github.com/LaoQi/tanya/render/term"
 	"github.com/LaoQi/tanya/render/theme"
 	"strings"
 	"testing"
@@ -73,24 +74,26 @@ func TestNewREPLEmptyTplFallback(t *testing.T) {
 
 func TestHistoryLine(t *testing.T) {
 	m := agent.Message{Role: "user", Content: "你好"}
-	if got := historyLine(1, m); got != "  1 user      你好" {
+	if got := historyLine(1, m, 0); got != "  1 user      你好" {
 		t.Errorf("got %q", got)
 	}
 	long := agent.Message{Role: "assistant", Content: strings.Repeat("字", 130)}
-	got := historyLine(2, long)
-	if !strings.HasSuffix(got, "...") || !strings.Contains(got, strings.Repeat("字", 120)) {
-		t.Errorf("超长应截断至 120 rune: %q", got)
+	if got := historyLine(2, long, 0); got != "  2 assistant "+strings.Repeat("字", 130) {
+		t.Errorf("宽度不可知时不应截断: %q", got)
+	}
+	if got := historyLine(2, long, 40); term.Width(got) > 39 {
+		t.Errorf("应按终端列宽截断到一行，实际 %d 列: %q", term.Width(got), got)
 	}
 	var tc agent.ToolCall
 	tc.ID = "1"
 	tc.Type = "function"
 	tc.Function.Name = "run_shell"
 	call := agent.Message{Role: "assistant", ToolCalls: []agent.ToolCall{tc}}
-	if got := historyLine(3, call); !strings.Contains(got, "[调用 run_shell]") {
+	if got := historyLine(3, call, 0); !strings.Contains(got, "[调用 run_shell]") {
 		t.Errorf("tool_calls 应显示调用: %q", got)
 	}
 	tool := agent.Message{Role: "tool", Name: "run_shell", Content: "结果"}
-	if got := historyLine(4, tool); !strings.HasPrefix(got, "  4 run_shell ") {
+	if got := historyLine(4, tool, 0); !strings.HasPrefix(got, "  4 run_shell ") {
 		t.Errorf("tool 消息应显示工具名: %q", got)
 	}
 }

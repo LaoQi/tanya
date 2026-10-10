@@ -278,7 +278,7 @@ func TestSessRowArchivedMark(t *testing.T) {
 		{ID: "20260101-010000", ModTime: m, Msgs: 2, Summary: "归档会话", Archived: true, MetaOK: true},
 	}
 	var out syncBuf
-	pickByNumber(list, NewStreams(&out, &syncBuf{}, modeRich).out)
+	pickByNumber(list, NewStreams(&out, &syncBuf{}, modeRich).out, 0)
 	got := out.String()
 	if !strings.Contains(got, SessArchMark+"归档会话") {
 		t.Errorf("归档项摘要应带标记: %q", got)

@@ -170,11 +170,17 @@ func pickSession(con readline.Console, list []agent.SessionInfo, out io.Writer, 
 	return p.cursor, true, true
 }
 
-func pickByNumber(list []agent.SessionInfo, out *output) (int, bool) {
+// pickByNumber 是逐键不可用时的序号菜单（与 sessionPicker 同属一份"一项一行"排版）：
+// 每行截断按终端显示列（cols <= 0 不截断），避免长摘要在窄终端折行打乱菜单。
+func pickByNumber(list []agent.SessionInfo, out *output, cols int) (int, bool) {
 	var b strings.Builder
 	b.WriteString(PickNumTitle)
 	for i, s := range list {
-		fmt.Fprintf(&b, "  %-3d "+SessRow+"\n", i+1, "", s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, sessSummary(s))
+		line := fmt.Sprintf("  %-3d "+SessRow, i+1, "", s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, sessSummary(s))
+		if cols > 0 {
+			line = term.Truncate(line, cols-1)
+		}
+		b.WriteString(line + "\n")
 	}
 	b.WriteString(PickNumPrompt)
 	out.emit(KindNotice, b.String())
