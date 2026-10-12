@@ -325,8 +325,8 @@ func runAttach(cfg *config.Config, args repl.AttachArgs, st printer) (*attach.Re
 	return &res, false, nil
 }
 
-// attachWaitRefresh 是等待接管期间刷新进度行的周期。
-const attachWaitRefresh = 5 * time.Second
+// attachWaitRefresh 是等待接管期间刷新进度行的周期（var 便于测试缩短）。
+var attachWaitRefresh = 5 * time.Second
 
 // takeOver 发起接管并等待结果：目标忙碌时按本地注册项刷新进度，^C 取消等待（关闭连接）。
 func takeOver(target attach.Entry, force bool, st printer) (attach.Result, error) {
@@ -344,8 +344,10 @@ func takeOver(target attach.Entry, force bool, st printer) (attach.Result, error
 		res, terr = c.Takeover(force)
 	}()
 	var tick <-chan time.Time
-	if target.State == attach.StateBusy && !force {
-		st.Print(repl.MsgAttachWaiting)
+	if !force {
+		if target.State == attach.StateBusy {
+			st.Print(repl.MsgAttachWaiting)
+		}
 		t := time.NewTicker(attachWaitRefresh)
 		defer t.Stop()
 		tick = t.C
@@ -356,7 +358,7 @@ func takeOver(target attach.Entry, force bool, st printer) (attach.Result, error
 			return res, terr
 		case <-tick:
 			e, err := c.State()
-			if err != nil || e.TurnStarted.IsZero() {
+			if err != nil || e.State != attach.StateBusy || e.TurnStarted.IsZero() {
 				continue
 			}
 			st.Print(fmt.Sprintf(repl.MsgAttachWaitingFmt, shortDur(time.Since(e.TurnStarted))))
@@ -379,8 +381,12 @@ func attachRefused(code string) string {
 		return "对方已有接管请求在处理"
 	case attach.CodeNoSession:
 		return "对方没有可接管的会话"
+	case attach.CodeIOError:
+		return "对方写入会话失败，接管未成立"
 	case attach.CodeVersion:
 		return "协议版本不匹配"
+	case attach.CodeBadRequest:
+		return "对方输入设备不支持接管注入"
 	}
 	return code
 }
@@ -431,6 +437,9 @@ func padCol(s string, w int) string {
 }
 
 func shortDur(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
 	switch {
 	case d >= time.Hour:
 		return fmt.Sprintf("%dh%02dm", int(d/time.Hour), int(d/time.Minute)%60)

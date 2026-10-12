@@ -46,10 +46,10 @@ S→C  {"hello":{"magic":"tanya-attach","v":1,"pid":41234}}
 C→S  {"takeover":{"force":false}}
 S→C  {"result":{"ok":true,"session":…,"file":…,"session_dir":…,"archive_dir":…,
                 "workspace":…,"model":…,"effort":…,"protocol":…,"messages":N}}
-     {"result":{"ok":false,"code":"no-save"|"read-only"|"in-progress"|"no-session"}}
+     {"result":{"ok":false,"code":"no-save"|"read-only"|"in-progress"|"no-session"|"io-error"|"bad-request"}}
 ```
 
-- 无 `wait` 参数、无进度消息、无周期心跳、无 `status` 命令：等待语义是**要么一直等，要么 `force`**；等待期的状态展示读 run 文件（B 在目标忙碌时每 5s 重读一次注册项、刷一行「目标仍在执行中（已 …）」，秒数按 `turn_started` 本地折算；A 不需要为此写盘）。
+- 无 `wait` 参数、无进度消息、无周期心跳、无 `status` 命令：等待语义是**要么一直等，要么 `force`**；等待期的状态展示读 run 文件（B 非 force 等待期每 5s 重读一次注册项，目标执行中（含受理后才变忙）刷一行「目标仍在执行中（已 …）」，秒数按 `turn_started` 本地折算；A 不需要为此写盘）。
 - 握手超时 3s；**取消 = 关闭连接**（B 的 `^C` 走这条路），A 侧由连接断开事件得知（见 §5），不改写会话。
 - 版本不一致：服务端回自己的 `hello` 后关闭，客户端明确报错（不猜兼容）。
 
@@ -65,7 +65,9 @@ idle         : 注入 EventTakeover               → Readline 返回 ErrTakeove
 交接点（Run 循环顶部 / ErrTakeover 分支）settleTakeover：
   ① AppendNotice → ② FreezeSession → ③ 交付结果给 serve goroutine 写出
   ├ 写出成功 → Server.Close（删 sock/注册项）→ farewell + 「已交由另一进程接管本次会话」→ 退出 0
+  ├ 事实行写不进（会话目录不可写等）→ 应答 io-error → 回滚（解冻、补 [接管未成立]、提示）→ 继续运行
   └ 对端已断开（gone）或写出失败 → 追加 [接管未成立] → 解冻 → 丢弃挂起 → 继续运行
+回滚与挂起摘除统一清掉未被编辑层消费的注入事件（`readline.Drainer` 可选接口）：force 的中断不再空中断下一行输入。
 ```
 
 **挂起项的生命周期**（改动：2026-10-13，用户报告「接管过一次后，后续请求都被 in-progress 拒掉」）：挂起项 `REPL.takeH` 有**两个**摘除点，谁先到谁摘——
@@ -96,6 +98,8 @@ idle         : 注入 EventTakeover               → Readline 返回 ErrTakeove
 | 目标被 `^Z` 冻结 | 连接可建但无应答 → B 一直等（符合"要么一直等"），`^C` 可取消 |
 | 空会话（尚无消息） | 允许：`AppendNotice` 会落盘建立文件，B 接管到 0 条历史 + 事实行 |
 | `-n` / 归档只读 | A 拒绝并给码；B 侧中文提示 |
+| 事实行写不进（磁盘故障/目录不可写） | A 应答 `io-error` 并回滚继续运行；B 报「对方写入会话失败，接管未成立」 |
+| force 接管被取消 | 残留的注入中断被清除，不会空中断 A 的下一行输入 |
 
 ## 8. 明确不做
 
@@ -123,4 +127,5 @@ idle         : 注入 EventTakeover               → Readline 返回 ErrTakeove
   - 链式：接管后的 B 出现在 `--list`（新 pid/新 tty、同一会话 id）；`SIGTERM` B → 注册项随之清除。
   - `--pid 999999` 报「没有 pid 999999 的运行实例」；`--bogus` 报未知参数。
   - 取消后立即重接管（2026-10-13 修复的真机回归，pty：假 LLM 挂住使 A 停在 busy）：原始 socket 发一条忙时非 force 请求并**硬关连接**（= B 的 `^C`）→ 立刻跑 `tanya attach --force`：新二进制接管成功（客户端退出码 0、打印「已接管会话 …」；A 打印「已中断」→ 回合分隔线 →「接管请求已取消」→ farewell +「已交由另一进程接管本次会话」、退出码 0、run 目录清空），改动前的二进制同一脚本报「对方已有接管请求在处理」、退出码 1。
+- review 修复（2026-10-13 同日第二轮）：删 `attach.Server` 死字段 `conns`；`attachRefused` 补 `bad-request`/`io-error` 映射；等待 ticker 非 force 一律武装（目标后来变忙也有进度行）；归档确认行收到 `ErrTakeover` 静默中止；force 回滚清残留注入（`readline.Drainer`）；事实行写不进应答 `io-error` 并回滚；`shortDur` 钳 0。`Alive` 探测占 backlog 与临时目录 pid 撞名核实为安全、留档不改。新增 `readline/post_test.go` 2 例、`repl/attach_test.go` 2 例、`repl/archive_test.go` 1 例、`main_test.go` 3 例；全量 `go test ./...`、`go test -race`（repl/attach/readline/agent）、`GOOS=windows build+vet`、`GOOS=darwin build` 通过。
 - 单测：`attach/` 8 例（握手/接管/版本不符/魔数不符/对端断开/陈旧跳过/socket 0600 与残留覆盖/Close 清理）；`repl/attach_test.go` 9 例（注册项字段与刷新、空闲端到端移交并退出、忙+非 force 不注入、忙+force 注入中断、对端断开即释放挂起且不改写会话（含取消提示恰好一次）、取消后新请求（force）不被 in-progress 挡、陈旧挂起不挡新请求、并发与 -n 拒绝、标题跳过事实行）；`agent/attach_test.go` 6 例（run 目录同 base 与 -n、AdoptSession 续写同文件且首行不改写、冻结停止写入、事实行、ArchiveDir/ApiProtocol）。

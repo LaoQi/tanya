@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -11,10 +12,15 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/attach"
 	"github.com/LaoQi/tanya/config"
 	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/readline"
@@ -260,4 +266,293 @@ func TestConsoleForShellAdapter(t *testing.T) {
 	if l, err := bad.LendFull(nil, nil); l != nil || !errors.Is(err, want) {
 		t.Errorf("借出失败应原样回传错误: %v %v", l, err)
 	}
+}
+
+func TestAttachRefused(t *testing.T) {
+	cases := []struct {
+		code string
+		want string
+	}{
+		{attach.CodeNoSave, "不落盘模式"},
+		{attach.CodeReadOnly, "归档只读"},
+		{attach.CodeInProgress, "已有接管请求"},
+		{attach.CodeNoSession, "没有可接管"},
+		{attach.CodeIOError, "写入会话失败"},
+		{attach.CodeVersion, "协议版本不匹配"},
+		{attach.CodeBadRequest, "不支持接管注入"},
+	}
+	for _, c := range cases {
+		if got := attachRefused(c.code); !strings.Contains(got, c.want) {
+			t.Errorf("attachRefused(%q) = %q, 应含 %q", c.code, got, c.want)
+		}
+	}
+	if got := attachRefused("unknown-code"); got != "unknown-code" {
+		t.Errorf("未知码应原样返回: %q", got)
+	}
+}
+
+func TestShortDur(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{500 * time.Millisecond, "500ms"},
+		{90 * time.Second, "1m30s"},
+		{2 * time.Hour, "2h00m"},
+		{-time.Second, "0ms"},
+		{0, "0ms"},
+	}
+	for _, c := range cases {
+		if got := shortDur(c.d); got != c.want {
+			t.Errorf("shortDur(%v) = %q, want %q", c.d, got, c.want)
+		}
+	}
+}
+
+type capturePrinter struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (p *capturePrinter) Print(s string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.lines = append(p.lines, s)
+}
+
+func (p *capturePrinter) String() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return strings.Join(p.lines, "")
+}
+
+// 目标发现时空闲、受理后才变忙：等待期也应刷出进度行（而非静默等待）。
+func TestTakeOverLateBusyRefreshesProgress(t *testing.T) {
+	old := attachWaitRefresh
+	attachWaitRefresh = 20 * time.Millisecond
+	t.Cleanup(func() { attachWaitRefresh = old })
+
+	dir := t.TempDir()
+	release := make(chan struct{})
+	h := &busyLaterHandler{dir: dir, release: release}
+	srv, err := attach.Serve(dir, os.Getpid(), h)
+	if err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	h.sock = srv.SockPath()
+	if err := attach.WriteEntry(dir, attach.Entry{
+		PID: os.Getpid(), Sock: h.sock, State: attach.StateIdle, Started: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	target, err := attach.ReadEntry(attach.EntryPath(dir, os.Getpid()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p := &capturePrinter{}
+	done := make(chan struct{})
+	var res attach.Result
+	go func() {
+		defer close(done)
+		res, _ = takeOver(target, false, p)
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for !strings.Contains(p.String(), "仍在执行中") {
+		if time.Now().After(deadline) {
+			t.Fatalf("目标后来变忙应刷进度行: %q", p.String())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(release)
+	<-done
+	if !res.OK {
+		t.Fatalf("接管应成功: %+v", res)
+	}
+	if strings.Contains(p.String(), repl.MsgAttachWaiting) {
+		t.Errorf("发现时目标空闲不应打首行等待提示: %q", p.String())
+	}
+}
+
+type busyLaterHandler struct {
+	dir     string
+	sock    string
+	release chan struct{}
+}
+
+func (h *busyLaterHandler) Takeover(force bool, peer attach.Peer, reply func(attach.Result) error) {
+	_ = attach.WriteEntry(h.dir, attach.Entry{
+		PID: os.Getpid(), Sock: h.sock, State: attach.StateBusy,
+		TurnStarted: time.Now(), Started: time.Now(),
+	})
+	<-h.release
+	_ = reply(attach.Result{OK: true, File: "x"})
+}
+
+type replyHandler struct {
+	res attach.Result
+	n   int32
+}
+
+func (h *replyHandler) Takeover(force bool, peer attach.Peer, reply func(attach.Result) error) {
+	atomic.AddInt32(&h.n, 1)
+	_ = reply(h.res)
+}
+
+// serveAttach 在 ws 的 run 目录里以 pid 起一个立即应答 res 的活实例。
+func serveAttach(t *testing.T, ws string, pid int, res attach.Result) *replyHandler {
+	t.Helper()
+	cfg := config.Default()
+	cfg.SessionMode = "local"
+	dir := agent.RunDirFor(&cfg.Config, ws)
+	h := &replyHandler{res: res}
+	srv, err := attach.Serve(dir, pid, h)
+	if err != nil {
+		t.Fatalf("Serve(%d): %v", pid, err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	if err := attach.WriteEntry(dir, attach.Entry{
+		PID: pid, Sock: srv.SockPath(), State: attach.StateIdle, Started: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+func TestRunAttachSelection(t *testing.T) {
+	oldWd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	inWs := func(t *testing.T) *config.Config {
+		t.Helper()
+		if err := os.Chdir(t.TempDir()); err != nil {
+			t.Fatal(err)
+		}
+		cfg := config.Default()
+		cfg.DataDir = t.TempDir()
+		cfg.SessionMode = "local"
+		return cfg
+	}
+	staleEntry := func(t *testing.T, ws string, pid int) {
+		t.Helper()
+		cfg := config.Default()
+		cfg.SessionMode = "local"
+		dir := agent.RunDirFor(&cfg.Config, ws)
+		if err := attach.WriteEntry(dir, attach.Entry{
+			PID: pid, Sock: attach.SockPath(dir, pid), State: attach.StateIdle, Started: time.Now(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("无实例报错", func(t *testing.T) {
+		cfg := inWs(t)
+		_, _, err := runAttach(cfg, repl.AttachArgs{}, &capturePrinter{})
+		if err == nil || !strings.Contains(err.Error(), repl.MsgAttachNone) {
+			t.Fatalf("应报无实例: %v", err)
+		}
+	})
+
+	t.Run("空目录 list", func(t *testing.T) {
+		cfg := inWs(t)
+		p := &capturePrinter{}
+		_, listed, err := runAttach(cfg, repl.AttachArgs{List: true}, p)
+		if err != nil || !listed || !strings.Contains(p.String(), repl.MsgAttachListNone) {
+			t.Fatalf("空 list 异常: %v %v %q", listed, err, p.String())
+		}
+	})
+
+	t.Run("list 标记陈旧且不接管", func(t *testing.T) {
+		cfg := inWs(t)
+		ws, _ := os.Getwd()
+		h := serveAttach(t, ws, 41001, attach.Result{OK: true, File: "f", Protocol: cfg.ApiProtocol})
+		staleEntry(t, ws, 41002)
+		p := &capturePrinter{}
+		_, listed, err := runAttach(cfg, repl.AttachArgs{List: true}, p)
+		if err != nil || !listed {
+			t.Fatalf("list 应成功: %v %v", listed, err)
+		}
+		if !strings.Contains(p.String(), repl.MsgAttachListStale) || !strings.Contains(p.String(), "41001") {
+			t.Fatalf("list 应含活实例与陈旧标记: %q", p.String())
+		}
+		if n := atomic.LoadInt32(&h.n); n != 0 {
+			t.Fatalf("list 不应触发接管: %d", n)
+		}
+	})
+
+	t.Run("多实例不自动选择", func(t *testing.T) {
+		cfg := inWs(t)
+		ws, _ := os.Getwd()
+		serveAttach(t, ws, 41011, attach.Result{OK: true, File: "f1", Protocol: cfg.ApiProtocol})
+		serveAttach(t, ws, 41012, attach.Result{OK: true, File: "f2", Protocol: cfg.ApiProtocol})
+		p := &capturePrinter{}
+		_, _, err := runAttach(cfg, repl.AttachArgs{}, p)
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf(repl.MsgAttachManyFmt, 2)) {
+			t.Fatalf("应报多实例: %v", err)
+		}
+		if !strings.Contains(p.String(), "41011") || !strings.Contains(p.String(), "41012") {
+			t.Fatalf("报错应列出候选: %q", p.String())
+		}
+	})
+
+	t.Run("pid 精确命中", func(t *testing.T) {
+		cfg := inWs(t)
+		ws, _ := os.Getwd()
+		serveAttach(t, ws, 41021, attach.Result{OK: true, File: "f1", Protocol: cfg.ApiProtocol})
+		h := serveAttach(t, ws, 41022, attach.Result{OK: true, File: "f2", Protocol: cfg.ApiProtocol})
+		res, listed, err := runAttach(cfg, repl.AttachArgs{PID: 41022}, &capturePrinter{})
+		if err != nil || listed {
+			t.Fatalf("pid 接管应成功: %v %v", listed, err)
+		}
+		if res == nil || res.File != "f2" {
+			t.Fatalf("应接管指定 pid: %+v", res)
+		}
+		if n := atomic.LoadInt32(&h.n); n != 1 {
+			t.Fatalf("只有目标被接管: %d", n)
+		}
+	})
+
+	t.Run("pid 指向陈旧项报错且不删", func(t *testing.T) {
+		cfg := inWs(t)
+		ws, _ := os.Getwd()
+		staleEntry(t, ws, 41031)
+		_, _, err := runAttach(cfg, repl.AttachArgs{PID: 41031}, &capturePrinter{})
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf(repl.MsgAttachStaleFmt, 41031)) {
+			t.Fatalf("应报陈旧: %v", err)
+		}
+		if _, serr := os.Stat(agent.RunDirFor(&cfg.Config, ws) + "/41031.json"); serr != nil {
+			t.Fatalf("陈旧项不得删除: %v", serr)
+		}
+	})
+
+	t.Run("pid 不存在报错", func(t *testing.T) {
+		cfg := inWs(t)
+		_, _, err := runAttach(cfg, repl.AttachArgs{PID: 41041}, &capturePrinter{})
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf(repl.MsgAttachNoPIDFmt, 41041)) {
+			t.Fatalf("应报无此 pid: %v", err)
+		}
+	})
+
+	t.Run("协议不一致拒绝", func(t *testing.T) {
+		cfg := inWs(t)
+		ws, _ := os.Getwd()
+		serveAttach(t, ws, 41051, attach.Result{OK: true, File: "f", Protocol: "chat"})
+		if cfg.ApiProtocol == "chat" {
+			t.Skip("默认协议即 chat，无法构造差异")
+		}
+		_, _, err := runAttach(cfg, repl.AttachArgs{PID: 41051}, &capturePrinter{})
+		if err == nil || !strings.Contains(err.Error(), repl.MsgAttachProtocolFmt[:10]) {
+			t.Fatalf("应报协议不一致: %v", err)
+		}
+	})
+
+	t.Run("无会话文件拒绝", func(t *testing.T) {
+		cfg := inWs(t)
+		ws, _ := os.Getwd()
+		serveAttach(t, ws, 41061, attach.Result{OK: true, Protocol: cfg.ApiProtocol})
+		_, _, err := runAttach(cfg, repl.AttachArgs{PID: 41061}, &capturePrinter{})
+		if err == nil || err.Error() != repl.MsgAttachNoSessionFmt {
+			t.Fatalf("应报无会话: %v", err)
+		}
+	})
 }

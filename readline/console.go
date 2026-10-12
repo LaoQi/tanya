@@ -39,6 +39,11 @@ type Poster interface {
 	Post(kind EventKind) bool
 }
 
+// Drainer 是可清除已注入事件的 Console：接管回滚后清掉未被消费的注入事件。
+type Drainer interface {
+	DrainInjected(kind EventKind)
+}
+
 type Event struct {
 	Kind EventKind
 	Key  KeyEvent
@@ -252,6 +257,19 @@ func (c *consoleImpl) takeInjected() (Event, bool) {
 	ev := c.injected[0]
 	c.injected = c.injected[1:]
 	return ev, true
+}
+
+// DrainInjected 移除注入队列中指定类型的事件（接管回滚后清理残留，不触碰设备读路径）。
+func (c *consoleImpl) DrainInjected(kind EventKind) {
+	c.mu.Lock()
+	kept := c.injected[:0]
+	for _, ev := range c.injected {
+		if ev.Kind != kind {
+			kept = append(kept, ev)
+		}
+	}
+	c.injected = kept
+	c.mu.Unlock()
 }
 
 func (c *consoleImpl) Subscribe(fn func(Event)) (cancel func()) {

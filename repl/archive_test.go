@@ -473,3 +473,33 @@ func TestHandleCommandArchiveConfirmEOF(t *testing.T) {
 		t.Errorf("确认读不应写入历史: %v", r.ed.History())
 	}
 }
+
+// 确认行收到接管注入应静默中止（不打「已取消」、不归档），交接由主循环完成；^C 仍走取消提示。
+func TestArchiveConfirmTakeoverSilent(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	path := seedOldSession(t, dir, "20260101-010000", 40*24*time.Hour)
+
+	r, dev, out, _ := newArchiveREPL(t, a)
+	dev.Post(readline.EventTakeover)
+	r.handleCommand("/archive")
+	got := out.String()
+	if !strings.Contains(got, MsgArchiveConfirm) {
+		t.Fatalf("应先出预览与确认: %q", got)
+	}
+	if strings.Contains(got, MsgArchiveCancel) {
+		t.Errorf("接管注入不应打印取消提示: %q", got)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("接管中止不应执行归档: %v", err)
+	}
+
+	out2 := &syncBuf{}
+	r2, dev2, _, _ := newArchiveREPL(t, a)
+	r2.st = NewStreams(out2, &syncBuf{}, modeRich)
+	dev2.Post(readline.EventInterrupt)
+	r2.handleCommand("/archive")
+	if !strings.Contains(out2.String(), MsgArchiveCancel) {
+		t.Errorf("^C 中断仍应打印取消提示: %q", out2.String())
+	}
+}

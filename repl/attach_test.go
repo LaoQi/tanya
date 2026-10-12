@@ -2,13 +2,13 @@ package repl
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/attach"
+	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/readline"
 )
 
@@ -39,6 +39,10 @@ func waitFor(t *testing.T, d time.Duration, ok func() bool) {
 
 func TestAttachRegistersEntry(t *testing.T) {
 	a := newSessTestAgent(t, t.TempDir())
+	dir, ok := a.RunDir()
+	if !ok {
+		t.Fatal("应有 run 目录")
+	}
 	term := newFakeTerm()
 	r, _, _ := newTestREPLAgent(t, a, term)
 	r.startAttach()
@@ -47,8 +51,11 @@ func TestAttachRegistersEntry(t *testing.T) {
 	if e.PID != os.Getpid() || e.State != attach.StateIdle {
 		t.Fatalf("注册项字段异常: %+v", e)
 	}
-	if e.Session == "" || e.Sock == "" || !strings.HasPrefix(filepath.Base(e.Path), "") {
+	if e.Session == "" || e.Sock == "" {
 		t.Fatalf("注册项缺字段: %+v", e)
+	}
+	if e.Path != attach.EntryPath(dir, os.Getpid()) {
+		t.Fatalf("注册项路径应指向 run 目录: %q", e.Path)
 	}
 	if e.Title == "" {
 		t.Error("标题不应为空")
@@ -65,7 +72,6 @@ func TestAttachRegistersEntry(t *testing.T) {
 		t.Fatalf("空闲态未写入: %q", got)
 	}
 	r.stopAttach()
-	dir, _ := a.RunDir()
 	if list, _ := attach.List(dir); len(list) != 0 {
 		t.Fatal("停止后注册项应删除")
 	}
@@ -345,5 +351,125 @@ func TestSessionTitleSkipsNoticeLines(t *testing.T) {
 	}
 	if got := sessionTitle([]agent.Message{{Role: "user", Content: agent.MsgInterruptNotice}}, "/tmp/ws"); got != "tanya · ws" {
 		t.Fatalf("全为事实行时应回落工作区名: %q", got)
+	}
+}
+
+// force 接管被取消后，注入的中断事件应被清掉（不空中断下一行输入）；非 force 取消不涉及中断。
+func TestTakeoverForceCancelDrainsStaleInterrupt(t *testing.T) {
+	a := newSessTestAgent(t, t.TempDir())
+	term := newFakeTerm()
+	r, _, _ := newTestREPLAgent(t, a, term)
+	r.startAttach()
+	t.Cleanup(r.stopAttach)
+	r.setBusy(true)
+	e := entryOf(t, a)
+
+	c, _ := pendingTakeover(t, r, e, true)
+	c.Close()
+	waitFor(t, 2*time.Second, func() bool {
+		if r.takeoverPending() {
+			return false
+		}
+		kinds := term.drainedKinds()
+		return len(kinds) == 1 && kinds[0] == readline.EventInterrupt
+	})
+	if r.settleTakeover() {
+		t.Fatal("对端已断开，不应完成移交")
+	}
+
+	b := newSessTestAgent(t, t.TempDir())
+	term2 := newFakeTerm()
+	r2, _, _ := newTestREPLAgent(t, b, term2)
+	r2.startAttach()
+	t.Cleanup(r2.stopAttach)
+	r2.setBusy(true)
+	e2 := entryOf(t, b)
+	c2, _ := pendingTakeover(t, r2, e2, false)
+	c2.Close()
+	waitFor(t, 2*time.Second, func() bool { return !r2.takeoverPending() })
+	if kinds := term2.drainedKinds(); len(kinds) != 0 {
+		t.Fatalf("非 force 取消不应涉及中断事件: %v", kinds)
+	}
+}
+
+// 事实行写不进（会话目录不可写）→ 应答 io-error、解冻回滚、继续运行。
+func TestTakeoverAppendNoticeFailureFailsHandover(t *testing.T) {
+	if ctty.IsRoot() {
+		t.Skip("root 下 chmod 不拦截写入")
+	}
+	a := newSessTestAgent(t, t.TempDir())
+	term := newFakeTerm()
+	r, out, errb := newTestREPLAgent(t, a, term)
+	r.startAttach()
+	t.Cleanup(r.stopAttach)
+	e := entryOf(t, a)
+
+	sessDir, ok := a.SessionDir()
+	if !ok {
+		t.Fatal("应有会话目录")
+	}
+	if err := os.Chmod(sessDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sessDir, 0o700) })
+
+	c, res := pendingTakeover(t, r, e, false)
+	defer c.Close()
+	if r.settleTakeover() {
+		t.Fatal("事实行写不进不应完成移交")
+	}
+	got := <-res
+	if got.OK || got.Code != attach.CodeIOError {
+		t.Fatalf("应答应为 io-error: %+v", got)
+	}
+	if errb.String() == "" {
+		t.Error("应报告写入错误")
+	}
+	if !strings.Contains(out.String(), MsgAttachTakeoverFailed) {
+		t.Errorf("应提示接管未成立: %q", out.String())
+	}
+	if err := os.Chmod(sessDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.AppendNotice("after"); err != nil {
+		t.Fatalf("回滚后应解冻可写: %v", err)
+	}
+	found := false
+	for _, m := range a.History() {
+		if m.Content == agent.MsgTakenOverFailed {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("回滚应补接管未成立事实行")
+	}
+}
+
+func TestRebindAttachKeepsServiceUsable(t *testing.T) {
+	a := newSessTestAgent(t, t.TempDir())
+	term := newFakeTerm()
+	r, _, _ := newTestREPLAgent(t, a, term)
+	if r.attachSrv != nil {
+		t.Fatal("未启动不应注册")
+	}
+	r.rebindAttach()
+	if r.attachSrv != nil {
+		t.Fatal("未注册时 rebind 应无操作")
+	}
+	r.startAttach()
+	t.Cleanup(r.stopAttach)
+	r.rebindAttach()
+	if r.attachSrv == nil {
+		t.Fatal("rebind 后应有新服务")
+	}
+	r.setBusy(true)
+	e := entryOf(t, a)
+	c, res := pendingTakeover(t, r, e, false)
+	defer c.Close()
+	if !r.settleTakeover() {
+		t.Fatal("重绑后应能完成移交")
+	}
+	if got := <-res; !got.OK {
+		t.Fatalf("接管应成功: %+v", got)
 	}
 }

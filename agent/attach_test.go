@@ -159,3 +159,20 @@ func TestArchiveDirAccessor(t *testing.T) {
 		t.Error("ApiProtocol 不应为空")
 	}
 }
+
+func TestAdoptSessionRejectsBadFile(t *testing.T) {
+	a := newTestAgent(t)
+	if err := a.AdoptSession(filepath.Join(t.TempDir(), "missing.jsonl")); err == nil {
+		t.Fatal("不存在的文件应报错")
+	}
+	torn := filepath.Join(t.TempDir(), "torn.jsonl")
+	if err := os.WriteFile(torn, []byte(`{"role":"user","content":"q1"}`+"\n{oops\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.AdoptSession(torn); err != nil {
+		t.Fatalf("残缺尾行应宽容跳过: %v", err)
+	}
+	if len(a.History()) != 1 || a.History()[0].Content != "q1" {
+		t.Fatalf("应保留坏行前的有效消息: %+v", a.History())
+	}
+}

@@ -1,11 +1,13 @@
 package repl
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/readline"
 )
 
 func (r *REPL) autoArchivePrompt() {
@@ -33,6 +35,9 @@ func (r *REPL) archiveFlow(opt agent.ArchiveOptions, noneArg string) {
 	}
 	r.st.out.emit(KindNotice, formatArchivePreview(rep, opt))
 	line, cerr := r.readConfirm(MsgArchiveConfirm)
+	if errors.Is(cerr, readline.ErrTakeover) {
+		return
+	}
 	if cerr != nil && strings.TrimSpace(line) == "" {
 		r.st.out.emit(KindDecor, "\n")
 		r.st.out.emit(KindNotice, MsgArchiveCancel)
