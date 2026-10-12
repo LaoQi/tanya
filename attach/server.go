@@ -17,9 +17,8 @@ type Server struct {
 	pid    int
 	h      Handler
 
-	mu    sync.Mutex
-	stop  bool
-	conns map[net.Conn]struct{}
+	mu   sync.Mutex
+	stop bool
 }
 
 func Serve(dir string, pid int, h Handler) (*Server, error) {
@@ -27,7 +26,7 @@ func Serve(dir string, pid int, h Handler) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{ln: ln, sock: sock, dir: dir, pid: pid, h: h, conns: map[net.Conn]struct{}{}}
+	s := &Server{ln: ln, sock: sock, dir: dir, pid: pid, h: h}
 	if filepath.Dir(sock) != dir {
 		s.tmpDir = filepath.Dir(sock)
 	}

@@ -22,6 +22,7 @@ const (
 	CodeReadOnly   = "read-only"
 	CodeInProgress = "in-progress"
 	CodeNoSession  = "no-session"
+	CodeIOError    = "io-error"
 	CodeVersion    = "version-mismatch"
 	CodeBadRequest = "bad-request"
 )

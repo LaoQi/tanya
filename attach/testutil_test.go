@@ -46,7 +46,7 @@ func waitFor(t *testing.T, d time.Duration, ok func() bool) {
 		if ok() {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("等待条件超时")
 }

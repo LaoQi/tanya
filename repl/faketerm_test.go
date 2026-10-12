@@ -89,6 +89,7 @@ type fakeTerm struct {
 	keys     []readline.KeyEvent
 	injected []readline.Event
 	posts    []readline.EventKind
+	drained  []readline.EventKind
 	subFns   []func(readline.Event)
 	wait     chan struct{}
 	idx      int
@@ -153,6 +154,31 @@ func (f *fakeTerm) injectedKinds() []readline.EventKind {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]readline.EventKind{}, f.posts...)
+}
+
+// DrainInjected 清掉注入队列里指定类型的事件，只在确实移除时记录（与 readline.Drainer 对应）。
+func (f *fakeTerm) DrainInjected(kind readline.EventKind) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	kept := f.injected[:0]
+	removed := false
+	for _, ev := range f.injected {
+		if ev.Kind == kind {
+			removed = true
+			continue
+		}
+		kept = append(kept, ev)
+	}
+	f.injected = kept
+	if removed {
+		f.drained = append(f.drained, kind)
+	}
+}
+
+func (f *fakeTerm) drainedKinds() []readline.EventKind {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]readline.EventKind{}, f.drained...)
 }
 
 func (f *fakeTerm) SubscribeKeys(fn func(readline.Event)) func() {

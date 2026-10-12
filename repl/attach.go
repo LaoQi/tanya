@@ -14,6 +14,7 @@ import (
 
 // handover 是一次进行中的接管请求：主循环在交接点交付结果，serve goroutine 写出并回报。
 type handover struct {
+	force   bool
 	gone    <-chan struct{}
 	deliver chan attach.Result
 	outcome chan error
@@ -197,10 +198,13 @@ func (r *REPL) Takeover(force bool, peer attach.Peer, reply func(attach.Result) 
 		_ = reply(rejectTakeover(attach.CodeReadOnly))
 		return
 	}
+	var stale *handover
 	if r.takeH != nil {
+		stale = r.takeH
 		r.takeH, r.takeGone = nil, r.takeGone+1
 	}
 	h := &handover{
+		force:   force,
 		gone:    peer.Gone(),
 		deliver: make(chan attach.Result),
 		outcome: make(chan error, 1),
@@ -209,6 +213,9 @@ func (r *REPL) Takeover(force bool, peer attach.Peer, reply func(attach.Result) 
 	r.takeH = h
 	busy := st.busy
 	r.takeMu.Unlock()
+	if stale != nil {
+		r.drainTakeover(stale)
+	}
 
 	if busy {
 		if force {
@@ -243,11 +250,13 @@ func peerGone(h *handover) bool {
 // dropGone 摘除对端已断开的挂起请求并记一次「已取消」，由主循环报告（reportGone）。
 func (r *REPL) dropGone(h *handover) bool {
 	r.takeMu.Lock()
-	defer r.takeMu.Unlock()
 	if r.takeH != h {
+		r.takeMu.Unlock()
 		return false
 	}
 	r.takeH, r.takeGone = nil, r.takeGone+1
+	r.takeMu.Unlock()
+	r.drainTakeover(h)
 	return true
 }
 
@@ -276,7 +285,7 @@ func (r *REPL) takeoverPending() bool {
 	return r.takeH != nil
 }
 
-// settleTakeover 在交接点完成移交：事实行 → 冻结 → 应答 → 退出；未送达或对端取消则回滚继续运行。
+// settleTakeover 在交接点完成移交：事实行 → 冻结 → 应答 → 退出；事实行写不进、未送达或对端取消则回滚继续运行。
 func (r *REPL) settleTakeover() bool {
 	r.reportGone()
 	r.takeMu.Lock()
@@ -293,26 +302,29 @@ func (r *REPL) settleTakeover() bool {
 		return false
 	default:
 	}
+	ioFail := false
 	if err := r.agent.AppendNotice(agent.MsgTakenOverNotice); err != nil {
 		r.failErr(err)
+		ioFail = true
 	}
 	r.agent.FreezeSession()
+	var res attach.Result
+	if ioFail {
+		res = rejectTakeover(attach.CodeIOError)
+	} else {
+		res = r.takeoverResult()
+	}
 	select {
-	case h.deliver <- r.takeoverResult():
+	case h.deliver <- res:
 	case <-h.gone:
 		r.clearHandover(h)
 		close(h.abort)
-		_ = r.agent.AppendNotice(agent.MsgTakenOverFailed)
-		r.agent.UnfreezeSession()
-		r.st.out.emit(KindNotice, MsgAttachCanceled)
+		r.rollbackTakeover(h, MsgAttachCanceled)
 		return false
 	}
-	if err := <-h.outcome; err != nil {
+	if err := <-h.outcome; err != nil || !res.OK {
 		r.clearHandover(h)
-		_ = r.agent.AppendNotice(agent.MsgTakenOverFailed)
-		r.agent.UnfreezeSession()
-		r.st.out.emit(KindNotice, MsgAttachTakeoverFailed)
-		r.refreshState()
+		r.rollbackTakeover(h, MsgAttachTakeoverFailed)
 		return false
 	}
 	r.clearHandover(h)
@@ -320,6 +332,28 @@ func (r *REPL) settleTakeover() bool {
 	r.farewell()
 	r.st.out.emit(KindDecor, MsgAttachHandedOver)
 	return true
+}
+
+// rollbackTakeover 撤销未成立的移交：补事实行、解冻、刷新注册项并清残留注入事件。
+func (r *REPL) rollbackTakeover(h *handover, notice string) {
+	_ = r.agent.AppendNotice(agent.MsgTakenOverFailed)
+	r.agent.UnfreezeSession()
+	r.st.out.emit(KindNotice, notice)
+	r.refreshState()
+	r.drainTakeover(h)
+}
+
+// drainTakeover 清掉接管注入但未被编辑层消费的事件（force 的中断、未被消费的接管事件），
+// 避免回滚后空中断/空退出一行输入。
+func (r *REPL) drainTakeover(h *handover) {
+	d, ok := r.con.(readline.Drainer)
+	if !ok {
+		return
+	}
+	d.DrainInjected(readline.EventTakeover)
+	if h.force {
+		d.DrainInjected(readline.EventInterrupt)
+	}
 }
 
 func (r *REPL) takeoverResult() attach.Result {

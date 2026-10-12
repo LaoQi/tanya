@@ -65,3 +65,31 @@ func TestEditorTakeoverReturns(t *testing.T) {
 		t.Fatal("Readline 返回后应复原终端模式")
 	}
 }
+
+func TestDrainInjectedRemovesOnlyKind(t *testing.T) {
+	dev := &fakeDevice{err: errIdle}
+	c := newConsole(dev)
+	if !c.Post(EventInterrupt) || !c.Post(EventTakeover) || !c.Post(EventInterrupt) {
+		t.Fatal("Post 应成功")
+	}
+	c.DrainInjected(EventInterrupt)
+	ev, err := c.ReadEvent()
+	if err != nil || ev.Kind != EventTakeover {
+		t.Fatalf("中断应被清掉、只剩接管事件: %+v %v", ev, err)
+	}
+	if ev, err = c.ReadEvent(); err != nil || ev.Kind != EventIdle {
+		t.Fatalf("接管事件取走后应回到设备读取: %+v %v", ev, err)
+	}
+}
+
+func TestDrainInjectedOnEmptyQueue(t *testing.T) {
+	dev := &fakeDevice{err: errIdle}
+	c := newConsole(dev)
+	c.DrainInjected(EventInterrupt)
+	if !c.Post(EventInterrupt) {
+		t.Fatal("Post 应成功")
+	}
+	if ev, err := c.ReadEvent(); err != nil || ev.Kind != EventInterrupt {
+		t.Fatalf("空队列 drain 不影响后续注入: %+v %v", ev, err)
+	}
+}
