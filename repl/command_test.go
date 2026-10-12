@@ -16,6 +16,8 @@ func TestParseCommand(t *testing.T) {
 		{"init", []string{"init"}, CmdInit, ""},
 		{"config", []string{"config"}, CmdConfig, ""},
 		{"config 多余参数", []string{"config", "-o"}, CmdConfig, "-o"},
+		{"attach", []string{"attach"}, CmdAttach, ""},
+		{"attach 带参数", []string{"attach", "extra"}, CmdAttach, "extra"},
 		{"init 多余参数", []string{"init", "extra"}, CmdInit, "extra"},
 		{"未知子命令按对话", []string{"Ask", "x"}, CmdREPL, ""},
 	}

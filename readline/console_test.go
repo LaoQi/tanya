@@ -26,6 +26,8 @@ func (d *fakeDevice) Sane()            { d.sane++ }
 
 func (d *fakeDevice) Size() (Size, bool) { return Size{Cols: 80, Rows: 24}, true }
 
+func (d *fakeDevice) attachable() bool { return true }
+
 func (d *fakeDevice) readEvent() (Event, error) {
 	if d.err != nil {
 		return Event{}, d.err

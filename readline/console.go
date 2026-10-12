@@ -13,6 +13,8 @@ var ErrUnsupported = errors.New("input: raw mode unsupported on this platform")
 
 var ErrExited = errors.New("input: exit requested")
 
+var ErrTakeover = errors.New("input: takeover requested")
+
 var exitRequested = func() bool { return ctty.Exiting() }
 
 type Size struct {
@@ -27,7 +29,15 @@ const (
 	EventInterrupt
 	EventResize
 	EventIdle
+	EventTakeover
 )
+
+// Poster 是可被外部注入事件的 Console：Attachable 报告读路径是否自带周期回环
+// （raw 终端 VTIME / 控制台超时轮询），Post 入队并同步通知订阅者。
+type Poster interface {
+	Attachable() bool
+	Post(kind EventKind) bool
+}
 
 type Event struct {
 	Kind EventKind
@@ -57,6 +67,12 @@ type device interface {
 
 type backgroundReader interface {
 	backgroundRead() bool
+}
+
+// attachable 报告设备的读路径是否周期性交还控制权（EventIdle 回环），
+// 决定 Post 注入能否被及时消费。
+type attachable interface {
+	attachable() bool
 }
 
 func backgroundReadable(d device) bool {
@@ -97,6 +113,7 @@ type consoleImpl struct {
 	interrupt <-chan struct{}
 	mu        sync.Mutex
 	subs      []*consoleSub
+	injected  []Event
 	pending   bool
 
 	resizePending bool
@@ -188,17 +205,53 @@ func (c *consoleImpl) Sane() { c.dev.Sane() }
 func (c *consoleImpl) Size() (Size, bool) { return c.dev.Size() }
 
 func (c *consoleImpl) ReadEvent() (Event, error) {
+	if ev, ok := c.takeInjected(); ok {
+		return ev, nil
+	}
 	if c.takeResize() {
 		return Event{Kind: EventResize}, nil
 	}
 	ev, err := c.dev.readEvent()
 	if err == errIdle {
+		if inject, ok := c.takeInjected(); ok {
+			return inject, nil
+		}
 		return Event{Kind: EventIdle}, nil
 	}
 	if err == nil {
 		c.dispatch(ev)
 	}
 	return ev, err
+}
+
+// Attachable 报告本设备能否被 Post 注入事件。
+func (c *consoleImpl) Attachable() bool {
+	a, ok := c.dev.(attachable)
+	return ok && a.attachable()
+}
+
+// Post 注入一个事件：入队供 ReadEvent 消费（由读路径的周期回环取走），
+// 并同步分发给订阅者——进行中的回合据此收到中断。
+func (c *consoleImpl) Post(kind EventKind) bool {
+	if !c.Attachable() {
+		return false
+	}
+	c.mu.Lock()
+	c.injected = append(c.injected, Event{Kind: kind})
+	c.mu.Unlock()
+	c.dispatch(Event{Kind: kind})
+	return true
+}
+
+func (c *consoleImpl) takeInjected() (Event, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.injected) == 0 {
+		return Event{}, false
+	}
+	ev := c.injected[0]
+	c.injected = c.injected[1:]
+	return ev, true
 }
 
 func (c *consoleImpl) Subscribe(fn func(Event)) (cancel func()) {

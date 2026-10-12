@@ -238,7 +238,11 @@ func TestResolveWorkspaceDirs(t *testing.T) {
 
 	globalSessions := filepath.Join(cfg.DataDir, "workspaces", workspaceID(root), "sessions")
 	globalArchive := filepath.Join(cfg.DataDir, "workspaces", workspaceID(root), "archive")
-	sessions, archive := resolveWorkspaceDirs(cfg, root)
+	sessions, archive, run := resolveWorkspaceDirs(cfg, root)
+	globalRun := filepath.Join(cfg.DataDir, "workspaces", workspaceID(root), "run")
+	if run != globalRun {
+		t.Errorf("run 目录应与 base 同源: %q", run)
+	}
 	if sessions != globalSessions || archive != globalArchive {
 		t.Errorf("auto 无 .tanya 应走 global: %q %q", sessions, archive)
 	}
@@ -248,20 +252,23 @@ func TestResolveWorkspaceDirs(t *testing.T) {
 	}
 	localSessions := filepath.Join(root, ".tanya", "sessions")
 	localArchive := filepath.Join(root, ".tanya", "archive")
-	sessions, archive = resolveWorkspaceDirs(cfg, root)
+	sessions, archive, run = resolveWorkspaceDirs(cfg, root)
+	if run != filepath.Join(root, ".tanya", "run") {
+		t.Errorf("auto 有 .tanya 时 run 应走 local: %q", run)
+	}
 	if sessions != localSessions || archive != localArchive {
 		t.Errorf("auto 有 .tanya 应走 local: %q %q", sessions, archive)
 	}
 	cfg.SessionMode = "global"
-	if sessions, archive = resolveWorkspaceDirs(cfg, root); sessions != globalSessions || archive != globalArchive {
+	if sessions, archive, _ = resolveWorkspaceDirs(cfg, root); sessions != globalSessions || archive != globalArchive {
 		t.Errorf("global 显式指定应优先: %q %q", sessions, archive)
 	}
 	cfg.SessionMode = "local"
-	if sessions, archive = resolveWorkspaceDirs(cfg, root); sessions != localSessions || archive != localArchive {
+	if sessions, archive, _ = resolveWorkspaceDirs(cfg, root); sessions != localSessions || archive != localArchive {
 		t.Errorf("local 显式指定: %q %q", sessions, archive)
 	}
 	cfg.SessionMode = "bogus"
-	if sessions, archive = resolveWorkspaceDirs(cfg, root); sessions != localSessions || archive != localArchive {
+	if sessions, archive, _ = resolveWorkspaceDirs(cfg, root); sessions != localSessions || archive != localArchive {
 		t.Errorf("未知模式应按 auto 处理: %q %q", sessions, archive)
 	}
 }

@@ -195,6 +195,16 @@ const welcomLogo = `
 
 const MsgNoSaveWarn = "不落盘模式：本次会话不写入会话文件"
 
+const (
+	MsgAttachHandedOver     = "已交由另一进程接管本次会话，本进程退出\n"
+	MsgAttachCanceled       = "接管请求已取消\n"
+	MsgAttachTakeoverFailed = "接管未成立（对端未确认），本进程继续运行\n"
+	MsgAttachDisabled       = "attach: 运行实例注册失败，本进程不可被接管\n"
+	MsgAttachTakenOverFmt   = "已接管会话 %s（来自另一进程 · %s）\n"
+	MsgAttachWaiting        = "目标正在执行中，等待回合结束…（^C 取消等待）\n"
+	MsgAttachWaitingFmt     = "目标仍在执行中（已 %s）…\n"
+)
+
 var (
 	Version   = "dev"
 	BuildTime = ""
@@ -215,6 +225,8 @@ const UsageHead = `用法: tanya [模式] [选项]
   tanya ask "问题"     单发提问，输出后退出（默认纯文本 + verbose 档，供父代理解析）
   tanya init           新工作区脚手架：建 .tanya/ 与 AGENTS.md 骨架，随后进入 REPL
   tanya config         把内置默认配置示例原样写到 stdout（可重定向为配置文件）
+  tanya attach         接管同一工作区里正在运行的实例（对方平滑退出，本进程继续该会话）
+                       选项: --pid N 指定实例 / --list 只列出 / --force 立即中断接管
 
 选项:
 `
@@ -229,4 +241,24 @@ const (
 
 	MsgVerboseRequiresPlain = "--verbose 需与 --plain 同用"
 	FlagVersion             = "显示版本号并退出"
+
+	MsgAttachUsage  = "用法: tanya attach [--pid N] [--force] [--list]\n"
+	MsgAttachBadPID = "无效 pid %q"
+	MsgAttachBadArg = "未知参数 %q（用法: tanya attach [--pid N] [--force] [--list]）"
+)
+
+const (
+	MsgAttachNone         = "当前工作区没有正在运行的实例（tanya attach --list 可查看）"
+	MsgAttachListHead     = "当前工作区的运行实例（%s）:\n"
+	MsgAttachListNone     = "（无）\n"
+	MsgAttachListStale    = "陈旧"
+	MsgAttachNoPIDFmt     = "没有 pid %d 的运行实例"
+	MsgAttachStaleFmt     = "pid %d 的实例已退出（陈旧记录）"
+	MsgAttachManyFmt      = "当前工作区有 %d 个运行实例，请用 --pid 指定；也可先 tanya attach --list 查看"
+	MsgAttachRefusedFmt   = "目标拒绝接管（%s）"
+	MsgAttachProtocolFmt  = "目标使用 %s 协议，本进程为 %s，无法接管"
+	MsgAttachNoSessionFmt = "目标没有可接管的会话"
+	MsgAttachNoSave       = "接管需要落盘：不能与 -n/--no-save 同用"
+	MsgAttachHeader       = "   PID  TTY      状态          标题 / 会话\n"
+	MsgAttachRowFmt       = "  %5d  %-7s  %-12s  %s\n"
 )

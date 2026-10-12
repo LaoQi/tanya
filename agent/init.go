@@ -59,7 +59,7 @@ func InitWorkspace(cfg *Config, o InitOptions) (*InitReport, error) {
 	}
 	rep.Entries = append(rep.Entries, e)
 
-	rep.SessionDir, _ = resolveWorkspaceDirs(cfg, cwd)
+	rep.SessionDir, _, _ = resolveWorkspaceDirs(cfg, cwd)
 	return rep, nil
 }
 

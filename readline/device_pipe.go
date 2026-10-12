@@ -24,6 +24,8 @@ func (d *pipeDevice) Sane() {}
 
 func (d *pipeDevice) Size() (Size, bool) { return Size{}, false }
 
+func (d *pipeDevice) attachable() bool { return false }
+
 func (d *pipeDevice) readEvent() (Event, error) {
 	if exitRequested() {
 		return Event{}, ErrExited
