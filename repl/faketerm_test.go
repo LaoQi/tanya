@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/readline"
@@ -84,17 +85,21 @@ func (b *syncBuf) Reset() {
 // fakeTerm 是 repl 侧的 readline.Console 替身：按键序列驱动 Run，无需真实终端（模拟真 tty，逐键会话恒可用）。
 // 常驻读者不在此模拟——SubscribeKeys 只登记回调，由用例用 push 主动投键。
 type fakeTerm struct {
-	mu      sync.Mutex
-	keys    []readline.KeyEvent
-	idx     int
-	raw     bool
-	noKeys  bool
-	inKey   bool
-	onKey   func()
-	err     error
-	sane    int
-	subs    int
-	keySubs []func(readline.Event)
+	mu       sync.Mutex
+	keys     []readline.KeyEvent
+	injected []readline.Event
+	posts    []readline.EventKind
+	subFns   []func(readline.Event)
+	wait     chan struct{}
+	idx      int
+	raw      bool
+	noKeys   bool
+	inKey    bool
+	onKey    func()
+	err      error
+	sane     int
+	subs     int
+	keySubs  []func(readline.Event)
 }
 
 func newFakeTerm(keys ...readline.KeyEvent) *fakeTerm {
@@ -122,8 +127,32 @@ func (f *fakeTerm) Size() (readline.Size, bool) { return readline.Size{Cols: 80,
 func (f *fakeTerm) Subscribe(fn func(readline.Event)) func() {
 	f.mu.Lock()
 	f.subs++
+	f.subFns = append(f.subFns, fn)
 	f.mu.Unlock()
 	return func() {}
+}
+
+// Attachable/Post 让 fakeTerm 具备接管注入能力（与 readline.Poster 对应）。
+func (f *fakeTerm) Attachable() bool { return true }
+
+func (f *fakeTerm) Post(kind readline.EventKind) bool {
+	f.mu.Lock()
+	f.posts = append(f.posts, kind)
+	f.injected = append(f.injected, readline.Event{Kind: kind})
+	fns := append([]func(readline.Event){}, f.subFns...)
+	f.mu.Unlock()
+	for _, fn := range fns {
+		if fn != nil {
+			fn(readline.Event{Kind: kind})
+		}
+	}
+	return true
+}
+
+func (f *fakeTerm) injectedKinds() []readline.EventKind {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]readline.EventKind{}, f.posts...)
 }
 
 func (f *fakeTerm) SubscribeKeys(fn func(readline.Event)) func() {
@@ -175,6 +204,24 @@ func typed(s string) []readline.KeyEvent {
 func (f *fakeTerm) rewind() { f.idx = 0 }
 
 func (f *fakeTerm) ReadEvent() (readline.Event, error) {
+	for {
+		f.mu.Lock()
+		if len(f.injected) > 0 {
+			ev := f.injected[0]
+			f.injected = f.injected[1:]
+			f.mu.Unlock()
+			return ev, nil
+		}
+		wait := f.wait
+		f.mu.Unlock()
+		if f.idx < len(f.keys) || wait == nil {
+			break
+		}
+		select {
+		case <-wait:
+		case <-time.After(2 * time.Millisecond):
+		}
+	}
 	f.inKey = true
 	defer func() { f.inKey = false }()
 	if f.onKey != nil {

@@ -129,6 +129,9 @@ func (t *posixTTY) hungUp() bool {
 
 func (t *posixTTY) backgroundRead() bool { return true }
 
+// attachable：raw 模式带 VTIME=1，空闲读每 100ms 返回一次 errIdle，注入事件据此被取走。
+func (t *posixTTY) attachable() bool { return true }
+
 func (t *posixTTY) readEvent() (Event, error) {
 	ev, err := t.keys.readKey()
 	if err != nil {

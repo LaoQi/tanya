@@ -81,6 +81,9 @@ func (t *windowsConsole) Size() (Size, bool) {
 	return Size{Cols: cols, Rows: rows}, true
 }
 
+// attachable：读路径带 5ms 轮询与 1s 上限，空闲周期返回 errIdle，注入事件据此被取走。
+func (t *windowsConsole) attachable() bool { return true }
+
 func (t *windowsConsole) readChunk(p []byte) (int, error) {
 	deadline := time.Now().Add(consoleReadTimeout)
 	for {

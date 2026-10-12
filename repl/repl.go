@@ -12,9 +12,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/attach"
 	"github.com/LaoQi/tanya/readline"
 	"github.com/LaoQi/tanya/render/present"
 )
@@ -40,6 +42,16 @@ type REPL struct {
 	started       time.Time
 	nextPending   bool
 	nextInput     string
+
+	attachSrv     *attach.Server
+	attachDir     string
+	attachTTY     string
+	attachStarted time.Time
+	takeMu        sync.Mutex
+	takeState     attachState
+	takeH         *handover
+	takeGone      int
+	takeover      *attach.Result
 }
 
 type options struct {
@@ -53,6 +65,7 @@ type options struct {
 	palette   map[string]string
 	reasoning bool
 	notifier  Notifier
+	takeover  *attach.Result
 	maxLines  int
 }
 
@@ -89,6 +102,11 @@ func WithTermFacts(f TermFacts) Option {
 
 func WithTheme(name string, palette map[string]string) Option {
 	return func(o *options) { o.themeName, o.palette = name, palette }
+}
+
+// WithTakeover 注入接管结果：本进程是从另一实例接管的会话，启动时报告一行。
+func WithTakeover(res attach.Result) Option {
+	return func(o *options) { o.takeover = &res }
 }
 
 func WithToolOutputLines(n int) Option {
@@ -149,7 +167,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
+	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, takeover: o.takeover, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
 	r.prof = o.prof
 	r.rend = render.NewThemedRenderer(r.prof, sch.MD)
 	ed.SetStyles(sem.Dim.With(r.prof), sem.Accent.With(r.prof))
@@ -296,10 +314,24 @@ func (r *REPL) noSaveWarn() string {
 func (r *REPL) Run() error {
 	r.started = time.Now()
 	r.st.out.emit(KindDecor, welcomeText()+r.noSaveWarn())
+	if r.takeover != nil {
+		r.st.out.emit(KindNotice, fmt.Sprintf(MsgAttachTakenOverFmt, r.takeover.Session, initPath(r.takeover.Workspace)))
+	}
 	r.autoArchivePrompt()
+	r.startAttach()
+	defer r.stopAttach()
 	for {
+		if r.settleTakeover() {
+			return nil
+		}
 		prompt := r.prompt.Render(r.prof, r.resolveVars())
 		line, err := r.ed.Readline(prompt)
+		if errors.Is(err, readline.ErrTakeover) {
+			if r.settleTakeover() {
+				return nil
+			}
+			continue
+		}
 		if err == readline.ErrInterrupt {
 			continue
 		}
@@ -371,9 +403,11 @@ func (r *REPL) runPrompt(in string, cont bool) {
 	r.con.Sane()
 	ctx, done := InterruptContext(r.con)
 	t := r.beginTurn(done)
+	r.setBusy(true)
 	err := r.runTurn(ctx, in, t, cont)
 	t.End(err)
 	r.afterTurn()
+	r.setBusy(false)
 }
 
 func (r *REPL) afterTurn() {
@@ -458,6 +492,7 @@ func (r *REPL) handleCommand(line string) bool {
 	case "/new":
 		r.agent.NewSession()
 		r.st.out.emit(KindNotice, MsgNewSession)
+		r.refreshState()
 	case "/switch":
 		r.handleSwitch(parts[1:])
 	case "/load":
@@ -467,6 +502,7 @@ func (r *REPL) handleCommand(line string) bool {
 			} else {
 				r.st.out.emit(KindNotice, r.loadNotice(parts[1]))
 				r.warnLegacyPrompt()
+				r.refreshState()
 			}
 			break
 		}
@@ -576,6 +612,7 @@ func (r *REPL) handleFork() {
 		out += MsgForkNoSave
 	}
 	r.st.out.emit(KindNotice, out)
+	r.refreshState()
 }
 
 func (r *REPL) handleSwitch(args []string) {
@@ -600,6 +637,7 @@ func (r *REPL) handleSwitch(args []string) {
 	r.st.out.emit(KindDecor, farewellText(retired))
 	r.st.out.emitText(KindNotice, out)
 	r.started = time.Now()
+	r.rebindAttach()
 }
 
 func (r *REPL) handleTheme(args []string) {
@@ -844,6 +882,7 @@ func (r *REPL) loadSessionInteractive() {
 	}
 	r.st.out.emit(KindNotice, r.loadNotice(list[idx].ID))
 	r.warnLegacyPrompt()
+	r.refreshState()
 }
 
 func (r *REPL) warnLegacyPrompt() {

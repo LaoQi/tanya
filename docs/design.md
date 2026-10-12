@@ -49,6 +49,7 @@ render/markup/     内联标记解析
 - `tanya ask "问题"`：单发，输出后退出。单发默认走 plain+verbose 档（`repl.SingleShot` 在 CLI 模式为 rich 时降到 `modePlainVerbose`；显式 `-p` 更窄则保持不动）：无状态行与心跳、无光标控制（工具块追加式）、正文原样直出，颜色仍按终端能力保留，`End()` 按 plain 语义"缺行尾换行才补"
 - `tanya init`：新工作区脚手架，建 `<cwd>/.tanya/sessions/`、询问后建 `<cwd>/.tanya/.gitignore`（内容 `*`）、缺口时建 `<cwd>/AGENTS.md` 骨架，随后与普通模式无异地进入 REPL（见下节）
 - `tanya config`：把内置默认配置示例原样打到 stdout（见下节）
+- `tanya attach`：接管同一工作区里正在运行的实例（对方平滑退出、本进程接手该会话），选项写在子命令之后（`--pid N` / `--force` / `--list`，`repl.ParseAttachArgs`）——本进程的常规启动流程照旧，只是先完成发现与接管，再把会话接管过来（见《接管运行中的实例》）
 - 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式、`--model <name>` 覆盖本次运行的模型、`-n` / `--no-save` 只读会话（见《会话与上下文》存储小节）
 - 模型来源优先级：`--model` > env `TANYA_MODEL` > 配置文件 `model`。`main.applyModel(cfg, v)` 在 `config.Load` 之后、`repl.CmdInit` 与 `agent.New` 之前生效（与 `-m` 覆盖 `cfg.SessionMode` 同一段），故 REPL / `ask` / `init` 三入口一致；`v` 经 `strings.TrimSpace` 后为空即视为未指定、保持下层取值（与 `-c ""` 走默认路径同风格），非空值不预校验（与 `/model`、`agent_custom set model` 一致，有效性由 `Config.Validate()` 与首次请求暴露）。只改进程内配置、不写配置文件，运行期仍可被 `/model` 覆盖；`-m` 已属会话存储模式，故本选项无短形式（`-model` 与 `--model` 等价）
 - 用法文本（`-h`/`--help`，选项解析出错时同款）：`repl.UsageHead`（用法行 + 四个入口的模式段 + `选项:` 标题）拼接 flag 包按定义清单生成的选项段，由 `main.writeUsage(w, fs)` 组装（`fs.SetOutput` 用 defer 还原）、`flag.Usage` 在 `flag.Parse` 前指向它（输出仍走 stderr，`-h`/`--help` 由 flag 包以 0 退出）；选项定义抽到 `main.registerFlags(fs)`，`main` 的 `flag.CommandLine` 与用法测试的独立 FlagSet 共用同一份清单。模式段的描述列按**显示宽度**手排（CJK 记 2 列，源码列宽与终端列宽不等），`repl/messages_test.go` 以 `term.Width` 断言四行描述起始列一致、并断言 `ParseCommand` 认识的子命令在用法里都有行；`main_test.go` 断言输出以 `UsageHead` 开头且每个已登记选项名都出现（新增选项不会漏进帮助）。`ask`/`init`/`config` 参数出错时仍只报各自的 `Msg*Usage` 单行，不打印整份用法
@@ -322,6 +323,17 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 表现层：REPL 在回合后拉取 `TakeHandoff`，打印旧会话收尾三行（复用 `farewellText`，会话 id/时长/用量/落盘文件）+ `已移交新会话 X（交接 N 行）`（**不重放摘要正文**，摘要本身在新旧两边的 history 里都能查），随后重置 `REPL.started` 并补一个回合分隔线，再按续跑规则决定是否发起下一轮
 - 边界：摘要空/超限、同回合二次调用报错且首次生效；回合中断/报错丢弃 pending；归档只读态拒绝对话故模型不可达、`/next` 直接拒绝；`-n` 允许（内存内交接，收尾块显示未写入）；连续交接不做次数限制（模型显式行为，不做无人值守自动移交）
 - 不做：旧会话裁剪/改写、自动归档旧会话（单会话小卷归 `/archive` 管）、前几轮历史揉成摘要的本地压缩、按 token 阈值自动移交、摘要的二次模型加工、新配置键
+
+## 接管运行中的实例
+
+`tanya attach`（被接管方）与 `tanya attach` 的新进程（接管方）之间的一次交接：**接管方成为该会话的唯一后续写者，被接管方平滑退出**。与 `/next` 的区别是「全量接管 vs 摘要转段」——接管不生成摘要、续写**同一个**会话文件与 id。机制与取舍全量记于 `docs/attach.md`，此处只留行为要点。
+
+- **发现域限当前工作区**：run 目录与 sessions/archive 同 base（`local`/`auto` → `<ws>/.tanya/run`、`global` → `$DataDir/workspaces/<id>/run`；`-n` 不建不注册），每实例 `<pid>.json`（展示快照：`state` idle/busy/readonly、`title` = 会话首条 user 消息摘要、`turn_started`、`session`、`tty` 等）+ `<pid>.sock`（AF_UNIX，0600；目录 0700）。刷新点＝启动／进入回合／离开回合／会话变化／`/switch` 重绑／退出删除；**回合执行期间零写入**（等待方按 `turn_started` 本地折算耗时）
+- **协议**（一条连接、JSON 流）：`hello{magic,v}` → `takeover{force}` → `result{ok,…}`。无 token（鉴权靠文件系统权限）、无 `wait`、无进度心跳、无 `status` 命令；等待语义＝要么一直等、要么 `force`；取消＝关连接；陈旧项只跳过不删、无 kill
+- **交接顺序是不变量**：`AppendNotice("[会话已由另一进程接管]")` → `FreezeSession()` → 应答。应答即承诺已停写，故接管方不等对方退出；对端断开或写出失败则追加 `[接管未成立]`、解冻、丢弃挂起并继续运行（会话零改写）
+- **被接管方状态机**：忙+`force` 注入 `EventInterrupt` 取消回合、忙+非 `force` 静默挂起（回合自然结束后交接）、空闲注入 `EventTakeover`（`Readline` 返回 `ErrTakeover`）；交接点关闭控制服务（删 socket/注册项）→ 退出收尾块 + `已交由另一进程接管本次会话` → 退出码 0
+- **接管方**：`--list` 列实例、`--pid` 指定（无参要求同工作区唯一，多个报错列候选、绝不自动选）→ 握手 + 接管（等待期每 5s 重读注册项刷新进度、`^C` 取消）→ 校验（`api_protocol` 一致、`file` 非空）→ `agent.AdoptSession` 采纳既存会话（目录随之、首行 system 快照不改写）+ 继承 model/effort → 启动块报告一行；接管后的进程照常注册，支持链式接管
+- **平台**：传输用标准库 `net` 的 `unix`（三平台一份实现，Windows 10.0.17063+；不可用则打一行提示并禁用，不做 TCP 回退）；注入靠读路径既有周期回环（posix `VMIN=0/VTIME=1` 的 100ms `errIdle`、Windows 控制台 5ms 轮询 + 1s 上限），**无需自管道**；`readline.Poster` 是可选接口，管道设备不实现 → 非 TTY 实例不注册
 
 ## 系统提示与缓存友好
 

@@ -9,6 +9,11 @@ const (
 )
 
 const (
+	MsgTakenOverNotice = "[会话已由另一进程接管]"
+	MsgTakenOverFailed = "[接管未成立]"
+)
+
+const (
 	MsgInterruptNotice = "[用户已中断本轮请求]"
 	MsgErrorNoticeFmt  = "[本轮因错误中止：%s]"
 	MsgInterruptedBare = "已中断"

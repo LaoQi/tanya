@@ -43,7 +43,7 @@ func usageLine(t *testing.T, label, desc string) string {
 }
 
 func TestUsageMentionsEverySubcommand(t *testing.T) {
-	for _, name := range []string{"ask", "init", "config"} {
+	for _, name := range []string{"ask", "init", "config", "attach"} {
 		if cmd, _ := ParseCommand([]string{name}); cmd == CmdREPL {
 			t.Fatalf("%s 是子命令，用例表已过期", name)
 		}

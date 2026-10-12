@@ -17,6 +17,7 @@ type Agent struct {
 	workspace   string
 	home        string
 	registered  []Tool
+	runDir      string
 	history     []Message
 	basePrompt  string
 	prompt      *promptBuilder
@@ -73,12 +74,15 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 }
 
 func (a *Agent) loadWorkspace(dir string, noSave bool) error {
-	sessionDir, archiveDir := resolveWorkspaceDirs(a.cfg, dir)
+	sessionDir, archiveDir, runDir := resolveWorkspaceDirs(a.cfg, dir)
 	if !noSave {
 		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 			return err
 		}
+	} else {
+		runDir = ""
 	}
+	a.runDir = runDir
 	a.workspace = dir
 	a.prompt = newPromptBuilder(a.basePrompt, dir, globalAgentsPath(), readAgentsFile)
 	a.store = newSessionStore(sessionDir, archiveDir, dir, noSave)
@@ -128,6 +132,23 @@ func (a *Agent) resolveWorkspace(dir string) (string, error) {
 
 func (a *Agent) Workspace() string { return a.workspace }
 
+// RunDir 返回本实例的接管注册目录；不落盘模式下为空（不入发现域）。
+func (a *Agent) RunDir() (string, bool) {
+	if a.runDir == "" {
+		return "", false
+	}
+	return a.runDir, true
+}
+
+func (a *Agent) ArchiveDir() (string, bool) {
+	if a.store == nil || a.store.disabled || a.store.archiveDir == "" {
+		return "", false
+	}
+	return a.store.archiveDir, true
+}
+
+func (a *Agent) ApiProtocol() string { return a.cfg.ApiProtocol }
+
 func (a *Agent) SessionDir() (string, bool) {
 	if a.store == nil || a.store.disabled {
 		return "", false
@@ -167,6 +188,31 @@ func (a *Agent) LoadSession(id string) error {
 	a.handoffPend = nil
 	a.lastHandoff = nil
 	return nil
+}
+
+// AdoptSession 接管一个既存会话文件（另一进程移交）：历史载入、目录随之、
+// 首行 system 快照沿用，后续 append 续写同一文件。
+func (a *Agent) AdoptSession(file string) error {
+	history, system, err := a.store.adopt(file)
+	if err != nil {
+		return err
+	}
+	a.prompt.adopt(system)
+	a.history = history
+	a.stats.reset()
+	a.handoffPend = nil
+	a.lastHandoff = nil
+	return nil
+}
+
+// FreezeSession 停止落盘（移交给接管方前调用）；UnfreezeSession 在接管未成立时回滚。
+func (a *Agent) FreezeSession()   { a.store.held = true }
+func (a *Agent) UnfreezeSession() { a.store.held = false }
+
+// AppendNotice 追加一条 user 事实行并落盘（接管事实、接管未成立等）。
+func (a *Agent) AppendNotice(text string) error {
+	a.history = append(a.history, Message{Role: "user", Content: text})
+	return a.save()
 }
 
 func (a *Agent) ListSessions() ([]SessionInfo, error) { return a.store.list() }

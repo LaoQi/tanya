@@ -10,11 +10,13 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/LaoQi/tanya/render/present"
 	"github.com/LaoQi/tanya/render/term"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/attach"
 	"github.com/LaoQi/tanya/config"
 	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/readline"
@@ -137,6 +139,27 @@ func main() {
 		cfg.SessionMode = *f.sessionMode
 	}
 	applyModel(cfg, *f.model)
+	var takeover *attach.Result
+	if cmd == repl.CmdAttach {
+		if *f.noSave {
+			st.FailErr("", errors.New(repl.MsgAttachNoSave))
+			exitNow(1)
+		}
+		args, err := repl.ParseAttachArgs(rest)
+		if err != nil {
+			st.FailErr("", err)
+			exitNow(1)
+		}
+		res, listed, err := runAttach(cfg, args, st)
+		if err != nil {
+			st.FailErr("", err)
+			exitNow(1)
+		}
+		if listed {
+			return
+		}
+		takeover = res
+	}
 	if cmd == repl.CmdInit {
 		if err := repl.RunInit(st, sem, prof, &cfg.Config); err != nil {
 			st.FailErr("", err)
@@ -174,6 +197,18 @@ func main() {
 		st.FailErr("", err)
 		exitNow(1)
 	}
+	if takeover != nil {
+		if err := a.AdoptSession(takeover.File); err != nil {
+			st.FailErr("", err)
+			exitNow(1)
+		}
+		if takeover.Model != "" {
+			_ = a.SetModel(takeover.Model)
+		}
+		if takeover.Effort != "" {
+			_ = a.SetReasoningEffort(takeover.Effort)
+		}
+	}
 	termFacts := repl.TermFacts{Cols: facts.Cols, ColsOK: facts.SizeOK}
 	views := present.NewRegistry()
 	views.Register("run_shell", shellview.View())
@@ -202,7 +237,11 @@ func main() {
 		st.FailErr("", err)
 		exitNow(1)
 	}
-	r, err := repl.NewREPL(a, "", repl.WithStreams(st), repl.WithProfile(prof), repl.WithToolViews(views), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithConsole(con))
+	opts := []repl.Option{repl.WithStreams(st), repl.WithProfile(prof), repl.WithToolViews(views), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithConsole(con)}
+	if takeover != nil {
+		opts = append(opts, repl.WithTakeover(*takeover))
+	}
+	r, err := repl.NewREPL(a, "", opts...)
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
@@ -215,6 +254,192 @@ func main() {
 	if code := ctty.ExitStatus(); code != 0 {
 		exitNow(code)
 	}
+}
+
+// printer 是 main 需要的输出面（repl.streams 的 Print）。
+type printer interface{ Print(text string) }
+
+// runAttach 在当前工作区发现目标实例并请求接管；listed 为真表示只是列出（不接管）。
+func runAttach(cfg *config.Config, args repl.AttachArgs, st printer) (*attach.Result, bool, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, false, err
+	}
+	dir := agent.RunDirFor(&cfg.Config, cwd)
+	all, err := attach.List(dir)
+	if err != nil {
+		return nil, false, err
+	}
+	rows := make([]attachRow, 0, len(all))
+	alive := make([]attach.Entry, 0, len(all))
+	for _, e := range all {
+		ok := attach.Alive(e)
+		rows = append(rows, attachRow{e: e, alive: ok})
+		if ok {
+			alive = append(alive, e)
+		}
+	}
+	if args.List {
+		printAttachList(st, dir, rows)
+		return nil, true, nil
+	}
+	var target attach.Entry
+	switch {
+	case args.PID > 0:
+		found := false
+		for _, e := range alive {
+			if e.PID == args.PID {
+				target, found = e, true
+				break
+			}
+		}
+		if !found {
+			for _, r := range rows {
+				if r.e.PID == args.PID {
+					return nil, false, fmt.Errorf(repl.MsgAttachStaleFmt, args.PID)
+				}
+			}
+			return nil, false, fmt.Errorf(repl.MsgAttachNoPIDFmt, args.PID)
+		}
+	case len(alive) == 1:
+		target = alive[0]
+	case len(alive) == 0:
+		return nil, false, errors.New(repl.MsgAttachNone)
+	default:
+		printAttachList(st, dir, rows)
+		return nil, false, fmt.Errorf(repl.MsgAttachManyFmt, len(alive))
+	}
+	res, err := takeOver(target, args.Force, st)
+	if err != nil {
+		return nil, false, err
+	}
+	if !res.OK {
+		return nil, false, fmt.Errorf(repl.MsgAttachRefusedFmt, attachRefused(res.Code))
+	}
+	if res.Protocol != cfg.ApiProtocol {
+		return nil, false, fmt.Errorf(repl.MsgAttachProtocolFmt, res.Protocol, cfg.ApiProtocol)
+	}
+	if res.File == "" {
+		return nil, false, errors.New(repl.MsgAttachNoSessionFmt)
+	}
+	return &res, false, nil
+}
+
+// attachWaitRefresh 是等待接管期间刷新进度行的周期。
+const attachWaitRefresh = 5 * time.Second
+
+// takeOver 发起接管并等待结果：目标忙碌时按本地注册项刷新进度，^C 取消等待（关闭连接）。
+func takeOver(target attach.Entry, force bool, st printer) (attach.Result, error) {
+	c, err := attach.Open(target)
+	if err != nil {
+		return attach.Result{}, err
+	}
+	defer c.Close()
+	ctty.WatchSignals()
+	done := make(chan struct{})
+	var res attach.Result
+	var terr error
+	go func() {
+		defer close(done)
+		res, terr = c.Takeover(force)
+	}()
+	var tick <-chan time.Time
+	if target.State == attach.StateBusy && !force {
+		st.Print(repl.MsgAttachWaiting)
+		t := time.NewTicker(attachWaitRefresh)
+		defer t.Stop()
+		tick = t.C
+	}
+	for {
+		select {
+		case <-done:
+			return res, terr
+		case <-tick:
+			e, err := c.State()
+			if err != nil || e.TurnStarted.IsZero() {
+				continue
+			}
+			st.Print(fmt.Sprintf(repl.MsgAttachWaitingFmt, shortDur(time.Since(e.TurnStarted))))
+		case <-ctty.Interrupted():
+			st.Print(repl.MsgAttachCanceled)
+			c.Close()
+			<-done
+			return attach.Result{}, errors.New(repl.MsgAttachCanceled)
+		}
+	}
+}
+
+func attachRefused(code string) string {
+	switch code {
+	case attach.CodeNoSave:
+		return "对方处于不落盘模式"
+	case attach.CodeReadOnly:
+		return "对方是归档只读会话，请在其上 /fork"
+	case attach.CodeInProgress:
+		return "对方已有接管请求在处理"
+	case attach.CodeNoSession:
+		return "对方没有可接管的会话"
+	case attach.CodeVersion:
+		return "协议版本不匹配"
+	}
+	return code
+}
+
+// attachRow 是列表里的一行：注册项 + 连接探测结果。
+type attachRow struct {
+	e     attach.Entry
+	alive bool
+}
+
+func printAttachList(st printer, dir string, rows []attachRow) {
+	st.Print(fmt.Sprintf(repl.MsgAttachListHead, dir))
+	if len(rows) == 0 {
+		st.Print(repl.MsgAttachListNone)
+		return
+	}
+	st.Print(repl.MsgAttachHeader)
+	for _, r := range rows {
+		state := "空闲"
+		if !r.alive {
+			state = repl.MsgAttachListStale
+		} else {
+			switch r.e.State {
+			case attach.StateBusy:
+				state = "执行中"
+				if !r.e.TurnStarted.IsZero() {
+					state += " " + shortDur(time.Since(r.e.TurnStarted))
+				}
+			case attach.StateReadOnly:
+				state = "归档只读"
+			}
+		}
+		title := r.e.Title
+		if s := r.e.Session; s != "" && title != "" {
+			title += " · " + s
+		} else if title == "" {
+			title = s
+		}
+		st.Print(fmt.Sprintf(repl.MsgAttachRowFmt, r.e.PID, padCol(r.e.TTY, 7), padCol(state, 12), term.Truncate(title, 60)))
+	}
+}
+
+func padCol(s string, w int) string {
+	if d := w - term.Width(s); d > 0 {
+		return s + strings.Repeat(" ", d)
+	}
+	return s
+}
+
+func shortDur(d time.Duration) string {
+	switch {
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh%02dm", int(d/time.Hour), int(d/time.Minute)%60)
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm%02ds", int(d/time.Minute), int(d/time.Second)%60)
+	case d >= time.Second:
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	return fmt.Sprintf("%dms", d.Milliseconds())
 }
 
 func applyModel(cfg *config.Config, v string) {

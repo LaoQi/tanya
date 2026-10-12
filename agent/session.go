@@ -40,6 +40,7 @@ type sessionStore struct {
 	workspace   string
 	disabled    bool
 	frozen      bool
+	held        bool
 	frozenID    string
 	file        string
 	saved       int
@@ -94,7 +95,7 @@ func (s *sessionStore) id() string {
 }
 
 func (s *sessionStore) append(msgs []Message, system string) error {
-	if s.disabled || s.frozen || s.saved >= len(msgs) {
+	if s.disabled || s.frozen || s.held || s.saved >= len(msgs) {
 		return nil
 	}
 	var buf bytes.Buffer
@@ -219,6 +220,28 @@ func tolerantDecodeErr(err error) bool {
 	var se *json.SyntaxError
 	var ute *json.UnmarshalTypeError
 	return errors.As(err, &se) || errors.As(err, &ute) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+// adopt 以绝对路径接管一个既存会话文件：目录切到该文件所在处，saved/systemSaved 置位，
+// 之后的 append 直接续写同一文件（不 rotate、不改写首行）。
+func (s *sessionStore) adopt(path string) ([]Message, string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, "", err
+	}
+	defer f.Close()
+	history, system, err := loadFrom(f)
+	if err != nil {
+		return nil, "", err
+	}
+	s.dir = filepath.Dir(path)
+	s.file = path
+	s.frozen = false
+	s.frozenID = ""
+	s.held = false
+	s.saved = len(history)
+	s.systemSaved = true
+	return history, system, nil
 }
 
 func (s *sessionStore) archivedID() (string, bool) { return s.frozenID, s.frozen }
@@ -378,6 +401,9 @@ func (s *sessionStore) refreshVolumes() error {
 
 const sessionSummaryRunes = 30
 
+// Summarize 按会话列表口径把文本压成一行摘要（换行归一空格，30 字上限）。
+func Summarize(s string) string { return summarize(s, sessionSummaryRunes) }
+
 const MaxSessionLineBytes = 64 << 20
 
 func scanSession(path, id string, modTime time.Time) SessionInfo {
@@ -434,7 +460,7 @@ func summarize(s string, limit int) string {
 	return s
 }
 
-func resolveWorkspaceDirs(cfg *Config, cwd string) (sessions, archive string) {
+func resolveWorkspaceDirs(cfg *Config, cwd string) (sessions, archive, run string) {
 	mode := cfg.SessionMode
 	if mode == "" {
 		mode = "auto"
@@ -451,7 +477,13 @@ func resolveWorkspaceDirs(cfg *Config, cwd string) (sessions, archive string) {
 			base = localBase
 		}
 	}
-	return filepath.Join(base, "sessions"), filepath.Join(base, "archive")
+	return filepath.Join(base, "sessions"), filepath.Join(base, "archive"), filepath.Join(base, "run")
+}
+
+// RunDirFor 返回 cfg 与 cwd 对应的运行实例目录（与 sessions/archive 同 base）。
+func RunDirFor(cfg *Config, cwd string) string {
+	_, _, run := resolveWorkspaceDirs(cfg, cwd)
+	return run
 }
 
 func isDir(p string) bool {

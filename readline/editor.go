@@ -115,6 +115,16 @@ func (e *Editor) Readline(prompt string) (string, error) {
 			e.rowsUsed = 1
 			return "", ErrInterrupt
 		}
+		if ev.Kind == EventTakeover {
+			e.buf = nil
+			e.pos = 0
+			e.ghost = ""
+			e.render("")
+			fmt.Fprint(e.out, "\r\n")
+			e.cursorRow = 0
+			e.rowsUsed = 1
+			return "", ErrTakeover
+		}
 		if ev.Kind == EventResize {
 			e.render("")
 			continue
