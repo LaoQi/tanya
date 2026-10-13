@@ -63,13 +63,18 @@ const (
 )
 
 const (
-	MsgHandoffPrompt      = "请调用 next_session 提交交接摘要：总结当前进度、关键上下文与下一阶段目标。提交后本会话结束，交由新会话继续。"
-	MsgHandoffToolDoneFmt = "已请求会话交接，本回合结束后开启新会话（摘要 %d 行）"
-	MsgHandoffEmpty       = "交接摘要不能为空"
-	MsgHandoffTooLongFmt  = "交接摘要过长（%d 字，上限 %d）"
-	MsgHandoffDup         = "本回合已请求过会话交接"
-	MsgHandoffNoticeFmt   = "[会话已移交至 %s]"
-	MsgHandoffIntroFmt    = "[会话交接] 上一个会话（%s）移交的进度摘要：\n%s"
+	MsgHandoffPrompt          = "请调用 next_session 提交交接摘要：总结当前进度、关键上下文与下一阶段目标。提交后本会话结束，交由新会话继续。"
+	MsgHandoffToolDoneFmt     = "已请求会话交接，本回合结束后开启新会话（摘要 %d 行）"
+	MsgHandoffToolDoneWsFmt   = "已请求会话交接，本回合结束后开启新会话（摘要 %d 行，工作区切至 %s）"
+	MsgHandoffEmpty           = "交接摘要不能为空"
+	MsgHandoffTooLongFmt      = "交接摘要过长（%d 字，上限 %d）"
+	MsgHandoffDup             = "本回合已请求过会话交接"
+	MsgHandoffBadWorkspaceFmt = "交接目标工作区不存在或不是目录: %s"
+	MsgHandoffNoticeFmt       = "[会话已移交至 %s]"
+	MsgHandoffNoticeWsFmt     = "[会话已移交至 %s（工作区 %s）]"
+	MsgHandoffIntroFmt        = "[会话交接] 上一个会话（%s）移交的进度摘要：\n%s"
+	MsgHandoffIntroWsFmt      = "[会话交接] 上一个会话（%s）移交的进度摘要（工作区已切换: %s → %s）：\n%s"
+	MsgHandoffFailNoticeFmt   = "[会话交接未成立：%s；本会话继续，工作区仍为 %s]"
 )
 
 const (
