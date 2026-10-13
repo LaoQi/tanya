@@ -206,3 +206,64 @@ func (a *Agent) Continue(ctx context.Context, sink EventSink) error // 不追加
 4. **测试补强（6 例，由变异复验找出的洞）**：① `TestHandoffSummaryLimitBoundary`——上限**边界**（恰好 `handoffSummaryLimit` 通过）与 **rune 口径**（`limit/2` 个中文字符字节数已超 1.5 倍仍应通过；原「`limit+1` 个中文字符」用例在 rune/字节两种实现下都超限，杀不死按字节的变异）；② `TestContinueRejectsArchiveReadOnly`；③ `TestHandleNextRejectsArchiveReadOnly`（无参与带参两条路径；§8 清单早已列此项，此前未落地）；④ `TestHandleNextInputOverridesContinueFalse`——**带参 + `continue:false`** 是「命令路径无条件忽略工具 `continue`」的最强口径，原用例只用 `continue:true` 作样例，把它混在「缺省续跑」里掩盖了；⑤ `TestHandoffResetsStarted`；⑥ `TestHandoffBlockTextExact` + `TestHandoffBlockNoSave`（收尾块从 `Contains("已移交新会话")` 升级为含旧会话 id/用量/文件行与精确「交接 N 行」整行断言，并覆盖 `-n` 的未写入行）。`repl` 侧 `newNextAgent` 因此加变参以支持 `agent.NoSave(true)`。
 
 变异复验（改完即还原）：删 `stats.reset()` → 用例 2 变红；删 `NewSession` 的 `lastHandoff = nil` → 用例 3 变红。第一轮 12 个变异中 6 个存活，上述补强后重放 8 个（含 `-n` 收尾块变体）**全部变红**（`gofmt`/`build`/`vet`/`test -count=1`/`-race` 复跑全绿）。
+
+## 13. 工作区移交（2026-10-13）
+
+状态：**已实施**。目标：让交接不仅能转段，还能**跨项目**——`next_session` 带上 `workspace` 时把新会话直接开到另一个项目目录，从而在 A/B 两个项目之间来回交接协作。新增能力只落在**工具**上（用户拍板：`/next` 命令不加工作区参数、`/switch` 语义不动、`system_prompt.md` 不改、零新配置键）。
+
+### 13.1 参数与校验
+
+```go
+func (a *Agent) RequestHandoff(summary string, cont bool, workspace string) (string, error)
+```
+
+- `workspace` 取绝对路径 / `~` / 相对当前工作区；空白视为未指定。
+- 处理在 `RequestHandoff` 期完成：`resolveWorkspace` 解析 + `os.Stat` 校验，失败即回 `MsgHandoffBadWorkspaceFmt`（`交接目标工作区不存在或不是目录: <输入>`）且**不置 pending**——模型在同一回合内即可改主意或重试。
+- 解析结果**等于当前工作区**（用户口述「是否变更都不重要」）→ 视为未指定：不报错、不切换，工具结果与事实行都不带工作区后缀。
+- 返回值是新会话的生效工作区（空串 = 留在原地），`nextTool` 据此选文案：切换时 `已请求会话交接，本回合结束后开启新会话（摘要 %d 行，工作区切至 %s）`，否则原文案。
+
+### 13.2 应用顺序（`applyHandoff`）
+
+```
+旧会话快照（id / file / stats / 条数 / OldWorkspace）   ← 必须在切换前，切换会 reset 这些
+  → 带 workspace 时：resolveWorkspace 复核（防回合执行期间目录被删）
+       → loadWorkspace(目标)（换装 prompt/store/tools/client + NewSession）
+  → newID := a.store.nextID(); a.store.rotateTo(newID)
+  → 旧 history + 移交事实行 → 由**切换前保留的旧 *sessionStore 指针** append
+  → history = [交接消息] → prompt.reset() + stats.reset() → save()
+```
+
+- **为什么留旧 store 指针**：切完 `a.store` 已指向新工作区，`a.save()` 会把事实行写进**新**会话；`oldStore.append(...)` 是同一份 `append` 实现（`disabled/frozen/held` 守卫一致），不新增裸文件写路径。
+- **落点与快照**：新会话落在目标工作区推导出的会话目录，首行 system 即**目标** AGENTS.md 的组装结果（`promptBuilder` 机制零改动，`/load` 仍逐字节可还原）。
+- **跟随是活的**：`tools.Options.Workspace`（`run_shell`/`read_image`）与 `repl.cwdBase`（`@路径` 基准、补全）都是活闭包，工作区一换自动跟随——工具侧零改动。
+
+### 13.3 失败语义（用户拍板 b2：整次作废）
+
+目标不可用（目录已删、会话目录建不出来等 TOCTOU）时：
+
+| 项 | 行为 |
+|---|---|
+| 工作区 | **不变**（`loadWorkspace` 失败即未动：`MkdirAll` 是首条语句） |
+| 会话 | **不 rotate**、不产生新会话文件 |
+| 旧会话 | 不写移交事实行；只追加 `[会话交接未成立：<原因>；本会话继续，工作区仍为 <路径>]` |
+| `Handoff` | `Failed=true`、`Err=<原因>`、`NewID=""`，经 `TakeHandoff` 交给表现层 |
+| REPL | `错误: 工作区切换失败（…），本次交接未成立；当前会话继续（工作区仍为 %路径）`；**不重置会话计时、不续跑**（命令路径的 `<指令>` 也不执行）、回提示符等输入 |
+
+理由（用户原话）：**不应当在错误的工作区执行未知操作而导致更严重风险**——宁可停住。那行未成立事实行既进 history 也进文件，后续回合与模型据此得知交接没成、自己仍在原工作区（摘要可能写着「下一步去 B 做 X」，不写这一行模型会误判自己在 B）。
+
+### 13.4 表现层
+
+- 收尾块 = 旧会话三行 + `已移交新会话 X（交接 N 行）` + （切换时）`工作区已切换: <旧> → <新>`（`initPath` 显示）。
+- 切换成功后 `rebindAttach()`：run 目录与 sessions 同 base，不重绑则新工作区 `tanya attach --list` 看不到本实例、旧 run 项成僵尸。
+- 失败时走 `failText`（stderr，不受输出模式屏蔽）；`nextPending/nextInput` 已被 `afterTurn` 消费，命令路径不会再补一句 `未生成交接摘要`。
+
+### 13.5 测试与验收
+
+- `agent/handoff_test.go` +5：切换落点/快照/文案/条数、同目录三种写法、非法与空白参数、`loadWorkspace` 失败与目标消失两条作废路径、`-n` 内存内切换。
+- `repl/handoff_test.go` +4：模型带 `workspace` 的真流程（含续跑轮用活闭包探针确认新工作区）、`rm_dir` 桩制造 TOCTOU 的作废路径、`/next <指令>` 在作废下不执行参数、attach 重绑。
+- 变异复验：忽略 `loadWorkspace` 错误 / 切换后改用 `a.save()` / 去掉 `rebindAttach` / 失败时照常交接——四个变异各有用例变红（第一条最初存活，促成 `TestHandoffWorkspaceLoadFailureAborts` 补测）。
+- 真机 pty（假 LLM，两条路径）：成功路径见 §13.2/§13.4 全部行为（含续跑轮 `pwd` 落在新工作区）；作废路径 `请求数=3`、终端一行错误、会话未轮转、无移交事实行。首版文案嵌套的 `错误: …（error: …）` 双层前缀在验收中暴露并修掉（`applyHandoff` 里改抛不带前缀的 `MsgHandoffBadWorkspaceFmt`）。
+
+### 13.6 不做
+
+按用户口径：`/next` 命令的工作区参数（跨项目时说清目标、由模型传参）、`/switch` 的「带摘要切换」、`system_prompt.md` 的能力提示、任何新配置键；也不做切换的等待/重试（失败即作废，由用户或模型重新发起）。

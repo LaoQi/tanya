@@ -29,7 +29,7 @@ func (s *stubConfigTarget) ConfigPath() string                   { return s.path
 func (s *stubConfigTarget) NoSave() bool                         { return s.noSave }
 func (s *stubConfigTarget) Stats() Stats                         { return s.stats }
 
-func (s *stubConfigTarget) RequestHandoff(string, bool) error { return s.err }
+func (s *stubConfigTarget) RequestHandoff(string, bool, string) (string, error) { return "", s.err }
 
 func newControlAgent(t *testing.T, m *mockLLM, protocol string) *Agent {
 	t.Helper()

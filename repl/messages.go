@@ -87,6 +87,8 @@ const (
 	MsgArchiveBadArg      = "无效的归档参数 %q（保留数量如 20、0，或时长如 7d、12h）"
 	MsgForkDone           = "已 fork 为新会话 %s（继承 %d 条历史）\n"
 	MsgHandoffBlockFmt    = "已移交新会话 %s（交接 %d 行）\n"
+	MsgHandoffWsFmt       = "工作区已切换: %s → %s\n"
+	MsgHandoffFailedFmt   = "工作区切换失败（%s），本次交接未成立；当前会话继续（工作区仍为 %s）"
 	MsgHandoffNone        = "未生成交接摘要，本回合按普通对话处理\n"
 	MsgHandoffReadOnlyFmt = "当前为归档只读会话（%s）；交接请先用 /fork 开新会话\n"
 	MsgSwitchDone         = "已切换工作区：%s → %s\n"

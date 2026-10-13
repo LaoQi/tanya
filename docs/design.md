@@ -244,12 +244,21 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 ### next_session（`agent/handoff.go`，会话交接）
 
-`next_session` 是第二个内建工具（恒在 `agent_custom` 之前），也是唯一会**改变会话边界**的工具：`summary`（必填，空/纯空白报错、超 128K 字符报错、`\r\n` 归一）承载交接摘要，`continue`（可省，默认 true）说明交接后是否自动继续执行。工具**只置 pending**（`Agent.RequestHandoff`），不碰 history、不 rotate——就地 rotate 会撕碎 `tool_calls → tool` 相邻性、并行工具安全与 append-only 假设；应用点在**回合出口**（`Agent.settleTurn`，`err == nil` 时调 `applyHandoff`），与 `InterruptError` 同一类出口语义：算新 id（`sessionStore.nextID`）→ 旧 history 追加 user 事实行 `[会话已移交至 <新 id>]` → `save()` → `rotateTo(新 id)` → history 换成单条交接消息（`[会话交接] 上一个会话（<旧 id>）移交的进度摘要：…`）→ `prompt.reset()` + `stats.reset()` → `save()`。中断/报错回合**丢弃 pending**（`settleTurn` 清零），同一回合二次调用报错、首次生效。
+`next_session` 是第二个内建工具（恒在 `agent_custom` 之前），也是唯一会**改变会话边界**的工具：`summary`（必填，空/纯空白报错、超 128K 字符报错、`\r\n` 归一）承载交接摘要，`continue`（可省，默认 true）说明交接后是否自动继续执行，`workspace`（可省）把**新会话开到另一个工作区**（跨项目协作：绝对路径/`~`/相对当前工作区；解析后等于当前工作区 = 视为未指定，不报错）。工具**只置 pending**（`Agent.RequestHandoff`），不碰 history、不 rotate——就地 rotate 会撕碎 `tool_calls → tool` 相邻性、并行工具安全与 append-only 假设；应用点在**回合出口**（`Agent.settleTurn`，`err == nil` 时调 `applyHandoff`），与 `InterruptError` 同一类出口语义：**先快照旧会话**（id / 文件 / 统计 / 条数 / 工作区——切换会 reset 这些）→ （带 `workspace` 时）`loadWorkspace(目标)` 换装 prompt/store/tools 并 `NewSession` → 算新 id（`sessionStore.nextID`）+ `rotateTo(新 id)` → 旧 history 追加 user 事实行 → `save()` → history 换成单条交接消息（`[会话交接] 上一个会话（<旧 id>）移交的进度摘要：…`）→ `prompt.reset()` + `stats.reset()` → `save()`。中断/报错回合**丢弃 pending**（`settleTurn` 清零），同一回合二次调用报错、首次生效。
 
 - 摘要进 **user 消息**、不进 system：`promptBuilder` 与快照机制零改动，新会话首行 system 仍是当前快照（`/load` 可逐字节还原），旧会话文件仍只追加、不裁剪
-- `Handoff` 结构带 `OldID/NewID/OldMsgs/OldStats/OldFile/Continue/NoSave` 快照（旧会话统计与落盘路径在 rotate 后已不可取），供表现层渲染收尾块；`Agent.TakeHandoff()` 一次性取走，`repl` 在回合后拉取（**不新增事件**——这是状态转移、不是过程事实）
+- `Handoff` 结构带 `OldID/NewID/OldMsgs/OldStats/OldFile/OldWorkspace/Workspace/Continue/NoSave/Failed/Err` 快照（旧会话统计与落盘路径在 rotate 后已不可取），供表现层渲染收尾块；`Agent.TakeHandoff()` 一次性取走，`repl` 在回合后拉取（**不新增事件**——这是状态转移、不是过程事实）
 - 续跑经 `Agent.Continue(ctx, sink)`：不追加 user 消息直接跑一轮；`ask(ctx, sink, rollback, producedFrom)` 的两个界标让 `Ask`（append 前长度 + 1）与 `Continue`（当前长度）共用同一中断/错误结算
 - 摘要上限 `handoffSummaryLimit = 128 * 1024` rune（兜底防爆，不做配置）
+
+**跨工作区交接（`workspace`）**：
+
+- `workspace` 在 `RequestHandoff` 期就 `resolveWorkspace` 校验（不存在/不是目录 → 工具错误文本 `交接目标工作区不存在或不是目录: <输入>`，**不置 pending**，模型在同一回合内可改主意或重试）；`applyHandoff` 期再解析一次（防回合执行期间目录被删）
+- 事实行与交接消息标注目标：`[会话已移交至 <新 id>（工作区 <目标>）]`、`[会话交接] 上一个会话（<旧 id>）移交的进度摘要（工作区已切换: <旧> → <新>）：…`；同工作区（未切换）时两者保持原样、不带工作区后缀
+- 新会话落在**目标工作区**的会话目录（`resolveWorkspaceDirs` 按目标推导），首行 system 快照即目标工作区 AGENTS.md 的组装结果；`run_shell`/`read_image` 的默认目录与 `@` 引用基准都是**活闭包**（`tools.Options.Workspace`、`repl.cwdBase`），工作区一换自动跟随，工具侧零改动
+- 旧会话的移交事实行由**切换前保留的旧 `*sessionStore` 指针**追加（`oldStore.append(旧 history + 事实行)`）——切完 `a.store` 已指向新工作区，用 `a.save()` 会把事实行写进新会话；守卫（`disabled/frozen/held`）与主路径是同一份 `append` 代码
+- **目标不可用 ⇒ 整次交接作废**（`Handoff.Failed`/`Err`）：不切工作区、不 rotate、不产生新会话、不写移交事实行；`applyHandoff` 只追加一行 `[会话交接未成立：<原因>；本会话继续，工作区仍为 <路径>]`（进 history 也进文件——后续回合与模型据此得知交接没成、自己仍在原工作区），`repl` 打错误行后**不重置会话计时、不续跑**、回到提示符等输入：宁可停住，也不在错误的工作区里替模型继续做事
+- `repl` 在交接后按 `Handoff.Workspace != OldWorkspace` **重绑 attach 注册目录**（run 目录与 sessions 同 base，否则新工作区里 `tanya attach --list` 看不到本实例、旧 run 项成僵尸）并打印 `工作区已切换: <旧> → <新>`
 
 ## 上下文管理
 
@@ -318,10 +327,11 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 
 `next_session`（模型）与 `/next`（用户）是同一条线路的两个入口：把当前会话的进度压成一份**现写的摘要**交给新会话，旧会话就此结束。与 `/fork` 的分工是「摘要继承 vs 全量继承」——fork 是分支（旧会话保留、可回切），交接是转段（旧会话终止、不再追加内容）。
 
-- 三入口与续跑规则：模型自调 `next_session{summary, continue}`（`continue` 默认 true = 交接后自动继续一轮、false = 停在提示符）、`/next` 无参（模型现写摘要，交接后等用户）、`/next <指令>`（摘要轮 + 指令作为新会话第一条 user 输入并立即执行）。命令路径忽略 `continue`
+- 三入口与续跑规则：模型自调 `next_session{summary, continue, workspace}`（`continue` 默认 true = 交接后自动继续一轮、false = 停在提示符；`workspace` 把新会话开到另一个工作区）、`/next` 无参（模型现写摘要，交接后等用户）、`/next <指令>`（摘要轮 + 指令作为新会话第一条 user 输入并立即执行）。命令路径忽略 `continue`；**命令路径不带工作区参数**——跨项目时用户在对话里说清目标，由模型自己传 `workspace`
 - 收尾形态：旧会话原文件除追加一行 `[会话已移交至 <新 id>]` 外逐字节不动（append-only 不变量在交接路径上同样成立）；新会话首行 system 快照为当前值、第一条消息是交接摘要（`[会话交接] 上一个会话（<旧 id>）移交的进度摘要：…`），故会话列表摘要与 `/load` 回看都自解释
 - 表现层：REPL 在回合后拉取 `TakeHandoff`，打印旧会话收尾三行（复用 `farewellText`，会话 id/时长/用量/落盘文件）+ `已移交新会话 X（交接 N 行）`（**不重放摘要正文**，摘要本身在新旧两边的 history 里都能查），随后重置 `REPL.started` 并补一个回合分隔线，再按续跑规则决定是否发起下一轮
-- 边界：摘要空/超限、同回合二次调用报错且首次生效；回合中断/报错丢弃 pending；归档只读态拒绝对话故模型不可达、`/next` 直接拒绝；`-n` 允许（内存内交接，收尾块显示未写入）；连续交接不做次数限制（模型显式行为，不做无人值守自动移交）
+- 跨工作区：`next_session{workspace}` 把新会话开到目标工作区（新会话落点与 system 快照取目标、`run_shell`/`read_image` 默认目录与 `@` 基准随过去、`repl` 重绑 attach 注册目录、收尾块打印 `工作区已切换: <旧> → <新>`）；目标不可用时**整次交接作废**、本会话照旧继续并落一行未成立事实行，表现层报错后停住等输入（详见《next_session》）
+- 边界：摘要空/超限、同回合二次调用报错且首次生效；目标工作区非法（工具期）与不可用（回合出口期）的处理分见上；回合中断/报错丢弃 pending；归档只读态拒绝对话故模型不可达、`/next` 直接拒绝；`-n` 允许（内存内交接，收尾块显示未写入）；连续交接不做次数限制（模型显式行为，不做无人值守自动移交）
 - 不做：旧会话裁剪/改写、自动归档旧会话（单会话小卷归 `/archive` 管）、前几轮历史揉成摘要的本地压缩、按 token 阈值自动移交、摘要的二次模型加工、新配置键
 
 ## 接管运行中的实例

@@ -1,17 +1,20 @@
 package repl
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/tanya/attach"
 	"github.com/LaoQi/tanya/render/term"
 )
 
@@ -375,5 +378,265 @@ func TestHandoffBlockNoSave(t *testing.T) {
 	}
 	if h := a.History(); len(h) != 1 {
 		t.Errorf("-n 交接仍应切到新会话（内存）: %+v", h)
+	}
+}
+
+func stepServer(t *testing.T, steps ...func(w http.ResponseWriter)) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		i := int(n.Add(1)) - 1
+		switch {
+		case i < len(steps):
+			steps[i](w)
+		default:
+			sseChunk(w, map[string]any{"content": "多余请求"})
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &n
+}
+
+func probeTool(fn func() string) agent.Tool {
+	return agent.NewTool("ws_probe", "测试桩：回报当前工作区（同 run_shell 的活闭包口径）",
+		`{"type":"object","properties":{}}`,
+		func(context.Context, string) agent.ToolResult { return agent.ToolResult{Text: fn()} })
+}
+
+func rmDirTool() agent.Tool {
+	return agent.NewTool("rm_dir", "测试桩：删除目录（制造交接目标失效）",
+		`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`,
+		func(_ context.Context, argsJSON string) agent.ToolResult {
+			var args struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+				return agent.ToolResult{Text: err.Error()}
+			}
+			if err := os.RemoveAll(args.Path); err != nil {
+				return agent.ToolResult{Text: err.Error()}
+			}
+			return agent.ToolResult{Text: "removed"}
+		})
+}
+
+func TestNextSessionSwitchesWorkspace(t *testing.T) {
+	dirB := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dirB, ".tanya"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srv, n := stepServer(t,
+		func(w http.ResponseWriter) {
+			sseToolArgs(w, "call-1", "next_session", fmt.Sprintf(`{"summary":"去 B","workspace":%q}`, dirB))
+		},
+		func(w http.ResponseWriter) { sseChunk(w, map[string]any{"content": "已交接"}) },
+		func(w http.ResponseWriter) { sseToolArgs(w, "call-2", "ws_probe", `{}`) },
+		func(w http.ResponseWriter) { sseChunk(w, map[string]any{"content": "接着干"}) },
+	)
+	var probe string
+	var holder *agent.Agent
+	a := newNextAgent(t, srv.URL, agent.WithTools(probeTool(func() string {
+		if holder == nil {
+			return ""
+		}
+		return holder.Workspace()
+	})))
+	holder = a
+	from := a.Workspace()
+	before, _ := a.SessionDir()
+	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	r.ask("干活")
+
+	if got := term.Strip(errb.String()); got != "" {
+		t.Fatalf("交接不应报错: %q", got)
+	}
+	text := term.Strip(out.String())
+	if !strings.Contains(text, "工作区已切换: "+initPath(from)+" → "+initPath(dirB)) {
+		t.Errorf("收尾块应打印工作区切换: %q", text)
+	}
+	if a.Workspace() != dirB {
+		t.Fatalf("工作区应为目标: %q", a.Workspace())
+	}
+	dir, ok := a.SessionDir()
+	esc := strings.ReplaceAll(strings.TrimPrefix(dirB, string(filepath.Separator)), string(filepath.Separator), "-")
+	if !ok || dir == before || !strings.Contains(dir, esc) {
+		t.Errorf("新会话应落目标工作区: got %q ok=%v（切换前 %q，目标 %q）", dir, ok, before, dirB)
+	}
+	if n.Load() != 4 {
+		t.Errorf("续跑轮应在切换后的工作区执行：请求数应为 4，实为 %d", n.Load())
+	}
+	h := a.History()
+	for _, msg := range h {
+		if msg.Role == "tool" && msg.Name == "ws_probe" {
+			probe = msg.Content
+		}
+	}
+	if probe != dirB {
+		t.Errorf("续跑轮的工具应看到新工作区: got %q want %q", probe, dirB)
+	}
+}
+
+func TestNextSessionWorkspaceFailedAborts(t *testing.T) {
+	dirB := t.TempDir()
+	srv, n := stepServer(t,
+		func(w http.ResponseWriter) {
+			sseToolArgs(w, "call-1", "next_session", fmt.Sprintf(`{"summary":"去 B","workspace":%q}`, dirB))
+		},
+		func(w http.ResponseWriter) {
+			sseToolArgs(w, "call-2", "rm_dir", fmt.Sprintf(`{"path":%q}`, dirB))
+		},
+		func(w http.ResponseWriter) { sseChunk(w, map[string]any{"content": "收尾"}) },
+	)
+	a := newNextAgent(t, srv.URL, agent.WithTools(rmDirTool()))
+	from := a.Workspace()
+	oldID := a.SessionID()
+	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	past := time.Now().Add(-time.Hour)
+	r.started = past
+	r.ask("干活")
+
+	text := term.Strip(errb.String())
+	if !strings.Contains(text, "本次交接未成立") || !strings.Contains(text, initPath(from)) {
+		t.Fatalf("应报告交接未成立并标出当前工作区: %q", text)
+	}
+	if strings.Contains(term.Strip(out.String()), "已移交新会话") {
+		t.Errorf("作废的交接不应打印收尾块: %q", out.String())
+	}
+	if a.Workspace() != from {
+		t.Errorf("工作区不应变: %q", a.Workspace())
+	}
+	if a.SessionID() != oldID {
+		t.Errorf("会话不应轮转: %q vs %q", a.SessionID(), oldID)
+	}
+	if n.Load() != 3 {
+		t.Errorf("交接作废应停下等输入（不续跑）：请求数应为 3，实为 %d", n.Load())
+	}
+	if !r.started.Equal(past) {
+		t.Errorf("会话未变不应重置计时起点: %v", r.started)
+	}
+	h := a.History()
+	last := h[len(h)-1]
+	if last.Role != "user" || !strings.Contains(last.Content, "会话交接未成立") {
+		t.Errorf("应把未成立事实行留给后续回合: %+v", last)
+	}
+	old := readSessionLines(t, a.SessionFile())
+	for _, msg := range old {
+		if strings.HasPrefix(msg.Content, "[会话已移交至 ") {
+			t.Errorf("落盘不应有移交事实行: %+v", msg)
+		}
+	}
+}
+
+func TestHandleNextWorkspaceFailedKeepsPrompt(t *testing.T) {
+	dirB := t.TempDir()
+	dirC := t.TempDir()
+	srv, n := stepServer(t,
+		func(w http.ResponseWriter) {
+			sseToolArgs(w, "call-1", "next_session", fmt.Sprintf(`{"summary":"去 C","workspace":%q}`, dirC))
+		},
+		func(w http.ResponseWriter) {
+			sseToolArgs(w, "call-2", "rm_dir", fmt.Sprintf(`{"path":%q}`, dirC))
+		},
+		func(w http.ResponseWriter) { sseChunk(w, map[string]any{"content": "收尾"}) },
+	)
+	a := newNextAgent(t, srv.URL, agent.WithTools(rmDirTool()))
+	if err := a.SwitchWorkspace(dirB); err != nil {
+		t.Fatal(err)
+	}
+	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	r.handleCommand("/next 继续做 C")
+	if !strings.Contains(term.Strip(errb.String()), "本次交接未成立") {
+		t.Errorf("应报告交接未成立: %q", errb.String())
+	}
+	if got := term.Strip(out.String()); strings.Contains(got, MsgHandoffNone) {
+		t.Errorf("失败路径不应再提示未生成摘要: %q", got)
+	}
+	if n.Load() != 3 {
+		t.Errorf("带参命令在交接作废后不应执行参数: %d", n.Load())
+	}
+	if r.nextPending || r.nextInput != "" {
+		t.Error("命令状态应已清理")
+	}
+	if a.Workspace() != dirB {
+		t.Errorf("工作区不应变: %q", a.Workspace())
+	}
+}
+
+func TestNextSessionSwitchesWorkspaceRebindsAttach(t *testing.T) {
+	dirB := t.TempDir()
+	srv, n := stepServer(t,
+		func(w http.ResponseWriter) {
+			sseToolArgs(w, "call-1", "next_session", fmt.Sprintf(`{"summary":"去 B","workspace":%q}`, dirB))
+		},
+		func(w http.ResponseWriter) { sseChunk(w, map[string]any{"content": "已交接"}) },
+		func(w http.ResponseWriter) { sseChunk(w, map[string]any{"content": "接着干"}) },
+	)
+	a := newNextAgent(t, srv.URL)
+	r, _, _ := newTestREPLAgent(t, a, newFakeTerm())
+	r.startAttach()
+	t.Cleanup(r.stopAttach)
+	if r.attachSrv == nil {
+		t.Skip("本平台不支持本地控制服务")
+	}
+	oldDir := r.attachDir
+	r.ask("干活")
+
+	if a.Workspace() != dirB {
+		t.Fatalf("工作区应为目标: %q", a.Workspace())
+	}
+	if n.Load() != 3 {
+		t.Errorf("续跑轮应在切换后执行：请求数应为 3，实为 %d", n.Load())
+	}
+	if r.attachDir == oldDir {
+		t.Errorf("注册目录应随工作区重绑: %q", r.attachDir)
+	}
+	if e := entryOf(t, a); e.Session != a.SessionID() {
+		t.Errorf("新工作区注册项应指向新会话: %+v（当前 %q）", e, a.SessionID())
+	}
+	if list, err := attach.List(oldDir); err != nil || len(list) != 0 {
+		t.Errorf("旧工作区注册项应清除: %v %d", err, len(list))
+	}
+}
+
+func TestHandleNextInputRunsInSwitchedWorkspace(t *testing.T) {
+	dirB := t.TempDir()
+	srv, n := stepServer(t,
+		func(w http.ResponseWriter) {
+			sseToolArgs(w, "call-1", "next_session", fmt.Sprintf(`{"summary":"去 B","workspace":%q}`, dirB))
+		},
+		func(w http.ResponseWriter) { sseChunk(w, map[string]any{"content": "已交接"}) },
+		func(w http.ResponseWriter) { sseToolArgs(w, "call-2", "ws_probe", `{}`) },
+		func(w http.ResponseWriter) { sseChunk(w, map[string]any{"content": "接着干"}) },
+	)
+	var holder *agent.Agent
+	a := newNextAgent(t, srv.URL, agent.WithTools(probeTool(func() string {
+		if holder == nil {
+			return ""
+		}
+		return holder.Workspace()
+	})))
+	holder = a
+	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
+	r.handleCommand("/next 在 B 里继续做")
+
+	if n.Load() != 4 {
+		t.Errorf("指令轮应在切换后的工作区执行：请求数应为 4，实为 %d", n.Load())
+	}
+	if a.Workspace() != dirB {
+		t.Fatalf("工作区应为目标: %q", a.Workspace())
+	}
+	if !strings.Contains(term.Strip(out.String()), "工作区已切换") {
+		t.Errorf("应打印工作区切换行: %q", out.String())
+	}
+	h := a.History()
+	if len(h) < 3 || h[1].Role != "user" || h[1].Content != "在 B 里继续做" {
+		t.Fatalf("指令应为新会话第二条 user 输入: %+v", h)
+	}
+	for _, msg := range h {
+		if msg.Role == "tool" && msg.Name == "ws_probe" && msg.Content != dirB {
+			t.Errorf("指令轮工具应看到新工作区: got %q want %q", msg.Content, dirB)
+		}
 	}
 }

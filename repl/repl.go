@@ -424,6 +424,10 @@ func (r *REPL) afterTurn() {
 		r.nextPending, input = false, r.nextInput
 		r.nextInput = ""
 	}
+	if h.Failed {
+		r.failText(fmt.Sprintf(MsgHandoffFailedFmt, h.Err, initPath(h.Workspace)))
+		return
+	}
 	r.st.out.emit(KindDecor, handoffText(farewellInfo{
 		session:  h.OldID,
 		duration: time.Since(r.started),
@@ -432,6 +436,9 @@ func (r *REPL) afterTurn() {
 		noSave:   h.NoSave,
 	}, h))
 	r.started = time.Now()
+	if h.Workspace != h.OldWorkspace {
+		r.rebindAttach()
+	}
 	r.st.out.emit(KindDecor, turnSep(r.prof, r.sem, 0, r.view.width()))
 	switch {
 	case input != "":
@@ -443,7 +450,11 @@ func (r *REPL) afterTurn() {
 }
 
 func handoffText(info farewellInfo, h agent.Handoff) string {
-	return farewellText(info) + fmt.Sprintf(MsgHandoffBlockFmt, h.NewID, strings.Count(h.Summary, "\n")+1)
+	out := farewellText(info) + fmt.Sprintf(MsgHandoffBlockFmt, h.NewID, strings.Count(h.Summary, "\n")+1)
+	if h.Workspace != h.OldWorkspace {
+		out += fmt.Sprintf(MsgHandoffWsFmt, initPath(h.OldWorkspace), initPath(h.Workspace))
+	}
+	return out
 }
 
 func (r *REPL) handleNext(args []string) {
