@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -17,7 +18,25 @@ const (
 	TimeoutLimit          = 900
 
 	shellWaitDelay = 2 * time.Second
+
+	shellKillGrace = 5 * time.Second
 )
+
+func waitBounded(wait func() error, expired <-chan struct{}, grace time.Duration) (err error, abandoned bool) {
+	done := make(chan error, 1)
+	go func() { done <- wait() }()
+	select {
+	case err = <-done:
+		return err, false
+	case <-expired:
+	}
+	select {
+	case err = <-done:
+		return err, false
+	case <-time.After(grace):
+		return nil, true
+	}
+}
 
 type Kind int
 
@@ -172,6 +191,7 @@ func writeStream(sb *strings.Builder, label string, chunks []Chunk) {
 }
 
 type streamCapture struct {
+	mu       sync.Mutex
 	chunks   *[]Chunk
 	head     []byte
 	tail     []byte
@@ -181,6 +201,8 @@ type streamCapture struct {
 }
 
 func (c *streamCapture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	n := len(p)
 	c.written += int64(n)
 	for len(p) > 0 {
@@ -211,6 +233,8 @@ func (c *streamCapture) Write(p []byte) (int, error) {
 }
 
 func (c *streamCapture) finish() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.written == 0 {
 		return
 	}
@@ -285,12 +309,15 @@ func runForeground(ctx context.Context, con Console, command string, timeoutSec 
 		res.Duration = time.Since(start)
 		return res
 	}
-	err := cmd.Wait()
+	err, abandoned := waitBounded(cmd.Wait, runCtx.Done(), shellKillGrace)
 	stdout.finish()
 	stderr.finish()
 	res.Duration = time.Since(start)
 
 	switch {
+	case abandoned:
+		res.TimedOut = true
+		res.Err = MsgAbandoned
 	case err != nil && ctx.Err() != nil:
 		res.Interrupted = true
 	case err != nil && runCtx.Err() == context.DeadlineExceeded:
@@ -336,12 +363,15 @@ func runFull(ctx context.Context, con Console, command string, timeoutSec int, p
 		}
 		return res, true
 	}
-	err = cmd.Wait()
+	err, abandoned := waitBounded(cmd.Wait, runCtx.Done(), shellKillGrace)
 	lease.Release()
 	capture.finish()
 	res.Duration = time.Since(start)
 
 	switch {
+	case abandoned:
+		res.TimedOut = true
+		res.Err = MsgAbandoned
 	case err != nil && ctx.Err() != nil:
 		res.Interrupted = true
 	case err != nil && runCtx.Err() == context.DeadlineExceeded:

@@ -19,6 +19,7 @@ const (
 	MsgInterruptNotStarted = agent.MsgErrPrefix + "已中断（命令未执行）"
 	MsgInterruptRunning    = agent.MsgErrPrefix + "已中断（进程已终止，输出可能不完整）"
 	MsgTimedOut            = agent.MsgErrPrefix + "执行超时"
+	MsgAbandoned           = agent.MsgErrPrefix + "超时后子进程仍未退出（可能处于不可中断状态），已放弃等待；其输出已截断"
 	MsgErrLine             = agent.MsgErrPrefix + "%s"
 	MsgNoShellFmt          = "未找到可用 shell（已尝试 %s），请安装或在配置中指定 shell:"
 	MsgShellOverrideFmt    = "配置的 shell %q 不可执行，请检查 shell: 或 TANYA_SHELL"
