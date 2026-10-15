@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -199,5 +200,39 @@ func TestSessionIDAndFileNoSave(t *testing.T) {
 func TestSessionStoreIDEmpty(t *testing.T) {
 	if got := (&sessionStore{}).id(); got != "" {
 		t.Errorf("未 rotate 的 store 不应有 id: %q", got)
+	}
+}
+
+func TestAskFlushesToolRoundsIncrementally(t *testing.T) {
+	m := newMockLLM(t,
+		mockStep{toolCalls: []mockToolCall{{id: "call_1", name: "calc", args: `{"expression":"1+1"}`}}},
+		mockStep{toolCalls: []mockToolCall{{id: "call_2", name: "probe", args: `{}`}}},
+		mockStep{content: "done"},
+	)
+	var a *Agent
+	snapshot := make(chan string, 1)
+	probe := NewTool("probe", "读会话文件", `{"type":"object"}`,
+		func(ctx context.Context, args string) ToolResult {
+			b, err := os.ReadFile(a.SessionFile())
+			if err != nil {
+				t.Errorf("读会话文件: %v", err)
+			}
+			snapshot <- string(b)
+			return ToolResult{Text: "ok"}
+		})
+	a = newAgent(t, m, WithTools(probe))
+	if err := a.Ask(context.Background(), "跑两轮", nil); err != nil {
+		t.Fatal(err)
+	}
+	snap := <-snapshot
+	for _, want := range []string{
+		`"role":"user","content":"跑两轮"`,
+		`"role":"assistant"`,
+		`"name":"calc"`,
+		`"role":"tool"`,
+	} {
+		if !strings.Contains(snap, want) {
+			t.Errorf("增量落盘缺失 %s:\n%s", want, snap)
+		}
 	}
 }

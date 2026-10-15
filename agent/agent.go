@@ -416,6 +416,9 @@ func (a *Agent) runTurn(ctx context.Context, sink EventSink) error {
 				Images:  roundImages,
 			})
 		}
+		if err := a.save(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
