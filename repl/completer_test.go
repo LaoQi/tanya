@@ -456,3 +456,71 @@ func TestSwitchCandidatesFollowWorkspace(t *testing.T) {
 		t.Errorf("ws2 ghost（应跟随 /switch 换区）: got %q", got)
 	}
 }
+
+func testHistoryCompleter(msgs int) *completer {
+	return &completer{historyLen: func() int { return msgs }}
+}
+
+func TestCompleteHistoryContext(t *testing.T) {
+	c := testHistoryCompleter(3)
+	cands := c.complete("/history ")
+	want := []string{"all", "0", "-1", "-2", "-3"}
+	if len(cands) != len(want) {
+		t.Fatalf("候选数 got %d want %d: %v", len(cands), len(want), cands)
+	}
+	for i, w := range want {
+		if cands[i].Insert != "/history "+w || cands[i].Display != w {
+			t.Errorf("候选 %d got %+v want %q", i, cands[i], w)
+		}
+	}
+}
+
+func TestCompleteHistoryNegativePrefix(t *testing.T) {
+	c := testHistoryCompleter(3)
+	cands := c.complete("/history -")
+	if len(cands) != 3 {
+		t.Fatalf("`-` 应匹配三条负数候选: %v", cands)
+	}
+	if cands[0].Insert != "/history -1" {
+		t.Errorf("首个候选应为 -1: %+v", cands[0])
+	}
+}
+
+// TestCompleteHistoryCapsTail：候选上限 20（历史更长时不铺满菜单），正数不做候选。
+func TestCompleteHistoryCapsTail(t *testing.T) {
+	c := testHistoryCompleter(500)
+	cands := c.complete("/history ")
+	if len(cands) != 22 {
+		t.Fatalf("候选应封顶 22 个: %d", len(cands))
+	}
+	if cands[len(cands)-1].Display != "-20" {
+		t.Errorf("末个候选应为 -20: %+v", cands[len(cands)-1])
+	}
+	if cands := c.complete("/history 3"); len(cands) != 0 {
+		t.Errorf("正数不做候选: %v", cands)
+	}
+	if cands := c.complete("/history all"); len(cands) != 1 {
+		t.Errorf("all 已完整仍应命中自身: %v", cands)
+	}
+}
+
+// TestCompleteHistoryNilLen：历史条数未知（未接线）时按上限给候选，不 panic。
+func TestCompleteHistoryNilLen(t *testing.T) {
+	c := &completer{}
+	if cands := c.complete("/history -3"); len(cands) != 1 || cands[0].Insert != "/history -3" {
+		t.Fatalf("应命中 -3: %v", cands)
+	}
+}
+
+func TestSuggestHistoryContext(t *testing.T) {
+	c := testHistoryCompleter(5)
+	if got := c.suggest("/history -"); got != "1" {
+		t.Errorf("ghost got %q", got)
+	}
+	if got := c.suggest("/history 0"); got != "" {
+		t.Errorf("完整输入不应有 ghost: %q", got)
+	}
+	if got := c.suggest("/history -5"); got != "" {
+		t.Errorf("末个负数已完整: %q", got)
+	}
+}

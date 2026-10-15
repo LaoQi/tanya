@@ -1,3 +1,12 @@
+## 2026-10-15 repl: /history 负数取最近若干条 + 0 取最后一条 + 参数补全
+
+- `/history -n` 输出**最近 n 条的列表**（沿用既有一行一条的截断形态，序号仍是绝对序号，便于接着 `/history <n>` 看全文）；`n` 超过总条数按全部处理、不报错，头行标注 `共 X 条消息（仅显示最近 N 条）`
+- `/history 0` 直接拉取**最后一条**全文（即 `/history <总数>` 的简写）；非法序号文案随之更新为 `序号无效（1-N、-1~-N、0 或 all）`
+- `/history ` 参数补全：候选 `all`、`0` 与 `-1`…`-N`（`N = min(历史条数, 20)`），ghost 与 Tab 菜单同链路；正数不做候选（大会话里以数字开头的候选没有信息量）
+- 列表形态与头行收敛到 `REPL.printHistoryList(msgs, start, total)`，无参路径同函数（`start 0` + 全片段），行为不变
+- 测试：`repl/history_test.go` +4（负数截尾含绝对序号与头行标注、越界退化全部且无错误行、`0` 取最后一条全文、`abc`/`4`/`1.5` 报序号无效）、`repl/completer_test.go` +5（候选全表、`-` 前缀、上限 20 与正数无候选、未接线不 panic、ghost）
+- 文档：`README.md` 命令表、`docs/design.md` `/history` 条、`/help` 文案
+
 ## 2026-10-15 repl,attach: force 接管直连取消 + 客户端限时 15s——回合卡死不再无限等
 
 - force 不再绕事件注入：REPL 登记当前回合的 cancel（`runPrompt` 派生 ctx），`Takeover` 直连调用；无活跃回合的擦肩窗口回落注入 EventTakeover 唤醒主循环
