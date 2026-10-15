@@ -24,6 +24,7 @@ const (
 	MsgAPIStatus   = "API 错误 %d: %s"
 	MsgModelList   = "解析模型列表失败: %w"
 	MsgReadStream  = "读取流失败: %w"
+	MsgStreamIdle  = "上游 %s 内未返回任何数据（流式空闲超时）"
 	MsgConfigParse = "配置文件解析失败 %s: %w"
 	MsgRespFailed  = "API 响应失败: %s"
 	MsgRespHint404 = "端点可能不支持 responses 协议，可在配置中设置 api_protocol: chat"

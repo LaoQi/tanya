@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 type httpError struct {
@@ -47,6 +49,56 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
+var streamIdleTimeout = 60 * time.Second
+
+type idleWatcher struct {
+	feed   chan struct{}
+	quit   chan struct{}
+	cancel context.CancelFunc
+	fired  atomic.Bool
+}
+
+func newIdleWatcher(ctx context.Context, d time.Duration) (*idleWatcher, context.Context) {
+	ictx, cancel := context.WithCancel(ctx)
+	w := &idleWatcher{feed: make(chan struct{}, 1), quit: make(chan struct{}), cancel: cancel}
+	go func() {
+		t := time.NewTimer(d)
+		defer t.Stop()
+		for {
+			select {
+			case <-w.quit:
+				return
+			case <-w.feed:
+				if !t.Stop() {
+					select {
+					case <-t.C:
+					default:
+					}
+				}
+				t.Reset(d)
+			case <-t.C:
+				w.fired.Store(true)
+				cancel()
+				return
+			}
+		}
+	}()
+	return w, ictx
+}
+
+func (w *idleWatcher) Write(p []byte) (int, error) {
+	select {
+	case w.feed <- struct{}{}:
+	default:
+	}
+	return len(p), nil
+}
+
+func (w *idleWatcher) stop() {
+	close(w.quit)
+	w.cancel()
+}
+
 func (c *Client) streamSSE(ctx context.Context, path string, payload any, onData func(string) error) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -63,7 +115,13 @@ func (c *Client) streamSSE(ctx context.Context, path string, payload any, onData
 		return err
 	}
 	defer resp.Body.Close()
-	return scanSSE(ctx, resp.Body, onData)
+	w, ictx := newIdleWatcher(ctx, streamIdleTimeout)
+	defer w.stop()
+	err = scanSSE(ictx, io.TeeReader(resp.Body, w), onData)
+	if err != nil && w.fired.Load() {
+		return fmt.Errorf(MsgStreamIdle, streamIdleTimeout)
+	}
+	return err
 }
 
 func scanSSE(ctx context.Context, r io.Reader, onData func(string) error) error {

@@ -90,6 +90,8 @@ OpenAI 兼容 Chat Completions API（`/chat/completions`，SSE 流式），一�
 
 思维链按 DeepSeek 思考模式文档处理：响应侧 `delta.reasoning_content` 增量累积为单条 `ReasoningItem`（`ID` 空）随会话落盘（`reasoning_items` 字段）；请求侧 `chatWireMessages` 把 `ReasoningItems` 顺序拼接折叠为 assistant 消息顶层 `reasoning_content` 回传（带 `tools` 时官方要求历史推理链完整回传，缺失属未定义行为），wire 上不出现 `reasoning_items`，历史无思维链的轮次省略该字段。第三方端点对缺失 `reasoning_content` 的宽容度不一，四场景探测脚本见 `scripts/chat_reason_probe.py`（自建透传网关实测四种形状均 200，未执行该硬校验）。
 
+流式空闲超时（llm_http.go `streamSSE`，两协议共用）：SSE 流以 `io.TeeReader` 喂狗，任何字节到达即重置计时器，**60s 无数据**取消派生 ctx 并返回 `MsgStreamIdle` 错误（与用户中断严格区分——中断仍走 `context.Canceled` 进 `[中断]` 分支，空闲超时走错误事实行）；`http.Client` 本身不设整体超时（长回复合法）。
+
 流式解析要点：`data:` 行逐条解析 JSON chunk；content 直接拼接并经回调输出；tool_calls 按 `index` 分组做增量合并（id/type/name 覆盖、arguments 拼接），`[DONE]` 结束。`stream_options.include_usage` 捕获 usage（`completion_tokens_details.reasoning_tokens` 经 `Usage.normalize()` 归一为 `Usage.ReasoningTokens`，与 responses 口径对齐）；流结束记总耗时，存于 `Message.Duration`（`json:"-"` 不落盘）。**首字延迟不在 `agent` 侧记录**（2026-09-28）：它可由事件流重建，属渲染侧现算的派生量，见《状态行》与 `docs/agent-event-seams.md`。
 
 ### responses 协议（llm_responses.go `responsesStream`）
