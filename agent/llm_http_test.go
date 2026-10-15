@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type failingReader struct{}
@@ -82,4 +86,69 @@ func TestStreamSSEErrors(t *testing.T) {
 			t.Fatal("非法 BaseURL 应返回构造错误")
 		}
 	})
+}
+
+func TestStreamSSEIdleTimeout(t *testing.T) {
+	old := streamIdleTimeout
+	streamIdleTimeout = 120 * time.Millisecond
+	t.Cleanup(func() { streamIdleTimeout = old })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: first\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(2 * time.Second)
+		fmt.Fprint(w, "data: late\n\ndata: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(&Config{BaseURL: srv.URL, APIKey: "k"}, nil)
+	var got []string
+	err := c.streamSSE(context.Background(), "/chat/completions", map[string]any{}, func(s string) error {
+		got = append(got, s)
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "空闲超时") {
+		t.Fatalf("空闲应报超时错误: %v", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		t.Fatalf("空闲超时不应误判为中断: %v", err)
+	}
+	if len(got) != 1 || got[0] != "first" {
+		t.Errorf("超时前的数据应已消费: %v", got)
+	}
+}
+
+func TestStreamSSEIdleReset(t *testing.T) {
+	old := streamIdleTimeout
+	streamIdleTimeout = 400 * time.Millisecond
+	t.Cleanup(func() { streamIdleTimeout = old })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for i := 0; i < 4; i++ {
+			fmt.Fprintf(w, "data: %d\n\n", i)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			time.Sleep(150 * time.Millisecond)
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(&Config{BaseURL: srv.URL, APIKey: "k"}, nil)
+	var got []string
+	err := c.streamSSE(context.Background(), "/chat/completions", map[string]any{}, func(s string) error {
+		got = append(got, s)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("持续喂狗的流不应超时: %v", err)
+	}
+	if len(got) != 4 {
+		t.Errorf("应收完 4 条: %v", got)
+	}
 }
