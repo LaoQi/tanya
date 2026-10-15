@@ -1,6 +1,8 @@
 package repl
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -72,5 +74,123 @@ func TestTermColsUnavailable(t *testing.T) {
 	r, _, _ := newTestREPLAgentProf(t, nil, nil, nonTTYProf)
 	if got := r.termCols(); got != 0 {
 		t.Errorf("无 Console 时 termCols 应为 0，实际 %d", got)
+	}
+}
+
+// TestShowHistoryNegativeShowsTail：/history -n 只列最近 n 条，序号仍是绝对序号。
+func TestShowHistoryNegativeShowsTail(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", historySampleSession(5))
+	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
+	if err := a.LoadSession("20260101-100000"); err != nil {
+		t.Fatal(err)
+	}
+	r.showHistory([]string{"-2"})
+	got := out.String()
+	if !strings.Contains(got, "共 5 条消息（仅显示最近 2 条）") {
+		t.Errorf("头行应标注只显示最近 2 条: %q", got)
+	}
+	if !strings.Contains(got, "  4 assistant") || !strings.Contains(got, "  5 user") {
+		t.Errorf("应列出第 4、5 条且序号为绝对序号: %q", got)
+	}
+	if strings.Contains(got, "  1 user") {
+		t.Errorf("不应出现第 1 条: %q", got)
+	}
+}
+
+// TestShowHistoryNegativeBeyondTotal：-n 超过总条数按全部处理，不报错。
+func TestShowHistoryNegativeBeyondTotal(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", historySampleSession(3))
+	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	if err := a.LoadSession("20260101-100000"); err != nil {
+		t.Fatal(err)
+	}
+	r.showHistory([]string{"-99"})
+	got := out.String()
+	if !strings.Contains(got, "共 3 条消息\n") {
+		t.Errorf("越界不应报错且头行不带尾标注: %q", got)
+	}
+	for _, want := range []string{"  1 user", "  2 assistant", "  3 user"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("应含全部 3 条（缺 %q）: %q", want, got)
+		}
+	}
+	if errb.String() != "" {
+		t.Errorf("不应有错误行: %q", errb.String())
+	}
+}
+
+// TestShowHistoryZeroPrintsLast：/history 0 直接拉取最后一条全文。
+func TestShowHistoryZeroPrintsLast(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", historySampleSession(4))
+	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	if err := a.LoadSession("20260101-100000"); err != nil {
+		t.Fatal(err)
+	}
+	r.showHistory([]string{"0"})
+	got := out.String()
+	if !strings.Contains(got, "#4 assistant") {
+		t.Errorf("应输出第 4 条（最后一条）的消息头: %q", got)
+	}
+	if !strings.Contains(got, "回复 4") {
+		t.Errorf("应输出最后一条正文: %q", got)
+	}
+	if errb.String() != "" {
+		t.Errorf("不应有错误行: %q", errb.String())
+	}
+}
+
+func TestShowHistoryRejectsBadIndex(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", historySampleSession(3))
+	r, out, errb := newTestREPLAgent(t, a, newFakeTerm())
+	if err := a.LoadSession("20260101-100000"); err != nil {
+		t.Fatal(err)
+	}
+	for _, arg := range []string{"abc", "4", "1.5"} {
+		errb.Reset()
+		out.Reset()
+		r.showHistory([]string{arg})
+		if !strings.Contains(errb.String(), "序号无效") {
+			t.Errorf("参数 %q 应报序号无效: %q", arg, errb.String())
+		}
+	}
+}
+
+// historySampleSession 造 n 条消息的会话：user 1 / assistant 1 / … 交替，正文含序号便于断言。
+func historySampleSession(n int) string {
+	var b strings.Builder
+	for i := 1; i <= n; i++ {
+		role, text := "assistant", "回复 "+strconv.Itoa(i)
+		if i%2 == 1 {
+			role, text = "user", "提问 "+strconv.Itoa(i)
+		}
+		fmt.Fprintf(&b, "{\"role\":%q,\"content\":%q}\n", role, text)
+	}
+	return b.String()
+}
+
+// TestShowHistoryNegativeOne：-1 是列表形态（最近 1 条的一行摘要），与 0（全文）区分。
+func TestShowHistoryNegativeOne(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", historySampleSession(4))
+	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
+	if err := a.LoadSession("20260101-100000"); err != nil {
+		t.Fatal(err)
+	}
+	r.showHistory([]string{"-1"})
+	got := out.String()
+	if !strings.Contains(got, "共 4 条消息（仅显示最近 1 条）") || !strings.Contains(got, "  4 assistant 回复 4") {
+		t.Errorf("-1 应只列最后一条: %q", got)
+	}
+	if strings.Contains(got, "  1 user") {
+		t.Errorf("不应出现第 1 条: %q", got)
 	}
 }

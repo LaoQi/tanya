@@ -151,6 +151,9 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	ed := readline.NewEditor(con)
 	ed.SetOutput(o.st.out)
 	c := &completer{listSessions: a.ListSessions, listModels: a.ListModels, workspaceDir: a.Workspace}
+	if a != nil {
+		c.historyLen = func() int { return len(a.History()) }
+	}
 	ed.SetComplete(c.complete)
 	ed.SetGhost(c.suggest)
 	name := o.themeName
@@ -781,18 +784,37 @@ func (r *REPL) showHistory(args []string) {
 			return
 		}
 		n, err := strconv.Atoi(args[0])
-		if err != nil || n < 1 || n > len(msgs) {
-			r.st.err.emit(KindError, fmt.Sprintf(MsgInvalidIndex, len(msgs)))
+		if err != nil || n > len(msgs) {
+			r.st.err.emit(KindError, fmt.Sprintf(MsgInvalidIndex, len(msgs), len(msgs)))
 			return
 		}
-		r.printHistoryFull(n, msgs[n-1])
+		switch {
+		case n > 0:
+			r.printHistoryFull(n, msgs[n-1])
+		case n == 0:
+			r.printHistoryFull(len(msgs), msgs[len(msgs)-1])
+		default:
+			k := min(-n, len(msgs))
+			r.printHistoryList(msgs[len(msgs)-k:], len(msgs)-k, len(msgs))
+		}
 		return
 	}
+	r.printHistoryList(msgs, 0, len(msgs))
+}
+
+// printHistoryList 输出列表形态（每项一行、按终端列宽截断）：msgs 为待打印片段，
+// start 为其首项在完整历史中的下标（序号恒为绝对序号，便于接着 /history <n> 看全文），
+// total 为完整条数——片段短于总数时头行标注只显示了最近若干条。
+func (r *REPL) printHistoryList(msgs []agent.Message, start, total int) {
 	var b strings.Builder
-	fmt.Fprintf(&b, MsgTotalMsgs, len(msgs))
+	if len(msgs) < total {
+		fmt.Fprintf(&b, MsgTotalMsgsTailFmt, total, len(msgs))
+	} else {
+		fmt.Fprintf(&b, MsgTotalMsgs, total)
+	}
 	cols := r.termCols()
 	for i, m := range msgs {
-		b.WriteString(historyLine(i+1, m, cols))
+		b.WriteString(historyLine(start+i+1, m, cols))
 		b.WriteString("\n")
 	}
 	r.st.out.emit(KindNotice, b.String())

@@ -23,10 +23,15 @@ var effortCandidates = func() []string {
 	return append(out, "off")
 }()
 
+// historyTailMax 是 /history 负数补全的候选上限：候选只为少打字，尾部条数本身可由
+// 用户手输任意值（超出总条数按全部处理），故不必把菜单铺满整段历史。
+const historyTailMax = 20
+
 type completer struct {
 	listSessions func() ([]agent.SessionInfo, error)
 	listModels   func() ([]string, error)
 	workspaceDir func() string
+	historyLen   func() int
 	modelCache   []string
 	modelLoaded  bool
 }
@@ -67,6 +72,14 @@ func (c *completer) isThemeContext(line string) bool {
 	return !strings.Contains(prefix, " ")
 }
 
+func (c *completer) isHistoryContext(line string) bool {
+	if !strings.HasPrefix(line, "/history ") {
+		return false
+	}
+	prefix := strings.TrimPrefix(line, "/history ")
+	return !strings.Contains(prefix, " ")
+}
+
 func (c *completer) isReasoningContext(line string) bool {
 	if !strings.HasPrefix(line, "/reasoning ") {
 		return false
@@ -81,6 +94,24 @@ func (c *completer) isThinkContext(line string) bool {
 	}
 	prefix := strings.TrimPrefix(line, "/think ")
 	return !strings.Contains(prefix, " ")
+}
+
+// historyArgs 给出 /history 的参数候选：all、0（最后一条）与 -1~-N（最近 N 条）。
+// N 取历史条数与 historyTailMax 的较小值（条数未知时按上限给）；正数序号不做候选，
+// 大会话里以数字开头的候选会多到没有信息量。
+func (c *completer) historyArgs() []string {
+	n := historyTailMax
+	if c.historyLen != nil {
+		if m := c.historyLen(); m < n {
+			n = m
+		}
+	}
+	out := make([]string, 0, n+2)
+	out = append(out, "all", "0")
+	for i := 1; i <= n; i++ {
+		out = append(out, fmt.Sprintf("-%d", i))
+	}
+	return out
 }
 
 // models 装载服务端模型名并清洗为单行：候选 Display、ghost 建议与 Enter 后的 Insert
@@ -245,6 +276,13 @@ func (c *completer) suggest(line string) string {
 				return m[len(prefix):]
 			}
 		}
+	case c.isHistoryContext(line):
+		prefix := strings.TrimPrefix(line, "/history ")
+		for _, a := range c.historyArgs() {
+			if strings.HasPrefix(a, prefix) && a != prefix {
+				return a[len(prefix):]
+			}
+		}
 	case c.isReasoningContext(line):
 		prefix := strings.TrimPrefix(line, "/reasoning ")
 		for _, v := range onOffCandidates {
@@ -312,6 +350,15 @@ func (c *completer) complete(line string) []readline.Completion {
 		for _, m := range c.models() {
 			if strings.HasPrefix(m, prefix) {
 				out = append(out, readline.Completion{Insert: "/model " + m, Display: m})
+			}
+		}
+		return out
+	case c.isHistoryContext(line):
+		prefix := strings.TrimPrefix(line, "/history ")
+		var out []readline.Completion
+		for _, a := range c.historyArgs() {
+			if strings.HasPrefix(a, prefix) {
+				out = append(out, readline.Completion{Insert: "/history " + a, Display: a})
 			}
 		}
 		return out
