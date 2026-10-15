@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -218,8 +219,8 @@ func (r *REPL) Takeover(force bool, peer attach.Peer, reply func(attach.Result) 
 	}
 
 	if busy {
-		if force {
-			r.post(readline.EventInterrupt)
+		if force && !r.cancelTurn() {
+			r.post(readline.EventTakeover)
 		}
 	} else if !r.post(readline.EventTakeover) {
 		r.clearHandover(h)
@@ -233,6 +234,29 @@ func (r *REPL) Takeover(force bool, peer attach.Peer, reply func(attach.Result) 
 	case <-h.gone:
 		r.dropGone(h)
 	}
+}
+
+func (r *REPL) setTurnCancel(fn context.CancelFunc) {
+	r.turnMu.Lock()
+	r.turnCancel = fn
+	r.turnMu.Unlock()
+}
+
+func (r *REPL) clearTurnCancel() {
+	r.turnMu.Lock()
+	r.turnCancel = nil
+	r.turnMu.Unlock()
+}
+
+func (r *REPL) cancelTurn() bool {
+	r.turnMu.Lock()
+	fn := r.turnCancel
+	r.turnMu.Unlock()
+	if fn == nil {
+		return false
+	}
+	fn()
+	return true
 }
 
 func rejectTakeover(code string) attach.Result { return attach.Result{Code: code} }
@@ -343,17 +367,13 @@ func (r *REPL) rollbackTakeover(h *handover, notice string) {
 	r.drainTakeover(h)
 }
 
-// drainTakeover 清掉接管注入但未被编辑层消费的事件（force 的中断、未被消费的接管事件），
-// 避免回滚后空中断/空退出一行输入。
-func (r *REPL) drainTakeover(h *handover) {
+// drainTakeover 清掉接管注入但未被编辑层消费的接管事件，避免回滚后空退出一行输入。
+func (r *REPL) drainTakeover(*handover) {
 	d, ok := r.con.(readline.Drainer)
 	if !ok {
 		return
 	}
 	d.DrainInjected(readline.EventTakeover)
-	if h.force {
-		d.DrainInjected(readline.EventInterrupt)
-	}
 }
 
 func (r *REPL) takeoverResult() attach.Result {

@@ -6,4 +6,6 @@ const (
 	MsgPeerGone   = "attach: 目标已断开或退出: %w"
 	MsgDial       = "attach: 连接目标失败: %w"
 	MsgListen     = "attach: 监听运行实例失败: %w"
+
+	MsgForceTimeout = "attach: force 接管超时——目标未响应中断（回合可能已卡死）"
 )

@@ -1,3 +1,9 @@
+## 2026-10-15 repl,attach: force 接管直连取消 + 客户端限时 15s——回合卡死不再无限等
+
+- force 不再绕事件注入：REPL 登记当前回合的 cancel（`runPrompt` 派生 ctx），`Takeover` 直连调用；无活跃回合的擦肩窗口回落注入 EventTakeover 唤醒主循环
+- 客户端 `Takeover(force)` 读限时 `attach.ForceWaitTimeout`=15s，超时报「目标未响应中断（回合可能已卡死）」并关连接（对端走既有 peer-gone 回滚）；非 force 保持排队无超时
+- `drainTakeover` 移除已无注入来源的 force 中断清理
+
 ## 2026-10-15 tools/shell: 看门狗防 D 状态子进程拖死回合——cmd.Wait 有界等待
 
 - `Cmd.Wait()` 首行即 `Process.Wait()`，子进程不可中断（D state）时永久阻塞且对 ctx 取消免疫，`^C`/`attach --force`/SIGTERM 全部失效（昨晚事故根因路径）

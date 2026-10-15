@@ -42,16 +42,25 @@ func Open(e Entry) (*Client, error) {
 	return &Client{entry: e, conn: cc}, nil
 }
 
-// Takeover 请求接管并阻塞等待结果：等待期无超时（取消方式是关闭连接）。
+// Takeover 请求接管并阻塞等待结果：force 限时 ForceWaitTimeout（回合卡死不再无限等），
+// 非 force 无超时（排队语义，取消方式仍是关闭连接）。
 func (c *Client) Takeover(force bool) (Result, error) {
 	if err := c.conn.send(message{Takeover: &Request{Force: force}}); err != nil {
 		return Result{}, fmt.Errorf(MsgPeerGone, err)
 	}
-	_ = c.conn.SetReadDeadline(time.Time{})
+	if force {
+		_ = c.conn.SetReadDeadline(time.Now().Add(ForceWaitTimeout))
+	} else {
+		_ = c.conn.SetReadDeadline(time.Time{})
+	}
 	m, err := c.conn.recv()
 	if err != nil {
+		if force && os.IsTimeout(err) {
+			return Result{}, errors.New(MsgForceTimeout)
+		}
 		return Result{}, fmt.Errorf(MsgPeerGone, err)
 	}
+	_ = c.conn.SetReadDeadline(time.Time{})
 	if m.Result == nil {
 		return Result{}, errors.New(MsgBadMagic)
 	}

@@ -49,7 +49,7 @@ S→C  {"result":{"ok":true,"session":…,"file":…,"session_dir":…,"archive_
      {"result":{"ok":false,"code":"no-save"|"read-only"|"in-progress"|"no-session"|"io-error"|"bad-request"}}
 ```
 
-- 无 `wait` 参数、无进度消息、无周期心跳、无 `status` 命令：等待语义是**要么一直等，要么 `force`**；等待期的状态展示读 run 文件（B 非 force 等待期每 5s 重读一次注册项，目标执行中（含受理后才变忙）刷一行「目标仍在执行中（已 …）」，秒数按 `turn_started` 本地折算；A 不需要为此写盘）。
+- 无 `wait` 参数、无进度消息、无周期心跳、无 `status` 命令：等待语义是**要么一直等，要么 `force`**（force 客户端侧限时 `attach.ForceWaitTimeout`=15s：目标未响应中断即关连接报错——回合卡死不再无限等；非 force 保持排队无超时）；等待期的状态展示读 run 文件（B 非 force 等待期每 5s 重读一次注册项，目标执行中（含受理后才变忙）刷一行「目标仍在执行中（已 …）」，秒数按 `turn_started` 本地折算；A 不需要为此写盘）。
 - 握手超时 3s；**取消 = 关闭连接**（B 的 `^C` 走这条路），A 侧由连接断开事件得知（见 §5），不改写会话。
 - 版本不一致：服务端回自己的 `hello` 后关闭，客户端明确报错（不猜兼容）。
 
@@ -59,7 +59,7 @@ S→C  {"result":{"ok":true,"session":…,"file":…,"session_dir":…,"archive_
 
 ```
 拒绝面：已有存活挂起 / -n / 归档只读 / 无会话    → 立即应答 ok:false
-busy + force : 注入 EventInterrupt 取消当前回合  → 回合出口交接
+busy + force : 直连取消当前回合 ctx（2026-10-15，`REPL.cancelTurn`——不依赖事件注入；无活跃回合的擦肩窗口回落注入 EventTakeover 唤醒主循环）→ 回合出口交接
 busy + !force: 静默挂起                          → 回合自然结束交接
 idle         : 注入 EventTakeover               → Readline 返回 ErrTakeover 交接
 交接点（Run 循环顶部 / ErrTakeover 分支）settleTakeover：
@@ -67,7 +67,7 @@ idle         : 注入 EventTakeover               → Readline 返回 ErrTakeove
   ├ 写出成功 → Server.Close（删 sock/注册项）→ farewell + 「已交由另一进程接管本次会话」→ 退出 0
   ├ 事实行写不进（会话目录不可写等）→ 应答 io-error → 回滚（解冻、补 [接管未成立]、提示）→ 继续运行
   └ 对端已断开（gone）或写出失败 → 追加 [接管未成立] → 解冻 → 丢弃挂起 → 继续运行
-回滚与挂起摘除统一清掉未被编辑层消费的注入事件（`readline.Drainer` 可选接口）：force 的中断不再空中断下一行输入。
+回滚与挂起摘除统一清掉未被编辑层消费的注入事件（`readline.Drainer` 可选接口）：回落注入的接管事件不再空退出一行输入。
 ```
 
 **挂起项的生命周期**（改动：2026-10-13，用户报告「接管过一次后，后续请求都被 in-progress 拒掉」）：挂起项 `REPL.takeH` 有**两个**摘除点，谁先到谁摘——
@@ -99,7 +99,7 @@ idle         : 注入 EventTakeover               → Readline 返回 ErrTakeove
 | 空会话（尚无消息） | 允许：`AppendNotice` 会落盘建立文件，B 接管到 0 条历史 + 事实行 |
 | `-n` / 归档只读 | A 拒绝并给码；B 侧中文提示 |
 | 事实行写不进（磁盘故障/目录不可写） | A 应答 `io-error` 并回滚继续运行；B 报「对方写入会话失败，接管未成立」 |
-| force 接管被取消 | 残留的注入中断被清除，不会空中断 A 的下一行输入 |
+| force 接管被取消 | 残留的回落注入接管事件被清除，不会空退出 A 的下一行输入 |
 
 ## 8. 明确不做
 

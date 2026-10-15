@@ -52,6 +52,8 @@ type REPL struct {
 	takeH         *handover
 	takeGone      int
 	takeover      *attach.Result
+	turnMu        sync.Mutex
+	turnCancel    context.CancelFunc
 }
 
 type options struct {
@@ -402,9 +404,13 @@ func (r *REPL) continueTurn() { r.runPrompt("", true) }
 func (r *REPL) runPrompt(in string, cont bool) {
 	r.con.Sane()
 	ctx, done := InterruptContext(r.con)
+	tctx, cancel := context.WithCancel(ctx)
+	r.setTurnCancel(cancel)
 	t := r.beginTurn(done)
 	r.setBusy(true)
-	err := r.runTurn(ctx, in, t, cont)
+	err := r.runTurn(tctx, in, t, cont)
+	r.clearTurnCancel()
+	cancel()
 	t.End(err)
 	r.afterTurn()
 	r.setBusy(false)
