@@ -181,7 +181,35 @@ func TestTakeoverBusyWaitsWithoutInterrupt(t *testing.T) {
 	}
 }
 
-func TestTakeoverBusyForceInterrupts(t *testing.T) {
+func TestTakeoverBusyForceCancelsLiveTurn(t *testing.T) {
+	a := newSessTestAgent(t, t.TempDir())
+	term := newFakeTerm()
+	r, _, _ := newTestREPLAgent(t, a, term)
+	r.startAttach()
+	t.Cleanup(r.stopAttach)
+	cancelled := make(chan struct{})
+	r.setTurnCancel(func() { close(cancelled) })
+	r.setBusy(true)
+	e := entryOf(t, a)
+	c, res := pendingTakeover(t, r, e, true)
+	defer c.Close()
+	select {
+	case <-cancelled:
+	default:
+		t.Fatal("force 应直连取消当前回合")
+	}
+	if kinds := term.injectedKinds(); len(kinds) != 0 {
+		t.Fatalf("直连取消不应注入事件: %v", kinds)
+	}
+	if !r.settleTakeover() {
+		t.Fatal("强制接管应完成移交")
+	}
+	if got := <-res; !got.OK {
+		t.Fatalf("接管应成功: %+v", got)
+	}
+}
+
+func TestTakeoverBusyForceFallbackPostsTakeover(t *testing.T) {
 	a := newSessTestAgent(t, t.TempDir())
 	term := newFakeTerm()
 	r, _, _ := newTestREPLAgent(t, a, term)
@@ -192,8 +220,8 @@ func TestTakeoverBusyForceInterrupts(t *testing.T) {
 	c, res := pendingTakeover(t, r, e, true)
 	defer c.Close()
 	kinds := term.injectedKinds()
-	if len(kinds) != 1 || kinds[0] != readline.EventInterrupt {
-		t.Fatalf("force 应注入中断事件: %v", kinds)
+	if len(kinds) != 1 || kinds[0] != readline.EventTakeover {
+		t.Fatalf("无活跃回合时 force 应回落注入接管事件: %v", kinds)
 	}
 	if !r.settleTakeover() {
 		t.Fatal("强制接管应完成移交")
@@ -354,7 +382,7 @@ func TestSessionTitleSkipsNoticeLines(t *testing.T) {
 	}
 }
 
-// force 接管被取消后，注入的中断事件应被清掉（不空中断下一行输入）；非 force 取消不涉及中断。
+// force 接管被取消后，回落注入的接管事件应被清掉（不空退出一行输入）。
 func TestTakeoverForceCancelDrainsStaleInterrupt(t *testing.T) {
 	a := newSessTestAgent(t, t.TempDir())
 	term := newFakeTerm()
@@ -371,7 +399,7 @@ func TestTakeoverForceCancelDrainsStaleInterrupt(t *testing.T) {
 			return false
 		}
 		kinds := term.drainedKinds()
-		return len(kinds) == 1 && kinds[0] == readline.EventInterrupt
+		return len(kinds) == 1 && kinds[0] == readline.EventTakeover
 	})
 	if r.settleTakeover() {
 		t.Fatal("对端已断开，不应完成移交")

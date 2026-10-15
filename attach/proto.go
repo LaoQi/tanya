@@ -17,6 +17,8 @@ const (
 	ProbeTimeout     = 300 * time.Millisecond
 )
 
+var ForceWaitTimeout = 15 * time.Second
+
 const (
 	CodeNoSave     = "no-save"
 	CodeReadOnly   = "read-only"

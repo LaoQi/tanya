@@ -339,3 +339,60 @@ func TestClientStateRereadsEntry(t *testing.T) {
 		t.Fatalf("无 Path 时应报 ErrNotExist: %v", err)
 	}
 }
+
+func TestForceTakeoverTimeout(t *testing.T) {
+	old := attach.ForceWaitTimeout
+	attach.ForceWaitTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { attach.ForceWaitTimeout = old })
+
+	block := make(chan struct{})
+	h := &fakeHandler{block: block}
+	_, e := serve(t, h)
+	c, err := attach.Open(e)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer c.Close()
+	start := time.Now()
+	_, err = c.Takeover(true)
+	if err == nil || !contains(err.Error(), "force 接管超时") {
+		t.Fatalf("force 限时应报超时: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("不应无限等待: %v", elapsed)
+	}
+	close(block)
+}
+
+func TestNonForceTakeoverNoDeadline(t *testing.T) {
+	old := attach.ForceWaitTimeout
+	attach.ForceWaitTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { attach.ForceWaitTimeout = old })
+
+	block := make(chan struct{})
+	h := &fakeHandler{block: block, reply: attach.Result{OK: true}}
+	_, e := serve(t, h)
+	c, err := attach.Open(e)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer c.Close()
+	res := make(chan attach.Result, 1)
+	go func() {
+		r, err := c.Takeover(false)
+		if err != nil {
+			t.Errorf("非 force 排队不应超时: %v", err)
+		}
+		res <- r
+	}()
+	time.Sleep(300 * time.Millisecond)
+	select {
+	case <-res:
+		t.Fatal("未放行前不应有结果")
+	default:
+	}
+	close(block)
+	if got := <-res; !got.OK {
+		t.Fatalf("放行后应完成接管: %+v", got)
+	}
+}
