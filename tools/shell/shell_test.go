@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -154,5 +155,51 @@ func TestShellArgsInteractive(t *testing.T) {
 	cmdProfile := &profile{Path: "cmd", Name: "cmd", Kind: KindCmd, ExtraArgs: []string{"/d", "/s"}}
 	if got := strings.Join(shellArgs(cmdProfile, "dir", true), " "); got != "/d /s /c dir" {
 		t.Errorf("cmd 参数不应受 interactive 影响: %q", got)
+	}
+}
+
+func TestWaitBoundedPassthrough(t *testing.T) {
+	never := make(chan struct{})
+	err, abandoned := waitBounded(func() error { return errors.New("boom") }, never, time.Second)
+	if abandoned || err == nil || err.Error() != "boom" {
+		t.Fatalf("正常返回应透传: err=%v abandoned=%v", err, abandoned)
+	}
+}
+
+func TestWaitBoundedAbandoned(t *testing.T) {
+	expired := make(chan struct{})
+	close(expired)
+	err, abandoned := waitBounded(func() error { select {} }, expired, 30*time.Millisecond)
+	if !abandoned || err != nil {
+		t.Fatalf("宽限期后应放弃: err=%v abandoned=%v", err, abandoned)
+	}
+}
+
+func TestWaitBoundedGraceRescue(t *testing.T) {
+	expired := make(chan struct{})
+	close(expired)
+	err, abandoned := waitBounded(func() error {
+		time.Sleep(20 * time.Millisecond)
+		return errors.New("late")
+	}, expired, time.Second)
+	if abandoned || err == nil || err.Error() != "late" {
+		t.Fatalf("宽限期内返回应透传: err=%v abandoned=%v", err, abandoned)
+	}
+}
+
+func TestRunForegroundTimeoutNotAbandoned(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("无 bash")
+	}
+	res := runForeground(context.Background(), nullConsole{}, "sleep 3", 1, &profile{Path: bash, Name: "bash", Kind: KindPosix}, t.TempDir(), false)
+	if res.TimedOut {
+		t.Log("TimedOut=true")
+	}
+	if res.Interrupted || res.ExitCode != 0 {
+		t.Fatalf("超时应只报 TimedOut: %+v", res)
+	}
+	if !res.TimedOut || res.Err != "" {
+		t.Fatalf("可杀子进程超时应报 TimedOut 且不放弃: %+v", res)
 	}
 }

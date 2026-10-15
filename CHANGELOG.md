@@ -1,3 +1,9 @@
+## 2026-10-15 tools/shell: 看门狗防 D 状态子进程拖死回合——cmd.Wait 有界等待
+
+- `Cmd.Wait()` 首行即 `Process.Wait()`，子进程不可中断（D state）时永久阻塞且对 ctx 取消免疫，`^C`/`attach --force`/SIGTERM 全部失效（昨晚事故根因路径）
+- 普通/交互两路径换 `waitBounded`：runCtx 结束后宽限 5s，仍未收割即放弃——`TimedOut` + 明确文案，回合继续；代价为泄漏一个等待 goroutine、输出截断
+- `streamCapture` 加互斥：放弃后的输出快照与残留拷贝协程无数据竞争
+
 ## 2026-10-15 agent: LLM 流式空闲超时 60s——网络侧悬挂不再无限等
 
 - `streamSSE`（chat/responses 共用）以 TeeReader 喂狗：任何字节到达即重置计时，60s 无数据取消并返回空闲超时错误
