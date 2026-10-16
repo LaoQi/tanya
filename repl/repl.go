@@ -775,12 +775,7 @@ func (r *REPL) showHistory(args []string) {
 	}
 	if len(args) > 0 {
 		if args[0] == "all" {
-			for i, m := range msgs {
-				if i > 0 {
-					r.st.out.emit(KindNotice, "\n")
-				}
-				r.printHistoryFull(i+1, m)
-			}
+			r.printHistoryFullRange(msgs, 0, "")
 			return
 		}
 		n, err := strconv.Atoi(args[0])
@@ -795,29 +790,47 @@ func (r *REPL) showHistory(args []string) {
 			r.printHistoryFull(len(msgs), msgs[len(msgs)-1])
 		default:
 			k := min(-n, len(msgs))
-			r.printHistoryList(msgs[len(msgs)-k:], len(msgs)-k, len(msgs))
+			start := len(msgs) - k
+			r.printHistoryFullRange(msgs[start:], start, historyTotalHead(k, len(msgs)))
 		}
 		return
 	}
-	r.printHistoryList(msgs, 0, len(msgs))
+	r.printHistoryList(msgs)
 }
 
-// printHistoryList 输出列表形态（每项一行、按终端列宽截断）：msgs 为待打印片段，
-// start 为其首项在完整历史中的下标（序号恒为绝对序号，便于接着 /history <n> 看全文），
-// total 为完整条数——片段短于总数时头行标注只显示了最近若干条。
-func (r *REPL) printHistoryList(msgs []agent.Message, start, total int) {
+// printHistoryList 输出无参列表形态（每项一行、按终端列宽截断）：序号为绝对序号，
+// 便于接着 /history <n> 看全文。
+func (r *REPL) printHistoryList(msgs []agent.Message) {
 	var b strings.Builder
-	if len(msgs) < total {
-		fmt.Fprintf(&b, MsgTotalMsgsTailFmt, total, len(msgs))
-	} else {
-		fmt.Fprintf(&b, MsgTotalMsgs, total)
-	}
+	fmt.Fprintf(&b, MsgTotalMsgs, len(msgs))
 	cols := r.termCols()
 	for i, m := range msgs {
-		b.WriteString(historyLine(start+i+1, m, cols))
+		b.WriteString(historyLine(i+1, m, cols))
 		b.WriteString("\n")
 	}
 	r.st.out.emit(KindNotice, b.String())
+}
+
+// printHistoryFullRange 逐条完整渲染 msgs：start 为首项在完整历史中的下标（序号恒为绝对序号），
+// head 非空时先打头行，条目之间空一行。
+func (r *REPL) printHistoryFullRange(msgs []agent.Message, start int, head string) {
+	if head != "" {
+		r.st.out.emit(KindNotice, head)
+	}
+	for i, m := range msgs {
+		if i > 0 {
+			r.st.out.emit(KindNotice, "\n")
+		}
+		r.printHistoryFull(start+i+1, m)
+	}
+}
+
+// historyTotalHead 给完整渲染的头行文案：片段短于总数时标注只显示了最近若干条。
+func historyTotalHead(shown, total int) string {
+	if shown < total {
+		return fmt.Sprintf(MsgTotalMsgsTailFmt, total, shown)
+	}
+	return fmt.Sprintf(MsgTotalMsgs, total)
 }
 
 func historyLabel(m agent.Message) string {

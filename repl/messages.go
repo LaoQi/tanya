@@ -182,7 +182,7 @@ const helpText = `斜杠命令：
   /next [指令]        交接上下文并开启新会话（无参先让 AI 总结，交接后等待输入）
   /switch <dir>       切换工作区（先收尾旧会话，重读 AGENTS.md）
   /stat               会话统计（工作区/用量/缓存）
-  /history [n|all]    无参截断列表；n 全文查看单条（0 = 最后一条，-n = 最近 n 条列表），all 全量显示
+  /history [n|all]    无参截断列表；n 全文查看单条（0 = 最后一条，-n = 最近 n 条全文），all 全量显示
   /model [name]       显示或切换模型
   /think [level]      显示或设置思考等级（minimal/low/medium/high/max/off）
   /reasoning [on|off] 显示或切换思维链回传

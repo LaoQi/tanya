@@ -77,8 +77,9 @@ func TestTermColsUnavailable(t *testing.T) {
 	}
 }
 
-// TestShowHistoryNegativeShowsTail：/history -n 只列最近 n 条，序号仍是绝对序号。
-func TestShowHistoryNegativeShowsTail(t *testing.T) {
+// TestShowHistoryNegativeFullRender：/history -n 走完整渲染（消息头 + 正文），
+// 而不是一行摘要；序号仍是绝对序号，头行标注只显示了尾部。
+func TestShowHistoryNegativeFullRender(t *testing.T) {
 	dir := t.TempDir()
 	a := newSessTestAgent(t, dir)
 	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", historySampleSession(5))
@@ -91,11 +92,41 @@ func TestShowHistoryNegativeShowsTail(t *testing.T) {
 	if !strings.Contains(got, "共 5 条消息（仅显示最近 2 条）") {
 		t.Errorf("头行应标注只显示最近 2 条: %q", got)
 	}
-	if !strings.Contains(got, "  4 assistant") || !strings.Contains(got, "  5 user") {
-		t.Errorf("应列出第 4、5 条且序号为绝对序号: %q", got)
+	for _, want := range []string{"#4 assistant", "回复 4", "#5 user", "提问 5"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("应完整渲染最近 2 条（缺 %q）: %q", want, got)
+		}
 	}
-	if strings.Contains(got, "  1 user") {
+	if i, j := strings.Index(got, "#4 assistant"), strings.Index(got, "#5 user"); i < 0 || j < 0 || i > j {
+		t.Errorf("条目应按时间顺序输出: %q", got)
+	}
+	if strings.Contains(got, "#1 ") || strings.Contains(got, "提问 1") {
 		t.Errorf("不应出现第 1 条: %q", got)
+	}
+	if strings.Contains(got, "  4 assistant 回复 4") {
+		t.Errorf("不应再输出一行摘要形态: %q", got)
+	}
+}
+
+// TestShowHistoryNegativeRendersToolMessage：-n 下的工具消息同样完整渲染——正文与
+// 「→ 工具 参数」行都要出现，而不是被压成一行摘要。
+func TestShowHistoryNegativeRendersToolMessage(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	seed := `{"role":"user","content":"提问"}` + "\n" +
+		`{"role":"assistant","content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"run_shell","arguments":"{\"command\":\"ls\"}"}}]}` + "\n" +
+		`{"role":"tool","name":"run_shell","content":"stdout:\nmock-out"}` + "\n"
+	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", seed)
+	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
+	if err := a.LoadSession("20260101-100000"); err != nil {
+		t.Fatal(err)
+	}
+	r.showHistory([]string{"-2"})
+	got := out.String()
+	for _, want := range []string{"#2 assistant", "[调用 run_shell]", "#3 run_shell", "mock-out", "→ run_shell", "command"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("工具消息应完整渲染（缺 %q）: %q", want, got)
+		}
 	}
 }
 
@@ -113,9 +144,9 @@ func TestShowHistoryNegativeBeyondTotal(t *testing.T) {
 	if !strings.Contains(got, "共 3 条消息\n") {
 		t.Errorf("越界不应报错且头行不带尾标注: %q", got)
 	}
-	for _, want := range []string{"  1 user", "  2 assistant", "  3 user"} {
+	for _, want := range []string{"#1 user", "提问 1", "#2 assistant", "回复 2", "#3 user", "提问 3"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("应含全部 3 条（缺 %q）: %q", want, got)
+			t.Errorf("应完整渲染全部 3 条（缺 %q）: %q", want, got)
 		}
 	}
 	if errb.String() != "" {
@@ -176,7 +207,7 @@ func historySampleSession(n int) string {
 	return b.String()
 }
 
-// TestShowHistoryNegativeOne：-1 是列表形态（最近 1 条的一行摘要），与 0（全文）区分。
+// TestShowHistoryNegativeOne：-1 只渲染最后一条，但形态与 0 同为全文（多的只是头行标注）。
 func TestShowHistoryNegativeOne(t *testing.T) {
 	dir := t.TempDir()
 	a := newSessTestAgent(t, dir)
@@ -187,10 +218,12 @@ func TestShowHistoryNegativeOne(t *testing.T) {
 	}
 	r.showHistory([]string{"-1"})
 	got := out.String()
-	if !strings.Contains(got, "共 4 条消息（仅显示最近 1 条）") || !strings.Contains(got, "  4 assistant 回复 4") {
-		t.Errorf("-1 应只列最后一条: %q", got)
+	for _, want := range []string{"共 4 条消息（仅显示最近 1 条）", "#4 assistant", "回复 4"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("-1 应输出最后一条全文（缺 %q）: %q", want, got)
+		}
 	}
-	if strings.Contains(got, "  1 user") {
+	if strings.Contains(got, "#1 ") || strings.Contains(got, "提问 1") {
 		t.Errorf("不应出现第 1 条: %q", got)
 	}
 }

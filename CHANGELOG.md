@@ -1,3 +1,14 @@
+## 2026-10-16 repl: /history 负数改为逐条完整渲染（用户要求：0 与负数都走完整渲染，不再只给摘要）
+
+- `/history -n` 由「最近 n 条的一行摘要列表」改为**最近 n 条逐条完整渲染**：复用 `printHistoryFull`（消息头 `#N 角色` 按标题渲染并按角色着色 + assistant 正文走 markdown 管线 + user/tool 正文清洗后原样 + `→ 工具 参数` 行），条目之间空一行，与 `all` 同形；序号仍是绝对序号，`n` 超过总条数按全部处理、不报错
+- **头行保留**（用户拍板）：片段短于总条数时先打 `共 X 条消息（仅显示最近 N 条）`；`-n` 覆盖全部时退化为 `共 X 条消息`
+- `/history 0` **不变**（`/history <总数>` 的简写，最后一条全文，本就是完整渲染）；无参 `/history` 不变（`共 N 条消息` + 一行摘要列表）
+- 代码：新增 `REPL.printHistoryFullRange(msgs, start, head)`（`all` 与负数共用，`all` 传空 head → 输出与改动前逐字节一致）与头行文案 `historyTotalHead(shown, total)`；`printHistoryList` 收窄为 `printHistoryList(msgs)`（只服务无参路径，不再带 `start/total` 与尾标注分支）
+- 文案：`/help` 与 `README.md` 命令表的 `-n = 最近 n 条列表` → `-n = 最近 n 条全文`；`completer.historyArgs` 注释同步（候选集不变：`all`、`0`、`-1`…`-N`）
+- 测试：`repl/history_test.go` 三例改写 + 一例新增——`TestShowHistoryNegativeFullRender`（`-2`：头行标注 + `#4`/`#5` 完整渲染 + 时间顺序 + 不出现第 1 条 + 不出现一行摘要形态）、`TestShowHistoryNegativeRendersToolMessage`（新增：`-2` 下助手工具调用消息渲染 `[调用 run_shell]` + `→ run_shell {"command":"ls"}`，tool 消息渲染 `#3 run_shell` + 正文）、`TestShowHistoryNegativeBeyondTotal`（`-99`：头行不带尾标注、三条全部完整渲染）、`TestShowHistoryNegativeOne`（`-1`：头行 + `#4 assistant` + 正文，不出第 1 条）
+- 文档：`docs/design.md` `/history` 条（负数语义、`printHistoryFullRange`/`historyTotalHead`/`printHistoryList` 分工）
+- 验收：`gofmt -l` 干净、`go build ./...`、`go vet ./...`、`go test ./...` 全绿
+
 ## 2026-10-15 repl: /history 负数取最近若干条 + 0 取最后一条 + 参数补全
 
 - `/history -n` 输出**最近 n 条的列表**（沿用既有一行一条的截断形态，序号仍是绝对序号，便于接着 `/history <n>` 看全文）；`n` 超过总条数按全部处理、不报错，头行标注 `共 X 条消息（仅显示最近 N 条）`
