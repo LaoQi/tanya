@@ -96,7 +96,7 @@ func (c *completer) isThinkContext(line string) bool {
 	return !strings.Contains(prefix, " ")
 }
 
-// historyArgs 给出 /history 的参数候选：all、0（最后一条）与 -1~-N（最近 N 条）。
+// historyArgs 给出 /history 的参数候选：all、0（最后一条）与 -1~-N（最近 N 条全文）。
 // N 取历史条数与 historyTailMax 的较小值（条数未知时按上限给）；正数序号不做候选，
 // 大会话里以数字开头的候选会多到没有信息量。
 func (c *completer) historyArgs() []string {
