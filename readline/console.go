@@ -5,11 +5,14 @@ import (
 	"io"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/LaoQi/tanya/ctty"
 )
 
 var ErrUnsupported = errors.New("input: raw mode unsupported on this platform")
+
+const readerJoinTimeout = time.Second
 
 var ErrExited = errors.New("input: exit requested")
 
@@ -74,6 +77,11 @@ type backgroundReader interface {
 	backgroundRead() bool
 }
 
+// backgroundReasserter 是常驻读者的模式自愈面：读者周期性核对自己的模式位是否被外部改坏。
+type backgroundReasserter interface {
+	ReassertReader() error
+}
+
 // attachable 报告设备的读路径是否周期性交还控制权（EventIdle 回环），
 // 决定 Post 注入能否被及时消费。
 type attachable interface {
@@ -124,9 +132,10 @@ type consoleImpl struct {
 	resizePending bool
 	resizeCancel  func()
 
-	state  consoleState
-	reader *consoleReader
-	broken bool
+	state         consoleState
+	reader        *consoleReader
+	reassertTicks int
+	broken        bool
 }
 
 func newConsole(dev device) *consoleImpl {
@@ -380,6 +389,7 @@ func (c *consoleImpl) readLoop(r *consoleReader) {
 		}
 		ev, err := c.dev.readEvent()
 		if err == errIdle {
+			c.reassertReader(r)
 			continue
 		}
 		if err != nil {
@@ -422,12 +432,40 @@ func (c *consoleImpl) detachReaderLocked() *consoleReader {
 	return r
 }
 
+const readerReassertEvery = 10
+
+func (c *consoleImpl) reassertReader(r *consoleReader) {
+	c.mu.Lock()
+	live := c.reader == r
+	if live {
+		c.reassertTicks++
+		if c.reassertTicks >= readerReassertEvery {
+			c.reassertTicks = 0
+		} else {
+			live = false
+		}
+	}
+	c.mu.Unlock()
+	if !live {
+		return
+	}
+	if d, ok := c.dev.(backgroundReasserter); ok {
+		_ = d.ReassertReader()
+	}
+}
+
 func (c *consoleImpl) joinReader(r *consoleReader) {
 	if r == nil {
 		return
 	}
-	<-r.done
-	c.dev.Restore()
+	select {
+	case <-r.done:
+		c.dev.Restore()
+	case <-time.After(readerJoinTimeout):
+		c.mu.Lock()
+		c.broken = true
+		c.mu.Unlock()
+	}
 }
 
 func (c *consoleImpl) beginLend() {

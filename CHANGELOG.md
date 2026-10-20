@@ -1,3 +1,13 @@
+## 2026-10-21 readline: 常驻读者读路径改为 poll 前置——子进程改坏终端 termios 不再拖死整个回合
+
+- **事故**：ivan 工作区的 tanya 实例在 `git commit` 超时被杀后永久卡死（`state=busy` 2h20m、心跳停在「执行中」、`^C` 无效）。栈证据：agent 卡在 `LendStdin → beginLend → parkReader → joinReader` 的 `<-r.done`（142 分钟），常驻读者卡在 `posixTTY.readChunk → unix.Read` 的阻塞读（143 分钟）。根因是**共享控制终端的 termios 被外部程序改回行缓冲**（`git commit` 触发的 gpg/pinentry 经 `/dev/tty` 改 termios，且不在超时被杀的进程组内），读者的下一次 `read` 永久阻塞；`joinReader` 无超时地等它，于是一整个回合死等。实测确认：**已阻塞的 `read` 不会因 termios 被改回 raw 而醒来**（只有数据到达或 fd 关闭），所以单加超时救不了，必须让读路径不进入无限阻塞
+- **A 读路径 poll 前置**（`readline/device_posix.go`）：`readChunk` 改为先 `unix.Poll(fd, 100ms)` 等 `POLLIN` 再 `read`——poll 超时返回 `(0,nil)`（上层照旧 `errIdle`，与旧 `VMIN=0/VTIME=1` 的 100ms 语义等价）、`POLLHUP/POLLERR/POLLNVAL` 无 `POLLIN` 返回 `EIO`（保持挂断归一 `io.EOF` 的既有契约）、`EINTR` 重试、`EAGAIN/EWOULDBLOCK` 归一为空读。读者不再依赖 termios 状态，`parkReader` 最多 100ms 返回
+- **B 借出等待有界**（`readline/console.go`）：`joinReader` 的 `<-r.done` 加 1s 上限（`readerJoinTimeout`），超时置 `broken` 且**不 `Restore`**（读者可能仍在读，复原会打乱下一次模式基线），把任何未知阻塞降为有界等待
+- **C 模式自愈**（`posixTTY.ReassertReader` + 可选接口 `backgroundReasserter`）：读者每 10 个空闲周期（约 1s）核对 `VMIN/VTIME/ICANON/ECHO`，被外部改坏则用 `SetTermios`（**不 flush**，免得吞掉用户正在输入的多字节序列）重设回读者形态；**有意不改 `t.saved`**（退出复原基线不变）；借出期不重设（终端归子进程）。没有 C 时 A 只保证「不卡」，但按键会被行缓冲吞掉
+- **测试**：新增 `readline/reader_tamper_test.go`（真 pty：篡改 termios 后 `LendStdin` 仍在 600ms 内返回且不靠 B 兜底、篡改后 ≤1s 自愈为读者形态且 `saved` 基线不被污染、借出期不重设）与 `readline/reader_join_guard_test.go`（fake device 永久阻塞读取时 `LendStdin` 有界返回、置 `broken`、不复原）；两处变异复验（退回阻塞 `read` → 篡改用例红；去掉 join 超时 → 兜底用例红）
+- **端到端复现**：脚本在真 pty 里跑新二进制，工具返回后把该 pty 改成行缓冲——对照二进制（旧 `readChunk`）第二个工具调用不再返回（心跳停在 0s，与事故形态一致），修复版三次连跑均自愈并完成第二个工具
+- 文档：`AGENTS.md` 终端持有者条、`docs/terminal-console.md` S8 落地记录补三条；验收：`gofmt` 干净、`build/vet`、`go test ./...` 与 `-race ./readline/ ./repl/ ./tools/shell/` 全绿、darwin/windows 交叉构建、`render_audit.py` 17 PASS / 0 FAIL
+
 ## 2026-10-21 agent: 全局说明（AGENTS.md）路径可注入，主机侧可隔离
 
 - 新增 `agent.WithGlobalAgentsPath(path string) Option`：指定 system prompt 末尾"全局说明"段读取的文件；`""`（空串）表示**不读**全局说明。不指定时行为不变，仍读 `~/.config/tanya/AGENTS.md`（供 ivan 之类的宿主读自己的配置目录，避免串用 tanya 的全局说明）
