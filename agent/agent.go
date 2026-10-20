@@ -11,20 +11,21 @@ import (
 )
 
 type Agent struct {
-	cfg         *Config
-	client      *Client
-	tools       *toolRegistry
-	workspace   string
-	home        string
-	registered  []Tool
-	runDir      string
-	history     []Message
-	basePrompt  string
-	prompt      *promptBuilder
-	store       *sessionStore
-	stats       usageStats
-	handoffPend *pendingHandoff
-	lastHandoff *Handoff
+	cfg          *Config
+	client       *Client
+	tools        *toolRegistry
+	workspace    string
+	home         string
+	registered   []Tool
+	runDir       string
+	history      []Message
+	basePrompt   string
+	globalAgents string
+	prompt       *promptBuilder
+	store        *sessionStore
+	stats        usageStats
+	handoffPend  *pendingHandoff
+	lastHandoff  *Handoff
 }
 
 type ResponseInfo struct {
@@ -34,9 +35,10 @@ type ResponseInfo struct {
 }
 
 type Options struct {
-	noSave       bool
-	systemPrompt string
-	registered   []Tool
+	noSave           bool
+	systemPrompt     string
+	registered       []Tool
+	globalAgentsPath *string
 }
 
 type Option func(*Options)
@@ -53,6 +55,12 @@ func WithTools(tools ...Tool) Option {
 	return func(o *Options) { o.registered = append(o.registered, tools...) }
 }
 
+// WithGlobalAgentsPath 指定全局说明（AGENTS.md）文件，空串表示不读全局说明。
+// 不指定时沿用 ~/.config/tanya/AGENTS.md。
+func WithGlobalAgentsPath(path string) Option {
+	return func(o *Options) { o.globalAgentsPath = &path }
+}
+
 func New(cfg *Config, opts ...Option) (*Agent, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -66,7 +74,12 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 		return nil, err
 	}
 	home, _ := os.UserHomeDir()
-	a := &Agent{cfg: cfg, workspace: cwd, home: home, basePrompt: o.systemPrompt, registered: o.registered}
+	globalPath := globalAgentsPath()
+	if o.globalAgentsPath != nil {
+		globalPath = *o.globalAgentsPath
+	}
+	a := &Agent{cfg: cfg, workspace: cwd, home: home, basePrompt: o.systemPrompt,
+		registered: o.registered, globalAgents: globalPath}
 	if err := a.loadWorkspace(cwd, o.noSave); err != nil {
 		return nil, err
 	}
@@ -84,7 +97,7 @@ func (a *Agent) loadWorkspace(dir string, noSave bool) error {
 	}
 	a.runDir = runDir
 	a.workspace = dir
-	a.prompt = newPromptBuilder(a.basePrompt, dir, globalAgentsPath(), readAgentsFile)
+	a.prompt = newPromptBuilder(a.basePrompt, dir, a.globalAgents, a.home, readAgentsFile)
 	a.store = newSessionStore(sessionDir, archiveDir, dir, noSave)
 	a.tools = newToolRegistry(assembleTools(a.registered, a, a)...)
 	a.client = NewClient(a.cfg, a.tools.defs())

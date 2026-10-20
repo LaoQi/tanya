@@ -1,3 +1,12 @@
+## 2026-10-21 agent: 全局说明（AGENTS.md）路径可注入，主机侧可隔离
+
+- 新增 `agent.WithGlobalAgentsPath(path string) Option`：指定 system prompt 末尾"全局说明"段读取的文件；`""`（空串）表示**不读**全局说明。不指定时行为不变，仍读 `~/.config/tanya/AGENTS.md`（供 ivan 之类的宿主读自己的配置目录，避免串用 tanya 的全局说明）
+- 标题改为按**实际路径**显示：home 目录下缩写为 `~/…`（如 `# 全局说明（~/.config/ivan/AGENTS.md）`）、其余原样输出；`newPromptBuilder` 增加 `home` 参数（内部用，`promptBuilder` 增 `home` 字段与 `globalLabel()`），`Agent` 增 `globalAgents` 字段，`loadWorkspace` 重建 prompt 时沿用注入值
+- 空路径时**跳过读取**（不再依赖 `os.ReadFile("")` 返回错误来兜底）；项目说明（`<工作区>/AGENTS.md`）逻辑未改动
+- 测试：`TestPromptBuilderCustomGlobalPath`（自定义路径标题 `~/.config/ivan/AGENTS.md`、home 外路径原样显示、空路径不读全局）、`TestWithGlobalAgentsPathIsolation`（注入生效、`""` 禁用、缺省仍为 tanya 路径）；既有 5 处 `newPromptBuilder` 调用点补 `home` 参数
+- 文档：无行为变化项不在 `docs/` 展开；调用方口径见 ivan `docs/plan.md` D10
+- 验收：`gofmt -l` 干净、`go vet ./agent/`、`go test ./agent/` 与 `-race` 全绿
+
 ## 2026-10-16 repl: /history 负数改为逐条完整渲染（用户要求：0 与负数都走完整渲染，不再只给摘要）
 
 - `/history -n` 由「最近 n 条的一行摘要列表」改为**最近 n 条逐条完整渲染**：复用 `printHistoryFull`（消息头 `#N 角色` 按标题渲染并按角色着色 + assistant 正文走 markdown 管线 + user/tool 正文清洗后原样 + `→ 工具 参数` 行），条目之间空一行，与 `all` 同形；序号仍是绝对序号，`n` 超过总条数按全部处理、不报错

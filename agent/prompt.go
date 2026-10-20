@@ -10,13 +10,14 @@ type promptBuilder struct {
 	base       string
 	cwd        string
 	globalPath string
+	home       string
 	read       func(string) string
 	snapshot   string
 	legacy     bool
 }
 
-func newPromptBuilder(base, cwd, globalPath string, read func(string) string) *promptBuilder {
-	p := &promptBuilder{base: normalizePrompt(base), cwd: cwd, globalPath: globalPath, read: read}
+func newPromptBuilder(base, cwd, globalPath, home string, read func(string) string) *promptBuilder {
+	p := &promptBuilder{base: normalizePrompt(base), cwd: cwd, globalPath: globalPath, home: home, read: read}
 	p.reset()
 	return p
 }
@@ -32,11 +33,13 @@ func (p *promptBuilder) reset() {
 
 func (p *promptBuilder) build() string {
 	prompt := p.base
-	if global := p.read(p.globalPath); global != "" {
-		if prompt != "" {
-			prompt += "\n\n"
+	if p.globalPath != "" {
+		if global := p.read(p.globalPath); global != "" {
+			if prompt != "" {
+				prompt += "\n\n"
+			}
+			prompt += "# 全局说明（" + p.globalLabel() + "）\n\n" + global
 		}
-		prompt += "# 全局说明（~/.config/tanya/AGENTS.md）\n\n" + global
 	}
 	if project := p.read(filepath.Join(p.cwd, "AGENTS.md")); project != "" {
 		if prompt != "" {
@@ -59,6 +62,13 @@ func (p *promptBuilder) adopt(system string) {
 func (p *promptBuilder) system() string { return p.snapshot }
 
 func (p *promptBuilder) legacyPrompt() bool { return p.legacy }
+
+func (p *promptBuilder) globalLabel() string {
+	if p.home != "" && strings.HasPrefix(p.globalPath, p.home+string(filepath.Separator)) {
+		return "~/" + strings.TrimPrefix(p.globalPath, p.home+string(filepath.Separator))
+	}
+	return p.globalPath
+}
 
 func globalAgentsPath() string {
 	home, _ := os.UserHomeDir()

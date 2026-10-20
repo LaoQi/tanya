@@ -655,3 +655,46 @@ func TestTotalTokensCountsMultipleReasoningItems(t *testing.T) {
 		t.Fatalf("多条 reasoning 未全部计入: 差 %d", multi-single)
 	}
 }
+
+func TestWithGlobalAgentsPathIsolation(t *testing.T) {
+	isolatePromptEnv(t)
+	dir := t.TempDir()
+	global := filepath.Join(dir, "ivan-agents.md")
+	if err := os.WriteFile(global, []byte("ivan 专属全局说明"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ws := filepath.Join(dir, "ws")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := New(defaultConfig(), WithSystemPrompt("BASE"), WithGlobalAgentsPath(global))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if a.globalAgents != global {
+		t.Fatalf("globalAgents = %q", a.globalAgents)
+	}
+	if err := a.SwitchWorkspace(ws); err != nil {
+		t.Fatalf("SwitchWorkspace: %v", err)
+	}
+	if got := a.prompt.system(); !strings.Contains(got, "ivan 专属全局说明") {
+		t.Fatalf("自定义全局说明未注入: %q", got)
+	}
+
+	off, err := New(defaultConfig(), WithSystemPrompt("BASE"), WithGlobalAgentsPath(""))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if off.globalAgents != "" {
+		t.Fatalf("空路径应禁用全局说明: %q", off.globalAgents)
+	}
+
+	def, err := New(defaultConfig(), WithSystemPrompt("BASE"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if !strings.HasSuffix(def.globalAgents, filepath.Join(".config", "tanya", "AGENTS.md")) {
+		t.Fatalf("默认应仍指向 tanya 全局说明: %q", def.globalAgents)
+	}
+}
