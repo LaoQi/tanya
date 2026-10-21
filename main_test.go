@@ -197,6 +197,18 @@ func TestEnvSectionNoCwdAndGolden(t *testing.T) {
 	}
 }
 
+func TestSystemPromptHasDestructiveOpGuard(t *testing.T) {
+	for _, want := range []string{".tanya/", "sessions/", "archive/", "run/", "破坏性操作", "单独一步执行", "先查看再动手"} {
+		if !strings.Contains(systemPromptFile, want) {
+			t.Errorf("内置提示词缺少护栏片段 %q", want)
+		}
+	}
+	if !strings.Contains(systemPromptFile, "只删除自己创建的东西") {
+		return
+	}
+	t.Error("护栏不应使用所有权断言（已被行为指令取代）")
+}
+
 func TestSystemBaseAppendsEnvAfterPrompt(t *testing.T) {
 	inv, err := shell.Resolve("")
 	if err != nil {

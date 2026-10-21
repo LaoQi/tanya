@@ -353,6 +353,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 ## 系统提示与缓存友好
 
 - 组装规则：**基座**（`main` 组装：内置默认提示词原文 `system_prompt.md` + 空行 + 环境段；`//go:embed` 编译期嵌入，构造时经 `agent.WithSystemPrompt` 注入）+ 全局 `~/.config/tanya/AGENTS.md`（存在时）+ 工作区 `./AGENTS.md`（存在时）。各 AGENTS 段以 `# 全局说明`/`# 项目说明` 标题分隔，文件缺失/空白跳过，分隔空行仅在前段非空时补（空基座下首段直接起步、不留前导空行，仅库用法可达）。`agent` 不再内置文本，配置项 `system_prompt` 早已移除，故内容仍不可配、改后需重新编译
+- 内置提示词内容（2026-10-21 补护栏）：除角色与工作习惯外，含三条操作纪律——`.tanya/` 的用途说明（`sessions/`/`archive/`/`run/` 各存什么，陈述事实而非禁令）、破坏性操作单独一步执行并检查回显、路径用途不明时先查看再动手。起因是 `.tanya/` 被误认作实验脚手架而遭递归删除的事故；护栏治诱因、不治损失（损失侧由「落盘不做静默重建」与 `/export` 兜住），内容由 `main_test.go` 的 `TestSystemPromptHasDestructiveOpGuard` 守护
 - 职责边界：**环境段归 `main`**（`main.systemBase` 拼「提示词 + 环境段」一次注入），`agent` 侧**无任何 env 概念**——agent 只管在注入基座后追加两层 AGENTS.md 并冻结快照，与其「通用 agent 核心」定位一致（不感知 shell、工作区）。环境段详见《系统提示头部》
 - 快照机制：注入文本在 `promptBuilder` 构造期归一化（`\r\n`→`\n`、去尾部换行），保证注入字节确定；**快照为空则不写 system 行**（与 `loadFrom` 的「首行 system 且非空才算快照」对称，空提示词的库用法不会在文件里留下空快照行，载入时按当前配置重建）——`/new` 与 `/load` 时刻读取 AGENTS.md 组装快照；会话进行中零文件 IO，快照冻结；旧格式会话（system 首行含历史环境段）原样保留并标记，`/load` 时提示 `/new`
 - 缓存收益：history 全程 append-only，system 在本进程内逐字节恒定，同一会话内请求前缀不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中。env 段自 2026-09-14 起在装配期定格、2026-09-24 起随基座并入 `main` 注入（此前的 `WORKSPACE` 行是 system 内唯一会自行变化的输入，已随 2026-09-14 收口删除）；`/switch` 换工作区时工具描述随新工作区重建，而 system 不再变化（env 段已不含工作区事实，见《系统提示头部》）
