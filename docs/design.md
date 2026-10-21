@@ -63,7 +63,8 @@ render/markup/     内联标记解析
 
 新工作区（通常既无 `.tanya/` 也无 `AGENTS.md`）的一次性脚手架，之后与普通 REPL **完全无二**：不改提示符、不加斜杠命令、不改运行期行为。只作用于启动目录，不做项目探测、不调模型、不碰 `~/.config/tanya/*`。
 
-- 三项动作，逐项幂等、永不覆盖既有文件：建 `<cwd>/.tanya/sessions/`（0755）→ 询问后建 `<cwd>/.tanya/.gitignore`（`*\n`，0644）→ 缺 `AGENTS.md` 时建骨架（`# <目录名>` + `## 项目说明` + `## 构建与测试` 两小节 + 生成标记注释，0644）
+- 四项动作，逐项幂等、永不覆盖既有文件：建 `<cwd>/.tanya/sessions/`（0755）→ 建 `<cwd>/.tanya/README`（目录用途说明，0644）→ 询问后建 `<cwd>/.tanya/.gitignore`（`*\n`，0644）→ 缺 `AGENTS.md` 时建骨架（`# <目录名>` + `## 项目说明` + `## 构建与测试` 两小节 + 生成标记注释，0644）
+- `.tanya/README` 的用途：把目录可辨识性做进工作区（内容述明由 tanya 创建、勿删，并列出 `sessions/`/`archive/`/`run/` 各存什么）——事故的直接诱因是 agent 把无说明的 `.tanya/` 误认作自己的实验脚手架，属**预防**手段（不治抢救能力，那由「落盘不做静默重建」与 `/export` 承担）；用 `ensureFile` 建、既有文件一律不覆盖（用户可自行改写）；与 `.tanya/` 标记一致，`global`/`-m global` 下亦照建（会话实际落全局 data_dir，但工作区标记仍在）
 - **顺序不变量**：`main` 在配置与 `-m` 覆盖之后、`agent.New` 之前调用 `repl.RunInit`。`.tanya/` 既是会话落点、也是 `session_mode: auto` 的判定依据（`resolveSessionDir` 的 `isDir(cwd/.tanya)`），先建后 New 才知道本次启动要落本地工作区，首个会话即写入 `<cwd>/.tanya/sessions/`；同一次构造里 `promptBuilder` 也随即读到新生成的 AGENTS.md（进入本次会话 system 快照，`/new` 时重读）
 - 忽略文件走交互确认：`ctty.Open()` 打开 `/dev/tty` 成功才提问（`是否…？[Y/n]`，**空行/直接回车默认同意**，`y`/`yes` 为真，`n`/`no` 与其它输入为拒；读到 EOF 且无内容（如 `^D`）亦为拒，避免无输入时误建），失败即非交互（管道调用、无控制终端、Windows stub）不提问也不创建，报告里以 `MsgInitSkipNoTTY` 说明并给出手动命令；用户拒绝为 `MsgInitSkipDeclined`。既有 `.gitignore` 时不再提问
 - 报告：`repl.RunInit` 编排（头行 → 询问 → `agent.InitWorkspace` → 条目与会话目录行 + 一行提示），走 `st.Print`（KindNotice，plain 下仍可见），标记着色只用 `sem.Ok`/`sem.Dim`；条目路径相对工作区显示，头行与会话目录经 `initPath` 做 `~` 归约（不用提示符的 `shortPath` 缩写，避免报错路径被压缩）；`SessionDir` 取自 `resolveSessionDir(cfg, cwd)`，与 `agent.New` 同函数同输入，显式 `-m global` 时如实报告 global 落点（`.tanya/` 标记照建）

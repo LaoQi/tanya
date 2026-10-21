@@ -1,3 +1,14 @@
+## 2026-10-21 agent,docs: `tanya init` 增建 `.tanya/README`——目录可辨识性
+
+- **动机**（事故复盘次要问题）：`.tanya/` 点开头、被 git 忽略、内含只有 `*` 的 `.gitignore`、**无任何说明文件**，与「临时脚手架」外观无法区分——这是 agent 误判用途的直接诱因。报告把它列为低优先级事实记录，本次补上
+- **改动**（`agent/init.go`，纯新增一项、零逻辑改动）：`InitWorkspace` 的动作由三项增至四项，在 `.tanya/sessions` 之后、`.tanya/.gitignore` 之前插入 `ensureFile(<cwd>/.tanya/README, MsgInitNoteReadme, readmeFileContent)`。README 内容：由 tanya 创建、用于存放当前项目会话数据、**请勿删除**，并列出 `sessions/`（历史会话）/`archive/`（归档卷）/`run/`（运行实例注册）各存什么，末行提示会话记录删除后无法恢复
+- **遵循既有惯例**（无新机制）：走既有的 `ensureFile`——**幂等、既有文件一律不覆盖**（用户可自行改写 README）；顺带修复报告提到的「重建不完整」——事故后缺失的 `.gitignore`，用户重跑 `tanya init` 即可补齐（同一条路径）
+- **一处文案修正**（实施中发现）：初版 README 末句断言「本目录由 .tanya/.gitignore 忽略」——实测演练时 `.gitignore` 可能被用户拒绝或非交互跳过，该断言与实际不符，改为「建议以 .tanya/.gitignore（内容 *）忽略，避免进入版本库」
+- **性质与边界**：属**预防**（改善可辨识性），**不治抢救能力**——后者已由前两批修正承担（「落盘不做静默重建」暴露问题、`/export` 提供出口）。`global`/`-m global` 下 `.tanya/` 标记照建，README 亦随之存在（会话实际落全局 `data_dir`）
+- **测试**：`agent/init_test.go` 新增 2 例（`TestInitReadmeContent` 断言新建动作、内容含 `tanya`/`请勿删除`/三个子目录、且不产生 `README.md`；`TestInitReadmeNotOverwritten` 断言既有 README 保持原样不被改写）；`TestInitWorkspaceFresh` 的条目清单同步加入 `.tanya/README`（`init` 幂等用例已自动覆盖复跑路径）
+- **文档**：`docs/design.md`《init 模式》「三项动作」改「四项动作」并补 `.tanya/README` 用途条；`CHANGELOG` 本条
+- **验收**：`gofmt -l` 干净、`go build/vet ./...`、`go test ./...`（20 包）全绿、`make cross` 两平台零断点；真机 `tanya init` 首次运行报告 `新建 .tanya/README 目录用途说明（勿删）`、README 内容为预期、二次运行显示 `已有`（幂等）
+
 ## 2026-10-21 main,docs: 内置提示词补破坏性操作护栏（`.tanya/` 用途说明 + 操作纪律）
 
 - **动机**（事故复盘诱因）：模型把工作区的 `.tanya/` 误认作「自己先前留下的实验脚手架」，与建实验目录合并成一条命令执行 `Remove-Item -Recurse -Force .tanya`（`-Force` 永久删除 + `-ErrorAction SilentlyContinue` 零反馈）。事故机上全局 `AGENTS.md` 仅 14 字节、项目 `AGENTS.md` 无任何删除防护——**唯一随发行版对全体用户生效的护栏位置就是内置提示词**，故护栏落 `system_prompt.md`

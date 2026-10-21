@@ -44,7 +44,7 @@ func TestInitWorkspaceFresh(t *testing.T) {
 	if rep.SessionDir != filepath.Join(cwd, ".tanya", "sessions") {
 		t.Errorf("会话目录应落在新建的工作区标记内: %q", rep.SessionDir)
 	}
-	for _, rel := range []string{".tanya/sessions", ".tanya/.gitignore", "AGENTS.md"} {
+	for _, rel := range []string{".tanya/sessions", ".tanya/README", ".tanya/.gitignore", "AGENTS.md"} {
 		if e := entryOf(t, rep, rel); e.Action != InitCreated {
 			t.Errorf("%s 应新建: %+v", rel, e)
 		}
@@ -246,5 +246,55 @@ func TestInitExplicitGlobalKeepsMarker(t *testing.T) {
 	}
 	if e := entryOf(t, rep, ".tanya/sessions"); e.Action != InitCreated {
 		t.Errorf("工作区标记仍应创建: %+v", e)
+	}
+}
+
+func TestInitReadmeContent(t *testing.T) {
+	isolatePromptEnv(t)
+	cwd, _ := os.Getwd()
+	rep, err := InitWorkspace(initConfig(t), initYes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := entryOf(t, rep, ".tanya/README"); e.Action != InitCreated {
+		t.Errorf(".tanya/README 应新建: %+v", e)
+	}
+	b, err := os.ReadFile(filepath.Join(cwd, ".tanya", "README"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"tanya", "请勿删除", "sessions/", "archive/", "run/"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("README 缺少 %q:\n%s", want, b)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cwd, ".tanya", "README.md")); !os.IsNotExist(err) {
+		t.Error("不应创建 README.md（文件名固定为 README）")
+	}
+}
+
+func TestInitReadmeNotOverwritten(t *testing.T) {
+	isolatePromptEnv(t)
+	cwd, _ := os.Getwd()
+	if err := os.MkdirAll(filepath.Join(cwd, ".tanya"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(cwd, ".tanya", "README")
+	if err := os.WriteFile(path, []byte("用户自定内容\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := InitWorkspace(initConfig(t), initYes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := entryOf(t, rep, ".tanya/README"); e.Action != InitExists {
+		t.Errorf("既有 README 应跳过: %+v", e)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "用户自定内容\n" {
+		t.Errorf("不应改写既有 README: %q", b)
 	}
 }

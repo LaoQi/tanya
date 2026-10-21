@@ -34,6 +34,17 @@ type InitOptions struct {
 
 const ignoreFileContent = "*\n"
 
+const readmeFileContent = `# .tanya
+
+本目录由 tanya（终端 AI 编码代理）创建，用于存放当前项目的会话数据，请勿删除。
+
+- sessions/  历史会话（每轮对话追加一条记录）
+- archive/   归档会话卷（打包为 zip，归档时生成）
+- run/       运行实例注册（供 attach 接管运行中的实例，运行时生成）
+
+会话记录删除后无法恢复。会话数据仅供本地使用，建议以 .tanya/.gitignore（内容 *）忽略，避免进入版本库。
+`
+
 func InitWorkspace(cfg *Config, o InitOptions) (*InitReport, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -42,6 +53,12 @@ func InitWorkspace(cfg *Config, o InitOptions) (*InitReport, error) {
 	rep := &InitReport{Workspace: cwd}
 
 	e, err := ensureDir(filepath.Join(cwd, ".tanya", "sessions"), MsgInitNoteSessions)
+	if err != nil {
+		return nil, err
+	}
+	rep.Entries = append(rep.Entries, e)
+
+	e, err = ensureFile(filepath.Join(cwd, ".tanya", "README"), MsgInitNoteReadme, readmeFileContent)
 	if err != nil {
 		return nil, err
 	}
