@@ -309,6 +309,19 @@ func TestShortDur(t *testing.T) {
 	}
 }
 
+// staleEntry 在 ws 的 run 目录里写一条指向不存在 socket 的陈旧注册项。
+func staleEntry(t *testing.T, ws string, pid int) {
+	t.Helper()
+	cfg := config.Default()
+	cfg.SessionMode = "local"
+	dir := agent.RunDirFor(&cfg.Config, ws)
+	if err := attach.WriteEntry(dir, attach.Entry{
+		PID: pid, Sock: attach.SockPath(dir, pid), State: attach.StateIdle, Started: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type capturePrinter struct {
 	mu    sync.Mutex
 	lines []string
@@ -433,17 +446,6 @@ func TestRunAttachSelection(t *testing.T) {
 		cfg.SessionMode = "local"
 		return cfg
 	}
-	staleEntry := func(t *testing.T, ws string, pid int) {
-		t.Helper()
-		cfg := config.Default()
-		cfg.SessionMode = "local"
-		dir := agent.RunDirFor(&cfg.Config, ws)
-		if err := attach.WriteEntry(dir, attach.Entry{
-			PID: pid, Sock: attach.SockPath(dir, pid), State: attach.StateIdle, Started: time.Now(),
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
 
 	t.Run("无实例报错", func(t *testing.T) {
 		cfg := inWs(t)
@@ -555,4 +557,95 @@ func TestRunAttachSelection(t *testing.T) {
 			t.Fatalf("应报无会话: %v", err)
 		}
 	})
+}
+
+func TestRunAttachPrune(t *testing.T) {
+	oldWd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	cfg.SessionMode = "local"
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	ws, _ := os.Getwd()
+	dir := agent.RunDirFor(&cfg.Config, ws)
+
+	h := serveAttach(t, ws, 42001, attach.Result{OK: true, File: "f", Protocol: cfg.ApiProtocol})
+	staleEntry(t, ws, 42002)
+	tmp := attach.EntryPath(dir, 42003) + ".tmp"
+	if err := os.WriteFile(tmp, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &capturePrinter{}
+	_, listed, err := runAttach(cfg, repl.AttachArgs{Prune: true}, p)
+	if err != nil || !listed {
+		t.Fatalf("prune 应成功且不接管: %v %v", listed, err)
+	}
+	out := p.String()
+	if !strings.Contains(out, "42002") || !strings.Contains(out, "42003") || !strings.Contains(out, "42001") {
+		t.Fatalf("报告应含清理项与保留项: %q", out)
+	}
+	if strings.Contains(out, repl.MsgAttachHeader) {
+		t.Fatalf("prune 不应打印列表表头: %q", out)
+	}
+	if !strings.Contains(out, "运行实例") {
+		t.Fatalf("存活实例应标为运行实例: %q", out)
+	}
+	if n := atomic.LoadInt32(&h.n); n != 0 {
+		t.Fatalf("prune 不得触发接管: %d", n)
+	}
+	if _, err := os.Stat(attach.EntryPath(dir, 42002)); !os.IsNotExist(err) {
+		t.Fatal("陈旧项应被删除")
+	}
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Fatal("tmp 残渣应被删除")
+	}
+	if _, err := os.Stat(attach.EntryPath(dir, 42001)); err != nil {
+		t.Fatal("存活实例不得被删除")
+	}
+}
+
+func TestAttachOpsListAndPruneShareText(t *testing.T) {
+	oldWd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	cfg.SessionMode = "local"
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	ws, _ := os.Getwd()
+	serveAttach(t, ws, 42101, attach.Result{OK: true, File: "f", Protocol: cfg.ApiProtocol})
+	staleEntry(t, ws, 42102)
+	dir := agent.RunDirFor(&cfg.Config, ws)
+
+	ops := attachOps{runDir: func() (string, bool) { return dir, true }}
+	rows, err := attach.Snapshot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := ops.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list != attachListText(dir, rows) {
+		t.Fatalf("工具侧列表文本应与 --list 同源:\n%q\n%q", list, attachListText(dir, rows))
+	}
+	prune, err := ops.Prune()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prune, "42102") || !strings.Contains(prune, "42101") {
+		t.Fatalf("清理报告内容异常: %q", prune)
+	}
+
+	noSave := attachOps{runDir: func() (string, bool) { return "", false }}
+	if _, err := noSave.List(); err == nil || !strings.Contains(err.Error(), repl.MsgAttachPruneNoSave) {
+		t.Fatalf("-n 应报不落盘: %v", err)
+	}
+	if _, err := noSave.Prune(); err == nil || !strings.Contains(err.Error(), repl.MsgAttachPruneNoSave) {
+		t.Fatalf("-n 应报不落盘: %v", err)
+	}
 }

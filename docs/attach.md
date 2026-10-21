@@ -35,7 +35,7 @@ run 目录里每个实例两个文件（`attach` 包）：`<pid>.json`（原子�
 
 - `state` 三值：`idle` / `busy` / `readonly`（归档只读会话注册并显示，但不可接管）。
 - `title` = 会话首条 user 消息摘要（30 字，`agent.Summarize`），跳过 tanya 自己写的单行方括号事实行；无内容时回落 `tanya · <工作区名>`。
-- 陈旧项**只跳过不删除**：判活靠 `attach.Alive`（connect 探测，`ECONNREFUSED` 即陈旧），不做 kill、不做 pid 复用比对。
+- 陈旧项**默认只跳过不删除**：判活靠 `attach.Alive`（connect 探测，`ECONNREFUSED` 即陈旧），不做 kill、不做 pid 复用比对；显式清理走 `tanya attach --prune`（见 §11）。
 - 选择：`--pid N` > 唯一实例；0 个报错，多个报错并列出候选（绝不自动选）。
 
 ## 4. 协议（`attach` 包，JSON 流一条连接）
@@ -103,7 +103,7 @@ idle         : 注入 EventTakeover               → Readline 返回 ErrTakeove
 
 ## 8. 明确不做
 
-接管进行中的流式响应或借出中的子进程；跨机/跨用户接管；`tanya ask` 单发进程；A 的 detach/reattach（无终端存活）；摘要式交接（那是 `/next`）；陈旧项自动清理（`--prune`）；鉴权 token（同用户进程无收益，见 §9）。
+接管进行中的流式响应或借出中的子进程；跨机/跨用户接管；`tanya ask` 单发进程；A 的 detach/reattach（无终端存活）；摘要式交接（那是 `/next`）；**自动**清理（启动时扫或 `--list` 顺手删——清理一律显式，见 §11）；跨工作区清理（`--all`，见 §11 第 4 条）；鉴权 token（同用户进程无收益，见 §9）。
 
 ## 9. 关键取舍（用户拍板记录）
 
@@ -129,3 +129,29 @@ idle         : 注入 EventTakeover               → Readline 返回 ErrTakeove
   - 取消后立即重接管（2026-10-13 修复的真机回归，pty：假 LLM 挂住使 A 停在 busy）：原始 socket 发一条忙时非 force 请求并**硬关连接**（= B 的 `^C`）→ 立刻跑 `tanya attach --force`：新二进制接管成功（客户端退出码 0、打印「已接管会话 …」；A 打印「已中断」→ 回合分隔线 →「接管请求已取消」→ farewell +「已交由另一进程接管本次会话」、退出码 0、run 目录清空），改动前的二进制同一脚本报「对方已有接管请求在处理」、退出码 1。
 - review 修复（2026-10-13 同日第二轮）：删 `attach.Server` 死字段 `conns`；`attachRefused` 补 `bad-request`/`io-error` 映射；等待 ticker 非 force 一律武装（目标后来变忙也有进度行）；归档确认行收到 `ErrTakeover` 静默中止；force 回滚清残留注入（`readline.Drainer`）；事实行写不进应答 `io-error` 并回滚；`shortDur` 钳 0。`Alive` 探测占 backlog 与临时目录 pid 撞名核实为安全、留档不改。新增 `readline/post_test.go` 2 例、`repl/attach_test.go` 2 例、`repl/archive_test.go` 1 例、`main_test.go` 3 例；全量 `go test ./...`、`go test -race`（repl/attach/readline/agent）、`GOOS=windows build+vet`、`GOOS=darwin build` 通过。
 - 单测：`attach/` 8 例（握手/接管/版本不符/魔数不符/对端断开/陈旧跳过/socket 0600 与残留覆盖/Close 清理）；`repl/attach_test.go` 9 例（注册项字段与刷新、空闲端到端移交并退出、忙+非 force 不注入、忙+force 注入中断、对端断开即释放挂起且不改写会话（含取消提示恰好一次）、取消后新请求（force）不被 in-progress 挡、陈旧挂起不挡新请求、并发与 -n 拒绝、标题跳过事实行）；`agent/attach_test.go` 6 例（run 目录同 base 与 -n、AdoptSession 续写同文件且首行不改写、冻结停止写入、事实行、ArchiveDir/ApiProtocol）。
+
+## 11. 陈旧残渣清理（`--prune`，2026-10-21）
+
+进程被 SIGKILL / 崩溃 / 机器重启时，`Server.Close()` 没机会跑，run 目录会留下 `<pid>.json` + `<pid>.sock`。此前一律「只跳过不删」，现在给一个**显式**入口。
+
+**入口两处、同一内核**：`tanya attach --prune`（人用）与 `agent_custom` 的 `{"action":"prune","key":"attach"}`（模型用，见 `docs/agent-control-tool.md` §19）；列表同理：`--list` 与 `{"action":"get","key":"attach"}`。渲染文本由 `main.attachListText`/`main.attachPruneText` 单点产出，两个入口逐字节同源。
+
+**`--prune` 与 `--list`/`--pid`/`--force` 互斥**（同时给即报错）；`-n` 沿用既有拒绝（不落盘本就不注册）。不新增 REPL 斜杠命令：REPL 内的进程自身必然是活的，无清理对象。
+
+**判定规则**（`attach.Prune`，保守优先、宁留不误删）：
+
+| 情形 | 处置 |
+|---|---|
+| `<pid>.json` 可解析 + 探测有响应 | **保留**（含 `busy`、`^Z` 冻结、归档只读） |
+| `<pid>.json` 可解析 + 探测无响应 | 删 `.json` + `.sock`（+ socket 落在 `$TMPDIR/tanya-run-<pid>/` 时连目录一起删，对齐 `Server.Close`） |
+| `entry.Sock` 为空 | **不据空值判死**：回落探测 `<dir>/<pid>.sock` 与临时目录候选，均无响应才删 |
+| `<pid>.json` 不可解析，或 `pid` 与文件名不符 | 用文件名推候选 socket 探测；无响应 → 删；有响应 → **保留并报告** |
+| `<pid>.sock` 存在但无 `<pid>.json`（孤儿） | 探测该 sock；无响应 → 删；有响应 → 保留 |
+| `*.json.tmp`（`WriteEntry` 中途被杀） | 直接删（中间态，永非有效状态） |
+| 目录不存在 | 空报告，退出码 0 |
+
+**竞态缓解**：读项 → 探测失败 → 删除之间，若同 pid 的新进程起来并占了同一 socket，会误删活实例。删除前**重读一次 `.json`，要求 `Sock`/`Started`/`Updated` 与探测时一致**，不一致即跳过（成本一个 `ReadFile`）。不做 pid 复用比对、不做文件锁——与既有 `Alive` 探测口径一致（该窗口已留档为安全）。
+
+**输出**：逐项 `清理 <pid> <类别> <标题 · 会话> <sock 路径>` / `保留 <pid> <类别> …` + 一行汇总；无残渣打「（无陈旧记录）」。类别四值：陈旧注册 / 孤儿 socket / 损坏注册项 / 临时残渣；保留项类别另表（运行实例 / socket 有响应 / 损坏项有响应）。
+
+**明确不做**：自动清理（启动扫、`--list` 顺手删）；删任何**探得到**的东西；碰会话文件与归档卷；`--all` 跨工作区（`global` 模式理论上可扫 `$DataDir/workspaces/*/run`，但 `local` 模式的 `.tanya/run` 散落各处无法枚举，只覆盖一半的 `--all` 比不给更容易误导）。

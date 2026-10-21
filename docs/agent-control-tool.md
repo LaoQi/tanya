@@ -51,7 +51,7 @@ v1 §2 曾用"schema 变化击穿 cache / 前缀每轮失效"论证"单工具 + 
 | 顶层字段 | `action` / `key` / `value`（恒定） | `action` + 每个能力域一个字段（膨胀） | `action` / `params`（恒定） | 每工具独立 schema |
 | 归属表达 | **`key` 的取值**（枚举） | 无 | `params` 内字段名 | 工具边界 |
 | 扩展新能力 | 加一个 key（enum + 说明 + 实现一行） | 顶层加字段 | 加 params 结构 | 加工具 |
-| schema 内约束 | `action`/`key` 双 enum；`value` 按 key 校验 | 无 | 无 | 强（enum/类型/required） |
+| schema 内约束 | `action`/`key` 双 enum（`action` 含 `get`/`set`/`prune`）；`value` 按 key 校验 | 无 | 无 | 强（enum/类型/required） |
 | 单次改动面 | 1 个 key 表条目 | 4 处手改 | 2 处 | 3 处 |
 | 多键原子性 | 天然不需要（单 key 单 value） | 需要（v1 有专门逻辑） | 需要 | 不需要 |
 | 工具数 | 5（不变） | 5 | 5 | 6 |
@@ -80,13 +80,14 @@ v1 §2 曾用"schema 变化击穿 cache / 前缀每轮失效"论证"单工具 + 
 | `stat` | ✅ | ❌ | — | 会话 id、消息数、累计 token 用量 | `Stats()` |
 | `sessions` | ✅ | ❌ | — | 本工作区会话列表 + **每个会话的文件绝对路径** | `ListSessions()`（`SessionInfo` 需补 `Path`） |
 | `config_path` | ✅ | ❌ | — | 生效配置文件绝对路径 + 改动需重启生效的提示（2026-09-17 追加，见 §18） | `ConfigPath()` |
+| `attach` | ✅ | ❌ | — | 当前工作区运行实例列表（含陈旧标记）；**`action=prune` 可清理其中的陈旧残渣**（2026-10-21 追加，见 §19） | 宿主注入的 `AttachOps` |
 
 可写键只有 `model` 与 `reasoning_effort`（沿用 v1 §8 的边界）；其余为只读（`config_path` 是只读的**定位**能力：给出文件路径，改文件走 `run_shell`）。将来扩展（输出行数预算、单向收紧权限）只需在本表加行 + 在 §7 的 enum 加值。
 
 ## 7. schema（golden）
 
 ```json
-{"type":"object","properties":{"action":{"type":"string","enum":["get","set"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）"},"key":{"type":"string","enum":["model","reasoning_effort","models","usage","stat","sessions","config_path"],"description":"可写键 model、reasoning_effort；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）、config_path（生效配置文件绝对路径，可用 run_shell 读取或修改，改动需重启生效）"},"value":{"type":"string","description":"set 的新值（get 时忽略）。reasoning_effort 取 minimal/low/medium/high/max/off，off 表示清空该字段"}},"required":["action","key"]}
+{"type":"object","properties":{"action":{"type":"string","enum":["get","set","prune"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）；prune 只适用于 key=attach，清理该 key 对应的陈旧残渣"},"key":{"type":"string","enum":["model","reasoning_effort","models","usage","stat","sessions","config_path","attach"],"description":"可写键 model、reasoning_effort；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）、config_path（生效配置文件绝对路径，可用 run_shell 读取或修改，改动需重启生效）、attach（当前工作区的运行实例列表，可用 action=prune 清理其中的陈旧残渣）"},"value":{"type":"string","description":"set 的新值（get 时忽略）。reasoning_effort 取 minimal/low/medium/high/max/off，off 表示清空该字段"}},"required":["action","key"]}
 ```
 
 - `action` 与 `key` **双 enum**：这是模型填对参数的唯一约束来源（`value` 无法在 schema 层约束，见 §5）。
@@ -105,6 +106,7 @@ v1 §2 曾用"schema 变化击穿 cache / 前缀每轮失效"论证"单工具 + 
 | `{"action":"get","key":"usage"}` | `上下文: 12345 tokens` / `缓存命中: 9000（72.90%）`（无请求：`上下文: 未知（本轮尚无请求）`） |
 | `{"action":"get","key":"stat"}` | `会话: 20260915-145844` / `消息数: 18` / `累计: prompt 45678 / completion 1234 / total 46912` |
 | `{"action":"get","key":"sessions"}` | 见 §11 |
+| `{"action":"get","key":"attach"}` | 见 §19 |
 
 ### set
 
@@ -114,6 +116,16 @@ v1 §2 曾用"schema 变化击穿 cache / 前缀每轮失效"论证"单工具 + 
 | `{"action":"set","key":"reasoning_effort","value":"low"}` | `reasoning_effort: high → low` |
 | `{"action":"set","key":"reasoning_effort","value":"off"}` | `reasoning_effort: high → (未设置)` |
 
+### prune
+
+| 调用 | 返回 |
+|---|---|
+| `{"action":"prune","key":"attach"}` | 清理报告（清理/保留逐项 + 汇总），见 §19 |
+
+- `prune` 是**该工具唯一的磁盘副作用**（只删 `attach` 运行目录里可证明已死的残渣，不碰会话文件、不碰归档卷、不 kill 任何进程）。
+- 只接受 `key=attach`：`prune model` → `error: prune 只适用于 key=attach（当前 key: "model"）`；带非空 `value` → `error: prune 不需要 value（key="attach" 直接清理陈旧残渣）`（沿用「不静默忽略」原则）。
+- `set attach` 走既有只读分支报错；`attach` 不在可写 key 列表里。
+
 - 单 key 单 value → **v1 的多键原子性问题自然消失**（不存在"一个键改了、另一个报错"的半成品状态）。
 - 语义不变：只写内存 `Config`，不落盘、不入会话文件；对**下一次请求**生效；`repl` 的 `{model}`/`{effort}` 占位符每轮现读，自动跟上。
 
@@ -121,10 +133,13 @@ v1 §2 曾用"schema 变化击穿 cache / 前缀每轮失效"论证"单工具 + 
 
 | 情形 | 文本 |
 |---|---|
-| `action` 非法/缺失 | `error: 未知 action %q（可选: get/set）` |
+| `action` 非法/缺失 | `error: 未知 action %q（可选: get/set/prune）` |
 | `key` 缺失 | `error: 缺少 key（可用: model、reasoning_effort、models、usage、stat、sessions）` |
 | `key` 未知 | `error: 未知 key %q（可用: …同上）` |
 | `set` 只读 key | `error: %q 是只读 key（可写: model、reasoning_effort）` |
+| `prune` 用于非 `attach` key | `error: prune 只适用于 key=attach（当前 key: %q）` |
+| `prune` 带 `value` | `error: prune 不需要 value（key=%q 直接清理陈旧残渣）` |
+| `attach` 能力未注入 / 不落盘 | `error: attach 发现域不可用（本进程未启用运行实例发现域管理）` |
 | `set` 缺 `value` | `error: set 需要 value`（附该 key 的取值域） |
 | `model` 为空/全空白 | `error: model 不能为空` |
 | `reasoning_effort` 非法 | 现有 `MsgBadEffort`（含可选值） |
@@ -144,10 +159,16 @@ type agentArgs struct {
 
 // key 表驱动：新增能力 = 加一行，不动 Invoke 的分支结构
 type keySpec struct {
-	name     string
 	writable string // 非空 = 可写，值为取值说明（用于错误文本回显）
 	read     func() string
 	write    func(v string) (string, error)
+	prune    func() (string, error) // 非空 = 支持 action=prune（当前仅 attach）
+}
+
+// AttachOps 由宿主注入（agent 不感知 attach 实现）：返回现成文本。
+type AttachOps interface {
+	List() (string, error)
+	Prune() (string, error)
 }
 
 func (t *agentTool) keys() map[string]keySpec { /* model / reasoning_effort / models / usage / stat / sessions */ }
@@ -202,7 +223,7 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 
 ## 14. 不做清单（沿用 v1 §8）
 
-`api_key` / `base_url` / `user_agent` / `api_protocol` / system prompt 与 AGENTS.md 注入 / 主题配色 / `session_mode` / `data_dir` / 工具清单增删 / 终端原语（`ctty` 不变量）/ 任何「放宽」方向能力（用户确认、沙箱、只读模式）。
+`api_key` / `base_url` / `user_agent` / `api_protocol` / system prompt 与 AGENTS.md 注入 / 主题配色 / `session_mode` / `data_dir` / 工具清单增删 / 终端原语（`ctty` 不变量）/ 任何「放宽」方向能力（用户确认、沙箱、只读模式）；`attach` 的**跨工作区**清理（只限当前工作区，与 `tanya attach` 同一发现域）。
 
 ## 15. 已定事项
 
@@ -211,7 +232,8 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 3. `value` 声明为 `string`，按 key 校验（数值型 key 将来由实现解析）。
 4. `get sessions` 本期纳入：列表 + 文件绝对路径，**不读内容**；范围仅当前 `sessionDir`，列前 20。
 5. 实现走 key 表驱动（新增能力 = 表加一行 + enum 加一值）。
-6. `models` 按**默认可用**表述：启动即要求 `api_key`（`agent.New` 无降级路径），其可用性与 LLM 请求同源，故工具描述与错误文案不做网络/凭据提醒；查询失败仅原样透传错误文本。
+6. `attach` key 与 `prune` action 于 2026-10-21 追加（§19）：enum **静态**（不承载运行态），未注入/不落盘时按状态报错。
+7. `models` 按**默认可用**表述：启动即要求 `api_key`（`agent.New` 无降级路径），其可用性与 LLM 请求同源，故工具描述与错误文案不做网络/凭据提醒；查询失败仅原样透传错误文本。
 
 ## 16. 文档同步清单（S4）
 
@@ -244,3 +266,16 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 4. 只读语义与其他只读 key 一致：`set config_path` 明确报错，不改状态。
 5. **无缓存代价**（2026-10-21 更正）：`key` 的 enum 与描述属工具 schema，改它属**版本更替**——开发期改动对任何运行中的进程都无影响，新版本处理旧会话最多首轮 miss 一次、随即重新命中，无实质代价，不构成对加 key / 改文案的约束。`docs/cache-probe.md` 的台阶测的是**运行期**请求内容变化，与开发期改动无关（本条此前写作「打掉一次 prompt cache、属一次性预热成本」，与 §4 的撤回自相矛盾，已改正）。
 6. 文档 §7 的 golden 由 `TestAgentToolParamsDocInSync` 与 `agentParams()` 全串比对守卫，改 enum/描述需同步改本节的两处。
+
+## 19. 追加 `attach` key 与 `prune` action（2026-10-21）
+
+**动机**：模型此前无从得知「本工作区还有没有别的 tanya 实例、它们是否已陈旧」，也不能清理 SIGKILL / 崩溃留下的注册残渣。`tanya attach --prune` 是给人用的入口，模型侧经 `agent_custom` 得到同一能力。
+
+**口径**：
+
+1. **共用同一内核与同一文本源**：`attach.Snapshot`（列表数据）/ `attach.Prune`（清理）/ `main.attachListText`、`main.attachPruneText`（渲染）。CLI 的 `--list`/`--prune` 与工具的 `get attach`/`prune attach` 输出逐字节同源，不存在第二套渲染。
+2. **`agent` 侧零 attach 依赖**：`go list -deps ./agent` 仍不含任何 tanya 包。能力经窄接口 `AttachOps`（`List`/`Prune` 返回现成文本）+ `agent.WithAttachOps` 注入；`main` 的适配器用闭包活取 `Agent.RunDir()`，`/switch` 后自动跟随（与 `tools.Options.Workspace` 同一手法）。
+3. **enum 静态、按状态报错**：`attach` 恒在 `key` enum 里，`prune` 恒在 `action` enum 里——`agentParams()` 保持纯函数（编译期常量），§7 golden 与 `TestAgentToolParamsDocInSync` 仍是唯一来源。未注入（库用法）报 `attach 发现域不可用`；`-n` 不落盘报同一句（`RunDir()` 为空）。这与 `config_path` 空值回 `(未设置)`、`--no-save` 时 `stat` 回 `(不落盘)` 同一风格。
+4. **只删可证明已死的**：判定与竞态缓解见 `docs/attach.md` §11。探得到的一律保留（含 `busy`、被 `^Z` 冻结、归档只读）。
+5. **磁盘副作用登记**：`prune attach` 是本工具**唯一的磁盘写入**（且只有删除，没有新增）。它不写配置文件、不碰会话文件与归档卷、不 kill 进程，故不违反 §2 的「只写内存」——那句话约束的是**配置态**，run 目录残渣是运行态垃圾。AGENTS.md 与 `docs/design.md` 已按此表述。
+6. **无缓存代价**（§18.5 更正）：enum/描述变更属版本更替，不构成设计约束。

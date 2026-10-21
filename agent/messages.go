@@ -86,7 +86,7 @@ const (
 	MsgEmptyDataDir          = "data_dir 不能为空"
 	MsgEmptyConfigPath       = "config_path 不能为空"
 	MsgBadSessionMode        = "无效 session_mode %q（可选: auto/local/global）"
-	MsgControlBadAction      = "未知 action %q（可选: get/set）"
+	MsgControlBadAction      = "未知 action %q（可选: get/set/prune）"
 	MsgControlUnset          = "(未设置)"
 	MsgControlModel          = "model: %s"
 	MsgControlEffort         = "reasoning_effort: %s"
@@ -112,6 +112,9 @@ const (
 	MsgControlReadOnlyKey    = "%q 是只读 key（可写: %s）"
 	MsgControlNeedValue      = "set 需要 value（%s）"
 	MsgControlConfigPath     = "配置文件: %s"
+	MsgControlPruneKey       = "prune 只适用于 key=attach（当前 key: %q）"
+	MsgControlPruneValue     = "prune 不需要 value（key=%q 直接清理陈旧残渣）"
+	MsgControlAttachAbsent   = "attach 发现域不可用（本进程未启用运行实例发现域管理）"
 	MsgControlModelSpec      = "非空模型名"
 	MsgControlEffortSpec     = "minimal/low/medium/high/max/off，off 表示清空"
 )

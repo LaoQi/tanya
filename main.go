@@ -192,7 +192,8 @@ func main() {
 	a, err = agent.New(&cfg.Config,
 		agent.NoSave(*f.noSave),
 		agent.WithTools(list...),
-		agent.WithSystemPrompt(systemBase(inv)))
+		agent.WithSystemPrompt(systemBase(inv)),
+		agent.WithAttachOps(attachOps{runDir: func() (string, bool) { return a.RunDir() }}))
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
@@ -266,17 +267,22 @@ func runAttach(cfg *config.Config, args repl.AttachArgs, st printer) (*attach.Re
 		return nil, false, err
 	}
 	dir := agent.RunDirFor(&cfg.Config, cwd)
-	all, err := attach.List(dir)
+	if args.Prune {
+		rep, err := attach.Prune(dir)
+		if err != nil {
+			return nil, false, err
+		}
+		printAttachPrune(st, rep)
+		return nil, true, nil
+	}
+	rows, err := attach.Snapshot(dir)
 	if err != nil {
 		return nil, false, err
 	}
-	rows := make([]attachRow, 0, len(all))
-	alive := make([]attach.Entry, 0, len(all))
-	for _, e := range all {
-		ok := attach.Alive(e)
-		rows = append(rows, attachRow{e: e, alive: ok})
-		if ok {
-			alive = append(alive, e)
+	alive := make([]attach.Entry, 0, len(rows))
+	for _, r := range rows {
+		if r.Alive {
+			alive = append(alive, r.Entry)
 		}
 	}
 	if args.List {
@@ -295,7 +301,7 @@ func runAttach(cfg *config.Config, args repl.AttachArgs, st printer) (*attach.Re
 		}
 		if !found {
 			for _, r := range rows {
-				if r.e.PID == args.PID {
+				if r.Entry.PID == args.PID {
 					return nil, false, fmt.Errorf(repl.MsgAttachStaleFmt, args.PID)
 				}
 			}
@@ -391,42 +397,149 @@ func attachRefused(code string) string {
 	return code
 }
 
-// attachRow 是列表里的一行：注册项 + 连接探测结果。
-type attachRow struct {
-	e     attach.Entry
-	alive bool
+// attachOps 把 attach 发现域能力交给 agent_custom（agent 侧不感知 attach）；
+// 工作区经闭包活取，/switch 后自动跟随。
+type attachOps struct {
+	runDir func() (string, bool)
 }
 
-func printAttachList(st printer, dir string, rows []attachRow) {
-	st.Print(fmt.Sprintf(repl.MsgAttachListHead, dir))
+func (o attachOps) dir() (string, error) {
+	dir, ok := o.runDir()
+	if !ok || dir == "" {
+		return "", errors.New(repl.MsgAttachPruneNoSave)
+	}
+	return dir, nil
+}
+
+func (o attachOps) List() (string, error) {
+	dir, err := o.dir()
+	if err != nil {
+		return "", err
+	}
+	rows, err := attach.Snapshot(dir)
+	if err != nil {
+		return "", err
+	}
+	return attachListText(dir, rows), nil
+}
+
+func (o attachOps) Prune() (string, error) {
+	dir, err := o.dir()
+	if err != nil {
+		return "", err
+	}
+	rep, err := attach.Prune(dir)
+	if err != nil {
+		return "", err
+	}
+	return attachPruneText(rep), nil
+}
+
+func printAttachList(st printer, dir string, rows []attach.Row) {
+	st.Print(attachListText(dir, rows))
+}
+
+// attachListText 渲染运行实例列表（CLI --list 与 agent_custom get attach 共用同一份文本）。
+func attachListText(dir string, rows []attach.Row) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, repl.MsgAttachListHead, dir)
 	if len(rows) == 0 {
-		st.Print(repl.MsgAttachListNone)
-		return
+		b.WriteString(repl.MsgAttachListNone)
+		return b.String()
 	}
-	st.Print(repl.MsgAttachHeader)
+	b.WriteString(repl.MsgAttachHeader)
 	for _, r := range rows {
-		state := "空闲"
-		if !r.alive {
-			state = repl.MsgAttachListStale
-		} else {
-			switch r.e.State {
-			case attach.StateBusy:
-				state = "执行中"
-				if !r.e.TurnStarted.IsZero() {
-					state += " " + shortDur(time.Since(r.e.TurnStarted))
-				}
-			case attach.StateReadOnly:
-				state = "归档只读"
-			}
-		}
-		title := r.e.Title
-		if s := r.e.Session; s != "" && title != "" {
-			title += " · " + s
-		} else if title == "" {
-			title = s
-		}
-		st.Print(fmt.Sprintf(repl.MsgAttachRowFmt, r.e.PID, padCol(r.e.TTY, 7), padCol(state, 12), term.Truncate(title, 60)))
+		fmt.Fprintf(&b, repl.MsgAttachRowFmt, r.Entry.PID, padCol(r.Entry.TTY, 7), padCol(attachStateLabel(r), 12), term.Truncate(attachTitle(r.Entry), 60))
 	}
+	return b.String()
+}
+
+func attachStateLabel(r attach.Row) string {
+	if !r.Alive {
+		return repl.MsgAttachListStale
+	}
+	switch r.Entry.State {
+	case attach.StateBusy:
+		if !r.Entry.TurnStarted.IsZero() {
+			return "执行中 " + shortDur(time.Since(r.Entry.TurnStarted))
+		}
+		return "执行中"
+	case attach.StateReadOnly:
+		return "归档只读"
+	}
+	return "空闲"
+}
+
+func attachTitle(e attach.Entry) string {
+	if e.Title == "" {
+		return e.Session
+	}
+	if e.Session == "" {
+		return e.Title
+	}
+	return e.Title + " · " + e.Session
+}
+
+func printAttachPrune(st printer, rep attach.PruneReport) {
+	st.Print(attachPruneText(rep))
+}
+
+// attachPruneText 渲染清理报告（CLI --prune 与 agent_custom prune attach 共用）。
+func attachPruneText(rep attach.PruneReport) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, repl.MsgAttachPruneHead, rep.Dir)
+	if len(rep.Removed) == 0 && len(rep.Kept) == 0 {
+		b.WriteString(repl.MsgAttachPruneNone)
+		return b.String()
+	}
+	if len(rep.Removed) == 0 {
+		b.WriteString(repl.MsgAttachPruneNone)
+	}
+	for _, it := range rep.Removed {
+		fmt.Fprintf(&b, repl.MsgAttachPruneRowFmt, it.PID, padCol(attachKindLabel(it.Kind), 12), attachItemDesc(it))
+	}
+	for _, it := range rep.Kept {
+		fmt.Fprintf(&b, repl.MsgAttachPruneKeptFmt, it.PID, padCol(attachKeptLabel(it.Kind), 12), attachItemDesc(it))
+	}
+	fmt.Fprintf(&b, repl.MsgAttachPruneTailFmt, len(rep.Removed), len(rep.Kept))
+	return b.String()
+}
+
+func attachKindLabel(kind string) string {
+	switch kind {
+	case attach.KindEntry:
+		return "陈旧注册"
+	case attach.KindSock:
+		return "孤儿 socket"
+	case attach.KindCorrupt:
+		return "损坏注册项"
+	case attach.KindTmp:
+		return "临时残渣"
+	}
+	return kind
+}
+
+func attachKeptLabel(kind string) string {
+	switch kind {
+	case attach.KindEntry:
+		return "运行实例"
+	case attach.KindSock:
+		return "socket 有响应"
+	case attach.KindCorrupt:
+		return "损坏项有响应"
+	}
+	return kind
+}
+
+func attachItemDesc(it attach.PrunedItem) string {
+	parts := make([]string, 0, 2)
+	if s := attachTitle(attach.Entry{Title: it.Title, Session: it.Session}); s != "" {
+		parts = append(parts, s)
+	}
+	if it.Sock != "" {
+		parts = append(parts, it.Sock)
+	}
+	return strings.Join(parts, "  ")
 }
 
 func padCol(s string, w int) string {

@@ -184,6 +184,7 @@ tanya attach --list          # 只列出当前工作区的实例：PID / TTY / �
 tanya attach                 # 同工作区唯一实例时直接接管
 tanya attach --pid 41234     # 有多个实例时指定
 tanya attach --force         # 目标正在执行时立即中断并接管（默认等它跑完这一回合）
+tanya attach --prune         # 清理本工作区里陈旧实例留下的注册残渣（崩溃/SIGKILL 残留）
 ```
 
 - 选项写在子命令之后（`tanya attach --pid N`）；全局选项仍在前面（`tanya -c cfg attach`）。
@@ -191,6 +192,7 @@ tanya attach --force         # 目标正在执行时立即中断并接管（默�
 - 默认**等待**目标当前回合结束再交接（等待期会定期显示它的执行时长，`^C` 可取消等待；取消不会改动对方会话）；`--force` 则是立即中断接管。
 - 接管方继承会话 id、历史、工作区、模型与思考等级，并接着写**同一个**会话文件；接管后它自己也照常可被再次接管。
 - 明确不支持：跨工作区/跨机接管、接管 `tanya ask` 单发进程、接管进行中的流式回合（`--force` 中断后从最后一个完整边界继续）。
+- 实例被 SIGKILL/崩溃后会在本工作区留下陈旧注册（`--list` 标「陈旧」）；`--prune` 显式清理，只删**连接探测无响应**的项（活实例一律保留），顺带清掉孤儿 socket 与半截临时文件。模型也可经 `agent_custom` 的 `get attach` / `prune attach` 使用同一能力。
 
 ### 启动自动归档
 
@@ -239,7 +241,7 @@ TTY 下的状态展示是**追加式**（不重绘、不移动光标，终端被
 | `get_env` | 环境变量查询（敏感变量名拒绝） |
 | `calc` | 四则运算求值 |
 | `next_session` | 交接上下文并开启新会话：`summary` 写进度/关键上下文/下一阶段目标（必填，上限 128K 字符），`continue` 缺省 `true`（交接后自动继续执行）、`false` 则等用户输入，`workspace` 可选（把新会话开到另一工作区：绝对路径/`~`/相对当前工作区；省略或等于当前工作区即不切换）；旧会话结束、原文件只追加一行移交事实行（切换工作区时事实行与交接消息标注目标） |
-| `agent_custom` | 按 `key` 读取或修改：可写 `model`、`reasoning_effort`（`set` 需给 `value`）；只读 `models`（可用模型）、`usage`（上下文/缓存）、`stat`（会话统计）、`sessions`（会话列表 + jsonl 路径）、`config_path`（生效配置文件路径，改动需重启生效）。改动对下一次请求生效，仅本次会话有效 |
+| `agent_custom` | 按 `key` 读取或修改：可写 `model`、`reasoning_effort`（`set` 需给 `value`）；只读 `models`（可用模型）、`usage`（上下文/缓存）、`stat`（会话统计）、`sessions`（会话列表 + jsonl 路径）、`config_path`（生效配置文件路径，改动需重启生效）、`attach`（本工作区运行实例列表）；`action=prune` 配 `key=attach` 清理陈旧注册残渣。改动对下一次请求生效，仅本次会话有效 |
 
 ### 终端与信号行为
 

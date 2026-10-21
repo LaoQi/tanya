@@ -17,7 +17,18 @@ type stubConfigTarget struct {
 	noSave   bool
 	err      error
 	path     string
+	ops      AttachOps
 }
+
+type stubAttachOps struct {
+	list  string
+	prune string
+	err   error
+	np    int
+}
+
+func (s *stubAttachOps) List() (string, error)  { return s.list, s.err }
+func (s *stubAttachOps) Prune() (string, error) { s.np++; return s.prune, s.err }
 
 func (s *stubConfigTarget) Model() string                        { return s.model }
 func (s *stubConfigTarget) SetModel(m string) error              { s.model = m; return nil }
@@ -28,6 +39,7 @@ func (s *stubConfigTarget) ListSessions() ([]SessionInfo, error) { return s.sess
 func (s *stubConfigTarget) ConfigPath() string                   { return s.path }
 func (s *stubConfigTarget) NoSave() bool                         { return s.noSave }
 func (s *stubConfigTarget) Stats() Stats                         { return s.stats }
+func (s *stubConfigTarget) AttachOps() AttachOps                 { return s.ops }
 
 func (s *stubConfigTarget) RequestHandoff(string, bool, string) (string, error) { return "", s.err }
 
@@ -79,8 +91,9 @@ func TestAgentToolDescGolden(t *testing.T) {
 	want := "读取或修改当前 agent 的模型与思考等级，并查询运行态统计、可用模型与会话列表。" +
 		"改动仅本次会话有效（不写入配置文件，进程退出即恢复），对下一次请求生效。" +
 		"切换模型后 prompt cache 不复用，需重新预热。" +
-		"action=get 按 key 读取；action=set 按 key 写入可写 key（需同时给 value）。" +
-		"key 可用: model、reasoning_effort、models、usage、stat、sessions、config_path；可写 key: model、reasoning_effort。"
+		"action=get 按 key 读取；action=set 按 key 写入可写 key（需同时给 value）；" +
+		"action=prune 只适用于 key=attach（清理当前工作区 attach 运行目录里的陈旧残渣，只删探测无响应的项）。" +
+		"key 可用: model、reasoning_effort、models、usage、stat、sessions、config_path、attach；可写 key: model、reasoning_effort。"
 	tool := newAgentTool(&stubConfigTarget{})
 	if got := tool.Definition().Function.Description; got != want {
 		t.Errorf("描述全串不匹配:\n got %q\nwant %q", got, want)
@@ -92,8 +105,8 @@ func TestAgentToolDescGolden(t *testing.T) {
 
 func TestAgentToolParamsGolden(t *testing.T) {
 	want := `{"type":"object","properties":{` +
-		`"action":{"type":"string","enum":["get","set"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）"},` +
-		`"key":{"type":"string","enum":["model","reasoning_effort","models","usage","stat","sessions","config_path"],"description":"可写键 model、reasoning_effort；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）、config_path（生效配置文件绝对路径，可用 run_shell 读取或修改，改动需重启生效）"},` +
+		`"action":{"type":"string","enum":["get","set","prune"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）；prune 只适用于 key=attach，清理该 key 对应的陈旧残渣"},` +
+		`"key":{"type":"string","enum":["model","reasoning_effort","models","usage","stat","sessions","config_path","attach"],"description":"可写键 model、reasoning_effort；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）、config_path（生效配置文件绝对路径，可用 run_shell 读取或修改，改动需重启生效）、attach（当前工作区的运行实例列表，可用 action=prune 清理其中的陈旧残渣）"},` +
 		`"value":{"type":"string","description":"set 的新值（get 时忽略）。reasoning_effort 取 minimal/low/medium/high/max/off，off 表示清空该字段"}},` +
 		`"required":["action","key"]}`
 	got := string(newAgentTool(&stubConfigTarget{}).Definition().Function.Parameters)

@@ -26,6 +26,7 @@ type Agent struct {
 	stats        usageStats
 	handoffPend  *pendingHandoff
 	lastHandoff  *Handoff
+	attachOps    AttachOps
 }
 
 type ResponseInfo struct {
@@ -39,6 +40,7 @@ type Options struct {
 	systemPrompt     string
 	registered       []Tool
 	globalAgentsPath *string
+	attachOps        AttachOps
 }
 
 type Option func(*Options)
@@ -61,6 +63,12 @@ func WithGlobalAgentsPath(path string) Option {
 	return func(o *Options) { o.globalAgentsPath = &path }
 }
 
+// WithAttachOps 注入 attach 发现域能力（agent_custom 的 attach key）；
+// 不注入时该 key 报告能力不可用，agent 侧不感知 attach 实现。
+func WithAttachOps(ops AttachOps) Option {
+	return func(o *Options) { o.attachOps = ops }
+}
+
 func New(cfg *Config, opts ...Option) (*Agent, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -79,7 +87,7 @@ func New(cfg *Config, opts ...Option) (*Agent, error) {
 		globalPath = *o.globalAgentsPath
 	}
 	a := &Agent{cfg: cfg, workspace: cwd, home: home, basePrompt: o.systemPrompt,
-		registered: o.registered, globalAgents: globalPath}
+		registered: o.registered, globalAgents: globalPath, attachOps: o.attachOps}
 	if err := a.loadWorkspace(cwd, o.noSave); err != nil {
 		return nil, err
 	}
@@ -522,6 +530,9 @@ func (a *Agent) SetReasoningEffort(level string) error {
 func (a *Agent) History() []Message { return a.history }
 
 func (a *Agent) NoSave() bool { return a.store.disabled }
+
+// AttachOps 返回宿主注入的 attach 能力（未注入为 nil）。
+func (a *Agent) AttachOps() AttachOps { return a.attachOps }
 
 func (a *Agent) SessionID() string {
 	if a.store.disabled {

@@ -20,6 +20,10 @@ func TestParseAttachArgs(t *testing.T) {
 		{"--pid x", AttachArgs{}, true},
 		{"--pid 0", AttachArgs{}, true},
 		{"--pid -5", AttachArgs{}, true},
+		{"--prune", AttachArgs{Prune: true}, false},
+		{"--prune --list", AttachArgs{}, true},
+		{"--prune --force", AttachArgs{}, true},
+		{"--prune --pid 1234", AttachArgs{}, true},
 		{"--bogus", AttachArgs{}, true},
 		{"extra", AttachArgs{}, true},
 	}

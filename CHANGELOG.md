@@ -1,14 +1,25 @@
+## 2026-10-21 attach: 陈旧残渣清理（`tanya attach --prune`）+ `agent_custom` 的 `attach` key / `prune` action
+
+- **动机**：进程被 SIGKILL/崩溃/重启时 `Server.Close()` 没机会跑，run 目录留下 `<pid>.json` + `<pid>.sock`；此前一律「只跳过不删」（`docs/attach.md` §8 明确把 `--prune` 列为不做）。实测两个本地工作区的 run 目录分别积了 3 条与 1 条
+- **内核**（`attach/prune.go`，零内部依赖）：`Snapshot(dir)`（列表数据 + 存活探测）、`Prune(dir) (PruneReport, error)`。判定保守优先、宁留不误删——可解析且探测有响应一律保留（含 `busy`、`^Z` 冻结、归档只读）；`entry.Sock` 为空**不据空值判死**，回落探测 `<dir>/<pid>.sock` 与 `$TMPDIR/tanya-run-<pid>/` 候选；`pid` 与文件名不符的 json 按损坏处理；另清孤儿 `.sock`、`*.json.tmp` 残渣、socket 落在临时目录时的空目录（对齐 `Server.Close`）。**竞态缓解**：删除前重读 `.json` 要求 `Sock`/`Started`/`Updated` 与探测时一致，不一致即跳过（pid 复用 + 微秒级窗口），不做 pid 复用比对、不做文件锁
+- **CLI**：`tanya attach --prune`，与 `--list`/`--pid`/`--force` **互斥**（`MsgAttachPruneConflict`），`-n` 沿用既有拒绝；`--prune` 走与 `--list` 同一条提前返回路径（不接管）。`main` 侧渲染收口为 `attachListText`/`attachPruneText` 两个纯函数，`--list` 改为经前者输出（逐字节不变），`attachRow` 类型删除（改用 `attach.Row`）
+- **工具**：`agent_custom` 新增 `attach` key（`get` 列运行实例，含陈旧标记）与 `prune` action（只接受 `key=attach`；带非空 `value`、用于其他 key 均明确报错）。`agent` 侧**零 attach 依赖**（`go list -deps ./agent` 仍只剩自身）——能力经窄接口 `AttachOps{List,Prune}` + `agent.WithAttachOps` 注入，`main` 适配器用闭包活取 `Agent.RunDir()`（`/switch` 后跟随），未注入/`-n` 报「attach 发现域不可用」。enum **静态**（`agentParams()` 保持纯函数、§7 golden 唯一来源），状态用文本表达
+- **文本同源**：CLI 与工具共用 `attach.Snapshot`/`attach.Prune` 与同一份渲染函数，无第二套格式（用例 `TestAttachOpsListAndPruneShareText` 对拍）
+- **测试**：`attach/prune_test.go` 8 例（陈旧成对删除、存活保留、空 Sock 回落、孤儿 sock 两向、坏 json 两向、tmp 残渣、目录不存在与幂等、Snapshot 存活判定）；`attach/prune_internal_test.go` 3 例（**探测后被重写即跳过**（经内部 `afterProbe` 钩子注入）、临时 socket 目录一并删除、`unchanged` 检测）；`agent/control_attach_test.go` 8 例（get 透传、未注入报错、prune 正常、非 attach key 拒绝且不改状态、带 value 拒绝且不执行、错误透传、未知 action 含 prune、`WithAttachOps` 采纳）；`main_test.go` 补 `TestRunAttachPrune`/`TestAttachOpsListAndPruneShareText`（含 `-n` 报错路径，`staleEntry` 提升为包级助手）；`repl/attach_args_test.go` 补 `--prune` 解析与三种互斥。golden 全串同步（`agent/control_test.go`、`docs/agent-control-tool.md` §7）
+- **文档**：`docs/attach.md` 新增 §11（入口、判定表、竞态缓解、输出、明确不做）并从 §8 移除「陈旧项自动清理」；`docs/agent-control-tool.md` §5/§6/§8/§9/§10/§14/§15 + 新增 §19（含「`prune` 是唯一磁盘副作用」的边界说明）；`AGENTS.md` 接管条与 `agent_custom` 条；`README.md` attach 小节与工具表
+- **验收**：`gofmt -l` 干净、`go build/vet ./...`、`go test ./...`（20 包）全绿、`go test -race ./attach/ ./agent/ ./repl/ .` 全绿、`make cross` 两平台零断点、`tanya config | diff - config.example.yaml` 为空；真机 `./tanya attach --list` → `--prune` 清掉 3 条陈旧（含标题/sock 路径逐项报告）、保留本进程自身那条，再跑一次输出「（无陈旧记录）」、退出码 0；`--prune --list` 报互斥、退出码 1；`attachOps` 的 `List`/`Prune` 文本与 CLI 逐字节同源（临时探针用例复核后删除）
+
 ## 2026-10-21 docs: 更正「开发期改动 → prompt cache 代价」的错误记录
 
-- **问题**（用户指出）：记录里多处把**开发期**改动（改工具描述/加 key/升级二进制）与 prompt cache 代价挂钩，写成「打掉一次 prompt cache」「属一次性预热成本」「改模型侧文案按台阶估代价」这类表述。这是对运行时与开发过程的混淆——开发期改动对任何运行中的进程都没有影响；换用新版本后，即便继续处理旧会话，也最多多一次提交（首轮 miss）随即重新命中，对缓存无实质影响。该认知还被记录反复强化，成为「不为字节不变牺牲功能」之外的另一条隐形约束
+- **问题**（用户指出）：记录里多处把**开发期**改动（改工具描述/加 key/升级二进制）与 prompt cache 代价挂钩，写成「打掉一次 prompt cache」「属一次性预热成本」「改模型侧文案按台阶估代价」这类表述。这是对运行时与开发过程的混淆——开发期改动对任何运行中的进程都没有影响；用户换用新版本后，即便继续处理旧会话，也最多多一次提交（首轮 miss）随即重新命中，对缓存无实质影响。该认知还被记录反复强化，成为「不为字节不变牺牲功能」之外的另一条隐形约束
 - **修正**（7 处，纯文档）：
   - `docs/agent-control-tool.md` §18.5 由「代价：加值/改文案会打掉一次 prompt cache，属一次性预热成本」改为「**无缓存代价**：改 enum/描述属版本更替，不构成对加 key / 改文案的约束」——原文还与同文档 §4「缓存不参与形态选择」的撤回**自相矛盾**，一并纠正
   - `docs/design.md`《系统提示与缓存友好》删「改模型侧文案时按台阶估代价、尽量把易变内容放靠后」，改为「开发期改动不在缓存不变性的讨论范围内；台阶只用于评估运行期易变输入」
   - `docs/cache-probe.md` 开篇补适用范围声明：台阶的全部适用对象是**运行期**，开发期改代码/改文案/升级二进制属版本更替、无实质代价、不作为设计取舍依据
   - `AGENTS.md` 缓存条补「开发期改动不在此列……不得作为设计取舍依据」
   - 另三处措辞纠正（均属把改造验收口径误写成运行期依赖）：`docs/shell-tool.md` 工具清单不变量的「prompt cache 依赖」→ 改造验收口径；`docs/session-archive.md`「prompt cache 红线在归档路径上的延续」→ 内容保真要求；`docs/design.md`《工具》「顺序即 tools 段顺序（prompt cache 依赖）」→ 运行期稳定可保住前缀缓存；`docs/multimodal.md` P0 判据「缓存不变性」→ 行为等价性
-- **未改动**（复核确认正确）：`docs/design.md` 系统提示头部「system 任何字节变化击穿其后前缀」、`docs/cache-probe.md` 台阶数据与《env 段的动态源》——讨论对象都是**运行期**请求内容变化（env 段曾每轮重探），结论成立
-- **验收**：`go test ./agent/ -run TestAgentToolParamsDocInSync`（§7 golden 守卫）通过；纯文档，无代码影响
+- **未改动**（复核确认正确）：`docs/design.md` §551「system 任何字节变化击穿其后前缀」、`docs/cache-probe.md` 台阶数据与《env 段的动态源》——讨论对象都是**运行期**请求内容变化（env 段曾每轮重探），结论成立
+- **验收**：`go test ./agent/ -run TestAgentToolParamsDocInSync`（§7 golden 守卫）通过；`git diff --stat` 7 文件、纯文档，无代码影响
 
 ## 2026-10-21 readline: 常驻读者测试补平台标签——darwin/windows 测试构建不再断
 

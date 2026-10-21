@@ -12,7 +12,7 @@ const agentModelListLimit = 50
 
 const agentSessionListLimit = 20
 
-var agentKeyNames = []string{"model", "reasoning_effort", "models", "usage", "stat", "sessions", "config_path"}
+var agentKeyNames = []string{"model", "reasoning_effort", "models", "usage", "stat", "sessions", "config_path", "attach"}
 
 var agentWritableKeys = []string{"model", "reasoning_effort"}
 
@@ -23,7 +23,8 @@ func agentWritableLabel() string { return strings.Join(agentWritableKeys, "、")
 var agentDesc = "读取或修改当前 agent 的模型与思考等级，并查询运行态统计、可用模型与会话列表。" +
 	"改动仅本次会话有效（不写入配置文件，进程退出即恢复），对下一次请求生效。" +
 	"切换模型后 prompt cache 不复用，需重新预热。" +
-	"action=get 按 key 读取；action=set 按 key 写入可写 key（需同时给 value）。" +
+	"action=get 按 key 读取；action=set 按 key 写入可写 key（需同时给 value）；" +
+	"action=prune 只适用于 key=attach（清理当前工作区 attach 运行目录里的陈旧残渣，只删探测无响应的项）。" +
 	"key 可用: " + agentKeysLabel() + "；可写 key: " + agentWritableLabel() + "。"
 
 type configTarget interface {
@@ -36,6 +37,7 @@ type configTarget interface {
 	ConfigPath() string
 	NoSave() bool
 	Stats() Stats
+	AttachOps() AttachOps
 }
 
 type agentTool struct{ target configTarget }
@@ -58,6 +60,13 @@ type keySpec struct {
 	writable string
 	read     func() string
 	write    func(v string) (string, error)
+	prune    func() (string, error)
+}
+
+// AttachOps 由宿主注入 attach 发现域能力（本包不感知 attach）：List/Prune 返回现成文本。
+type AttachOps interface {
+	List() (string, error)
+	Prune() (string, error)
 }
 
 func (t *agentTool) keys() map[string]keySpec {
@@ -77,6 +86,7 @@ func (t *agentTool) keys() map[string]keySpec {
 		"stat":        {read: t.readStat},
 		"sessions":    {read: t.readSessions},
 		"config_path": {read: t.readConfigPath},
+		"attach":      {read: t.readAttach, prune: t.pruneAttach},
 	}
 }
 
@@ -86,7 +96,7 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 		return ToolResult{Text: fmt.Sprintf(MsgParseArgs, err)}
 	}
 	action := strings.ToLower(strings.TrimSpace(args.Action))
-	if action != "get" && action != "set" {
+	if action != "get" && action != "set" && action != "prune" {
 		return ToolResult{Text: fmt.Sprintf(MsgErrPrefix+MsgControlBadAction, args.Action)}
 	}
 	key := strings.ToLower(strings.TrimSpace(args.Key))
@@ -99,6 +109,19 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 	}
 	if action == "get" {
 		return ToolResult{Text: spec.read()}
+	}
+	if action == "prune" {
+		if spec.prune == nil {
+			return ToolResult{Text: fmt.Sprintf(MsgErrPrefix+MsgControlPruneKey, key)}
+		}
+		if args.Value != nil && strings.TrimSpace(*args.Value) != "" {
+			return ToolResult{Text: fmt.Sprintf(MsgErrPrefix+MsgControlPruneValue, key)}
+		}
+		out, err := spec.prune()
+		if err != nil {
+			return ToolResult{Text: MsgErrPrefix + err.Error()}
+		}
+		return ToolResult{Text: out}
 	}
 	if spec.writable == "" {
 		return ToolResult{Text: fmt.Sprintf(MsgErrPrefix+MsgControlReadOnlyKey, key, agentWritableLabel())}
@@ -127,6 +150,25 @@ func (t *agentTool) writeEffort(v string) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf(MsgControlEffortSwitch, old, effortLabel(t.target.ReasoningEffort())), nil
+}
+
+func (t *agentTool) readAttach() string {
+	if t.target.AttachOps() == nil {
+		return MsgErrPrefix + MsgControlAttachAbsent
+	}
+	out, err := t.target.AttachOps().List()
+	if err != nil {
+		return MsgErrPrefix + err.Error()
+	}
+	return out
+}
+
+func (t *agentTool) pruneAttach() (string, error) {
+	ops := t.target.AttachOps()
+	if ops == nil {
+		return "", fmt.Errorf("%s", MsgControlAttachAbsent)
+	}
+	return ops.Prune()
 }
 
 func (t *agentTool) readConfigPath() string {
@@ -208,8 +250,8 @@ func effortLabel(v string) string {
 func agentParams() string {
 	keys, _ := json.Marshal(agentKeyNames)
 	return fmt.Sprintf(`{"type":"object","properties":{`+
-		`"action":{"type":"string","enum":["get","set"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）"},`+
-		`"key":{"type":"string","enum":%s,"description":"可写键 %s；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）、config_path（生效配置文件绝对路径，可用 run_shell 读取或修改，改动需重启生效）"},`+
+		`"action":{"type":"string","enum":["get","set","prune"],"description":"get 读取 key 的当前值；set 写入可写 key（需同时给 value）；prune 只适用于 key=attach，清理该 key 对应的陈旧残渣"},`+
+		`"key":{"type":"string","enum":%s,"description":"可写键 %s；只读键 models（服务端可用模型）、usage（上下文与缓存）、stat（会话统计）、sessions（会话列表与文件路径，jsonl 每行一条消息）、config_path（生效配置文件绝对路径，可用 run_shell 读取或修改，改动需重启生效）、attach（当前工作区的运行实例列表，可用 action=prune 清理其中的陈旧残渣）"},`+
 		`"value":{"type":"string","description":"set 的新值（get 时忽略）。reasoning_effort 取 minimal/low/medium/high/max/off，off 表示清空该字段"}},`+
 		`"required":["action","key"]}`, keys, agentWritableLabel())
 }

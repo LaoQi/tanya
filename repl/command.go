@@ -22,6 +22,7 @@ type AttachArgs struct {
 	PID   int
 	List  bool
 	Force bool
+	Prune bool
 }
 
 func ParseAttachArgs(arg string) (AttachArgs, error) {
@@ -34,6 +35,8 @@ func ParseAttachArgs(arg string) (AttachArgs, error) {
 			out.List = true
 		case f == "--force" || f == "-f":
 			out.Force = true
+		case f == "--prune":
+			out.Prune = true
 		case f == "--pid" || strings.HasPrefix(f, "--pid="):
 			v := strings.TrimPrefix(f, "--pid=")
 			if f == "--pid" {
@@ -51,6 +54,14 @@ func ParseAttachArgs(arg string) (AttachArgs, error) {
 		default:
 			return AttachArgs{}, fmt.Errorf(MsgAttachBadArg, f)
 		}
+	}
+	switch {
+	case out.Prune && out.List:
+		return AttachArgs{}, errors.New(MsgAttachPruneConflict)
+	case out.Prune && out.PID > 0:
+		return AttachArgs{}, errors.New(MsgAttachPruneConflict)
+	case out.Prune && out.Force:
+		return AttachArgs{}, errors.New(MsgAttachPruneConflict)
 	}
 	return out, nil
 }

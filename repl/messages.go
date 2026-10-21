@@ -245,9 +245,10 @@ const (
 	MsgVerboseRequiresPlain = "--verbose 需与 --plain 同用"
 	FlagVersion             = "显示版本号并退出"
 
-	MsgAttachUsage  = "用法: tanya attach [--pid N] [--force] [--list]\n"
-	MsgAttachBadPID = "无效 pid %q"
-	MsgAttachBadArg = "未知参数 %q（用法: tanya attach [--pid N] [--force] [--list]）"
+	MsgAttachUsage         = "用法: tanya attach [--pid N] [--force] [--list] [--prune]\n"
+	MsgAttachBadPID        = "无效 pid %q"
+	MsgAttachBadArg        = "未知参数 %q（用法: tanya attach [--pid N] [--force] [--list] [--prune]）"
+	MsgAttachPruneConflict = "--prune 与其他选项互斥（用法: tanya attach --prune）"
 )
 
 const (
@@ -263,5 +264,11 @@ const (
 	MsgAttachNoSessionFmt = "目标没有可接管的会话"
 	MsgAttachNoSave       = "接管需要落盘：不能与 -n/--no-save 同用"
 	MsgAttachHeader       = "   PID  TTY      状态          标题 / 会话\n"
+	MsgAttachPruneHead    = "当前工作区的陈旧注册（%s）:\n"
+	MsgAttachPruneNone    = "（无陈旧记录）\n"
+	MsgAttachPruneRowFmt  = "  清理 %5d  %s  %s\n"
+	MsgAttachPruneKeptFmt = "  保留 %5d  %s  %s\n"
+	MsgAttachPruneTailFmt = "清理 %d 项；保留 %d 项（探测有响应的一律不动）\n"
+	MsgAttachPruneNoSave  = "本进程不落盘（-n），不参与 attach 发现域"
 	MsgAttachRowFmt       = "  %5d  %-7s  %-12s  %s\n"
 )
