@@ -280,8 +280,10 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 只读会话（`-n` / `--no-save`）：由 CLI 经 `agent.New(cfg, agent.NoSave(true))` 传入，`Config` 无对应字段，配置文件与 env 均无法开启；`ask` 单发与 REPL 通用。读路径全部保留（启动预扫描、`ListSessions`、`LoadSession` 照常，既有会话不会被截断或改写），写路径在 `sessionStore.append` 首行（`disabled`）返回 nil 被整体关闭（覆盖成功/中断/错误三条路径）；`MkdirAll(store.dir)` 在只读模式下跳过，目录缺失时 `store.refresh` 按空列表处理不报错。内存 history 照常维护（中断保留语义不变），进程退出即丢。REPL 启动时在欢迎屏下方以语义色 `Warn` 打一行 `MsgNoSaveWarn`（`REPL.noSaveWarn`，agent 为 nil 或可写时不输出），`ask` 静默；归档只读态（`frozen`）是另一维度的只读，见《会话归档与 fork》
 - 落盘：`<timestamp>.jsonl`，每轮结束追加写入新消息（一行一条 Message JSON），记录完整历史（回放/审计用）；回合因中断/错误保留产出时同样落盘（含终止提示行）
 - 落盘原子性：本批消息先编码进内存缓冲再单次追加写入，写入报错或短写时 `Truncate` 回滚到写入前大小，`saved` 游标与文件内容始终一致（重试不会产生重复行/半行）
+- 落盘不做静默重建：**已绑定**到既有会话文件之后（写过 / `/load` / 接管 `adopt` 任一发生，`sessionStore.bound`），追加前先 `Stat` 探测，文件不存在即返回 `MsgSessionFileGone` 错误，**不带 `O_CREATE` 落盘**——文件被外部删除是数据丢失事件，必须暴露给调用方，绝不能伪装成一次成功写入（事故根因之一，见 `CHANGELOG`）。只有全新会话（`/new`、`/fork` 后的首次写入，尚未绑定）才允许创建文件
 - 首行持久化 system prompt 快照（`systemSaved` 标志防重复），`/load` 还原后前缀与当初逐字节一致；旧格式文件（无 system 首行）回退为载入时快照当前 AGENTS.md，且保持不补写；system 行不计入会话条数与摘要
 - 会话列表扫描：`agent.New` 启动时预扫描填充缓存（只读模式不建目录，目录缺失按空处理）；`ListSessions` 按 (mtime,size) 增量刷新，仅重扫变化的文件与归档卷；每文件 `bufio` 逐行计数条数、仅解码至首条 user 消息取摘要；归档卷只读中央目录取条目与描述（见《会话归档与 fork》）
+- 内存历史导出（`/export <路径>`，`Agent.ExportSession`）：会话文件被外部删除/损坏时，进程内存里的 `history` 是唯一幸存副本，本命令把它写成**与原会话文件同构的 jsonl**（首行 system 快照 + 逐条 `Message`，复用 `encodeMessages`），产物可被 `/load` 直接读回。相对路径落在当前工作区。**只读内存**：不触碰会话文件、不改 `saved`/`systemSaved` 游标、不进 history；写盘走 tmp + rename，失败不留半截文件。边界：只在进程存活期间有效（进程退出即内存消失），且不自动回填原会话文件——导出是独立产物，由用户决定如何恢复
 - 会话浏览经 `/load` 无参菜单（`repl/picker.go`，stdin 非终端降级为序号输入），候选带 id、时间、条数、首条 user 摘要；`/load <id>` 直接恢复继续对话（归档条目在摘要列前标注 `[归档] `，载入为只读，见《会话归档与 fork》）；id 校验拒绝路径穿越（`/sessions` 命令已移除，浏览职责由 picker 承接）
 
 ## 会话归档与 fork

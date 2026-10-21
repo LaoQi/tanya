@@ -236,3 +236,250 @@ func TestAskFlushesToolRoundsIncrementally(t *testing.T) {
 		}
 	}
 }
+
+func toolCall(id, name, args string) ToolCall {
+	var tc ToolCall
+	tc.ID = id
+	tc.Type = "function"
+	tc.Function.Name = name
+	tc.Function.Arguments = args
+	return tc
+}
+
+func TestExportSessionRoundTrip(t *testing.T) {
+	a := newTestAgent(t)
+	a.history = []Message{
+		{Role: "user", Content: "q1"},
+		{Role: "assistant", Content: "a1", ToolCalls: []ToolCall{toolCall("t1", "run_shell", `{"command":"ls"}`)}},
+		{Role: "tool", Content: "out", ToolCallID: "t1", Name: "run_shell"},
+		{Role: "user", Content: "看图", Images: []ImageRef{{MIME: "image/png", Data: "QUJD"}}},
+	}
+	path := filepath.Join(t.TempDir(), "recover.jsonl")
+	n, err := a.ExportSession(path)
+	if err != nil || n != 4 {
+		t.Fatalf("ExportSession: n=%d err=%v", n, err)
+	}
+	s := newSessionStore(filepath.Dir(path), "", "", false)
+	history, system, err := s.load(strings.TrimSuffix(filepath.Base(path), ".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if system != a.prompt.system() {
+		t.Errorf("system 首行不一致: %q", system)
+	}
+	if len(history) != 4 {
+		t.Fatalf("往返条数: %d", len(history))
+	}
+	if len(history[1].ToolCalls) != 1 || history[1].ToolCalls[0].Function.Name != "run_shell" {
+		t.Errorf("tool_calls 丢失: %+v", history[1])
+	}
+	if history[2].ToolCallID != "t1" || history[2].Name != "run_shell" {
+		t.Errorf("tool 字段丢失: %+v", history[2])
+	}
+	if len(history[3].Images) != 1 || history[3].Images[0].Data != "QUJD" {
+		t.Errorf("图像字段丢失: %+v", history[3])
+	}
+}
+
+func TestExportSessionDoesNotTouchSessionFile(t *testing.T) {
+	a := newTestAgent(t)
+	a.history = []Message{{Role: "user", Content: "q1"}}
+	if err := a.save(); err != nil {
+		t.Fatal(err)
+	}
+	orig, err := os.ReadFile(a.store.path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, expected := a.store.saved, a.store.systemSaved
+	out := filepath.Join(t.TempDir(), "r.jsonl")
+	if _, err := a.ExportSession(out); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(a.store.path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(orig) != string(after) {
+		t.Error("导出不应改动会话文件")
+	}
+	if a.store.saved != saved || a.store.systemSaved != expected {
+		t.Error("导出不应改动落盘游标")
+	}
+}
+
+func TestExportSessionEmptyHistory(t *testing.T) {
+	a := newTestAgent(t)
+	path := filepath.Join(t.TempDir(), "empty.jsonl")
+	n, err := a.ExportSession(path)
+	if err != nil || n != 0 {
+		t.Fatalf("空历史导出: n=%d err=%v", n, err)
+	}
+	s := newSessionStore(filepath.Dir(path), "", "", false)
+	history, system, err := s.load(strings.TrimSuffix(filepath.Base(path), ".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 0 || system != a.prompt.system() {
+		t.Errorf("空历史往返: history=%d system=%q", len(history), system)
+	}
+}
+
+func TestExportSessionNoPath(t *testing.T) {
+	a := newTestAgent(t)
+	if _, err := a.ExportSession("  "); err == nil {
+		t.Error("空路径应报错")
+	}
+}
+
+func TestExportSessionBadPathLeavesNoPartial(t *testing.T) {
+	a := newTestAgent(t)
+	a.history = []Message{{Role: "user", Content: "q"}}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "sub", "r.jsonl")
+	if _, err := a.ExportSession(target); err == nil {
+		t.Fatal("目录不存在应报错")
+	}
+	if _, err := os.Stat(target + ".tmp"); !os.IsNotExist(err) {
+		t.Error("失败不应留下 .tmp")
+	}
+}
+
+func TestSessionStoreAppendNoSilentRecreate(t *testing.T) {
+	dir := t.TempDir()
+	s := newSessionStore(dir, "", "", false)
+	s.rotate()
+	path := s.path()
+	msgs := []Message{{Role: "user", Content: "q1"}}
+	if err := s.append(msgs, "sys"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	msgs = append(msgs, Message{Role: "assistant", Content: "a1"})
+	err := s.append(msgs, "sys")
+	if err == nil {
+		t.Fatal("文件消失后追加应报错")
+	}
+	if !strings.Contains(err.Error(), "会话文件已丢失") {
+		t.Errorf("错误信息应点明文件丢失: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("不应静默重建会话文件")
+	}
+}
+
+func TestSessionStoreAppendCreatesOnFirstWrite(t *testing.T) {
+	dir := t.TempDir()
+	s := newSessionStore(dir, "", "", false)
+	s.rotate()
+	if _, err := os.Stat(s.path()); !os.IsNotExist(err) {
+		t.Fatal("rotate 不应建文件")
+	}
+	if err := s.append([]Message{{Role: "user", Content: "a"}}, "sys"); err != nil {
+		t.Fatalf("首次写入应创建文件: %v", err)
+	}
+	if err := s.append([]Message{{Role: "user", Content: "a"}, {Role: "assistant", Content: "b"}}, "sys"); err != nil {
+		t.Fatalf("文件存在后应可续写: %v", err)
+	}
+	data, err := os.ReadFile(s.path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), `"role":"system"`) != 1 {
+		t.Errorf("system 行应只写一次: %q", data)
+	}
+}
+
+func TestSessionStoreAppendAfterLoadFailsOnMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	content := `{"role":"system","content":"sys"}` + "\n" + `{"role":"user","content":"q"}` + "\n"
+	path := filepath.Join(dir, "20260101-000000.jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := newSessionStore(dir, "", "", false)
+	history, _, err := s.load("20260101-000000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	history = append(history, Message{Role: "assistant", Content: "a"})
+	if err := s.append(history, "sys"); err == nil {
+		t.Error("载入的文件消失后追加应报错")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("不应静默重建")
+	}
+}
+
+func TestSessionStoreAppendAfterLoadSystemOnlyFailsOnMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "20260101-000000.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"system","content":"sys"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := newSessionStore(dir, "", "", false)
+	history, _, err := s.load("20260101-000000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 0 || s.saved != 0 {
+		t.Fatalf("仅 system 行应得空历史: %d saved=%d", len(history), s.saved)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.append([]Message{{Role: "user", Content: "q"}}, "sys"); err == nil {
+		t.Error("载入（即使历史为空）后文件消失应报错，不得重建")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("不应静默重建")
+	}
+}
+
+func TestAskFailsWhenSessionFileDeleted(t *testing.T) {
+	m := newMockLLM(t, mockStep{content: "答一"}, mockStep{content: "答二"})
+	a := newAgent(t, m)
+	if err := a.Ask(context.Background(), "第一问", nil); err != nil {
+		t.Fatal(err)
+	}
+	path := a.store.path()
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	err := a.Ask(context.Background(), "第二问", nil)
+	if err == nil {
+		t.Fatal("会话文件消失后 Ask 应返回错误，不得静默成功")
+	}
+	if !strings.Contains(err.Error(), "会话文件已丢失") {
+		t.Errorf("错误应点明文件丢失: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("不应静默重建会话文件")
+	}
+}
+
+func TestSettleTurnStillRunsWhenFileDeleted(t *testing.T) {
+	m := newMockLLM(t, mockStep{content: "答一"}, mockStep{content: "答二"})
+	a := newAgent(t, m)
+	if err := a.Ask(context.Background(), "第一问", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(a.store.path()); err != nil {
+		t.Fatal(err)
+	}
+	var end TurnInfo
+	sink := EventSink(func(e Event) {
+		if e.Kind == EventTurnEnd {
+			end = e.Turn
+		}
+	})
+	_ = a.Ask(context.Background(), "第二问", sink)
+	if !end.Failed {
+		t.Error("文件丢失导致的回合失败应反映在 EventTurnEnd.Failed")
+	}
+}

@@ -45,6 +45,7 @@ type sessionStore struct {
 	file        string
 	saved       int
 	systemSaved bool
+	bound       bool // 已绑定到一个既有的会话文件（写过 / load 过 / adopt 过）：此后文件必须仍在
 	cache       map[string]SessionInfo
 	stat        map[string]sessionFileStat
 	volStat     map[string]sessionFileStat
@@ -80,6 +81,7 @@ func (s *sessionStore) rotate() { s.rotateTo(s.nextID()) }
 func (s *sessionStore) rotateTo(id string) {
 	s.saved = 0
 	s.systemSaved = false
+	s.bound = false
 	s.frozen = false
 	s.frozenID = ""
 	s.file = filepath.Join(s.dir, id+".jsonl")
@@ -94,23 +96,49 @@ func (s *sessionStore) id() string {
 	return strings.TrimSuffix(filepath.Base(s.file), ".jsonl")
 }
 
-func (s *sessionStore) append(msgs []Message, system string) error {
-	if s.disabled || s.frozen || s.held || s.saved >= len(msgs) {
-		return nil
+func systemFor(system string, saved bool) string {
+	if saved {
+		return ""
 	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	if !s.systemSaved && system != "" {
+	return system
+}
+
+func encodeMessages(w io.Writer, msgs []Message, system string) error {
+	enc := json.NewEncoder(w)
+	if system != "" {
 		if err := enc.Encode(Message{Role: "system", Content: system}); err != nil {
 			return err
 		}
 	}
-	for _, m := range msgs[s.saved:] {
+	for _, m := range msgs {
 		if err := enc.Encode(m); err != nil {
 			return err
 		}
 	}
-	f, err := os.OpenFile(s.file, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	return nil
+}
+
+func (s *sessionStore) append(msgs []Message, system string) error {
+	if s.disabled || s.frozen || s.held || s.saved >= len(msgs) {
+		return nil
+	}
+	// 已绑定的会话文件必须仍在：消失即报错，不做静默重建（详见 docs/design.md《会话》）。
+	// 只有全新会话（rotate 后、Fork 后，尚未绑定任何文件）的首次写入才允许创建。
+	create := !s.bound
+	if !create {
+		if _, err := os.Stat(s.file); err != nil {
+			return fmt.Errorf(MsgSessionFileGone, s.file)
+		}
+	}
+	var buf bytes.Buffer
+	if err := encodeMessages(&buf, msgs[s.saved:], systemFor(system, s.systemSaved)); err != nil {
+		return err
+	}
+	flags := os.O_APPEND | os.O_WRONLY
+	if create {
+		flags |= os.O_CREATE
+	}
+	f, err := os.OpenFile(s.file, flags, 0o644)
 	if err != nil {
 		return err
 	}
@@ -130,6 +158,7 @@ func (s *sessionStore) append(msgs []Message, system string) error {
 	}
 	s.systemSaved = true
 	s.saved = len(msgs)
+	s.bound = true
 	return nil
 }
 
@@ -149,6 +178,7 @@ func (s *sessionStore) load(id string) ([]Message, string, error) {
 		s.frozenID = ""
 		s.saved = len(history)
 		s.systemSaved = true
+		s.bound = true
 		return history, system, nil
 	}
 	if err := s.refresh(); err != nil {
@@ -241,6 +271,7 @@ func (s *sessionStore) adopt(path string) ([]Message, string, error) {
 	s.held = false
 	s.saved = len(history)
 	s.systemSaved = true
+	s.bound = true
 	return history, system, nil
 }
 

@@ -39,6 +39,7 @@ const (
 	MsgControlStatArchive  = "会话: 归档只读 %s（未写入）"
 	MsgBadSessionID        = "非法会话 id"
 	MsgSessionGone         = "会话不存在: %s"
+	MsgSessionFileGone     = "会话文件已丢失（不再自动重建）: %s"
 	MsgBadEffort           = "无效思考等级 %q（可选: minimal/low/medium/high/max/off）"
 	MsgBadApiProtocol      = "无效 api_protocol %q（可选: chat/responses）"
 	MsgSessionImageSummary = "[图 %d]"
@@ -50,6 +51,7 @@ const (
 	MsgEmptyWorkspace      = MsgErrPrefix + "未指定工作区目录"
 	MsgBadWorkspace        = MsgErrPrefix + "工作区不存在或不是目录: %s"
 	MsgSameWorkspace       = MsgErrPrefix + "已在该工作区: %s"
+	MsgExportNoPath        = MsgErrPrefix + "导出需要目标路径"
 )
 
 const (

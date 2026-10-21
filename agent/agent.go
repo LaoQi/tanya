@@ -552,6 +552,35 @@ func (a *Agent) SessionFile() string {
 	return p
 }
 
+// ExportSession 把内存中的完整历史（system 首行 + 全部消息）写成同构 jsonl 到 path，
+// 返回导出的消息条数。只读内存、不触碰会话文件；写盘走 tmp + rename，失败不留半截文件。
+func (a *Agent) ExportSession(path string) (int, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return 0, fmt.Errorf(MsgExportNoPath)
+	}
+	path = filepath.Clean(path)
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return 0, err
+	}
+	if err := encodeMessages(f, a.history, a.prompt.system()); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return 0, err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return 0, err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return 0, err
+	}
+	return len(a.history), nil
+}
+
 func (a *Agent) ListModels() ([]string, error) { return a.client.ListModels() }
 
 func (a *Agent) ConfigPath() string {

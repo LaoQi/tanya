@@ -1,3 +1,14 @@
+## 2026-10-21 agent,repl: 内存历史导出（`/export`）——会话文件丢失时的抢救出口
+
+- **动机**（事故复盘）：工作区 `.tanya/` 被误删后，进程内存里仍完整持有全部历史，但**没有任何通道能把它取出**——`/history` 只往终端打印（截断即丢、无法读回），`attach` 协议不传历史。数据最终永久丢失的根因之一就是这个缺口
+- **导出方法**（`Agent.ExportSession(path) (int, error)`，`agent/agent.go`）：把 `history` + 当前 system 快照写成**与原会话文件同构的 jsonl**，产物可被既有 `/load` 直接读回（闭环）。编码复用新抽出的 `encodeMessages`（与 `sessionStore.append` 同源，避免格式漂移）；**只读内存**——不触碰会话文件、不动 `saved`/`systemSaved`、不进 history；写盘 tmp + rename 原子落定，失败清 `.tmp` 不留半截
+- **命令**（`repl`）：新增 `/export <路径>`（`handleExport`），相对路径落在当前工作区、绝对路径原样；无参给用法、多参报错；登记 `slashCommands`（补全可用）与 `helpText`。**未采纳**的通道：`agent_custom` 加 key（与该工具「只写内存、不落盘」的定位冲突）、`tanya dump --pid`（需扩展 attach 协议传历史，破坏「无 wait/无心跳」的极简定位）
+- **边界**（已记入 `docs/design.md`《会话》）：只在**进程存活期间**有效（退出即内存消失）；不自动回填原会话文件，导出是独立产物
+- **落盘不做静默重建**（`agent/session.go` 的 `append`）：新增 `sessionStore.bound` 标志——**写过 / `/load` / 接管 `adopt` 任一发生**即视为已绑定到既有会话文件，此后每次追加先 `Stat` 探测，文件不存在即返回 `MsgSessionFileGone`（"会话文件已丢失（不再自动重建）: <路径>"），**落盘不再带 `O_CREATE`**；只有全新会话（`/new`/`/fork` 后尚未绑定的首次写入）才允许创建文件。修复的正是复盘里的核心缺口——`O_CREATE` 把"文件被外部删除"伪装成一次成功写入（`err == nil`、无告警、历史不回写）。判据用 `bound` 而非 `saved == 0`：仅含 system 行的会话经 `/load` 后 `saved` 为 0，若据此后判会漏判（实测确认，已单独补用例）。**错误如何暴露**：`append` 的 err 经 `Ask`/`runTurn` 逐层上传，`repl` 侧由 `turn.End` → `failErr` 打错误行，无需新增通道
+- **不做**：不做自动恢复（文件丢失即报错停写、不自动重写内存历史——恢复走 `/export` 手动导出，避免与接管态抢写）；不改注册项心跳、不做 attach 一致性校验——均属独立事项
+- **测试**：`agent/session_test.go` 9 例（导出 5 例：**往返一致性**（含 `tool_calls`/`tool_call_id`/`Images` 逐字段相等）、空历史仅 system、不触碰会话文件与游标、空路径报错、坏路径不留 `.tmp`；落盘 4 例：文件消失即报错且**不重建**、首次写入仍可创建、`/load` 后文件消失即报错、**仅 system 行的会话载入后文件消失即报错**（`bound` 判据的守卫）；`repl/export_test.go` 6 例（用法/多参/绝对路径/相对路径落工作区/补全与帮助登记/**端到端演练**：删掉整棵 sessions 目录后 `/export` 救回全部历史且产物可读回）
+- **验收**：`gofmt -l` 干净、`go build/vet ./...`、`go test ./...`（20 包）全绿、`go test -race ./agent/ ./repl/` 全绿、`make cross` 两平台零断点
+
 ## 2026-10-21 attach: 陈旧残渣清理（`tanya attach --prune`）+ `agent_custom` 的 `attach` key / `prune` action
 
 - **动机**：进程被 SIGKILL/崩溃/重启时 `Server.Close()` 没机会跑，run 目录留下 `<pid>.json` + `<pid>.sock`；此前一律「只跳过不删」（`docs/attach.md` §8 明确把 `--prune` 列为不做）。实测两个本地工作区的 run 目录分别积了 3 条与 1 条

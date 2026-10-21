@@ -10,6 +10,7 @@ import (
 	"github.com/LaoQi/tanya/render/theme"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -537,6 +538,8 @@ func (r *REPL) handleCommand(line string) bool {
 		r.st.out.emitText(KindNotice, statInfo(r.agent.Stats())+"\n")
 	case "/history":
 		r.showHistory(parts[1:])
+	case "/export":
+		r.handleExport(parts[1:])
 	case "/model":
 		if len(parts) < 2 {
 			r.st.out.emitText(KindNotice, fmt.Sprintf(MsgCurModel, r.agent.Model()))
@@ -633,6 +636,30 @@ func (r *REPL) handleFork() {
 	}
 	r.st.out.emit(KindNotice, out)
 	r.refreshState()
+}
+
+func (r *REPL) handleExport(args []string) {
+	if r.agent == nil {
+		return
+	}
+	if len(args) == 0 {
+		r.st.out.emit(KindNotice, MsgExportUsage)
+		return
+	}
+	if len(args) > 1 {
+		r.st.err.emit(KindError, MsgExportTooManyArgs)
+		return
+	}
+	path := args[0]
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(r.agent.Workspace(), path)
+	}
+	n, err := r.agent.ExportSession(path)
+	if err != nil {
+		r.failErr(err)
+		return
+	}
+	r.st.out.emit(KindNotice, fmt.Sprintf(MsgExportDone, n, initPath(path)))
 }
 
 func (r *REPL) handleSwitch(args []string) {

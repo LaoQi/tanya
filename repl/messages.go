@@ -6,7 +6,11 @@ const (
 	MsgAskUsage     = "用法: tanya ask \"问题\"\n"
 	MsgNoSessions   = "(无历史会话)\n"
 	MsgNoHistoryMsg = "(当前会话无消息)\n"
-	MsgCancelled    = "已取消\n"
+
+	MsgExportUsage       = "用法: /export <路径>（把内存中的完整历史写成同构 jsonl；相对路径落在工作区）\n"
+	MsgExportTooManyArgs = "参数过多：/export 只接受一个目标路径\n"
+	MsgExportDone        = "已导出 %d 条消息 → %s\n"
+	MsgCancelled         = "已取消\n"
 
 	MsgDialogueEmpty = "用法: 直接输入内容与 AI 对话（: 前缀亦可）\n"
 )
@@ -183,6 +187,7 @@ const helpText = `斜杠命令：
   /switch <dir>       切换工作区（先收尾旧会话，重读 AGENTS.md）
   /stat               会话统计（工作区/用量/缓存）
   /history [n|all]    无参截断列表；n 全文查看单条（0 = 最后一条，-n = 最近 n 条全文），all 全量显示
+  /export <路径>      把内存中的完整历史写成同构 jsonl（抢救会话文件丢失时用）
   /model [name]       显示或切换模型
   /think [level]      显示或设置思考等级（minimal/low/medium/high/max/off）
   /reasoning [on|off] 显示或切换思维链回传
