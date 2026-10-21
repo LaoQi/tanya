@@ -1,3 +1,15 @@
+## 2026-10-21 docs: 更正「开发期改动 → prompt cache 代价」的错误记录
+
+- **问题**（用户指出）：记录里多处把**开发期**改动（改工具描述/加 key/升级二进制）与 prompt cache 代价挂钩，写成「打掉一次 prompt cache」「属一次性预热成本」「改模型侧文案按台阶估代价」这类表述。这是对运行时与开发过程的混淆——开发期改动对任何运行中的进程都没有影响；换用新版本后，即便继续处理旧会话，也最多多一次提交（首轮 miss）随即重新命中，对缓存无实质影响。该认知还被记录反复强化，成为「不为字节不变牺牲功能」之外的另一条隐形约束
+- **修正**（7 处，纯文档）：
+  - `docs/agent-control-tool.md` §18.5 由「代价：加值/改文案会打掉一次 prompt cache，属一次性预热成本」改为「**无缓存代价**：改 enum/描述属版本更替，不构成对加 key / 改文案的约束」——原文还与同文档 §4「缓存不参与形态选择」的撤回**自相矛盾**，一并纠正
+  - `docs/design.md`《系统提示与缓存友好》删「改模型侧文案时按台阶估代价、尽量把易变内容放靠后」，改为「开发期改动不在缓存不变性的讨论范围内；台阶只用于评估运行期易变输入」
+  - `docs/cache-probe.md` 开篇补适用范围声明：台阶的全部适用对象是**运行期**，开发期改代码/改文案/升级二进制属版本更替、无实质代价、不作为设计取舍依据
+  - `AGENTS.md` 缓存条补「开发期改动不在此列……不得作为设计取舍依据」
+  - 另三处措辞纠正（均属把改造验收口径误写成运行期依赖）：`docs/shell-tool.md` 工具清单不变量的「prompt cache 依赖」→ 改造验收口径；`docs/session-archive.md`「prompt cache 红线在归档路径上的延续」→ 内容保真要求；`docs/design.md`《工具》「顺序即 tools 段顺序（prompt cache 依赖）」→ 运行期稳定可保住前缀缓存；`docs/multimodal.md` P0 判据「缓存不变性」→ 行为等价性
+- **未改动**（复核确认正确）：`docs/design.md` 系统提示头部「system 任何字节变化击穿其后前缀」、`docs/cache-probe.md` 台阶数据与《env 段的动态源》——讨论对象都是**运行期**请求内容变化（env 段曾每轮重探），结论成立
+- **验收**：`go test ./agent/ -run TestAgentToolParamsDocInSync`（§7 golden 守卫）通过；纯文档，无代码影响
+
 ## 2026-10-21 readline: 常驻读者测试补平台标签——darwin/windows 测试构建不再断
 
 - **问题**（用户报告）：上一批「常驻读者读路径改 poll 前置」新增的 `readline/reader_tamper_test.go` 未打平台标签，windows 上构建失败（`ctty.Termios has no field or method Iflag`、`unix.ICRNL` 等未定义——windows 的 `ctty.Termios` 是空结构体），darwin 上同样断（`undefined: newTestPTYPair`——该助手在 `readline/lease_posix_test.go`，而那个文件带 `//go:build linux`，用了 darwin 没有的 `/dev/ptmx` + `TIOCSPTLCK`）。全仓逐包 `go test -c` 复核：**只有 `readline` 一个包断**，同批新增的 `readline/reader_join_guard_test.go`（fake device）两平台均可编译、不动

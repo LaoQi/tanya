@@ -142,7 +142,7 @@ client := NewClient(cfg, ToolDefs(tool.profile))   // 工具清单随 client 定
 
 1. shell 解析失败 → `New` 报错退出，无 noshell 降级路径
 2. profile 非空不变量：`run_shell` 恒定注册、env 段恒定输出 SHELL/TIMEOUT/OUTPUT 行
-3. 工具清单**顺序与内容字节级不变**（prompt cache 依赖，见 `docs/cache-probe.md`）
+3. 工具清单**顺序与内容字节级不变**（改造验收口径：改造前后 wire 请求体一致即证明无行为变化；「运行期顺序稳定」是运行要求，与开发期改动无关，见 `docs/cache-probe.md`）
 4. 进程 cwd 不变（全程不 `os.Chdir`）；默认目录取当前工作区（`/switch` 后随工作区变），`cwd` 参数只设 `cmd.Dir`，且桥接与回退两条路径都设置
 5. bridge 未注入或 `Prepare` 失败 → 回退 foreground
 6. 输出头尾截断、超时（60/300/900）、`128 + signum`、中断与挂起标记语义不变

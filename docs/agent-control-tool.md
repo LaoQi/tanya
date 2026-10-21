@@ -242,5 +242,5 @@ func (t *agentTool) Invoke(_ context.Context, argsJSON string) ToolResult {
 2. **只回路径**：`get config_path` 返回单行 `配置文件: <绝对路径>`；配置在 `config.Load` 一次加载、运行期不重载，故改动自然需重启（`model`/`reasoning_effort` 的内存覆盖路径是另一回事，由各自的 key 承担）。
 3. **按需查询、不做常驻注入**：不写进 system 环境段、不加 `/` 命令、不做运行期 reload——用户拍板"平时使用机会较少，只在需要获取配置时取"。
 4. 只读语义与其他只读 key 一致：`set config_path` 明确报错，不改状态。
-5. **代价**：`key` 的 enum 与描述属于工具 schema 前缀，加值/改文案会打掉一次 prompt cache（见 `AGENTS.md` 的工具清单约束），属一次性预热成本。
+5. **无缓存代价**（2026-10-21 更正）：`key` 的 enum 与描述属工具 schema，改它属**版本更替**——开发期改动对任何运行中的进程都无影响，新版本处理旧会话最多首轮 miss 一次、随即重新命中，无实质代价，不构成对加 key / 改文案的约束。`docs/cache-probe.md` 的台阶测的是**运行期**请求内容变化，与开发期改动无关（本条此前写作「打掉一次 prompt cache、属一次性预热成本」，与 §4 的撤回自相矛盾，已改正）。
 6. 文档 §7 的 golden 由 `TestAgentToolParamsDocInSync` 与 `agentParams()` 全串比对守卫，改 enum/描述需同步改本节的两处。

@@ -213,7 +213,7 @@ Images []ImageRef `json:"images,omitempty"`
 1. **`scanSessionFile` 行缓冲（硬前置，P0 已落地）**：`sc.Buffer` 上限从 1 MB 提到独立常量（建议 64 MB，`agent` 侧常量、不依赖配置包），否则内联图会让 `/load` 列表条数/摘要静默残缺；同时给 `si, _ :=` 的忽略 err 处补一条可见降级（列表项标记不全）。
 2. **摘要回落**：`sessionSummaryRunes` 遇 `Content == ""` 且有图时写 `[图 n]`。
 3. **本地 token 估算**（D3）：`estimateTokens` 不含图像 → 无 usage 时上下文显示偏低；可选按每图固定值（建议 1024，或 OpenAI `low` 口径 85）计入，真 usage 到达即覆盖。
-4. **缓存不变性**：纯文本会话的请求字节必须逐字节不变（`scripts/cache_probe.py` 复验）；带图会话每轮全量重发，前缀稳定。
+4. **行为等价性**：纯文本会话的请求字节必须逐字节不变（改造验收口径，`scripts/cache_probe.py` 复验）；带图会话每轮全量重发，运行期前缀稳定。
 5. **中断/失败回滚**：`Ask` 的 `mark` 按 history 长度回滚，与消息内容无关 → 天然兼容，无需改动。
 6. **归档**：内联图进 zip（`Deflate`）；卷注释的 summary 来自 `scanSessionFile`，与第 1 条同源。
 7. **noSave（`-n`）**：`store.append` 直接返回 → 图像不落盘、不新增文件，与既有只读语义一致。
