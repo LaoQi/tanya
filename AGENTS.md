@@ -74,9 +74,12 @@ render/             表现层树根（IR → ANSI）：style/ 词汇、term/ 终
 ```bash
 go build ./... && go vet ./...          # 构建 + 静态检查
 go test ./... && go test -race ./...    # 全量测试 + 竞态
+make cross                              # 交叉检查（darwin/windows 的 vet + 测试编译）
 go run . ask "你好"                      # 单发冒烟（需配置 api_key）
 python3 scripts/render_audit.py         # 渲染审计（pty + VT 回放，需先 make build）
 ```
+
+**平台标签**：平台相关的实现与测试一律显式打 tag（白名单），别依赖「本机是 linux 所以没报错」——`make cross` 会逐包编译测试二进制，新加的 posix 用例漏 tag 会在这里当场断掉（`go build ./...` 不含测试文件，拦不住这类问题）。
 
 **测试包边界**：需要上层包（如 `readline`）的集成用例一律放**外部测试包**（`package X_test`，写在同目录）——内部测试包导入上层包会让上层永远无法依赖本包（测试二进制成环），实例见 `tools/shell/tty_e2e_test.go`。
 

@@ -1,3 +1,11 @@
+## 2026-10-21 readline: 常驻读者测试补平台标签——darwin/windows 测试构建不再断
+
+- **问题**（用户报告）：上一批「常驻读者读路径改 poll 前置」新增的 `readline/reader_tamper_test.go` 未打平台标签，windows 上构建失败（`ctty.Termios has no field or method Iflag`、`unix.ICRNL` 等未定义——windows 的 `ctty.Termios` 是空结构体），darwin 上同样断（`undefined: newTestPTYPair`——该助手在 `readline/lease_posix_test.go`，而那个文件带 `//go:build linux`，用了 darwin 没有的 `/dev/ptmx` + `TIOCSPTLCK`）。全仓逐包 `go test -c` 复核：**只有 `readline` 一个包断**，同批新增的 `readline/reader_join_guard_test.go`（fake device）两平台均可编译、不动
+- **根因**：验收口径有洞——上一版记的「darwin/windows 交叉构建通过」只跑了 `go build ./...`，**不含测试文件**，所以漏 tag 的用例拦不住
+- **改法**：`readline/reader_tamper_test.go` 加 `//go:build linux`（该用例是「真 pty + 篡改 termios」，依赖 linux-only 的 pty 助手与 linux 的 termios 字段，与既有 `device_posix_pty_test.go`、`lease_posix_test.go` 口径一致）。`newTestPTYPair` 归属不动——darwin 要跑此用例需另写 darwin pty 助手（`posix_openpt`/`grantpt`），本机无法验证，留作后续独立事项
+- **补防线**：`Makefile` 新增 `cross` 目标（`darwin`/`windows` 两平台 `go vet ./...` + 逐包 `go test -c -o /dev/null`，仅编译不运行），`AGENTS.md`《构建与测试》补 `make cross` 一行与「平台标签」条：平台相关的实现与测试一律显式打 tag，别依赖本机是 linux
+- **验收**：`gofmt -l` 干净、`go build ./...`/`go vet ./...`、`go test -count=1 ./...` 全绿（20 包）、`go test -race -count=1 ./readline/ ./repl/ ./tools/shell/` 全绿、`make cross` 两平台零断点、`TestReader*` 三例本机（linux）原样通过（0.30s / 1.10s / 1.50s，行为未变）
+
 ## 2026-10-21 readline: 常驻读者读路径改为 poll 前置——子进程改坏终端 termios 不再拖死整个回合
 
 - **事故**：ivan 工作区的 tanya 实例在 `git commit` 超时被杀后永久卡死（`state=busy` 2h20m、心跳停在「执行中」、`^C` 无效）。栈证据：agent 卡在 `LendStdin → beginLend → parkReader → joinReader` 的 `<-r.done`（142 分钟），常驻读者卡在 `posixTTY.readChunk → unix.Read` 的阻塞读（143 分钟）。根因是**共享控制终端的 termios 被外部程序改回行缓冲**（`git commit` 触发的 gpg/pinentry 经 `/dev/tty` 改 termios，且不在超时被杀的进程组内），读者的下一次 `read` 永久阻塞；`joinReader` 无超时地等它，于是一整个回合死等。实测确认：**已阻塞的 `read` 不会因 termios 被改回 raw 而醒来**（只有数据到达或 fd 关闭），所以单加超时救不了，必须让读路径不进入无限阻塞
@@ -6,7 +14,7 @@
 - **C 模式自愈**（`posixTTY.ReassertReader` + 可选接口 `backgroundReasserter`）：读者每 10 个空闲周期（约 1s）核对 `VMIN/VTIME/ICANON/ECHO`，被外部改坏则用 `SetTermios`（**不 flush**，免得吞掉用户正在输入的多字节序列）重设回读者形态；**有意不改 `t.saved`**（退出复原基线不变）；借出期不重设（终端归子进程）。没有 C 时 A 只保证「不卡」，但按键会被行缓冲吞掉
 - **测试**：新增 `readline/reader_tamper_test.go`（真 pty：篡改 termios 后 `LendStdin` 仍在 600ms 内返回且不靠 B 兜底、篡改后 ≤1s 自愈为读者形态且 `saved` 基线不被污染、借出期不重设）与 `readline/reader_join_guard_test.go`（fake device 永久阻塞读取时 `LendStdin` 有界返回、置 `broken`、不复原）；两处变异复验（退回阻塞 `read` → 篡改用例红；去掉 join 超时 → 兜底用例红）
 - **端到端复现**：脚本在真 pty 里跑新二进制，工具返回后把该 pty 改成行缓冲——对照二进制（旧 `readChunk`）第二个工具调用不再返回（心跳停在 0s，与事故形态一致），修复版三次连跑均自愈并完成第二个工具
-- 文档：`AGENTS.md` 终端持有者条、`docs/terminal-console.md` S8 落地记录补三条；验收：`gofmt` 干净、`build/vet`、`go test ./...` 与 `-race ./readline/ ./repl/ ./tools/shell/` 全绿、darwin/windows 交叉构建、`render_audit.py` 17 PASS / 0 FAIL
+- 文档：`AGENTS.md` 终端持有者条、`docs/terminal-console.md` S8 落地记录补三条；验收：`gofmt` 干净、`build/vet`、`go test ./...` 与 `-race ./readline/ ./repl/ ./tools/shell/` 全绿、darwin/windows 交叉构建（**口径更正：当时只跑了 `go build ./...`、不含测试文件，漏掉 `reader_tamper_test.go` 的缺平台标签，见上一条**）、`render_audit.py` 17 PASS / 0 FAIL
 
 ## 2026-10-21 agent: 全局说明（AGENTS.md）路径可注入，主机侧可隔离
 

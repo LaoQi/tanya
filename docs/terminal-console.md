@@ -142,6 +142,8 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 - **两套终端模式**：读者的模式是**输入侧 raw + 保留 `Oflag`**（新原语 `device.ReaderRaw()`），与独占 `Raw()`（连 `OPOST` 一起清）不同。原因：tanya 的输出链路逐块写 `\n` 而依赖内核 `ONLCR` 补 CR（cooked 语义），读者期丢 `OPOST` 会让工具块与状态行整屏错位——`render_audit` 的 `clean-tool-builtin-args` 正是这么抓出来的，`readline/device_posix_test.go` 的 `TestReaderTermiosKeepsOutputProcessing` 作回归守护。
 - **`^C` 路径不变**：读者期 `ISIG` 关闭，`0x03` 经 device 归一为 `EventInterrupt` 推给订阅者（`InterruptContext` 取消回合），与信号面同效；借出期归子进程。
 - **订阅回调的并发**：可能来自信号 watcher 或读者协程，回调须自身并发安全且不阻塞（现有两个订阅者分别是 `cancel()` 与带缓冲 channel 的非阻塞投递）。
+- **测试的平台标签**：上述三条的回归用例 `readline/reader_tamper_test.go` 带 `//go:build linux`——它用真 pty 助手 `newTestPTYPair`（`lease_posix_test.go`，`/dev/ptmx` + `TIOCSPTLCK`，darwin 无此 ioctl）并直接改 `ctty.Termios` 的 posix 字段（windows 上 `Termios` 是空结构体）；darwin/windows 的测试构建由 `make cross` 守护（`go build ./...` 不含测试文件，拦不住漏 tag）。
+
 - 未落成：Windows 后台读（未实机验证，门禁保持关闭）、多读者通用仲裁（仍只有 Reader↔Lease 两态）。
 
 ## 6 搬迁与下线清单
