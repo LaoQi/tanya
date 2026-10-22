@@ -1,3 +1,12 @@
+## 2026-10-22 attach: 允许裸写 pid（`tanya attach 41234`）
+
+- **动机**（用户要求）：`--pid` 是唯一指定实例的方式，多打一个旗标纯属啰嗦；裸写 pid 更贴近 `kill 41234` 一类习惯
+- **改动**（`repl/command.go`）：`ParseAttachArgs` 新增一条分支——**纯数字字段**即 pid，与 `--pid N` 等价；`--pid N` / `--pid=N` 原样保留（既有脚本与文档不受影响）。`0` / `-1` / `12a` 仍走 `无效 pid %q`，非数字非选项（如 `extra`）仍走 `未知参数 %q`
+- **重复指定**（用户拍板：报错而非后者覆盖）：新增 `MsgAttachDupPID`（`重复指定 pid %q（只能给一个）`），`1234 5678`、`--pid 1234 5678`、`1234 --pid 5678` 一律报错，避免静默取后者的歧义；`--prune` 与裸 pid 同给沿用既有互斥报错
+- **文案**：`MsgAttachUsage` / `MsgAttachBadArg` / `UsageHead` 的 attach 段补位置参数（`[N]`），模式段选项行改「`N` 或 `--pid N` 指定实例」；`repl/attach_args_test.go` 参数表由 17 条增至 30 条（裸 pid、裸 pid + `--force`（前后位）、裸 pid 与 `--list` 同给、三种重复写法、`0` / `-1` / `12a` / `1234x`、`--prune` 与裸 pid）
+- **文档**：`README.md`《接管运行中的实例》示例与选项说明、`docs/attach.md` §3 选择、`docs/design.md`《运行模式》同步
+- **验收**：`gofmt -l` 干净、`go build/vet ./...`、`go test ./...` 全绿、`make cross` 零断点
+
 ## 2026-10-21 agent,docs: `tanya init` 增建 `.tanya/README`——目录可辨识性
 
 - **动机**（事故复盘次要问题）：`.tanya/` 点开头、被 git 忽略、内含只有 `*` 的 `.gitignore`、**无任何说明文件**，与「临时脚手架」外观无法区分——这是 agent 误判用途的直接诱因。报告把它列为低优先级事实记录，本次补上

@@ -181,12 +181,12 @@ REPL 斜杠命令：
 ```bash
 tanya attach --list          # 只列出当前工作区的实例：PID / TTY / 状态 / 标题 · 会话
 tanya attach                 # 同工作区唯一实例时直接接管
-tanya attach --pid 41234     # 有多个实例时指定
+tanya attach 41234           # 有多个实例时指定 pid（等价 --pid 41234）
 tanya attach --force         # 目标正在执行时立即中断并接管（默认等它跑完这一回合）
 tanya attach --prune         # 清理本工作区里陈旧实例留下的注册残渣（崩溃/SIGKILL 残留）
 ```
 
-- 选项写在子命令之后（`tanya attach --pid N`）；全局选项仍在前面（`tanya -c cfg attach`）。
+- 选项写在子命令之后；指定实例可以裸写 pid（`tanya attach 41234`）或写 `--pid 41234`，两者等价、同时给则报错。全局选项仍在前面（`tanya -c cfg attach`）。
 - 发现范围只限**当前工作区**（同一目录、同一 `session_mode`）：实例的注册表与 `sessions/` 同源（`local`/`auto` 落 `<cwd>/.tanya/run/`，`global` 落 `$DataDir/workspaces/<id>/run/`），`-n` 不落盘故不注册、不可被接管。
 - 默认**等待**目标当前回合结束再交接（等待期会定期显示它的执行时长，`^C` 可取消等待；取消不会改动对方会话）；`--force` 则是立即中断接管。
 - 接管方继承会话 id、历史、工作区、模型与思考等级，并接着写**同一个**会话文件；接管后它自己也照常可被再次接管。

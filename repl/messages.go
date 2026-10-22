@@ -234,7 +234,7 @@ const UsageHead = `用法: tanya [模式] [选项]
   tanya init           新工作区脚手架：建 .tanya/ 与 AGENTS.md 骨架，随后进入 REPL
   tanya config         把内置默认配置示例原样写到 stdout（可重定向为配置文件）
   tanya attach         接管同一工作区里正在运行的实例（对方平滑退出，本进程继续该会话）
-                       选项: --pid N 指定实例 / --list 只列出 / --force 立即中断接管
+                       选项: N 或 --pid N 指定实例 / --list 只列出 / --force 立即中断接管
 
 选项:
 `
@@ -250,9 +250,10 @@ const (
 	MsgVerboseRequiresPlain = "--verbose 需与 --plain 同用"
 	FlagVersion             = "显示版本号并退出"
 
-	MsgAttachUsage         = "用法: tanya attach [--pid N] [--force] [--list] [--prune]\n"
+	MsgAttachUsage         = "用法: tanya attach [N] [--pid N] [--force] [--list] [--prune]\n"
 	MsgAttachBadPID        = "无效 pid %q"
-	MsgAttachBadArg        = "未知参数 %q（用法: tanya attach [--pid N] [--force] [--list] [--prune]）"
+	MsgAttachBadArg        = "未知参数 %q（用法: tanya attach [N] [--pid N] [--force] [--list] [--prune]）"
+	MsgAttachDupPID        = "重复指定 pid %q（只能给一个）"
 	MsgAttachPruneConflict = "--prune 与其他选项互斥（用法: tanya attach --prune）"
 )
 

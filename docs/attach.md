@@ -36,7 +36,7 @@ run 目录里每个实例两个文件（`attach` 包）：`<pid>.json`（原子�
 - `state` 三值：`idle` / `busy` / `readonly`（归档只读会话注册并显示，但不可接管）。
 - `title` = 会话首条 user 消息摘要（30 字，`agent.Summarize`），跳过 tanya 自己写的单行方括号事实行；无内容时回落 `tanya · <工作区名>`。
 - 陈旧项**默认只跳过不删除**：判活靠 `attach.Alive`（connect 探测，`ECONNREFUSED` 即陈旧），不做 kill、不做 pid 复用比对；显式清理走 `tanya attach --prune`（见 §11）。
-- 选择：`--pid N` > 唯一实例；0 个报错，多个报错并列出候选（绝不自动选）。
+- 选择：显式 pid（裸写 `N` 或 `--pid N`，重复指定报错）> 唯一实例；0 个报错，多个报错并列出候选（绝不自动选）。
 
 ## 4. 协议（`attach` 包，JSON 流一条连接）
 

@@ -17,7 +17,7 @@ const (
 	CmdAttach
 )
 
-// AttachArgs 是 attach 子命令自己的选项（写在子命令之后：tanya attach --pid N）。
+// AttachArgs 是 attach 子命令自己的选项（写在子命令之后：tanya attach --pid N 或 tanya attach N）。
 type AttachArgs struct {
 	PID   int
 	List  bool
@@ -46,11 +46,13 @@ func ParseAttachArgs(arg string) (AttachArgs, error) {
 				}
 				v = fields[i]
 			}
-			n, err := strconv.Atoi(v)
-			if err != nil || n <= 0 {
-				return AttachArgs{}, fmt.Errorf(MsgAttachBadPID, v)
+			if err := setAttachPID(&out, v); err != nil {
+				return AttachArgs{}, err
 			}
-			out.PID = n
+		case isDigits(f):
+			if err := setAttachPID(&out, f); err != nil {
+				return AttachArgs{}, err
+			}
 		default:
 			return AttachArgs{}, fmt.Errorf(MsgAttachBadArg, f)
 		}
@@ -64,6 +66,30 @@ func ParseAttachArgs(arg string) (AttachArgs, error) {
 		return AttachArgs{}, errors.New(MsgAttachPruneConflict)
 	}
 	return out, nil
+}
+
+func setAttachPID(out *AttachArgs, v string) error {
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return fmt.Errorf(MsgAttachBadPID, v)
+	}
+	if out.PID > 0 {
+		return fmt.Errorf(MsgAttachDupPID, v)
+	}
+	out.PID = n
+	return nil
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func ParseCommand(args []string) (Cmd, string) {
