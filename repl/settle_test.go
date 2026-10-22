@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 )
 
 func newSettleAgent(t *testing.T) *agent.Agent {
@@ -13,7 +13,7 @@ func newSettleAgent(t *testing.T) *agent.Agent {
 	cfg := &agent.Config{
 		BaseURL:     "http://127.0.0.1:1",
 		Model:       "test-model",
-		UserAgent:   agent.UserAgent("dev"),
+		UserAgent:   "tanya/dev",
 		ConfigPath:  "/tmp/tanya-test-config.yaml",
 		ApiProtocol: "chat",
 		DataDir:     t.TempDir(),

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 	"github.com/LaoQi/tanya/readline"
 )
 
@@ -14,7 +14,7 @@ func newAutoArchiveAgent(t *testing.T, dir string, threshold, keep int) *agent.A
 	cfg := &agent.Config{
 		BaseURL:          "http://127.0.0.1:1",
 		Model:            "test-model",
-		UserAgent:        agent.UserAgent("dev"),
+		UserAgent:        "tanya/dev",
 		ConfigPath:       "/tmp/tanya-test-config.yaml",
 		ApiProtocol:      "chat",
 		DataDir:          dir,

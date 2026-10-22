@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 )
 
 func TestFormatTokens(t *testing.T) {

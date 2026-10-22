@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
-	"github.com/LaoQi/tanya/tools/shell"
+	"github.com/LaoQi/battlelab/agent"
+	"github.com/LaoQi/battlelab/tools/shell"
 )
 
 func TestStreamsInjectWriter(t *testing.T) {

@@ -12,18 +12,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LaoQi/tanya/render/present"
-	"github.com/LaoQi/tanya/render/term"
+	"github.com/LaoQi/battlelab/agent"
+	"github.com/LaoQi/battlelab/ctty"
+	"github.com/LaoQi/battlelab/tools"
+	"github.com/LaoQi/battlelab/tools/shell"
 
-	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/attach"
 	"github.com/LaoQi/tanya/config"
-	"github.com/LaoQi/tanya/ctty"
+	"github.com/LaoQi/tanya/notify"
 	"github.com/LaoQi/tanya/readline"
+	"github.com/LaoQi/tanya/render/present"
+	"github.com/LaoQi/tanya/render/term"
 	"github.com/LaoQi/tanya/repl"
-	"github.com/LaoQi/tanya/tools"
-	"github.com/LaoQi/tanya/tools/shell"
-	shellview "github.com/LaoQi/tanya/tools/shell/view"
+	"github.com/LaoQi/tanya/views/shell"
 )
 
 var (
@@ -193,6 +194,7 @@ func main() {
 		agent.NoSave(*f.noSave),
 		agent.WithTools(list...),
 		agent.WithSystemPrompt(systemBase(inv)),
+		agent.WithGlobalAgentsPath(config.GlobalAgentsPath()),
 		agent.WithAttachOps(attachOps{runDir: func() (string, bool) { return a.RunDir() }}))
 	if err != nil {
 		st.FailErr("", err)
@@ -608,7 +610,7 @@ func buildNotifier(ui config.UI, inv shell.Invocation) (repl.Notifier, error) {
 		list = append(list, repl.OSCNotifier())
 	}
 	if ui.NotifyCmd != "" {
-		n, err := shell.NewCommandNotifier(inv, ui.NotifyCmd)
+		n, err := notify.NewCommand(inv, ui.NotifyCmd)
 		if err != nil {
 			return nil, err
 		}

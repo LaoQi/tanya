@@ -34,14 +34,6 @@ type ToolView struct {
 	Result func(text string, meta any, width, maxLines int) (View, bool)
 }
 
-// Notification 是通知载荷的成品形态：已清洗为单行、已截断，由触发方（repl）生成、
-// 行为方（终端提示音/OSC/外部程序）只读。
-type Notification struct {
-	Title   string
-	Content string
-	Kind    string
-}
-
 // Registry 按工具名索引视图，装配期注入、运行期冻结（与工具注入同语义）。
 type Registry struct {
 	views map[string]ToolView

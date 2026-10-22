@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -20,7 +20,7 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Temperature != 0.7 {
 		t.Errorf("默认数值异常: %+v", cfg)
 	}
-	if cfg.UserAgent != agent.UserAgent(Version) || !strings.HasPrefix(cfg.UserAgent, "tanya/") || !strings.Contains(cfg.UserAgent, "(+"+agent.UserAgentURL+")") {
+	if cfg.UserAgent != UserAgent(Version) || !strings.HasPrefix(cfg.UserAgent, "tanya/") || !strings.Contains(cfg.UserAgent, "(+"+UserAgentURL+")") {
 		t.Errorf("默认 UA 异常: %q", cfg.UserAgent)
 	}
 }
@@ -407,11 +407,11 @@ func TestDefaultUserAgentFollowsVersion(t *testing.T) {
 	defer func() { Version = old }()
 	Version = "v9.9.9"
 	cfg := Default()
-	want := agent.UserAgent("v9.9.9")
+	want := UserAgent("v9.9.9")
 	if cfg.UserAgent != want {
 		t.Errorf("默认 UA 未跟随 Version: %q != %q", cfg.UserAgent, want)
 	}
-	if cfg.UserAgent == agent.UserAgent(old) {
+	if cfg.UserAgent == UserAgent(old) {
 		t.Errorf("默认 UA 仍为旧版本值: %q", cfg.UserAgent)
 	}
 }

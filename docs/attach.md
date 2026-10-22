@@ -134,7 +134,7 @@ idle         : 注入 EventTakeover               → Readline 返回 ErrTakeove
 
 进程被 SIGKILL / 崩溃 / 机器重启时，`Server.Close()` 没机会跑，run 目录会留下 `<pid>.json` + `<pid>.sock`。此前一律「只跳过不删」，现在给一个**显式**入口。
 
-**入口两处、同一内核**：`tanya attach --prune`（人用）与 `agent_custom` 的 `{"action":"prune","key":"attach"}`（模型用，见 `docs/agent-control-tool.md` §19）；列表同理：`--list` 与 `{"action":"get","key":"attach"}`。渲染文本由 `main.attachListText`/`main.attachPruneText` 单点产出，两个入口逐字节同源。
+**入口两处、同一内核**：`tanya attach --prune`（人用）与 `agent_custom` 的 `{"action":"prune","key":"attach"}`（模型用，见 battlelab 的 `docs/agent-control-tool.md` §19）；列表同理：`--list` 与 `{"action":"get","key":"attach"}`。渲染文本由 `main.attachListText`/`main.attachPruneText` 单点产出，两个入口逐字节同源。
 
 **`--prune` 与 `--list`/`--pid`/`--force` 互斥**（同时给即报错）；`-n` 沿用既有拒绝（不落盘本就不注册）。不新增 REPL 斜杠命令：REPL 内的进程自身必然是活的，无清理对象。
 

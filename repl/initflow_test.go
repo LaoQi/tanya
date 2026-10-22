@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LaoQi/tanya/agent"
 	"github.com/LaoQi/tanya/config"
+	"github.com/LaoQi/tanya/workspace"
 )
 
 func initWorkdir(t *testing.T) string {
@@ -81,7 +81,7 @@ func TestRunInitReportNonInteractive(t *testing.T) {
 	if strings.Contains(got, MsgInitAskIgnore) {
 		t.Errorf("非交互不应提问:\n%s", got)
 	}
-	if want := MsgInitTagSkip + "  .tanya/.gitignore  " + agent.MsgInitSkipNoTTY; !strings.Contains(got, want) {
+	if want := MsgInitTagSkip + "  .tanya/.gitignore  " + workspace.MsgInitSkipNoTTY; !strings.Contains(got, want) {
 		t.Errorf("报告缺少 %q:\n%s", want, got)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".tanya", ".gitignore")); !os.IsNotExist(err) {
@@ -113,7 +113,7 @@ func TestRunInitDeclined(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := MsgInitTagSkip + "  .tanya/.gitignore  " + agent.MsgInitSkipDeclined; !strings.Contains(got, want) {
+		if want := MsgInitTagSkip + "  .tanya/.gitignore  " + workspace.MsgInitSkipDeclined; !strings.Contains(got, want) {
 			t.Errorf("%q 应视为拒绝:\n%s", in, got)
 		}
 		if _, err := os.Stat(filepath.Join(dir, ".tanya", ".gitignore")); !os.IsNotExist(err) {
@@ -133,7 +133,7 @@ func TestRunInitEOFDeclined(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if want := MsgInitTagSkip + "  .tanya/.gitignore  " + agent.MsgInitSkipDeclined; !strings.Contains(got, want) {
+	if want := MsgInitTagSkip + "  .tanya/.gitignore  " + workspace.MsgInitSkipDeclined; !strings.Contains(got, want) {
 		t.Errorf("EOF 应视为拒绝:\n%s", got)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".tanya", ".gitignore")); !os.IsNotExist(err) {

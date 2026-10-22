@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/LaoQi/tanya/ctty"
+	"github.com/LaoQi/battlelab/ctty"
 )
 
 type consoleLease struct {

@@ -11,7 +11,7 @@ import (
 
 	"github.com/LaoQi/tanya/render/term"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 )
 
 func newSessTestAgent(t *testing.T, dir string, opts ...agent.Option) *agent.Agent {
@@ -19,7 +19,7 @@ func newSessTestAgent(t *testing.T, dir string, opts ...agent.Option) *agent.Age
 	cfg := &agent.Config{
 		BaseURL:     "http://127.0.0.1:1",
 		Model:       "test-model",
-		UserAgent:   agent.UserAgent("dev"),
+		UserAgent:   "tanya/dev",
 		ConfigPath:  "/tmp/tanya-test-config.yaml",
 		ApiProtocol: "chat",
 		DataDir:     dir,

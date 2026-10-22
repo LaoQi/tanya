@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
-	"github.com/LaoQi/tanya/ctty"
-	"github.com/LaoQi/tanya/render/present"
+	"github.com/LaoQi/battlelab/agent"
+	"github.com/LaoQi/battlelab/ctty"
+
+	"github.com/LaoQi/tanya/notify"
 	"github.com/LaoQi/tanya/render/term"
 )
 
@@ -27,7 +28,7 @@ type Notification struct {
 }
 
 type Notifier interface {
-	Notify(present.Notification)
+	Notify(notify.Notification)
 }
 
 // notifySink 是通知在事件流上的旁路消费者：触发语义由事实驱动，不再由 turn 内的硬编码分支发起。
@@ -56,19 +57,19 @@ const (
 )
 
 // payloadOf 把 REPL 侧的触发语义成品化成交警载荷：清洗为单行、按上限截断。
-func payloadOf(n Notification) (present.Notification, bool) {
-	var t present.Notification
+func payloadOf(n Notification) (notify.Notification, bool) {
+	var t notify.Notification
 	switch n.Reason {
 	case NotifyNeedInput:
-		t = present.Notification{Content: fmt.Sprintf(MsgNotifyInputFmt, n.Tool), Kind: notifyKindInput}
+		t = notify.Notification{Content: fmt.Sprintf(MsgNotifyInputFmt, n.Tool), Kind: notifyKindInput}
 	case NotifyTurnDone:
 		if n.Failed {
-			t = present.Notification{Content: fmt.Sprintf(MsgNotifyFailedFmt, turnDuration(n.Duration)), Kind: notifyKindFailed}
+			t = notify.Notification{Content: fmt.Sprintf(MsgNotifyFailedFmt, turnDuration(n.Duration)), Kind: notifyKindFailed}
 		} else {
-			t = present.Notification{Content: fmt.Sprintf(MsgNotifyDoneFmt, turnDuration(n.Duration)), Kind: notifyKindDone}
+			t = notify.Notification{Content: fmt.Sprintf(MsgNotifyDoneFmt, turnDuration(n.Duration)), Kind: notifyKindDone}
 		}
 	default:
-		return present.Notification{}, false
+		return notify.Notification{}, false
 	}
 	t.Title = clampLine(NotifyTitle, notifyTitleMax)
 	t.Content = clampLine(t.Content, notifyContentMax)
@@ -79,7 +80,7 @@ func clampLine(s string, w int) string { return term.Truncate(term.OneLine(s), w
 
 type notifiers []Notifier
 
-func (ns notifiers) Notify(n present.Notification) {
+func (ns notifiers) Notify(n notify.Notification) {
 	for _, x := range ns {
 		x.Notify(n)
 	}
@@ -107,7 +108,7 @@ type oscNotifier struct {
 	write func(string) error
 }
 
-func (o oscNotifier) Notify(n present.Notification) {
+func (o oscNotifier) Notify(n notify.Notification) {
 	_ = o.write(n.Title + ": " + n.Content)
 }
 
@@ -116,6 +117,6 @@ func OSCNotifier() Notifier { return oscNotifier{write: ctty.NotifyOSC} }
 // bellNotifier 往控制终端写一声 BEL，载荷全忽略（终端只有这一种可发声行为）。
 type bellNotifier struct{}
 
-func (bellNotifier) Notify(present.Notification) { _ = ctty.Bell() }
+func (bellNotifier) Notify(notify.Notification) { _ = ctty.Bell() }
 
 func BellNotifier() Notifier { return bellNotifier{} }

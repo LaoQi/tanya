@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 )
 
 func newFarewellREPL(t *testing.T, a *agent.Agent, mode outMode) (*REPL, *syncBuf) {

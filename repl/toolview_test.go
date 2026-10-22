@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
+	"github.com/LaoQi/battlelab/tools/shell"
 	"github.com/LaoQi/tanya/render/present"
 	"github.com/LaoQi/tanya/render/term"
 	"github.com/LaoQi/tanya/render/theme"
-	"github.com/LaoQi/tanya/tools/shell"
 )
 
 // renderToolEnd 还原一次完整工具块：ToolStart 的着色标题 + 追加式正文与状态行。

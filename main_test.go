@@ -19,13 +19,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
+	"github.com/LaoQi/battlelab/ctty"
+	"github.com/LaoQi/battlelab/tools/shell"
 	"github.com/LaoQi/tanya/attach"
 	"github.com/LaoQi/tanya/config"
-	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/readline"
 	"github.com/LaoQi/tanya/repl"
-	"github.com/LaoQi/tanya/tools/shell"
 )
 
 func TestConfigExampleEmbedded(t *testing.T) {

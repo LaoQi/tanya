@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/LaoQi/tanya/agent"
-	"github.com/LaoQi/tanya/ctty"
+	"github.com/LaoQi/battlelab/agent"
+
+	"github.com/LaoQi/battlelab/ctty"
 	"github.com/LaoQi/tanya/render/term"
 	"github.com/LaoQi/tanya/render/theme"
+	"github.com/LaoQi/tanya/workspace"
 )
 
 func RunInit(st *streams, sem theme.Semantics, prof term.Profile, cfg *agent.Config) error {
@@ -33,7 +35,7 @@ func runInit(st *streams, sem theme.Semantics, prof term.Profile, cfg *agent.Con
 	if tty != nil {
 		confirm = func() bool { return askIgnore(st, tty) }
 	}
-	rep, err := agent.InitWorkspace(cfg, agent.InitOptions{ConfirmIgnore: confirm})
+	rep, err := workspace.InitWorkspace(cfg, workspace.InitOptions{ConfirmIgnore: confirm})
 	if err != nil {
 		return err
 	}
@@ -56,13 +58,13 @@ func askIgnore(st *streams, tty io.Reader) bool {
 	}
 }
 
-func printInit(st *streams, sem theme.Semantics, prof term.Profile, rep *agent.InitReport) {
+func printInit(st *streams, sem theme.Semantics, prof term.Profile, rep *workspace.InitReport) {
 	for _, e := range rep.Entries {
 		path := relPath(rep.Workspace, e.Path)
 		switch e.Action {
-		case agent.InitCreated:
+		case workspace.InitCreated:
 			st.Print(fmt.Sprintf(MsgInitEntryFmt, sem.Ok.With(prof).Sprint(MsgInitTagNew), path, e.Note))
-		case agent.InitExists:
+		case workspace.InitExists:
 			st.Print(fmt.Sprintf(MsgInitEntryFmt, sem.Dim.With(prof).Sprint(MsgInitTagOld), path, e.Note))
 		default:
 			st.Print(fmt.Sprintf(MsgInitEntryFmt, sem.Dim.With(prof).Sprint(MsgInitTagSkip), path, e.Reason))

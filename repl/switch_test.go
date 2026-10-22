@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 )
 
 func TestSwitchUsageWithoutArg(t *testing.T) {

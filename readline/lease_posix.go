@@ -2,7 +2,7 @@
 
 package readline
 
-import "github.com/LaoQi/tanya/ctty"
+import "github.com/LaoQi/battlelab/ctty"
 
 var lendOpenTTY = ctty.Open
 

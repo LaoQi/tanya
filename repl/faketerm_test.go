@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 	"github.com/LaoQi/tanya/readline"
 	"github.com/LaoQi/tanya/render/present"
-	shellview "github.com/LaoQi/tanya/tools/shell/view"
+	"github.com/LaoQi/tanya/views/shell"
 )
 
 // syncBuf 让测试断言与心跳 goroutine 的写入互斥，-race 下安全。

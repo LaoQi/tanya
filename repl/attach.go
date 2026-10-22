@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 	"github.com/LaoQi/tanya/attach"
 	"github.com/LaoQi/tanya/readline"
 )

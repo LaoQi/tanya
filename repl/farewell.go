@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 )
 
 type farewellInfo struct {

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 	"github.com/LaoQi/tanya/readline"
 	"github.com/LaoQi/tanya/render/term"
 )
@@ -44,7 +44,7 @@ func newAskAgent(t *testing.T, baseURL string, tools ...agent.Tool) *agent.Agent
 		BaseURL:          baseURL,
 		APIKey:           "test-key",
 		Model:            "test-model",
-		UserAgent:        agent.UserAgent("dev"),
+		UserAgent:        "tanya/dev",
 		ConfigPath:       "/tmp/tanya-test-config.yaml",
 		ApiProtocol:      "chat",
 		DataDir:          t.TempDir(),

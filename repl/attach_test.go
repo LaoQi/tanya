@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
+	"github.com/LaoQi/battlelab/ctty"
 	"github.com/LaoQi/tanya/attach"
-	"github.com/LaoQi/tanya/ctty"
 	"github.com/LaoQi/tanya/readline"
 )
 

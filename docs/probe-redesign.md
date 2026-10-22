@@ -1,6 +1,6 @@
 # 环境探针重构方案
 
-> 状态：已按本文实施完毕（设计定稿归档）。目标态已并入 `docs/design.md`《系统提示与缓存友好》/《环境段（envprobe）》。本文保留决策过程与对比，供回溯。**更正（2026-09-14）**：§4「环境段固定放 system prompt 最末尾…前缀缓存不受损」已被实测推翻（序列化顺序为 messages/instructions → tools，system 的任何变化都击穿其后全部 history），`envSection` 已改为构造期定格、`WORKSPACE` 行已删除；目标态见 `docs/design.md`《环境段（envprobe）》，实测见 `docs/cache-probe.md`《落实：env 段的动态源》。实施后 review 决议：移除 `probe` 配置开关（本文 §8/§11 相关内容作废），环境注入恒定生效。
+> 状态：已按本文实施完毕（设计定稿归档）。目标态已并入 `docs/design.md`《系统提示与缓存友好》/《环境段（envprobe）》。本文保留决策过程与对比，供回溯。**更正（2026-09-14）**：§4「环境段固定放 system prompt 最末尾…前缀缓存不受损」已被实测推翻（序列化顺序为 messages/instructions → tools，system 的任何变化都击穿其后全部 history），`envSection` 已改为构造期定格、`WORKSPACE` 行已删除；目标态见 `docs/design.md`《环境段（envprobe）》，实测见 battlelab 的 `docs/cache-probe.md`《落实：env 段的动态源》。实施后 review 决议：移除 `probe` 配置开关（本文 §8/§11 相关内容作废），环境注入恒定生效。
 
 ## 1. 背景
 

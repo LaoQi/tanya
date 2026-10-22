@@ -3,7 +3,7 @@ package repl
 import (
 	"context"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 	"github.com/LaoQi/tanya/readline"
 )
 

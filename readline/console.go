@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/LaoQi/tanya/ctty"
+	"github.com/LaoQi/battlelab/ctty"
 )
 
 var ErrUnsupported = errors.New("input: raw mode unsupported on this platform")

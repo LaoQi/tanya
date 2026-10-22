@@ -1,5 +1,7 @@
 # 多模态（图像）支持方案
 
+> 归属（2026-10-22）：图像通路（`read_image` 工具、图像缩放/裁剪/EXIF、`Message.Images` 与两协议 wire）的实现已迁至 `battlelab` 仓；用户侧 `@` 引用（`repl/ref.go`）、附件回显与补全仍在本仓。
+
 > 状态：**现行口径 = §0《简化（2026-10-10）》**：用户侧 `@` 只做「引用 + 存在性检查 + 回显」，**不读文件、不上传图像**；图像进模型**唯一通道是标准工具 `read_image`**（§7.5，含 `region` 区域读取）。§4.3/§4.4/§4.5/§5/§7 里关于「用户附图」的条款均已被 §0 取代（保留原文作历史）。此前的 P0/P1/预缩放/P4 状态说明如下（历史）：**P1 已实施 + 本地预缩放已实施 + P4（模型主动读图）已实施**（P0：数据模型/两协议 wire/扫描缓冲/`Ask` 带附件入口（原 `AskContent`）/`image_detail`；P1：`@path` 解析与校验、对话与 `ask` 接线、附件回显行、`@` 触发补全、`/history` 与列表占位、`image_max_bytes`/`image_max_count`）。拍定口径见 §7。
 > 依据：① 上游网关的 agent 指南（端点 `GET /api/guide.md`，源文件在网关仓库 `internal/admin/guide.md`；§2.1–2.2 抄录其 2026-10-08 实测口径）；② DeepSeek 官方文档 `guides/vision` 与 `quick_start/token_usage`（§2.3 抄录，2026-10-09 查证）
 > 范围：REPL 用户侧附图 → 两协议（`chat` / `responses`）→ history / 落盘 / 归档 / fork / load / 渲染全链路

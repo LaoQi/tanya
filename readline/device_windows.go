@@ -7,7 +7,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/LaoQi/tanya/ctty"
+	"github.com/LaoQi/battlelab/ctty"
 	"golang.org/x/sys/windows"
 )
 

@@ -5,14 +5,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LaoQi/tanya/agent"
-	"github.com/LaoQi/tanya/render/present"
+	"github.com/LaoQi/battlelab/agent"
+
+	"github.com/LaoQi/tanya/notify"
 	"github.com/LaoQi/tanya/render/term"
 )
 
-type fakeNotifier struct{ got []present.Notification }
+type fakeNotifier struct{ got []notify.Notification }
 
-func (f *fakeNotifier) Notify(n present.Notification) { f.got = append(f.got, n) }
+func (f *fakeNotifier) Notify(n notify.Notification) { f.got = append(f.got, n) }
 
 func withBellREPL(t *testing.T, mode outMode, prof term.Profile) (*REPL, *fakeNotifier) {
 	t.Helper()
@@ -207,7 +208,7 @@ func TestNotifiersFanOut(t *testing.T) {
 	if n == nil {
 		t.Fatal("有行为时不应为 nil")
 	}
-	n.Notify(present.Notification{Kind: notifyKindDone})
+	n.Notify(notify.Notification{Kind: notifyKindDone})
 	for i, f := range []*fakeNotifier{a, b, c} {
 		if len(f.got) != 1 {
 			t.Errorf("第 %d 个行为应各收一条: %+v", i, f.got)

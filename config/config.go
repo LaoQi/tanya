@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 )
 
 type UI struct {
@@ -35,13 +35,28 @@ type Config struct {
 var Version = "dev"
 
 const (
+	DefaultLocalDir         = ".tanya"
+	UserAgentProduct        = "tanya"
+	UserAgentURL            = "https://github.com/LaoQi/tanya"
 	DefaultToolOutputLines  = 20
 	DefaultImageDetail      = "low"
 	DefaultTheme            = "nord"
 	DefaultSessionMode      = "auto"
 	DefaultDataDirSuffix    = ".local/share/tanya"
 	DefaultConfigPathSuffix = ".config/tanya/config.yaml"
+	GlobalAgentsSuffix      = ".config/tanya/AGENTS.md"
 )
+
+// UserAgent 组装出站 UA（与 -v 同源的版本号）。
+func UserAgent(version string) string {
+	return fmt.Sprintf("%s/%s (+%s)", UserAgentProduct, version, UserAgentURL)
+}
+
+// GlobalAgentsPath 返回"全局说明"文件路径（agent 侧不预设路径，由调用方注入）。
+func GlobalAgentsPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, filepath.FromSlash(GlobalAgentsSuffix))
+}
 
 func defaultDataDir() string {
 	home, _ := os.UserHomeDir()
@@ -62,7 +77,8 @@ func Default() *Config {
 			ImageDetail:      DefaultImageDetail,
 			ApiProtocol:      "responses",
 			SessionMode:      DefaultSessionMode,
-			UserAgent:        agent.UserAgent(Version),
+			LocalDir:         DefaultLocalDir,
+			UserAgent:        UserAgent(Version),
 			DataDir:          defaultDataDir(),
 			AutoArchive:      true,
 			ArchiveThreshold: agent.DefaultArchiveThreshold,
@@ -147,7 +163,7 @@ func Load(path string) (*Config, error) {
 		cfg.ImageMaxBytes = agent.DefaultImageMaxBytes
 	}
 	if cfg.UserAgent == "" {
-		cfg.UserAgent = agent.UserAgent(Version)
+		cfg.UserAgent = UserAgent(Version)
 	}
 	cfg.NotifyCmd = strings.TrimSpace(cfg.NotifyCmd)
 	cfg.ReasoningEffort = agent.NormalizeEffort(cfg.ReasoningEffort)
@@ -164,6 +180,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.SessionMode == "" {
 		cfg.SessionMode = DefaultSessionMode
+	}
+	if strings.TrimSpace(cfg.LocalDir) == "" {
+		cfg.LocalDir = DefaultLocalDir
 	}
 	cfg.ConfigPath = cfg.Path
 

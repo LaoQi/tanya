@@ -1,3 +1,15 @@
+## 2026-10-22 refactor(agent,tools,ctty): 核心库抽到 `github.com/LaoQi/battlelab`
+
+- **动机**（用户拍板）：tanya 与 ivan 共用同一套 agent 核心，抽取独立 module `battlelab`，两仓都作库依赖，避免双份实现
+- **迁出**（工作树文件整体移走，本仓 git 历史保留删除记录）：`agent/`（回合核心）、`tools/`（Standard + `shell`/`image`/`builtin`）、`ctty/`（终端原语）→ `battlelab`，三包在库侧零本仓依赖
+- **留在本仓**（表现层与前台）：`repl`/`readline`/`render`/`attach`/`config`/`main`，另新增三个包——`workspace/`（`tanya init` 脚手架，原 `agent/init.go`；目录名取 `agent.Config.LocalDir`）、`notify/`（通知载荷 `Notification` + 外部程序通知，原 `tools/shell/notify.go`；bell/OSC 原语仍在 `ctty`）、`views/shell/`（run_shell 终端视图，原 `tools/shell/view`）、`integration/`（原 `tools/shell/tty_e2e_test.go`，readline × run_shell 真终端用例）
+- **库侧去品牌化**（保持本仓行为逐字节不变）：`agent.Config` 新增非 yaml 字段 `LocalDir`（本仓 `config.Default()` 填 `.tanya`，`validate` 要求 `session_mode=local` 时必须非空）；全局说明默认路径由库内硬编码 `~/.config/tanya/AGENTS.md` 改为**无默认**、由 `main` 经 `agent.WithGlobalAgentsPath(config.GlobalAgentsPath())` 注入；`agent.UserAgent*` 常量与 `msgNotify*`/`MsgInit*` 文案随各自归属迁走；`MsgAPIKey`/`MsgShellOverrideFmt` 去掉 `TANYA_*` 环境变量名
+- **通知边界**（用户要求：库不提供具体实现）：`Notification` 类型与该通知实现**都不进库**——tanya 的 `notify` 包持有载荷与外部程序通知，`battlelab/tools` 只留工具执行；`tools/shell` 从此不依赖任何 `render/*`
+- **构建**：`go.mod` 增 `require github.com/LaoQi/battlelab v0.0.0` + `replace ../battlelab`（开发期本地联调）；`golang.org/x/sys` 随 battlelab 升至 v0.48.0、`go` 指令随依赖要求升至 1.26.0（与 ivan 对齐）
+- **测试**：搬走的包连同其测试一起迁入 battlelab（`agent` 保留 `TestMain` 隔离，夹具改中性目录 `.agent`/`tanya/dev` 等）；`agent/init_test.go` 迁 `workspace/init_test.go` 并改用公开 API 断言；`agent/ua_test.go` 的 UA 断言并入 `config/config_test.go`；新增 `integration/doc.go` 让该包在各平台存在（否则 `make cross` 对空包失败）
+- **文档**：7 篇随代码迁至 battlelab（`agent-control-tool.md`、`ctty.md`、`shell-tool.md`、`agent-event-seams.md`、`session-archive.md`、`session-handoff.md`、`cache-probe.md`），每篇加归属说明；本仓全部引用改指 `battlelab 的 docs/…`，`docs/design.md`、`docs/multimodal.md`（混合文档）加归属注；`AGENTS.md` 顶部说明/结构块/依赖/文档清单同步，battlelab 侧新增 `docs/extraction.md` 记录边界判据
+- **验收**：`gofmt -l` 干净、`go build/vet ./...`、`go test ./...` 全绿、`make cross`（darwin/windows）零断点；ivan 侧同步改 import 后 `go build/vet/test ./...` 全绿（ivan 已不再直接依赖 tanya）
+
 ## 2026-10-22 attach: 允许裸写 pid（`tanya attach 41234`）
 
 - **动机**（用户要求）：`--pid` 是唯一指定实例的方式，多打一个旗标纯属啰嗦；裸写 pid 更贴近 `kill 41234` 一类习惯

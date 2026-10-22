@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 	"github.com/LaoQi/tanya/render/term"
 )
 

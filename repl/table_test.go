@@ -6,7 +6,7 @@ import (
 
 	"github.com/LaoQi/tanya/render/term"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 )
 
 func TestTurnRendersMarkdownTable(t *testing.T) {

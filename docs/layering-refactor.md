@@ -42,7 +42,7 @@
 | P2 | `readline`（输入层）依赖 `render/style`（表现层词汇）：`Editor` 持有 `rstyle.Style` 仅为 ghost 置灰与菜单高亮 | `readline/editor.go:6,46-47,62,320,413` | S3 |
 | P3 | 终端尺寸变化无归属：`EventResize`/`EventHangup` 声明后**从不产出**；`SIGWINCH` 只在 pty 借用期被 `readline` 直接注册；`repl` 的工具块宽度在启动时冻结（`facts.Width` 是值接收者方法值 = 常量），而 `picker` 每轮重读 `Size()` —— 三种行为并存 | `readline/console.go:26-31`、`readline/lease_linux.go:9,151`、`repl/repl.go:152`、`repl/picker.go:155` | S4 |
 | P4 | 可插拔性不对称：工具经 `agent.WithTools` 完全可插拔，但 `repl` 用 `res.Meta.(*shell.Result)` 类型断言 + `name == "run_shell"` 字符串分派认死具体工具；第三方工具的自定义 `Meta` 拿不到渲染 | `repl/toolview.go:74,172,340` | S5 |
-| P5 | 文档引用漂移：4 个已删文件被 6 份文档当作现行文件引用 | `docs/terminal-console.md`、`docs/ctty.md` 等 | S1 |
+| P5 | 文档引用漂移：4 个已删文件被 6 份文档当作现行文件引用 | `docs/terminal-console.md`、battlelab 的 `docs/ctty.md` 等 | S1 |
 
 不属于问题、但需要在文档里正名的两点见 §3 D1 / D2。
 
@@ -90,7 +90,7 @@
 
 ### S4 落地记录（2026-09-28）
 
-- **`ctty`**：`signals_posix.go` 增 `resizeSignals = []os.Signal{unix.SIGWINCH}`（windows/stub 为空集）；`signals.go` 拆出 `signals()`（单 channel + 单 dispatcher，`watchOnce`）、`watchNotify`（退出/中断清单，`WatchSignals` 用）、`resizeNotify`（resize 清单，`OnResize` 首次订阅时登记），`dispatch` 按信号类分流（resize → `notifyResize()`）。**武装按信号类惰性**的理由见 §3 D2 与 `docs/ctty.md`：`readline` 作为库被嵌入时不应连带装上 SIGTERM/SIGHUP 处置。
+- **`ctty`**：`signals_posix.go` 增 `resizeSignals = []os.Signal{unix.SIGWINCH}`（windows/stub 为空集）；`signals.go` 拆出 `signals()`（单 channel + 单 dispatcher，`watchOnce`）、`watchNotify`（退出/中断清单，`WatchSignals` 用）、`resizeNotify`（resize 清单，`OnResize` 首次订阅时登记），`dispatch` 按信号类分流（resize → `notifyResize()`）。**武装按信号类惰性**的理由见 §3 D2 与 battlelab 的 `docs/ctty.md`：`readline` 作为库被嵌入时不应连带装上 SIGTERM/SIGHUP 处置。
 - **`readline`**：`console.go` 在 `newConsole` 期订阅 `ctty.OnResize`（放在纯构造函数里，测试才能验到生产接线），`signalResize` 置位 + 推订阅者（借出期不推），`takeResize` 供 `ReadEvent` 与常驻读者消费；`editor.go` 收 `EventResize` → `render("")`；`picker.go` 改吃事件、删每轮 `Size()` 比对；`lease_linux.go` 删 `os/signal` 与 `winch` 通道，改经 `ctty.OnResize` 传播 `TIOCSWINSZ`（`fdMu` + `closed` 与 fd 拆除串行）；`EventHangup` 删除（挂断走 `io.EOF`，从未产出）。
 - **`repl`**：新增 `LiveWidth(con, facts) func() int`——每次渲染现取 `con.Size()`，取不到回落 `TermFacts`、再回落 80；`NewREPL` 与 `main` 的 `ask` 单发同路径。**无状态**（不缓存宽度、不缓存事件），只有「何时重绘」依赖 `EventResize`。
 - **验收**：`rg 'os/signal'` 仅 `ctty` 命中、`rg 'EventHangup'` 零命中、`-race` 全绿、darwin/windows 交叉编译通过、`render_audit` 15 PASS；新增单测 8 条（ctty SIGWINCH 实测送达与取消、Console 合并/订阅/借出期静默/常驻读者、编辑器重绘计数、picker 事件重排、`LiveWidth` 活取与兜底）。**两个 pty 端到端探针**（临时脚本，未入库）：① 100 列下工具块长行为 97 A，回合中途缩到 60 列后同一块变 57 A → 宽度活取生效；② `interactive: true` 的 `stty size` 在借出期缩放前后分别打印 `30 100` / `30 60` → 窗口尺寸传播生效。
@@ -115,13 +115,13 @@
 ### S6 `tools/shell` 依赖边正名与测试边修正（已落地，见下方落地记录）
 
 - **测试边**：`package shell` 内使用 `readline` 的 pty 集成用例移到外部测试包（`shell_test`），解除「`readline` 不得依赖 `tools/shell`」的隐性枷锁（内部测试包导入 `readline` 会让后者永远无法依赖 `tools/shell`；外部测试包无此约束）。
-- **正名**（§3 D1）：`AGENTS.md` 与 `docs/ctty.md` 明确「`ctty` 是零依赖叶子，任何层可直接依赖；注入只针对**终端所有权**（`Console`）」——`tools/shell` 直连 `ctty.ProtectJobSignals`/`DecodeCP` 属允许，不再记作违反注入原则。
+- **正名**（§3 D1）：`AGENTS.md` 与 battlelab 的 `docs/ctty.md` 明确「`ctty` 是零依赖叶子，任何层可直接依赖；注入只针对**终端所有权**（`Console`）」——`tools/shell` 直连 `ctty.ProtectJobSignals`/`DecodeCP` 属允许，不再记作违反注入原则。
 - 验收：`package shell` 的测试不再导入 `readline`；`go test -race ./...` 全绿。
 
 ### S6 落地记录（2026-09-28）
 
 - **测试边**：`tools/shell` 内部测试包（`package shell`）原先导入 `readline`（`rlConsole` 适配器 + 四个真终端用例），这会让 `readline` 永远无法依赖 `tools/shell`（内部测试包进测试二进制即成环）。四个用例（`TestRunShellKeepsTerminalForeground`、`TestRunShellFullRealTTYE2E`、`TestRunShellFullRealTTYReuse`、`TestRunShellFullCwdRealTTYE2E`）迁到**外部测试包** `package shell_test`（新文件 `tools/shell/tty_e2e_test.go`，`//go:build linux`），改用公开 API（`shell.New`/`Tool.Invoke` + JSON 参数 + `*shell.Result`），`rlConsole` 适配器随之搬走。
-- **正名**（D1）：`AGENTS.md` 与 `docs/ctty.md` 明示「`ctty` 是零依赖叶子，任何层可直接依赖，不需要注入；注入只针对终端**所有权**」——撤回首轮对 `tools/shell → ctty` 的"违反注入原则"定性；`AGENTS.md` 另加一条**测试包边界**约定（需要上层包的集成用例一律放外部测试包）。
+- **正名**（D1）：`AGENTS.md` 与 battlelab 的 `docs/ctty.md` 明示「`ctty` 是零依赖叶子，任何层可直接依赖，不需要注入；注入只针对终端**所有权**」——撤回首轮对 `tools/shell → ctty` 的"违反注入原则"定性；`AGENTS.md` 另加一条**测试包边界**约定（需要上层包的集成用例一律放外部测试包）。
 - **验收**：`go list -f '{{.TestImports}}' ./tools/shell` 不再含 `readline`（外部测试包按 `XTestImports` 单独报告）；`-race` 全绿；三个真 pty 用例在 `script -qec` 下实跑通过（`TTY_E2E=1` 的 E2E 与 cwd 用例、`TTY_E2E_REUSE=1` 的复用用例输出 `got:hello` / `got:world`）。
 
 ## 3 决策记录
@@ -167,5 +167,5 @@ rg 'EventHangup' -g '*.go' .                    # S4 后必须为空
 ## 5 遗留与不做
 
 - `repl` 的体量（3578 行）不属本次范围，见 D3。
-- `render/term` 与 `ctty` 的边界保持现状：前者是**输出侧原语**（宽度/清洗/控制序列），后者是**控制终端原语**（termios/尺寸/信号/代码页）；两侧都只放原语、不放策略，与 `docs/ctty.md`《设计原则》一致。
+- `render/term` 与 `ctty` 的边界保持现状：前者是**输出侧原语**（宽度/清洗/控制序列），后者是**控制终端原语**（termios/尺寸/信号/代码页）；两侧都只放原语、不放策略，与 battlelab 的 `docs/ctty.md`《设计原则》一致。
 - Windows 侧 resize 事件不产出（无 `SIGWINCH`）：`repl` 的活取宽度仍会在下次渲染时读到新尺寸，但 picker 的 `p.size` 是打开时快照、只在 `EventResize` 时更新——Windows 会话内缩放不自愈重排（S4 前的每轮 `Size()` 比对兜底已随事件化移除，与 D2「不假装支持」一致，行为退化记档于此）；如需实时化，属独立的 Windows 实机课题。

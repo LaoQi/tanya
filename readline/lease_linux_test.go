@@ -4,7 +4,7 @@ package readline
 
 import (
 	"bytes"
-	"github.com/LaoQi/tanya/ctty"
+	"github.com/LaoQi/battlelab/ctty"
 	"os"
 	"os/exec"
 	"strings"

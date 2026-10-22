@@ -9,7 +9,7 @@ import (
 	"github.com/LaoQi/tanya/render/term"
 	"github.com/LaoQi/tanya/render/theme"
 
-	"github.com/LaoQi/tanya/agent"
+	"github.com/LaoQi/battlelab/agent"
 	"github.com/LaoQi/tanya/readline"
 )
 
