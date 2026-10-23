@@ -106,6 +106,15 @@ OpenAI 兼容 Chat Completions API（`/chat/completions`，SSE 流式），一�
 - **退避**：500ms 起指数翻倍、封顶 8s；HTTP 响应带 `Retry-After`（秒数或 HTTP-date）时取它、封顶 60s；等待走 `select ctx.Done() / timer`，`^C` 立刻中断
 - **可观测**：每次重试发 `EventRetry`（`RetryInfo{Attempt, Max, Delay, Err}`），`Err` 是完整的上游错误原文（不裁剪）；`repl` 渲染成两行——上一行错误原文、下一行 `500ms 后重试（第 1/2 次）`，属于过程信息（`KindToolStatus`，`-p` 纯文本档不输出），心跳在提示后以 `» 等待响应` 续上。`EventRequestStart` 不重复发，故 TTFT 把重试等待一并计入（它就是用户的等待时间）
 
+#### 流中断（`unexpected EOF` / `MsgReadStream`）的边界
+
+`unexpected EOF` 是 HTTP body 未正常结束（上游或中间代理掐断长连接、连接重置、上游重启）。60s 空闲超时管不到它——那是「静默」检测，代理的「总时长掐断」只能在上游/代理侧调大超时，不在本仓口径内。
+
+- **无产出**（首字节之前就断）：纯传输层错误，按 `max_retries` 重试。2026-10-23 用「`Content-Length` 声明大于实际写入」造的真实 `unexpected EOF` 验过：两次断流 + 一次成功 = 3 次请求，两次 `EventRetry` 的 `Err` 都是「读取流失败」
+- **已有产出**（模型说到一半）：**不重试**——已流式上屏的内容无法回滚，重放会重复输出并重复计费
+- **已产出的半截内容不进 history**：`runTurn` 在 `err != nil` 时直接返回（部分消息不入 `history`），`ask` 只追加一行 `[本轮因错误中止：…]`。因此用户看到半截回答、会话里却没有它，模型下一轮不知道自己说到哪，用户说「继续」会从头重来
+- **取舍（用户拍板，2026-10-23）**：保留半截内容、或做「续接重试」（把半截当 assistant 前缀让模型接着写）都要动 history 一致性、`tool_calls` 完整性（残缺 `tool_calls` 会让下一请求 400）、缓存与回滚判定，而该错误在真实使用中是低频事件——**暂不实施**，靠「重新提问」自然恢复。重新评估的前提是某环境里高频出现（如长回答被代理稳定掐断）：届时优先做「半截内容入 history + 截断标注」，「续接重试」仍不做（模型不保证不重复、双协议差异大、额外计费）
+
 ### responses 协议（llm_responses.go `responsesStream`）
 
 OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses API 标准为参照**（OpenAI 兼容但不完整遵守 OpenAI：不支持/不依赖 `include`、`encrypted_content`），切换核心动机是思维链保持：
