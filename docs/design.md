@@ -97,6 +97,15 @@ OpenAI 兼容 Chat Completions API（`/chat/completions`，SSE 流式），一�
 
 流式解析要点：`data:` 行逐条解析 JSON chunk；content 直接拼接并经回调输出；tool_calls 按 `index` 分组做增量合并（id/type/name 覆盖、arguments 拼接），`[DONE]` 结束。`stream_options.include_usage` 捕获 usage（`completion_tokens_details.reasoning_tokens` 经 `Usage.normalize()` 归一为 `Usage.ReasoningTokens`，与 responses 口径对齐）；流结束记总耗时，存于 `Message.Duration`（`json:"-"` 不落盘）。**首字延迟不在 `agent` 侧记录**（2026-09-28）：它可由事件流重建，属渲染侧现算的派生量，见《状态行》与 battlelab 的 `docs/agent-event-seams.md`。
 
+### 请求重试（llm.go `ChatStream` + llm_http.go）
+
+`max_retries`（默认 2，`0` 关闭，`TANYA_MAX_RETRIES` 可覆盖，tanya 侧上限 20、越界回落默认）是**一次请求**的失败重试次数，重试包在 `Client.ChatStream` 外层（chat / responses 共用同一个循环），每次尝试 = 一次完整请求（建连 + 状态码 + 流读取）。`do()` 与 `ListModels` 不参与，避免两层重试相乘；`/model` 列表保持既有「失败不重试」口径。
+
+- **重试**：传输层错误（建连失败、连接重置、`unexpected EOF`、`MsgReadStream`）、`MsgStreamIdle`（流式空闲超时）、HTTP `408`/`425`/`429`/`5xx`
+- **不重试**：`ctx` 取消/超时（用户中断立即返回）、其余 4xx（`400`/`401`/`403`/`404` 等）、上游语义失败（`response.failed`/`response.completed` 带 error/`error` 事件，用 `semanticError` 标记）、**已经 emit 过 `EventContent`/`EventReasoning`/`EventToolCall` 的任何失败**——已上屏内容无法回滚，重放会让用户看到重复输出
+- **退避**：500ms 起指数翻倍、封顶 8s；HTTP 响应带 `Retry-After`（秒数或 HTTP-date）时取它、封顶 60s；等待走 `select ctx.Done() / timer`，`^C` 立刻中断
+- **可观测**：每次重试发 `EventRetry`（`RetryInfo{Attempt, Max, Delay, Err}`），`Err` 是完整的上游错误原文（不裁剪）；`repl` 渲染成两行——上一行错误原文、下一行 `500ms 后重试（第 1/2 次）`，属于过程信息（`KindToolStatus`，`-p` 纯文本档不输出），心跳在提示后以 `» 等待响应` 续上。`EventRequestStart` 不重复发，故 TTFT 把重试等待一并计入（它就是用户的等待时间）
+
 ### responses 协议（llm_responses.go `responsesStream`）
 
 OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses API 标准为参照**（OpenAI 兼容但不完整遵守 OpenAI：不支持/不依赖 `include`、`encrypted_content`），切换核心动机是思维链保持：

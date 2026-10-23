@@ -956,3 +956,45 @@ func TestToolViewNoTimingWithoutRequestStart(t *testing.T) {
 		t.Errorf("仍应显示 agent 报告的耗时: %q", got)
 	}
 }
+
+func TestToolViewRetryNotice(t *testing.T) {
+	var buf syncBuf
+	view := NewToolView(NewStreams(&buf, &syncBuf{}, modeRich), ttyRich(), testSem(), func() int { return 80 }, 20, testViews())
+	view.heart.interval = 2 * time.Millisecond
+	view.Handle(agent.Event{Kind: agent.EventRequestStart})
+	body := "上游返回的完整错误体 " + strings.Repeat("x", 160) + "\n第二行原文"
+	view.Handle(agent.Event{Kind: agent.EventRetry, Retry: agent.RetryInfo{
+		Attempt: 1, Max: 2, Delay: 500 * time.Millisecond, Err: "API 错误 503: " + body,
+	}})
+	out := term.Strip(buf.String())
+	if !strings.Contains(out, "API 错误 503: "+body) {
+		t.Errorf("错误原文应完整上屏、不裁剪: %q", out)
+	}
+	if !strings.Contains(out, body+"\n"+fmt.Sprintf(MsgRetryNoticeFmt, "500ms", 1, 2)) {
+		t.Errorf("重试计划应在错误信息的下一行: %q", out)
+	}
+	waitUntil(t, "重试后恢复等待心跳", func() bool {
+		return strings.Count(term.Strip(buf.String()), MsgStatusWaiting) >= 2
+	})
+	view.Stop()
+	assertNoCursorControl(t, buf.String())
+}
+
+func TestToolViewRetryNoticeHiddenInPlain(t *testing.T) {
+	var buf syncBuf
+	view := NewToolView(NewStreams(&buf, &syncBuf{}, modePlain), term.Profile{}, testSem(), func() int { return 80 }, 20, testViews())
+	view.Handle(agent.Event{Kind: agent.EventRetry, Retry: agent.RetryInfo{Attempt: 1, Max: 2, Delay: time.Second, Err: "API 错误 503: boom"}})
+	if buf.String() != "" {
+		t.Errorf("plain 档不应输出重试提示: %q", buf.String())
+	}
+}
+
+func TestRenderRetryNoticeSanitizesError(t *testing.T) {
+	got := RenderRetryNotice(agent.RetryInfo{Attempt: 2, Max: 2, Delay: 2 * time.Second, Err: "boom\x1b[31m红\x07\n"})
+	if strings.ContainsRune(got, 0x1b) || strings.ContainsRune(got, 0x07) {
+		t.Errorf("错误原文应清洗控制序列: %q", got)
+	}
+	if !strings.Contains(got, "2.0s 后重试（第 2/2 次）") {
+		t.Errorf("应格式化重试计划: %q", got)
+	}
+}

@@ -415,3 +415,43 @@ func TestDefaultUserAgentFollowsVersion(t *testing.T) {
 		t.Errorf("默认 UA 仍为旧版本值: %q", cfg.UserAgent)
 	}
 }
+
+func TestLoadConfigMaxRetries(t *testing.T) {
+	if got := Default().MaxRetries; got != DefaultMaxRetries {
+		t.Errorf("默认重试次数应为 %d: %d", DefaultMaxRetries, got)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("max_retries: 7\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxRetries != 7 {
+		t.Errorf("yaml max_retries 未生效: %d", cfg.MaxRetries)
+	}
+	t.Setenv("TANYA_MAX_RETRIES", "0")
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxRetries != 0 {
+		t.Errorf("env 应覆盖 yaml（0 = 关闭）: %d", cfg.MaxRetries)
+	}
+	t.Setenv("TANYA_MAX_RETRIES", "")
+	for _, body := range []string{"max_retries: -3\n", "max_retries: 99\n"} {
+		write(body)
+		cfg, err = Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.MaxRetries != DefaultMaxRetries {
+			t.Errorf("%q 应回落到默认 %d: %d", body, DefaultMaxRetries, cfg.MaxRetries)
+		}
+	}
+}

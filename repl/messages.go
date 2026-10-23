@@ -13,6 +13,8 @@ const (
 	MsgCancelled         = "已取消\n"
 
 	MsgDialogueEmpty = "用法: 直接输入内容与 AI 对话（: 前缀亦可）\n"
+
+	MsgRetryNoticeFmt = "%s 后重试（第 %d/%d 次）"
 )
 
 const (

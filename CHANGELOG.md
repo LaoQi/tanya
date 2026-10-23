@@ -1,3 +1,14 @@
+## 2026-10-23 feat(config,repl,agent): 请求失败自动重试（`max_retries`，默认 2 次 = 最多 3 次请求）
+
+- **动机**（用户要求）：请求失败（网络抖动、上游 5xx/429、流中途断开）不该让整轮直接报错，应自动重试；次数默认「再试 2 次」，退避按既有 5 次序列规则（0.5s 起指数翻倍、封顶 8s）
+- **配置**（`config/config.go`）：新增 `DefaultMaxRetries = 2`、`max_retries` 键与 `TANYA_MAX_RETRIES` 覆盖（非法值忽略、0 = 关闭、负值或 > 20 回落默认）；`config.example.yaml` 新增键与注释块，`tanya config` 输出与示例逐字节一致；`main_test.go` 的默认值比对表补 `max_retries`（漏项会被「示例显式键未纳入比对」当场拦下）
+- **重试内核**（battlelab 的 `agent`，详见其 CHANGELOG）：`Client.ChatStream` 外层循环、chat/responses 共用；只重试传输层错误 / `408`/`425`/`429`/`5xx` / 无产出时的流中断，其余 4xx、上游语义失败、`ctx` 取消不重试；**已 emit 过 content/reasoning/tool_call 即停**（已上屏内容无法回滚）；`Retry-After` 优先、`sleepCtx` 等待可被 `^C` 打断
+- **提示行**（`repl/toolview.go`）：新增 `EventRetry` 消费与 `RenderRetryNotice`——**上一行是完整的上游错误原文（不裁剪、仅清洗控制序列）**，下一行才是 `500ms 后重试（第 1/2 次）`（用户要求重试信息另起一行，避免遮住错误正文）；归 `KindToolStatus`（过程信息），`-p` 纯文本档不输出，`ask` 单发与 REPL 同一实现；提示后心跳以 `» 等待响应` 续上
+- **测试**：battlelab `agent/llm_retry_test.go` +11（503→200、用尽、关闭、4xx 不重试、已上屏不重试、`Retry-After` + 等待期取消、responses 两条、`retryDelay` 序列封顶、`retryableErr` 判定表）；本仓 `config/config_test.go` 加 yaml/env/回落三路、`repl/toolview_test.go` 加错误原文完整上屏 + 重试行在下一行 + 心跳恢复 + plain 档不输出 + `RenderRetryNotice` 清洗控制序列
+- **真机验收**（`make build` + 假 LLM：前两次 503、第三次成功）：`tanya ask "你好"` 打两行错误原文（`{"error": {...}}` 完整未截断）+ `500ms / 1.0s 后重试（第 1/2 次）`，第三次输出「重试成功。」与状态行（TTFT 1.5s 含重试等待）；REPL 同样两轮提示后心跳续行、回合正常收尾
+- **依赖**：battlelab 打 tag `v0.1.1` 并入仓发布，本仓 `require` 升到 `v0.1.1`、撤除开发期的 `replace ../battlelab`
+- **验收**：`gofmt -l` 干净、`go build/vet ./...`、`go test ./...`、`make cross`（darwin/windows）零断点（均在发布版依赖上复跑）；battlelab 侧 `go test -race ./agent/` 通过
+
 ## 2026-10-22 refactor(agent,tools,ctty): 核心库抽到 `github.com/LaoQi/battlelab`
 
 - **动机**（用户拍板）：tanya 与 ivan 共用同一套 agent 核心，抽取独立 module `battlelab`，两仓都作库依赖，避免双份实现

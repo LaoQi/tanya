@@ -30,6 +30,7 @@
 - 回合渲染单 goroutine 事件合流（`repl/turnloop.go`）：agent 事件与完成信号同 channel FIFO、保尾事件不丢、工具块先于工具输出上屏；思考期 `Ctrl+O` 经 `Console.SubscribeKeys` 送键（门禁 posix + keys + 富档）；`ReadEvent` 空闲返回 `EventIdle`（不 dispatch），见 `docs/stream-input-events.md`
 - REPL 输入分发（`repl/dispatch.go`）：`/` 白名单斜杠命令、`exit`/`quit` 内建退出、`:`/`：` 显式对话前缀；进程 cwd 恒为启动目录（不 `os.Chdir`），`run_shell` 默认在当前工作区执行、可用 `cwd` 指定单次目录；`/switch <dir>` 按新目录重建会话，失败或目标非法时原工作区与会话不动；注入工具**不重建**，默认目录由 `tools.Options.Workspace` 活取
 - `api_protocol` 双通道（yaml/env，默认 `responses`，非法值启动报错）：`responses` 走 `/responses`（reasoning 明文捕获/回传、固定 `store: false`），`chat` 走 `/chat/completions`（思维链走 `reasoning_content`），见 `docs/design.md`《LLM 接入》
+- 请求失败自动重试：`max_retries`（默认 2，`0` = 关闭，`TANYA_MAX_RETRIES`；tanya 侧上限 20 越界回落默认）。重试包在 `Client.ChatStream` 外层（两协议共用，每次尝试 = 一次完整请求），只重试传输层错误、`408`/`425`/`429`/`5xx` 与「无产出时的流中断」；**一旦 emit 过 `EventContent`/`EventReasoning`/`EventToolCall` 即停**（已上屏内容无法回滚），语义失败（`semanticError`）与其余 4xx 不重试；退避 0.5s 起翻倍封顶 8s、`Retry-After` 优先封顶 60s、等待可被 ctx 取消。提示走 `EventRetry`（错误原文完整不裁剪，重试计划另起一行，`KindToolStatus`），见 `docs/design.md`《请求重试》
 - 思考等级只用标准字段 `reasoning_effort`（minimal/low/medium/high/max），不用厂商私有参数；设置后两协议均不发 `temperature`
 - 出站 UA：默认 `tanya/<版本> (+https://github.com/LaoQi/tanya)`（不做伪装；格式源 `agent.UserAgent`，`<版本>` 由 `main` 经 `config.Version` 注入、与 `-v` 同源，未注入即 `dev`），`user_agent` / `TANYA_USER_AGENT` 可配（显式设置后原样发送、不再走默认格式）
 - 输出侧动态文本（模型输出、用户输入、工具参数、服务端数据、错误信息）落屏前一律清洗控制序列；`emit` 只承载自生成样式文本、不做 emit 级全局 Strip，见 `docs/design.md`《输出流与 Kind》

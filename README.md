@@ -46,9 +46,11 @@ api_key: "sk-..."
 model: deepseek-v4-flash
 ```
 
-环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_API_PROTOCOL` / `TANYA_DATA_DIR` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES` / `TANYA_SHELL` / `TANYA_THEME`。
+环境变量 `TANYA_*` 可覆盖配置文件：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_API_PROTOCOL` / `TANYA_DATA_DIR` / `TANYA_SESSION_MODE` / `TANYA_USER_AGENT` / `TANYA_TOOL_OUTPUT_LINES` / `TANYA_SHELL` / `TANYA_THEME` / `TANYA_MAX_RETRIES`。
 
 `api_protocol` 配置项（env `TANYA_API_PROTOCOL`）选择 API 协议：`responses`（默认，OpenAI Responses API 兼容格式，思维链明文回传）或 `chat`（Chat Completions 兼容协议）。端点路径为 `/responses` 时用 `responses`；仅提供 `/chat/completions` 的端点遇 404 时请切换为 `chat`。
+
+`max_retries` 配置项（env `TANYA_MAX_RETRIES`，默认 `2`，`0` 关闭，上限 `20`）决定请求失败后的自动重试次数：网络错误、`408`/`425`/`429`/`5xx`、以及**尚未输出任何内容时的流中断**会重试；`400`/`401`/`403`/`404` 与上游语义失败（如 `response.failed`）不重试；**一旦已有内容上屏就不再重试**（已输出内容无法回滚）。每次重试前打两行提示——上一行是完整的上游错误原文（不裁剪），下一行是重试计划（`500ms 后重试（第 1/2 次）`）。等待按 0.5s 起指数翻倍、封顶 8s，上游给了 `Retry-After` 时优先用它（封顶 60s）；等待期间 `^C` 立即中断。
 
 `shell` 配置项（env `TANYA_SHELL`）指定 run_shell 使用的 shell，支持名字或绝对路径（如 `zsh`、`/usr/bin/fish`）；缺省自动探测：Windows 依次尝试 pwsh → powershell（Windows PowerShell 5.1 兜底），Linux/macOS 依次尝试 bash → sh → ash。全部落空（含配置的 shell 不存在）时启动阶段直接报错退出，不进入 REPL。
 

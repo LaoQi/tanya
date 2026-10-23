@@ -118,6 +118,16 @@ func RenderToolEndAppend(sem theme.Semantics, prof term.Profile, name string, re
 	return b.String()
 }
 
+// RenderRetryNotice 渲染一次重试提示：首行是上游错误原文（完整、不裁剪），次行是重试计划。
+func RenderRetryNotice(r agent.RetryInfo) string {
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(term.Sanitize(r.Err, false), "\n"))
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf(MsgRetryNoticeFmt, present.Duration(r.Delay), r.Attempt, r.Max))
+	b.WriteString("\n")
+	return b.String()
+}
+
 // respTiming 记录一次出站请求的首字延迟：由看见完整事件流的那一层推进（REPL 是 turn，单发是 toolView）。
 type respTiming struct {
 	now   func() time.Time
@@ -367,6 +377,17 @@ func (v *toolView) Handle(e agent.Event) {
 		v.Content(KindContent, term.Sanitize(e.Text, false))
 	case agent.EventResponse:
 		v.Response(e.Response, v.timing.ttft, v.timing.ttfc)
+	case agent.EventRetry:
+		v.heart.stop()
+		dirty := v.dirty
+		v.st.out.atomic(KindToolStatus, func(w io.Writer) {
+			if dirty {
+				io.WriteString(w, "\n")
+			}
+			io.WriteString(w, v.sem.Dim.With(v.prof).Frame(RenderRetryNotice(e.Retry)))
+		})
+		v.dirty = false
+		v.heart.start(statusWaiting, v.statusOn())
 	case agent.EventToolStart:
 		v.heart.stop()
 		v.st.out.atomic(KindToolBlock, func(w io.Writer) {

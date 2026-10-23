@@ -39,6 +39,8 @@ const (
 	UserAgentProduct        = "tanya"
 	UserAgentURL            = "https://github.com/LaoQi/tanya"
 	DefaultToolOutputLines  = 20
+	DefaultMaxRetries       = 2
+	maxRetriesLimit         = 20
 	DefaultImageDetail      = "low"
 	DefaultTheme            = "nord"
 	DefaultSessionMode      = "auto"
@@ -76,6 +78,7 @@ func Default() *Config {
 			Temperature:      0.7,
 			ImageDetail:      DefaultImageDetail,
 			ApiProtocol:      "responses",
+			MaxRetries:       DefaultMaxRetries,
 			SessionMode:      DefaultSessionMode,
 			LocalDir:         DefaultLocalDir,
 			UserAgent:        UserAgent(Version),
@@ -135,6 +138,11 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("TANYA_API_PROTOCOL"); v != "" {
 		cfg.ApiProtocol = v
 	}
+	if v := os.Getenv("TANYA_MAX_RETRIES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.MaxRetries = n
+		}
+	}
 	if v := os.Getenv("TANYA_DATA_DIR"); v != "" {
 		cfg.DataDir = v
 	}
@@ -161,6 +169,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.ImageMaxBytes < 1 {
 		cfg.ImageMaxBytes = agent.DefaultImageMaxBytes
+	}
+	if cfg.MaxRetries < 0 || cfg.MaxRetries > maxRetriesLimit {
+		cfg.MaxRetries = DefaultMaxRetries
 	}
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = UserAgent(Version)

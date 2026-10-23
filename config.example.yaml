@@ -42,6 +42,10 @@ image_resize: true
 # notify_cmd: osascript -e 'display notification "{content}" with title "{title}"'
 # notify_cmd: /path/to/hook {kind} {title} {content}
 
+# 请求失败自动重试次数（0 = 关闭，上限 20）：网络错误、408/425/429/5xx，以及尚未输出任何内容时的流中断会重试
+# 一旦已输出内容就不再重试（已上屏内容无法回滚）；等待按 0.5s 起指数翻倍、封顶 8s，上游给了 Retry-After 则优先（封顶 60s）
+max_retries: 2
+
 # 出站请求 User-Agent：默认 tanya/<版本> (+https://github.com/LaoQi/tanya)，<版本> 为构建期注入的版本号（与 `tanya -v` 显示的一致）
 # user_agent: tanya/dev (+https://github.com/LaoQi/tanya)
 # REPL 提示符为内置固定模板（不可配），占位符按口径分两组（加 _total 后缀即本次运行累计，无后缀即最近一次请求）：{cwd} 短路径 / {model} 模型 / {effort} 思考等级 / {usage} 上下文用量 / {cache} 本次命中量 / {cache_rate} 本次命中率 / {usage_total} 累计用量 / {cache_total} 累计命中量 / {cache_rate_total} 累计命中率 / {usage_summary} 组合显示（混合口径，{usage} 其后有累计缓存数据时追加累计命中率；与 /stat 命令不同源）

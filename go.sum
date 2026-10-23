@@ -1,5 +1,5 @@
-github.com/LaoQi/battlelab v0.1.0 h1:wiWaM/XrAdpPDFSKuu9l0IU629BxqNOOeZMlagT5MZc=
-github.com/LaoQi/battlelab v0.1.0/go.mod h1:3wsvotIy4uFotJi51SuaYS96KBd6Bt4ar5aYmRq85dk=
+github.com/LaoQi/battlelab v0.1.1 h1:Rk7p0I/vHrJbSgF3YQ+mOpN+AZCBakMzuiOacC5zkSg=
+github.com/LaoQi/battlelab v0.1.1/go.mod h1:3wsvotIy4uFotJi51SuaYS96KBd6Bt4ar5aYmRq85dk=
 golang.org/x/sys v0.48.0 h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=
 golang.org/x/sys v0.48.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
