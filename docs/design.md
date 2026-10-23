@@ -526,6 +526,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `notify_cmd` | 空 | 调用外部程序发送通知的 shell 命令字符串，支持 `{title}`/`{content}`/`{kind}` 占位符（`kind` 取 done/failed/input；占位符自带引号，配置里不要加；空 = 关闭，无 env） |
 | `show_reasoning` | `false` | 思维链是否随对话显示（markdown 渲染 + `─── 思考 ───` / `─── 思考结束 · 3.2s ───` 分隔；仅 REPL rich 档生效，无 env）；REPL 内 `/reasoning on\|off` 可运行时切换 |
 | `api_protocol` | `responses` | API 协议 responses/chat（见《LLM 接入》），非法值启动报错 |
+| `max_retries` | `2` | 请求失败自动重试次数（`0` = 关闭；负值或 > 20 回落默认；见《请求重试》） |
 | `colors` | `auto` | 终端配色 auto（跟随终端能力与 `NO_COLOR`）/ on（强制开色）/ off（强制纯文本） |
 | `theme` | `nord` | 内置配色主题（语义色/提示符/markdown 标题与代码整体切换）：default/minimal/solar/vivid/nord/gruv/dusk，非法值启动报错 |
 | `palette` | 空 | 语义色覆盖（info/warn/ok/error/dim/accent/think/run → 色名），叠加在当前主题之上（切换主题后自动重放） |
@@ -535,7 +536,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 | `tool_output_lines` | 20 | 工具输出最多显示行数（1-1000） |
 | `shell` | 空 | run_shell 使用的 shell（名字或绝对路径）；空则平台探测（linux/darwin bash→sh→ash，windows pwsh→powershell），全部落空启动报错 |
 
-env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_API_PROTOCOL` / `TANYA_DATA_DIR` / `TANYA_SESSION_MODE` / `TANYA_THEME` / `TANYA_USER_AGENT` / `TANYA_SHELL` / `TANYA_TOOL_OUTPUT_LINES`。
+env 覆盖：`TANYA_BASE_URL` / `TANYA_API_KEY` / `TANYA_MODEL` / `TANYA_TEMPERATURE` / `TANYA_REASONING_EFFORT` / `TANYA_API_PROTOCOL` / `TANYA_MAX_RETRIES` / `TANYA_DATA_DIR` / `TANYA_SESSION_MODE` / `TANYA_THEME` / `TANYA_USER_AGENT` / `TANYA_SHELL` / `TANYA_TOOL_OUTPUT_LINES`。
 
 完整示例文本（带注释、含全部可配项）经 `//go:embed` 嵌在二进制里，`tanya config` 可直接输出（见《config 子命令》）。
 
