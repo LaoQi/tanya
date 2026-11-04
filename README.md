@@ -89,6 +89,7 @@ tanya attach          # 接管同一工作区里正在运行的实例（对方�
 tanya -n              # 只读会话：可载入历史，不写入
 tanya -n ask "问题"   # 单发且不写入会话历史
 tanya -c x.yaml       # 指定配置文件
+tanya -C ~/proj       # 指定工作区（启动时注入到 argv，ps 里可直接复制复跑）
 tanya -m local        # 会话存到当前目录 .tanya/
 tanya --model gpt-5   # 本次运行使用指定模型（只影响本次进程，不写配置文件）
 tanya -p              # 纯文本输出：无颜色/状态行/工具块，stdout 只留答案与命令反馈
@@ -96,6 +97,16 @@ tanya -p --verbose    # 纯文本输出但保留工具块与状态行（仍无�
 tanya -v              # 显示版本号
 tanya -h              # 用法：四种运行模式与全局选项（--help 同）
 ```
+
+`-C <目录>` 是**真实生效的参数**（启动时切到该目录一次，此后不再 chdir），仅 Linux 上的交互 REPL 会自动注入当前目录，使 `ps` 显示的命令行合法可执行：
+
+```
+$ ps -eo pid,args
+ 531013 tanya -C /home/user/proj-a
+ 531062 tanya -C /home/user/proj-b
+```
+
+子命令（`ask`/`init`/`config`/`attach`）不注入；注入失败静默忽略，不影响启动。
 
 模型来源优先级（从高到低）：命令行 `--model <name>` > env `TANYA_MODEL` > 配置文件 `model`。`--model` 只覆盖本次运行，空值或纯空白视为未指定、回落下层；运行期仍可用 `/model` 或让模型经 `agent_custom` 的 `set model` 再切换。
 

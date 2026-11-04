@@ -1,3 +1,18 @@
+## 2026-11-04 feat(main,procarg): 新增 `-C <目录>`，启动时把工作区写进 argv（ps 可直接复跑）
+
+- **动机**（用户反馈）：执行期间从 `ps` 看进程只有 `tanya` 一行，看不出它对应哪个工作区、哪个项目。多实例共存时无法区分
+- **做法**：仅 **REPL 模式**、未显式给 `-C` 时，`main` 在 `flag.Parse()` 之前 re-exec 一次，把 `-C <cwd>` 注入到 argv 最前。`-C` 是**真实生效的参数**（启动时 `os.Chdir` 一次），故 `ps` 显示的那行本身合法可执行——复制到任意终端即进入同一工作区
+- **新增顶级包 `procarg`**（约 40 行，能力只服务 tanya，**不进 battlelab**）：`Reinject(workspace) bool` + 常量 `Flag = "C"`。平台分片遵循白名单约束——`reinject_linux.go`（`//go:build linux`，`os.Executable` + `syscall.Exec`）与 `reinject_stub.go`（`//go:build !linux`，恒返回 false）。`main.go` 内**不出现** `syscall`/`runtime.GOOS`/build tag
+- **失败一律静默**：取不到 cwd/exe、exec 失败、非 Linux 平台 → 直接按原名继续运行，绝不因改名挡住启动。无 `TANYA_NO_REEXEC` 逃生开关（用户要求：失败就失败了）
+- **子命令不注入**：`ask`/`init`/`config`/`attach` 保持原行为（避免无谓 re-exec，也与「`tanya config | diff -`」这类管道用法无关）；判定用 `ContinueOnError` 私有 FlagSet + `SetOutput(io.Discard)`，不污染 stderr
+- **`flag.CommandLine.Init("tanya", flag.ExitOnError)`**：显式命名，避免 usage 印成「用法: tanya[...] [选项]」（注入后 argv0 变长会污染 `FlagSet.Name()`）
+- **`-c` 相对路径先固化**：`os.Chdir` 之前把相对配置路径转绝对，否则 `-C /proj -c my.yaml` 会在目标目录下找错文件
+- **不变量保持**：`-C` 只在启动时 chdir 一次，此后全程不再 `os.Chdir`——「进程 cwd 恒为启动目录」不变；`agent.New` 的 `os.Getwd()` 自然读到目标目录，**battlelab 零改动**；`/switch` 不改 cwd（`-C` 表示启动目录）
+- **错误文案**：`repl.MsgBadWorkspaceDirFmt`（不复用 `agent.MsgBadWorkspace`——后者自带 `error: ` 前缀，套进 `错误: %v` 会重复）
+- **测试**（`main_test.go` +4）：`-C` 已登记且进 usage、`applyWorkspace`（空/nil/有效/无效四态）、`hasSubcommand` 8 条表、`lookupFlag` 命中与未登记
+- **真机验收**：`/tmp/zzws2` 启动 → `ps -o args=` 显示 `tanya -C /tmp/zzws2 -n`，cwd 与状态行均为该目录；`ps` 那行改子命令后可直接复跑；无效目录报「错误: 无效工作区 ...」（退出 1）；`-v`/`ask`/`config` 行为不变
+- **验收**：`gofmt -l` 干净、`go build ./...`、`go vet ./...`、`go test ./...` 全绿、`make cross`（darwin/windows）通过、`/tanya config` 输出与 `config.example.yaml` 一致（无新配置键）
+
 ## 2026-10-23 docs(design): 记录流中断的重试边界与半截内容取舍
 
 - **背景**（用户反馈）：已更新新版本的节点上真实出现过 `错误: 读取流失败: unexpected EOF` 且未重试。核查确认为**有产出后断流**——设计如此（已上屏内容无法回滚），非重试机制失效

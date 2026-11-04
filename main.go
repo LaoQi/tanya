@@ -20,6 +20,7 @@ import (
 	"github.com/LaoQi/tanya/attach"
 	"github.com/LaoQi/tanya/config"
 	"github.com/LaoQi/tanya/notify"
+	"github.com/LaoQi/tanya/procarg"
 	"github.com/LaoQi/tanya/readline"
 	"github.com/LaoQi/tanya/render/present"
 	"github.com/LaoQi/tanya/render/term"
@@ -42,6 +43,7 @@ var configExampleFile string
 
 type cliFlags struct {
 	showVersion *bool
+	workspace   *string
 	configPath  *string
 	sessionMode *string
 	model       *string
@@ -54,6 +56,7 @@ type cliFlags struct {
 func registerFlags(fs *flag.FlagSet) *cliFlags {
 	f := &cliFlags{}
 	f.showVersion = fs.Bool("v", false, repl.FlagVersion)
+	f.workspace = fs.String(procarg.Flag, "", repl.FlagWorkspace)
 	f.configPath = fs.String("c", "", repl.FlagConfig)
 	f.sessionMode = fs.String("m", "", repl.FlagMode)
 	f.model = fs.String("model", "", repl.FlagModel)
@@ -66,11 +69,17 @@ func registerFlags(fs *flag.FlagSet) *cliFlags {
 }
 
 func main() {
+	flag.CommandLine.Init("tanya", flag.ExitOnError)
+	maybeReinject()
 	f := registerFlags(flag.CommandLine)
 	flag.Usage = func() { writeUsage(os.Stderr, flag.CommandLine) }
 	flag.Parse()
 	ctty.EnsureUTF8()
 	defer ctty.RestoreUTF8()
+	if err := applyWorkspace(f.workspace); err != nil {
+		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
+		exitNow(1)
+	}
 
 	cmd, rest := repl.ParseCommand(flag.Args())
 	mode, err := repl.ParseMode(*f.plain, *f.verbose)
@@ -564,6 +573,64 @@ func shortDur(d time.Duration) string {
 		return fmt.Sprintf("%.1fs", d.Seconds())
 	}
 	return fmt.Sprintf("%dms", d.Milliseconds())
+}
+
+// maybeReinject 在仅有 REPL 模式且未给 -C 时，把当前工作区写进 argv 后重启自身，
+// 使 ps 显示的命令行可直接复跑。子命令、已给 -C、非 Linux 平台、exec 失败一律不动。
+func maybeReinject() {
+	if hasSubcommand(os.Args[1:]) {
+		return
+	}
+	fs := flag.NewFlagSet("tanya", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	registerFlags(fs)
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		return
+	}
+	if v, ok := lookupFlag(fs, procarg.Flag); ok && v != "" {
+		return
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	procarg.Reinject(cwd)
+}
+
+// hasSubcommand 报告命令行是否以子命令起头：这些模式不做 argv 注入。
+func hasSubcommand(args []string) bool {
+	fs := flag.NewFlagSet("tanya", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	registerFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return false
+	}
+	rest := fs.Args()
+	if len(rest) == 0 {
+		return false
+	}
+	cmd, _ := repl.ParseCommand(rest)
+	return cmd != repl.CmdREPL
+}
+
+// lookupFlag 读取探测用 FlagSet 里的字符串选项；未登记时返回 false。
+func lookupFlag(fs *flag.FlagSet, name string) (string, bool) {
+	f := fs.Lookup(name)
+	if f == nil {
+		return "", false
+	}
+	return f.Value.String(), true
+}
+
+// applyWorkspace 让 -C 真正生效：启动时切到该目录一次，此后全程不再 chdir。
+func applyWorkspace(dir *string) error {
+	if dir == nil || *dir == "" {
+		return nil
+	}
+	if err := os.Chdir(*dir); err != nil {
+		return fmt.Errorf(repl.MsgBadWorkspaceDirFmt, *dir, err)
+	}
+	return nil
 }
 
 func applyModel(cfg *config.Config, v string) {

@@ -25,6 +25,7 @@
 - 启动即拒绝 root：`ctty.IsRoot()`（posix 取 euid 0，其余平台恒 false）为真则整个入口拒绝（`-v`/`config`/`ask`/`init` 无豁免），逃生舱只认 `TANYA_ALLOW_ROOT=1`；判定在 `main`
 - 启动即要求可用 shell：解析（配置覆盖 > 平台探测）全落空即报错退出、无降级；解析点在 `tools.Standard`，`agent.New` 不感知 shell
 - 配置分层：`agent.Config` 只留运行时核心项，终端表现项外移顶级 `config` 包（`config.UI` inline 合成）、`shell` 覆盖为顶层字段由 `main` 读给 `tools.Standard`；**yaml 键名与 `TANYA_*` env 名全程不变**，`config.example.yaml` 与 `tanya config` 输出逐字节不变。`agent` 无配置加载机制（不读 yaml/env），路径由调用方写入 `Config.ConfigPath`；`Config.Validate()` 在 `agent.New` 入口调用，**`api_key` 唯一豁免**；默认值与加载归 `config` 包，见 `docs/design.md`《配置分层》
+- `-C <目录>` 是**真实生效的参数**（启动时 `os.Chdir` 一次，此后全程不再 chdir，「进程 cwd 恒为启动目录」不变量不变），仅 **REPL 模式**下由 `main` 在 `flag.Parse()` 之前经 `procarg.Reinject` re-exec 注入到 argv 最前，故 `ps` 显示的那行**本身合法可执行**；子命令（`ask`/`init`/`config`/`attach`）不注入，已给 `-C` 时幂等跳过；一切失败（取不到 cwd/exe、exec 失败、非 Linux）**静默继续**，绝不挡住启动，无逃生开关。平台代码收敛在 `procarg` 分片（`linux` 实现 / 其余 stub），`main.go` 不出现 `syscall`/`GOOS`/build tag。`-c` 相对路径在 chdir 前固化为绝对
 - `init` 子命令是新工作区的一次性脚手架（幂等、不覆盖既有文件），**必须在 `agent.New` 之前执行**；不做项目探测、不调模型，见 `docs/design.md`《init 模式》
 - 会话归档：写入触发点只有 `/archive` 与启动自动归档两处，共用 `REPL.archiveFlow`（先报告再确认）；卷无损、写入后不可变、不做解档；归档会话 `/load` 只读、继续对话一律 `/fork`，见 battlelab 的 `docs/session-archive.md`
 - 回合渲染单 goroutine 事件合流（`repl/turnloop.go`）：agent 事件与完成信号同 channel FIFO、保尾事件不丢、工具块先于工具输出上屏；思考期 `Ctrl+O` 经 `Console.SubscribeKeys` 送键（门禁 posix + keys + 富档）；`ReadEvent` 空闲返回 `EventIdle`（不 dispatch），见 `docs/stream-input-events.md`
@@ -51,6 +52,7 @@ system_prompt.md    内置系统提示词原文（顶层，编译期嵌入）
 config.example.yaml 默认配置示例原文（顶层，编译期嵌入，`tanya config` 输出）
 config/             tanya 作为 CLI 的完整配置：agent.Config + UI(inline) + Shell + Path；yaml 加载、TANYA_* 覆盖、校验（agent 侧零加载机制）
 attach/             接管运行中实例：工作区 run 注册表 + AF_UNIX 控制协议（被接管方监听/接管方发起），零内部依赖
+procarg/            `-C <目录>` 注入：把工作区写进进程 argv 后重启自身，使 ps 里的命令行可直接复跑（linux 实现 + 其余平台 stub）
 repl/               REPL 循环与输入分发、斜杠命令、提示符、ghost 补全、picker、工具块排版（标题组合 + 通用回落）、状态行、回合事件合流（turnloop）、退出收尾；**不认识任何具体工具**（自带视图经注入）
 readline/           终端输入层：Console 仲裁 + device 设备面 + 租约（借出/pty 泵/锚点）、行编辑/历史/补全、按键解析、宽度
 workspace/          工作区脚手架（`tanya init`）：建 `.tanya/{sessions,README,.gitignore}` + AGENTS.md 骨架；目录名取 `agent.Config.LocalDir`（tanya 侧固定 `.tanya`）

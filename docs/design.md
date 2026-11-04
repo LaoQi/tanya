@@ -35,7 +35,7 @@ render/markup/     内联标记解析
 
 事实归属（不设共享暴露层）——这些结论不再重复讨论：
 
-- **进程事实**：`cwd`（启动目录，全程不 `os.Chdir`）；家目录与工作区基准在 `main` 装配一次、注入 `tools/shell`（`tools.Options.Home` / `Workspace func() string`，见 battlelab 的 `docs/shell-tool.md`）；`/switch` 换工作区时由 `Agent.loadWorkspace` 重建派生态（system 提示、会话存储），进程 cwd 不变，**注入的工具不重建**——`run_shell` 的默认目录经 `Workspace` 回调活取 `Agent.Workspace()`，故换区自动跟随
+- **进程事实**：`cwd`（启动目录，全程不 `os.Chdir`；`-C` 只在启动时切一次，详见《`-C <目录>` 与进程可见性》）；家目录与工作区基准在 `main` 装配一次、注入 `tools/shell`（`tools.Options.Home` / `Workspace func() string`，见 battlelab 的 `docs/shell-tool.md`）；`/switch` 换工作区时由 `Agent.loadWorkspace` 重建派生态（system 提示、会话存储），进程 cwd 不变，**注入的工具不重建**——`run_shell` 的默认目录经 `Workspace` 回调活取 `Agent.Workspace()`，故换区自动跟随
 - **`ctx` 属请求层**：只承担取消/超时，不承载进程事实（`repl.Run()` 不收 ctx；每回合由 `InterruptContext()` 现造，以 `context.Background()` 为根）
 - **tty 与颜色能力由消费方独占**：`term.Profile` 由 `term.DetectProfile` 计算、只有 `term` 保留进程级默认档案（终端能力是名副其实的进程事实）；语义色 `theme.Semantics` 为值传递（repl 持有当前方案、readline 经 `SetStyles` 注入，见 `docs/style-split.md`）；终端尺寸是实时值（`ToolWidth` 以函数传递）；终端持有者与模式自愈归 `readline` 的 `Console`（唯一持有者 + `Sane()` 纯模式复原）；`ctty.Supported` 是编译期平台常量；`/dev/tty` 打开、termios、模式复位/光标锚点、`SIGTTIN/SIGTTOU` 忽略等**控制终端原语**统一在零依赖叶子包 `ctty`（battlelab 的 `docs/ctty.md`），而「谁持终端、何时切模式、`^C` 归谁」的策略收在 `readline` 的 Console 层（2026-09-27 起 `repl` 只消费事件流与租约，不再持有任何终端策略；前台组概念整体退出设计，见 `docs/terminal-console.md`）
 
@@ -44,6 +44,27 @@ render/markup/     内联标记解析
 启动最前端拒绝以 root 运行：`main` 构造 `repl.Streams` 之后、任何子命令分支（`-v`/`config`/`ask`/`init`/REPL）之前调用 `main.rootRefusal()`，判定 `ctty.IsRoot()`——posix（`linux || darwin`）取 `os.Geteuid() == 0`，故 `sudo` 与 setuid 安装同样被拦；Windows 及其余平台无 uid 语义，恒 false（不检查）。命中时报 `repl.MsgRootRefused` 单行错误并以 1 退出，走 `st.FailErr` 即只落 stderr、stdout 保持干净。策略是**一律拒绝**、不设子命令豁免：拦截点在入口单点，将来新增子命令不会漏（代价是 `-v`/`config` 这类无副作用子命令在 root 下也不可用）。`-h`/`--help` 与非法选项不受影响——`flag.Parse` 在检查之前已分别以 0 / 2 退出。
 
 逃生舱为环境变量 `TANYA_ALLOW_ROOT`，**只认精确值 `1`**（`main.envAllowRoot`，其它值如 `true`/`yes`/非空串均不放行），放行静默、不打提示，也不进配置文件、无 REPL 命令（容器里默认 root 的场合靠它显式松绑）。检查刻意留在 `main` 而非 `agent`：策略只作用于 CLI 入口，把 `agent` 当库用时不做权限判断。
+
+## `-C <目录>` 与进程可见性（`procarg`，2026-11-04）
+
+多实例并行时，`ps` 默认只能看到 `tanya` 一行，无法区分进程对应哪个工作区。tanya 在启动时把工作区写进自己的 argv：
+
+```
+$ ps -eo pid,args
+ 531013 tanya -C /home/user/proj-a
+ 531062 tanya -C /home/user/proj-b
+```
+
+- **`-C` 是真实生效的参数**：启动时 `os.Chdir(dir)` 一次，此后全程不再 chdir（「进程 cwd 恒为启动目录」不变量不变）。`agent.New` 的 `os.Getwd()` 自然读到目标目录，**battlelab 侧零改动**；`/switch` 不改 cwd，故 `-C` 表示**启动目录**而非当前工作区。
+- **注入时机**：`main` 在 `flag.Parse()` **之前**调 `procarg.Reinject(cwd)`，成功即 `syscall.Exec` 重启自身（pid 不变，镜像原地替换）。仅 **REPL 模式**注入；`ask`/`init`/`config`/`attach` 不注入——避免无谓 re-exec，也避免干扰 `tanya config | diff -` 这类管道用法。
+- **判据只看 `-C` 是否为空**（幂等）：不用 env 标记——`os.Unsetenv` 后 `/proc/self/environ` 仍残留且被子进程继承。
+- **参数透传用 `os.Args[1:]`**：用 `fs.Args()` 会丢掉已解析的 flag（实测 `-p` 丢失）。
+- **exec 目标用 `os.Executable()`**（内部即 `readlink("/proc/self/exe")`）：直接传 `"/proc/self/exe"` 会让 `comm` 变成 `exe`。
+- **`-c` 相对路径先固化**：chdir 之前把相对配置路径转成绝对，否则 `-C /proj -c my.yaml` 会在目标目录下找错文件。
+- **失败一律静默**：取不到 cwd/exe、exec 失败、非 Linux 平台 → 按原名继续运行，绝不因改名挡住启动；无逃生开关（用户口径：失败就失败了）。
+- **平台分片**：能力只服务 tanya，**不进 battlelab**。`procarg/reinject_linux.go`（`//go:build linux`，`os.Executable` + `syscall.Exec`）+ `procarg/reinject_stub.go`（`//go:build !linux`，恒返回 false）。`main.go` 内不出现 `syscall`/`runtime.GOOS`/build tag。
+- **`flag.CommandLine.Init("tanya", ...)`**：显式命名，避免注入后 `FlagSet.Name()` 取到变长的 argv0、把 usage 印成「用法: tanya[...] [选项]」。
+- **已知不做**：改 `comm`（`PR_SET_NAME` 上限 15 字节且只作用于调用线程——Go 的 main goroutine 阻塞在 `read` 时会被 runtime 迁移到其他线程，改名静默失效）；写会话 id 进 argv（会话在启动后才生成，且运行期更新需反复原地覆写 argv 槽位，收益不足）。
 
 ## 运行模式
 

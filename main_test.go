@@ -24,6 +24,7 @@ import (
 	"github.com/LaoQi/battlelab/tools/shell"
 	"github.com/LaoQi/tanya/attach"
 	"github.com/LaoQi/tanya/config"
+	"github.com/LaoQi/tanya/procarg"
 	"github.com/LaoQi/tanya/readline"
 	"github.com/LaoQi/tanya/repl"
 )
@@ -660,5 +661,88 @@ func TestAttachOpsListAndPruneShareText(t *testing.T) {
 	}
 	if _, err := noSave.Prune(); err == nil || !strings.Contains(err.Error(), repl.MsgAttachPruneNoSave) {
 		t.Fatalf("-n 应报不落盘: %v", err)
+	}
+}
+
+func TestWorkspaceFlagRegistered(t *testing.T) {
+	fs := flag.NewFlagSet("tanya", flag.ContinueOnError)
+	f := registerFlags(fs)
+	if f.workspace == nil {
+		t.Fatal("应登记工作区选项")
+	}
+	if fs.Lookup(procarg.Flag) == nil {
+		t.Fatalf("应登记 -%s", procarg.Flag)
+	}
+	var buf bytes.Buffer
+	writeUsage(&buf, fs)
+	if !strings.Contains(buf.String(), "-"+procarg.Flag) {
+		t.Errorf("用法应列出 -%s:\n%s", procarg.Flag, buf.String())
+	}
+}
+
+func TestApplyWorkspace(t *testing.T) {
+	base := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	empty := ""
+	if err := applyWorkspace(&empty); err != nil {
+		t.Errorf("空值应直接返回: %v", err)
+	}
+	if err := applyWorkspace(nil); err != nil {
+		t.Errorf("nil 应直接返回: %v", err)
+	}
+
+	if err := applyWorkspace(&base); err != nil {
+		t.Fatalf("应切到目标目录: %v", err)
+	}
+	got, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Clean(got) != filepath.Clean(base) {
+		t.Errorf("cwd = %q, want %q", got, base)
+	}
+
+	bad := filepath.Join(base, "no-such-dir")
+	if err := applyWorkspace(&bad); err == nil {
+		t.Error("无效目录应报错")
+	} else if !strings.Contains(err.Error(), bad) {
+		t.Errorf("错误应包含目录名: %v", err)
+	}
+}
+
+func TestHasSubcommand(t *testing.T) {
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{nil, false},
+		{[]string{"-p"}, false},
+		{[]string{"hello"}, false},
+		{[]string{"ask", "问题"}, true},
+		{[]string{"-p", "ask", "问题"}, true},
+		{[]string{"init"}, true},
+		{[]string{"config"}, true},
+		{[]string{"attach", "--list"}, true},
+	}
+	for _, c := range cases {
+		if got := hasSubcommand(c.args); got != c.want {
+			t.Errorf("hasSubcommand(%q) = %v, want %v", c.args, got, c.want)
+		}
+	}
+}
+
+func TestLookupFlag(t *testing.T) {
+	fs := flag.NewFlagSet("tanya", flag.ContinueOnError)
+	registerFlags(fs)
+	if v, ok := lookupFlag(fs, procarg.Flag); !ok || v != "" {
+		t.Errorf("未给值时 = (%q, %v), want (\"\", true)", v, ok)
+	}
+	if _, ok := lookupFlag(fs, "no-such-flag"); ok {
+		t.Error("未登记的选项应返回 false")
 	}
 }
