@@ -191,6 +191,39 @@ func TestLoadConfigShell(t *testing.T) {
 	}
 }
 
+func TestLoadConfigVbash(t *testing.T) {
+	if cfg := Default(); !cfg.Vbash {
+		t.Error("vbash 应默认开启")
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("vbash: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Vbash {
+		t.Error("yaml vbash: false 应关闭解释器")
+	}
+	t.Setenv("TANYA_VBASH", "true")
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Vbash {
+		t.Error("TANYA_VBASH=true 应覆盖 yaml")
+	}
+	t.Setenv("TANYA_VBASH", "0")
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Vbash {
+		t.Error("TANYA_VBASH=0 应关闭解释器")
+	}
+}
+
 func TestLoadConfigInvalidYAML(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("model: [unclosed"), 0o644); err != nil {

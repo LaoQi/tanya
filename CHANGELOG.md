@@ -1,3 +1,23 @@
+## 2026-11-06 feat(config,main): 接入 vbash，run_shell 默认走内置 bash 解释器
+
+`run_shell` 改由 battlelab 的进程内 bash 子集解释器（`vbash`）执行，不再起 `bash -c` 子进程。
+属实验特性，**默认开启**，失败不回落。
+
+- **配置项**：顶层 `Vbash bool`（yaml `vbash` / env `TANYA_VBASH`，用 `strconv.ParseBool` 解析，非法值静默保持当前值），
+  `config.Default()` 置 `true`，`config.example.yaml` 同步（该文件即 `tanya config` 的原样输出，一致性由根包测试守护）
+- **装配**：`main` 的 `tools.Standard` 调用补 `Vbash: cfg.Vbash` 与 `Environ: os.Environ`——
+  后者是 `shell.New` 的硬要求（`vbash` 是纯库、不读 `os.Environ`），缺失会在装配期报错，故不设「Vbash 即自动用 os.Environ」的隐式推断
+- **不支持的构造直接报错**（`case`/`[[ ]]`/反引号/`<<<`/`(( ))`/进程替换/数组/函数内改全局变量/`${V:off:len}`/算术 `n++` 与 `**`/`set -o pipefail`/`$RANDOM`），
+  描述里已列清并给出替代写法（同轮在 battlelab 补，见该仓 CHANGELOG 同日条目）——否则模型撞报错只能反复试错
+- **`interactive: true` 不经解释器**：仍走 `runFull` 借终端（终端所有权属 `ctty`），此时配置的 `shell` 也不参与
+- **`shell` 配置项语义收窄**：只在 `vbash: false` 时决定实际执行器；开启时仅用于诊断前缀与回避探测失败（探测仍照常做，全落空依旧启动报错）
+- **同轮闭合的接入前缺陷**（battlelab `aede478`）：复合命令后接带 fd 前缀的重定向（`done 2>/dev/null`、`} 2>f`、`fi 0<f`）
+  解析失败、退出码 2，真实语料命中 0.90%——不修则一开 vbash 就会把原本能跑的命令变成硬报错
+- **测试**：`config/config_test.go` 新增 `TestLoadConfigVbash`（默认值、yaml 关闭、env 覆盖三态）；
+  `main_test.go` 的示例默认值比对表补 `vbash` 一行（示例显式写了该键，不补会触发「显式键未纳入比对」）
+- **文档**：`docs/design.md`《run_shell》新增接线段（开关两层透传、`interactive` 绕行、不回落、已知差异指引），
+  `README.md` 配置项说明与工具表、`config.example.yaml` 注释同步
+
 ## 2026-11-04 feat(main,procarg): 新增 `-C <目录>`，启动时把工作区写进 argv（ps 可直接复跑）
 
 - **动机**（用户反馈）：执行期间从 `ps` 看进程只有 `tanya` 一行，看不出它对应哪个工作区、哪个项目。多实例共存时无法区分

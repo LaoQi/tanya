@@ -52,7 +52,9 @@ model: deepseek-v4-flash
 
 `max_retries` 配置项（env `TANYA_MAX_RETRIES`，默认 `2`，`0` 关闭，上限 `20`）决定请求失败后的自动重试次数：网络错误、`408`/`425`/`429`/`5xx`、以及**尚未输出任何内容时的流中断**会重试；`400`/`401`/`403`/`404` 与上游语义失败（如 `response.failed`）不重试；**一旦已有内容上屏就不再重试**（已输出内容无法回滚）。每次重试前打两行提示——上一行是完整的上游错误原文（不裁剪），下一行是重试计划（`500ms 后重试（第 1/2 次）`）。等待按 0.5s 起指数翻倍、封顶 8s，上游给了 `Retry-After` 时优先用它（封顶 60s）；等待期间 `^C` 立即中断。
 
-`shell` 配置项（env `TANYA_SHELL`）指定 run_shell 使用的 shell，支持名字或绝对路径（如 `zsh`、`/usr/bin/fish`）；缺省自动探测：Windows 依次尝试 pwsh → powershell（Windows PowerShell 5.1 兜底），Linux/macOS 依次尝试 bash → sh → ash。全部落空（含配置的 shell 不存在）时启动阶段直接报错退出，不进入 REPL。
+`vbash` 配置项（env `TANYA_VBASH`，**默认开启**）让 `run_shell` 交内置的 bash 子集解释器执行，不再起 `bash -c` 子进程：命令按 bash 写法书写，**不支持的构造直接报错、不回落系统 shell**（`case`/`[[ ]]`/反引号/`<<<`/`(( ))`/进程替换/数组/函数内改全局变量/`${V:off:len}`/算术 `n++` 与 `**`/`set -o pipefail`/`$RANDOM`），工具描述里已给出对应的替代写法（`if`/`[ ]`/`$( )`/heredoc/`$(( ))`）。`interactive: true` 的命令不受影响，仍借终端直跑。属实验特性：已知与真 bash 的语义差异（如函数内改全局变量不回传、`${V:off:len}` 报错、`set -o pipefail` 被忽略、后台 `&` 同步等待）见 battlelab 的 `docs/vbash-capability.md` §3.3。设 `vbash: false`（或 `TANYA_VBASH=false`）即回到历史行为。
+
+`shell` 配置项（env `TANYA_SHELL`）指定 run_shell 使用的 shell，支持名字或绝对路径（如 `zsh`、`/usr/bin/fish`）；缺省自动探测：Windows 依次尝试 pwsh → powershell（Windows PowerShell 5.1 兜底），Linux/macOS 依次尝试 bash → sh → ash。全部落空（含配置的 shell 不存在）时启动阶段直接报错退出，不进入 REPL。**关闭 `vbash` 后该项才决定实际执行器**；`vbash` 开启时它只用于诊断前缀与回避探测失败。
 
 `reasoning_effort` 配置项（env `TANYA_REASONING_EFFORT`）设置思考等级，随请求发送 OpenAI 标准字段（o 系 / gpt-5 及兼容网关支持），可选 `minimal` / `low` / `medium` / `high` / `max`，留空不发送；REPL 内 `/think` 可运行时切换。`responses` 协议下映射为 `reasoning.effort`，`chat` 协议下为 `reasoning_effort`。设置思考等级后请求不再发送 `temperature`（两协议一致），以兼容 o 系 / gpt-5 等仅支持 `temperature=1` 的推理模型。
 
@@ -248,7 +250,7 @@ TTY 下的状态展示是**追加式**（不重绘、不移动光标，终端被
 
 | 工具 | 说明 |
 |---|---|
-| `run_shell` | shell 执行命令（按平台自动选择）；`cwd` 指定执行目录（默认当前工作区，不存在则快速失败）；`timeout` 默认 60s、`interactive: true` 时 300s，上限 900s；输出截断 30000 字节 |
+| `run_shell` | shell 执行命令（默认内置 vbash 解释器，关闭 `vbash` 后按平台自动选择）；`cwd` 指定执行目录（默认当前工作区，不存在则快速失败）；`timeout` 默认 60s、`interactive: true` 时 300s，上限 900s；输出截断 30000 字节 |
 | `read_image` | 读取本地图像文件交给模型查看（JPEG/PNG/GIF/WebP，单次一张；`path` 支持 `~` 与相对当前工作区，`detail` 缺省用配置，`region` 可只读一块）；格式/大小/缩放与用户附图同口径 |
 | `get_time` | 当前时间 |
 | `get_env` | 环境变量查询（敏感变量名拒绝） |

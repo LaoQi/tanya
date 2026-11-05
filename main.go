@@ -191,6 +191,8 @@ func main() {
 		Home:          home,
 		Workspace:     func() string { return a.Workspace() },
 		Console:       consoleForShell{con},
+		Vbash:         cfg.Vbash,
+		Environ:       os.Environ,
 		ImageMaxBytes: cfg.ImageMaxBytes,
 		ImageResize:   cfg.ImageResize,
 		ImageDetail:   cfg.ImageDetail,

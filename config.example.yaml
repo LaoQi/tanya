@@ -82,3 +82,8 @@ tool_output_lines: 20
 # run_shell 使用的 shell：名字或绝对路径（如 zsh、/usr/bin/fish），缺省自动探测
 # Windows 依次尝试 pwsh → powershell（Windows PowerShell 5.1 兜底）；Linux/macOS 依次尝试 bash → sh → ash；全部落空（含配置的 shell 不存在）则启动报错退出
 # shell: bash
+# run_shell 由内置 bash 解释器（vbash）执行，不再起 bash -c 子进程（环境变量 TANYA_VBASH）
+# 默认开启；命令按 bash 写法书写，不支持的构造（case/[[ ]]/反引号/<<</数组等）直接报错、不回落系统 shell
+# interactive: true 的命令不受影响，仍借终端直跑；上面的 shell 仅在关闭解释器时生效
+# Windows 上开启后命令仍按 bash 写法（路径用 /、盘符写作 /c/），由解释器吸收平台差异
+vbash: true
