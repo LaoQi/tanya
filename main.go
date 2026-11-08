@@ -253,7 +253,7 @@ func main() {
 		return
 	}
 
-	notifier, err := buildNotifier(cfg.UI, inv)
+	notifier, err := buildNotifier(cfg.UI, inv, notifyRunOptions(a.Workspace, home, fence))
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
@@ -676,8 +676,20 @@ func writeUsage(w io.Writer, fs *flag.FlagSet) {
 	fs.PrintDefaults()
 }
 
+// notifyRunOptions 是 notify_cmd 的执行上下文：与 run_shell 同源——同一工作区（随 /switch 跟随）、
+// 同一环境、同一进程围栏，因此内置解释器下后台作业同样受退出收割保护。
+func notifyRunOptions(workspace func() string, home string, fence *vbash.Fence) func() shell.RunOptions {
+	return func() shell.RunOptions {
+		dir := workspace()
+		if dir == "" {
+			dir, _ = os.Getwd()
+		}
+		return shell.RunOptions{Dir: dir, Home: home, Env: os.Environ(), Fence: fence}
+	}
+}
+
 // buildNotifier 按配置组装通知行为（bell / OSC 9 / 外部程序，各自独立开关），全关时为 nil。
-func buildNotifier(ui config.UI, inv shell.Invocation) (repl.Notifier, error) {
+func buildNotifier(ui config.UI, inv shell.Invocation, run func() shell.RunOptions) (repl.Notifier, error) {
 	var list []repl.Notifier
 	if ui.Bell {
 		list = append(list, repl.BellNotifier())
@@ -686,7 +698,7 @@ func buildNotifier(ui config.UI, inv shell.Invocation) (repl.Notifier, error) {
 		list = append(list, repl.OSCNotifier())
 	}
 	if ui.NotifyCmd != "" {
-		n, err := notify.NewCommand(inv, ui.NotifyCmd)
+		n, err := notify.NewCommand(inv, run, ui.NotifyCmd)
 		if err != nil {
 			return nil, err
 		}

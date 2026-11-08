@@ -52,9 +52,7 @@ model: deepseek-v4-flash
 
 `max_retries` 配置项（env `TANYA_MAX_RETRIES`，默认 `2`，`0` 关闭，上限 `20`）决定请求失败后的自动重试次数：网络错误、`408`/`425`/`429`/`5xx`、以及**尚未输出任何内容时的流中断**会重试；`400`/`401`/`403`/`404` 与上游语义失败（如 `response.failed`）不重试；**一旦已有内容上屏就不再重试**（已输出内容无法回滚）。每次重试前打两行提示——上一行是完整的上游错误原文（不裁剪），下一行是重试计划（`500ms 后重试（第 1/2 次）`）。等待按 0.5s 起指数翻倍、封顶 8s，上游给了 `Retry-After` 时优先用它（封顶 60s）；等待期间 `^C` 立即中断。
 
-`vbash` 配置项（env `TANYA_VBASH`，**默认开启**）让 `run_shell` 交内置的 bash 子集解释器执行，不再起 `bash -c` 子进程：命令按 bash 写法书写，**不支持的构造直接报错、不回落系统 shell**（`case`/`[[ ]]`/反引号/`<<<`/`(( ))`/进程替换/数组/函数内改全局变量/`${V:off:len}`/算术 `n++` 与 `**`/`set -o pipefail`/`$RANDOM`），工具描述里已给出对应的替代写法（`if`/`[ ]`/`$( )`/heredoc/`$(( ))`）。`interactive: true` 的命令不受影响，仍借终端直跑。属实验特性：已知与真 bash 的语义差异（如函数内改全局变量不回传、`${V:off:len}` 报错、`set -o pipefail` 被忽略、后台 `&` 同步等待）见 battlelab 的 `docs/vbash-capability.md` §3.3。设 `vbash: false`（或 `TANYA_VBASH=false`）即回到历史行为。
-
-`shell` 配置项（env `TANYA_SHELL`）指定 run_shell 使用的 shell，支持名字或绝对路径（如 `zsh`、`/usr/bin/fish`）；缺省自动探测：Windows 依次尝试 pwsh → powershell（Windows PowerShell 5.1 兜底），Linux/macOS 依次尝试 bash → sh → ash。全部落空（含配置的 shell 不存在）时启动阶段直接报错退出，不进入 REPL。**关闭 `vbash` 后该项才决定实际执行器**；`vbash` 开启时它只用于诊断前缀与回避探测失败。
+`shell` 配置项（env `TANYA_SHELL`）指定 `run_shell` 使用的 shell，**`vbash` 是它的一个取值**（与 `bash`/`zsh`/`pwsh` 同级，没有独立开关）：填 `vbash`（默认值）即交内置的 bash 子集解释器执行，不再起 `bash -c` 子进程，`notify_cmd` 同样进程内执行、**不回落系统 shell**；填 `bash`/`zsh` 或绝对路径（如 `/usr/bin/fish`）就走系统 shell。留空按平台探测：Windows 依次尝试 pwsh → powershell（Windows PowerShell 5.1 兜底），Linux/macOS 依次尝试 bash → sh → ash；全部落空（含配置的 shell 不存在）时启动阶段直接报错退出，不进入 REPL。走内置解释器时命令按 bash 写法书写，**不支持的构造直接报错**（`case`/`[[ ]]`/反引号/`<<<`/`(( ))`/进程替换/数组/函数内改全局变量/`${V:off:len}`/算术 `n++` 与 `**`/`set -o pipefail`/`$RANDOM`），工具描述里已给出对应的替代写法（`if`/`[ ]`/`$( )`/heredoc/`$(( ))`）；`interactive: true` 的命令不受影响，仍借终端直跑。属实验特性：已知与真 bash 的语义差异（如函数内改全局变量不回传、`${V:off:len}` 报错、`set -o pipefail` 被忽略）见 battlelab 的 `docs/vbash-capability.md` §3.3。
 
 `reasoning_effort` 配置项（env `TANYA_REASONING_EFFORT`）设置思考等级，随请求发送 OpenAI 标准字段（o 系 / gpt-5 及兼容网关支持），可选 `minimal` / `low` / `medium` / `high` / `max`，留空不发送；REPL 内 `/think` 可运行时切换。`responses` 协议下映射为 `reasoning.effort`，`chat` 协议下为 `reasoning_effort`。设置思考等级后请求不再发送 `temperature`（两协议一致），以兼容 o 系 / gpt-5 等仅支持 `temperature=1` 的推理模型。
 
@@ -72,7 +70,7 @@ notify_cmd: osascript -e 'display notification "{content}" with title "{title}"'
 notify_cmd: /path/to/hook {kind} {title} {content}          # 自写脚本，按类别分流
 ```
 
-命令交给与 `run_shell` 同一个 shell 执行（`shell` 配置或平台探测的结果），所以管道、重定向、多命令都可用。可用的占位符只有三个：`{title}`（固定 `tanya`）、`{content}`（已处理好的单行文本：`回合结束 · 12.3s` / `回合失败 · 12.3s` / `run_shell 等待输入`，剥掉控制序列、压成一行、超长截断）、`{kind}`（`done` / `failed` / `input`，便于脚本分别处理成功与失败）。**占位符自带引号，配置里直接写 `{content}` 即可，不要再自己加引号**——`"{content}"` 会多出一层字面引号（启动时会报错提示）；写错占位符、花括号不配对同样在启动时报错退出。**`notify_cmd` 里的花括号是保留语法**：命令中出现的任何 `{...}` 都必须正好是这三个占位符，因此 `${VAR}`、awk 的 `'{print $1}'`、brace expansion 这类含花括号的 shell 写法会被启动校验拒绝——复杂逻辑放进外部脚本，配置里只写脚本路径。
+命令交给与 `run_shell` 同一个 shell 执行（`shell` 配置或平台探测的结果），所以管道、重定向、多命令都可用；`shell: vbash` 时命令同样由内置解释器执行，**不回落系统 shell**（内置解释器的语法边界同样适用于通知脚本）。可用的占位符只有三个：`{title}`（固定 `tanya`）、`{content}`（已处理好的单行文本：`回合结束 · 12.3s` / `回合失败 · 12.3s` / `run_shell 等待输入`，剥掉控制序列、压成一行、超长截断）、`{kind}`（`done` / `failed` / `input`，便于脚本分别处理成功与失败）。**占位符自带引号，配置里直接写 `{content}` 即可，不要再自己加引号**——`"{content}"` 会多出一层字面引号（启动时会报错提示）；写错占位符、花括号不配对同样在启动时报错退出。**`notify_cmd` 里的花括号是保留语法**：命令中出现的任何 `{...}` 都必须正好是这三个占位符，因此 `${VAR}`、awk 的 `'{print $1}'`、brace expansion 这类含花括号的 shell 写法会被启动校验拒绝——复杂逻辑放进外部脚本，配置里只写脚本路径。
 
 外部程序异步执行，不阻塞对话；上一次还没结束就丢弃本次通知（避免堆积），3 秒超时后强制结束，stdout/stderr 一律丢弃（不会污染对话界面），失败静默——程序不存在、没有 D-Bus、没有通知权限都只是"没有效果"。与 `notify_osc` 可以同时开启（各发一份）。设计见 `docs/design.md`《终端通知》。
 

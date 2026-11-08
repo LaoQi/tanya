@@ -31,7 +31,7 @@ image_resize: true
 # notify_osc: 写终端原生 OSC 9 通知（iTerm2 / WezTerm / Ghostty / Windows Terminal 系支持；
 #   Terminal.app 与传统 xterm 系不认，tmux/screen 下通常被吞）
 # notify_osc: false
-# notify_cmd: 调用外部程序，命令交给与 run_shell 同一个 shell 执行
+# notify_cmd: 调用外部程序，命令交给与 run_shell 同一个 shell 执行（shell 配置为 vbash 时同样进程内执行，不回落系统 shell）
 #   占位符只有三个（自带引号，配置里不要再加引号）：
 #     {title}   固定 tanya
 #     {content} 已处理好的单行文本（回合结束 · 12.3s / 回合失败 · 12.3s / run_shell 等待输入）

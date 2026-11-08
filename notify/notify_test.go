@@ -3,7 +3,9 @@ package notify
 import (
 	"context"
 	"errors"
-	"slices"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,15 +16,15 @@ import (
 
 var testShellInv = shell.Invocation{Argv: []string{"/bin/bash", "-c"}, Kind: shell.KindPosix}
 
-func captureCommand(t *testing.T, inv shell.Invocation, tmpl string) (*Command, *[][]string, chan struct{}) {
+func captureCommand(t *testing.T, inv shell.Invocation, tmpl string) (*Command, *[]string, chan struct{}) {
 	t.Helper()
 	c := mustCommand(t, inv, tmpl)
 	var mu sync.Mutex
-	var got [][]string
+	var got []string
 	done := make(chan struct{}, 8)
-	c.run = func(_ context.Context, argv []string) error {
+	c.run = func(_ context.Context, script string, _ shell.RunOptions) error {
 		mu.Lock()
-		got = append(got, argv)
+		got = append(got, script)
 		mu.Unlock()
 		done <- struct{}{}
 		return nil
@@ -32,11 +34,16 @@ func captureCommand(t *testing.T, inv shell.Invocation, tmpl string) (*Command, 
 
 func mustCommand(t *testing.T, inv shell.Invocation, tmpl string) *Command {
 	t.Helper()
-	c, err := NewCommand(inv, tmpl)
+	c, err := NewCommand(inv, nil, tmpl)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return c
+}
+
+func newTestCommand(t *testing.T, tmpl string) (*Command, error) {
+	t.Helper()
+	return NewCommand(testShellInv, nil, tmpl)
 }
 
 func waitNotify(t *testing.T, done chan struct{}) {
@@ -52,10 +59,9 @@ func TestCommandArgv(t *testing.T) {
 	c, got, done := captureCommand(t, testShellInv, "notify-send -a {title} {content}")
 	c.Notify(Notification{Title: "tanya", Content: "回合失败 · 12.3s", Kind: "failed"})
 	waitNotify(t, done)
-	argv := (*got)[0]
-	want := []string{"/bin/bash", "-c", "notify-send -a 'tanya' '回合失败 · 12.3s'"}
-	if !slices.Equal(argv, want) {
-		t.Errorf("argv 不符:\n got %q\nwant %q", argv, want)
+	want := "notify-send -a 'tanya' '回合失败 · 12.3s'"
+	if script := (*got)[0]; script != want {
+		t.Errorf("命令不符:\n got %q\nwant %q", script, want)
 	}
 }
 
@@ -63,8 +69,8 @@ func TestCommandKindPlaceholder(t *testing.T) {
 	c, got, done := captureCommand(t, testShellInv, "hook {kind} {content}")
 	c.Notify(Notification{Title: "tanya", Content: "run_shell 等待输入", Kind: "input"})
 	waitNotify(t, done)
-	if argv := (*got)[0]; argv[len(argv)-1] != "hook 'input' 'run_shell 等待输入'" {
-		t.Errorf("类别占位符不符: %q", argv[len(argv)-1])
+	if script := (*got)[0]; script != "hook 'input' 'run_shell 等待输入'" {
+		t.Errorf("类别占位符不符: %q", script)
 	}
 }
 
@@ -72,7 +78,7 @@ func TestCommandSingleFlight(t *testing.T) {
 	c, _, _ := captureCommand(t, testShellInv, "hook {kind}")
 	entered, release := make(chan struct{}), make(chan struct{})
 	var calls int32
-	c.run = func(context.Context, []string) error {
+	c.run = func(context.Context, string, shell.RunOptions) error {
 		if atomic.AddInt32(&calls, 1) == 1 {
 			close(entered)
 			<-release
@@ -102,7 +108,7 @@ func TestCommandTimeout(t *testing.T) {
 	c, _, _ := captureCommand(t, testShellInv, "hook {kind}")
 	c.timeout = 20 * time.Millisecond
 	seen := make(chan error, 1)
-	c.run = func(ctx context.Context, _ []string) error {
+	c.run = func(ctx context.Context, _ string, _ shell.RunOptions) error {
 		<-ctx.Done()
 		seen <- ctx.Err()
 		return ctx.Err()
@@ -121,12 +127,12 @@ func TestCommandTimeout(t *testing.T) {
 func TestCommandTemplateValidation(t *testing.T) {
 	bad := []string{"notify-send {body}", "notify-send {title", "notify-send title}", `notify-send "{title}"`, "notify-send '{content}'"}
 	for _, tmpl := range bad {
-		if _, err := NewCommand(testShellInv, tmpl); err == nil {
+		if _, err := newTestCommand(t, tmpl); err == nil {
 			t.Errorf("模板应被拒绝: %q", tmpl)
 		}
 	}
 	for _, tmpl := range []string{"notify-send {title} {content}", "notify-send --text=tanya:{content}", "hook {kind}"} {
-		if _, err := NewCommand(testShellInv, tmpl); err != nil {
+		if _, err := newTestCommand(t, tmpl); err != nil {
 			t.Errorf("合法模板被拒绝 %q: %v", tmpl, err)
 		}
 	}
@@ -146,5 +152,52 @@ func TestQuote(t *testing.T) {
 		if got := Quote(c.kind, c.in); got != c.want {
 			t.Errorf("kind %v 引号不符: got %q want %q", c.kind, got, c.want)
 		}
+	}
+}
+
+func TestCommandRunsThroughBuiltinShell(t *testing.T) {
+	inv, err := shell.Resolve(shell.BuiltinShellName)
+	if err != nil {
+		t.Fatalf("解析内置解释器失败: %v", err)
+	}
+	if !inv.Builtin {
+		t.Fatal("shell 配置为 vbash 时应解析为内置解释器")
+	}
+	dir := t.TempDir()
+	c, err := NewCommand(inv, func() shell.RunOptions {
+		return shell.RunOptions{Dir: dir, Env: []string{"PATH=" + os.Getenv("PATH")}}
+	}, "printf 'ran:%s' {kind} > ran.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Notify(Notification{Title: "tanya", Content: "x", Kind: "done"})
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if b, err := os.ReadFile(filepath.Join(dir, "ran.txt")); err == nil {
+			if strings.TrimSpace(string(b)) != "ran:done" {
+				t.Errorf("内置解释器执行结果不符: %q", b)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("通知命令未在 3s 内经内置解释器执行")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestCommandBuiltinNeedsNoHostShell(t *testing.T) {
+	inv, err := shell.Resolve(shell.BuiltinShellName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Argv) != 0 {
+		t.Fatalf("内置解释器不应回落宿主 argv: %q", inv.Argv)
+	}
+	c, got, done := captureCommand(t, inv, "hook {kind}")
+	c.Notify(Notification{Kind: "input"})
+	waitNotify(t, done)
+	if (*got)[0] != "hook 'input'" {
+		t.Errorf("render 不符: %q", (*got)[0])
 	}
 }

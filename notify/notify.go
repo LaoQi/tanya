@@ -5,7 +5,7 @@ package notify
 import (
 	"context"
 	"fmt"
-	"os/exec"
+	"io"
 	"strings"
 	"time"
 
@@ -28,35 +28,31 @@ const (
 var notifyPlaceholders = []string{"{title}", "{content}", "{kind}"}
 
 // Command 按配置调用外部程序：异步、单飞（上一次未结束就丢弃本次）、固定超时、stdio 接空设备、失败静默。
+// 命令经与 run_shell 同一个 shell 执行——shell 配置为内置解释器时同样进解释器，不回落系统 shell。
 type Command struct {
-	argv    []string
+	inv     shell.Invocation
+	opts    func() shell.RunOptions
 	kind    shell.Kind
 	tmpl    string
 	timeout time.Duration
-	run     func(context.Context, []string) error
+	run     func(context.Context, string, shell.RunOptions) error
 	sem     chan struct{}
 }
 
 // NewCommand 校验模板（未知占位符、花括号不配对、占位符紧邻引号）后构造通知行为。
-func NewCommand(inv shell.Invocation, tmpl string) (*Command, error) {
+func NewCommand(inv shell.Invocation, opts func() shell.RunOptions, tmpl string) (*Command, error) {
 	if err := ValidateTemplate(tmpl); err != nil {
 		return nil, err
 	}
 	return &Command{
-		argv:    inv.Argv,
+		inv:     inv,
+		opts:    opts,
 		kind:    inv.Kind,
 		tmpl:    tmpl,
 		timeout: NotifyCmdTimeout,
-		run:     RunCommand,
+		run:     func(ctx context.Context, script string, o shell.RunOptions) error { return inv.Run(ctx, script, o) },
 		sem:     make(chan struct{}, 1),
 	}, nil
-}
-
-func RunCommand(ctx context.Context, argv []string) error {
-	if len(argv) == 0 {
-		return nil
-	}
-	return exec.CommandContext(ctx, argv[0], argv[1:]...).Run()
 }
 
 func (c *Command) Notify(n Notification) {
@@ -65,13 +61,24 @@ func (c *Command) Notify(n Notification) {
 	default:
 		return
 	}
-	argv := append(append(make([]string, 0, len(c.argv)+1), c.argv...), c.Render(n))
+	script := c.Render(n)
 	go func() {
 		defer func() { <-c.sem }()
 		ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 		defer cancel()
-		_ = c.run(ctx, argv)
+		_ = c.run(ctx, script, c.stdio())
 	}()
+}
+
+func (c *Command) stdio() shell.RunOptions {
+	var opts shell.RunOptions
+	if c.opts != nil {
+		opts = c.opts()
+	}
+	opts.Stdin = nil
+	opts.Stdout = io.Discard
+	opts.Stderr = io.Discard
+	return opts
 }
 
 // Render 单趟替换占位符：替换值按目标 shell 的引号规则包成字面量（值自带引号，配置里不必也不该再加）。
