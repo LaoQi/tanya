@@ -16,6 +16,7 @@ import (
 	"github.com/LaoQi/battlelab/ctty"
 	"github.com/LaoQi/battlelab/tools"
 	"github.com/LaoQi/battlelab/tools/shell"
+	"github.com/LaoQi/battlelab/vbash"
 
 	"github.com/LaoQi/tanya/attach"
 	"github.com/LaoQi/tanya/config"
@@ -186,6 +187,12 @@ func main() {
 	home, _ := os.UserHomeDir()
 	var a *agent.Agent
 	con := readline.NewConsole()
+	var fence *vbash.Fence
+	if cfg.Vbash {
+		vbash.EnableSubreaper()
+		fence = vbash.NewFence()
+		defer fence.Reap()
+	}
 	list, err := tools.Standard(tools.Options{
 		ShellOverride: cfg.Shell,
 		Home:          home,
@@ -193,6 +200,7 @@ func main() {
 		Console:       consoleForShell{con},
 		Vbash:         cfg.Vbash,
 		Environ:       os.Environ,
+		Fence:         fence,
 		ImageMaxBytes: cfg.ImageMaxBytes,
 		ImageResize:   cfg.ImageResize,
 		ImageDetail:   cfg.ImageDetail,
