@@ -29,11 +29,12 @@ type Config struct {
 	agent.Config `yaml:",inline"`
 	UI           `yaml:",inline"`
 	Shell        string `yaml:"shell"`
-	Vbash        bool   `yaml:"vbash"`
 	Path         string `yaml:"-"`
 }
 
 var Version = "dev"
+
+const DefaultShell = "vbash"
 
 const (
 	DefaultLocalDir         = ".tanya"
@@ -89,7 +90,7 @@ func Default() *Config {
 			ArchiveKeep:      agent.DefaultArchiveKeep,
 		},
 		Path:  defaultConfigPath(),
-		Vbash: true,
+		Shell: DefaultShell,
 		UI: UI{
 			Theme:           DefaultTheme,
 			ToolOutputLines: DefaultToolOutputLines,
@@ -159,11 +160,6 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("TANYA_SHELL"); v != "" {
 		cfg.Shell = v
-	}
-	if v := os.Getenv("TANYA_VBASH"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Vbash = b
-		}
 	}
 	if v := os.Getenv("TANYA_TOOL_OUTPUT_LINES"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {

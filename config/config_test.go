@@ -186,41 +186,28 @@ func TestLoadConfigShell(t *testing.T) {
 	if cfg.Shell != "/usr/bin/fish" {
 		t.Errorf("env 应覆盖 yaml: %q", cfg.Shell)
 	}
-	if cfg := Default(); cfg.Shell != "" {
-		t.Errorf("默认 shell 应为空（自动探测）: %q", cfg.Shell)
+	if cfg := Default(); cfg.Shell != DefaultShell {
+		t.Errorf("默认 shell 应为 %q: %q", DefaultShell, cfg.Shell)
 	}
 }
 
-func TestLoadConfigVbash(t *testing.T) {
-	if cfg := Default(); !cfg.Vbash {
-		t.Error("vbash 应默认开启")
+func TestDefaultShellIsBuiltin(t *testing.T) {
+	if got := Default().Shell; got != DefaultShell {
+		t.Errorf("默认 shell 应为 %q（内置解释器）: %q", DefaultShell, got)
+	}
+	if DefaultShell != "vbash" {
+		t.Errorf("内置解释器取值应为 vbash: %q", DefaultShell)
 	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("vbash: false\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("shell: bash\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Vbash {
-		t.Error("yaml vbash: false 应关闭解释器")
-	}
-	t.Setenv("TANYA_VBASH", "true")
-	cfg, err = Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !cfg.Vbash {
-		t.Error("TANYA_VBASH=true 应覆盖 yaml")
-	}
-	t.Setenv("TANYA_VBASH", "0")
-	cfg, err = Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Vbash {
-		t.Error("TANYA_VBASH=0 应关闭解释器")
+	if cfg.Shell != "bash" {
+		t.Errorf("shell: bash 应与 vbash 同级被接受: %q", cfg.Shell)
 	}
 }
 

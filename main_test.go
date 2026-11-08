@@ -63,7 +63,7 @@ func TestConfigExampleMatchesDefaults(t *testing.T) {
 		{"image_resize", strconv.FormatBool(got.ImageResize), strconv.FormatBool(want.ImageResize)},
 		{"tool_output_lines", strconv.Itoa(got.ToolOutputLines), strconv.Itoa(want.ToolOutputLines)},
 		{"max_retries", strconv.Itoa(got.MaxRetries), strconv.Itoa(want.MaxRetries)},
-		{"vbash", strconv.FormatBool(got.Vbash), strconv.FormatBool(want.Vbash)},
+		{"shell", got.Shell, want.Shell},
 	}
 	covered := make(map[string]bool, len(checks))
 	for _, c := range checks {

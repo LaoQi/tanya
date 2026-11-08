@@ -188,7 +188,7 @@ func main() {
 	var a *agent.Agent
 	con := readline.NewConsole()
 	var fence *vbash.Fence
-	if cfg.Vbash {
+	if shell.IsBuiltin(cfg.Shell) {
 		vbash.EnableSubreaper()
 		fence = vbash.NewFence()
 		defer fence.Reap()
@@ -198,7 +198,6 @@ func main() {
 		Home:          home,
 		Workspace:     func() string { return a.Workspace() },
 		Console:       consoleForShell{con},
-		Vbash:         cfg.Vbash,
 		Environ:       os.Environ,
 		Fence:         fence,
 		ImageMaxBytes: cfg.ImageMaxBytes,
