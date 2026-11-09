@@ -267,10 +267,11 @@ func (f *fakeTerm) ReadEvent() (readline.Event, error) {
 	return readline.Event{Kind: readline.EventKey, Key: ev}, nil
 }
 
-// testViews 复刻 main 的装配（run_shell 自带视图），使 repl 侧既有渲染 golden 仍走真实视图。
+// testViews 复刻 main 的装配（run_shell 自带视图，默认 shell 为内置解释器），
+// 使 repl 侧既有渲染 golden 仍走真实视图；标题显示名即 `vbash$`。
 func testViews() *present.Registry {
 	r := present.NewRegistry()
-	r.Register("run_shell", shellview.View())
+	r.Register("run_shell", shellview.View("vbash"))
 	return r
 }
 

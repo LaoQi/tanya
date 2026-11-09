@@ -29,7 +29,9 @@ type View struct {
 }
 
 // ToolView 是一个工具的自带渲染：两个回调都返回 ok=false 表示「本视图不处理，走通用回落」。
+// Title 非空时顶替工具名作为标题显示名（如 run_shell 显示为实际 shell 名 + `$`）。
 type ToolView struct {
+	Title  string
 	Args   func(argsJSON string, width int) (ArgsView, bool)
 	Result func(text string, meta any, width, maxLines int) (View, bool)
 }
@@ -46,6 +48,15 @@ func (r *Registry) Register(name string, v ToolView) {
 		return
 	}
 	r.views[name] = v
+}
+
+// Title 返回工具的自带标题显示名：未注册、无视图或 Title 为空时返回空串（调用方回落工具名）。
+func (r *Registry) Title(name string) string {
+	v, ok := r.lookup(name)
+	if !ok || v.Title == "" {
+		return ""
+	}
+	return v.Title
 }
 
 func (r *Registry) Args(name, argsJSON string, width int) (ArgsView, bool) {

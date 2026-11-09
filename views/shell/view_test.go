@@ -45,7 +45,7 @@ func TestShellArgsViewCwd(t *testing.T) {
 			if strings.Contains(body, "cwd") || strings.Contains(body, "timeout") {
 				t.Errorf("%s: 不应出现 cwd/timeout 行: %q", c.label, body)
 			}
-			if want := "\n▸ run_shell " + c.wantCmd + "\n"; v.Inline != c.wantCmd {
+			if want := "\n▸ vbash$ " + c.wantCmd + "\n"; v.Inline != c.wantCmd {
 				t.Errorf("%s: 应内联命令: got %q, want %q", c.label, v.Inline, want)
 			}
 			continue
@@ -144,5 +144,28 @@ func TestResultViewRejectsForeignMeta(t *testing.T) {
 		if _, ok := resultView("", meta, 80, 20); ok {
 			t.Errorf("非 *shell.Result 不应被认领: %#v", meta)
 		}
+	}
+}
+func TestShellTitle(t *testing.T) {
+	cases := []struct {
+		label, in, want string
+	}{
+		{"内置解释器", "vbash", "vbash$"},
+		{"系统 shell", "bash", "bash$"},
+		{"带空白", " zsh ", "zsh$"},
+		{"空串回落工具名", "", ""},
+		{"纯空白回落工具名", "   ", ""},
+	}
+	for _, c := range cases {
+		if got := shellTitle(c.in); got != c.want {
+			t.Errorf("%s: shellTitle(%q) = %q, want %q", c.label, c.in, got, c.want)
+		}
+	}
+	v := View("fish")
+	if v.Title != "fish$" || v.Args == nil || v.Result == nil {
+		t.Errorf("View 应带上带 $ 的标题与两个回调: %+v", v)
+	}
+	if got := View("").Title; got != "" {
+		t.Errorf("空 shell 名不应给标题: %q", got)
 	}
 }

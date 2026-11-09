@@ -29,17 +29,28 @@ func RenderToolStart(name, args string, views *present.Registry, width int) stri
 	return b.String()
 }
 
-// toolTitleLines 组装标题区：参数短到能与工具名同行时内联单行（`▸ run_shell ls -la`、`▸ calc expression: 6*7`），
-// 放不下或参数多行/多值时转块形态——首行工具名，其后是参数区（run_shell 为 cwd/timeout 行加 `  $ ` 命令行，
-// 其余工具为 `  key: value` 行）。width 是终端总列数，各前缀宽度在此扣除。
+// toolTitleLines 组装标题区：参数短到能与标题同行时内联单行（`▸ vbash$ ls -la`、`▸ calc expression: 6*7`），
+// 放不下或参数多行/多值时转块形态——首行标题，其后是参数区（run_shell 为 cwd/timeout 行加 `  $ ` 命令行，
+// 其余工具为 `  key: value` 行）。标题默认是工具名，视图给出 Title 时改用它（run_shell 显示实际 shell 名）。
+// width 是终端总列数，各前缀宽度在此扣除。
 func toolTitleLines(name, args string, views *present.Registry, width int) []string {
+	title := toolTitle(name, views)
 	v := toolArgsView(name, args, views, width)
 	if v.Inline != "" {
-		if inner := width - 3 - term.Width(name) - 1; inner > 0 && term.Width(v.Inline) <= inner {
-			return []string{term.Truncate(name+" "+v.Inline, width-3)}
+		if inner := width - 3 - term.Width(title) - 1; inner > 0 && term.Width(v.Inline) <= inner {
+			return []string{term.Truncate(title+" "+v.Inline, width-3)}
 		}
 	}
-	return append([]string{term.Truncate(name, width-3)}, v.Body...)
+	return append([]string{term.Truncate(title, width-3)}, v.Body...)
+}
+
+// toolTitle 取标题显示名：视图的 Title 优先（配置来源，落屏前清洗控制序列），
+// 未注册视图或 Title 为空时用工具名。
+func toolTitle(name string, views *present.Registry) string {
+	if t := strings.TrimSpace(term.Sanitize(views.Title(name), false)); t != "" {
+		return t
+	}
+	return name
 }
 
 // toolArgsView 按工具名分派参数视图：注册了自带视图的工具（如 run_shell）走它的实现，

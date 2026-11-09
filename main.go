@@ -232,7 +232,7 @@ func main() {
 	}
 	termFacts := repl.TermFacts{Cols: facts.Cols, ColsOK: facts.SizeOK}
 	views := present.NewRegistry()
-	views.Register("run_shell", shellview.View())
+	views.Register("run_shell", shellview.View(inv.Name))
 	sink := repl.NewToolView(st, prof, sem, repl.LiveWidth(con, termFacts), cfg.ToolOutputLines, views)
 
 	if cmd == repl.CmdAsk {

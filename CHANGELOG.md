@@ -1,3 +1,35 @@
+## 2026-11-09 feat(repl,present,views,main): 工具标题支持视图自带显示名，`run_shell` 显示为 `vbash$`
+
+工具块标题原先一律是工具名，`run_shell` 于是显示成 `▸ run_shell ls -la`——它实际在哪个 shell 里跑
+（`vbash` / `bash` / `zsh` / `pwsh` / `cmd`）只能靠用户自己记配置。改为由自带视图给出标题显示名，
+`run_shell` 显示为**实际 shell 名 + `$`**（与命令区 `  $ ` 前缀同一提示符记号）。
+
+- **契约扩展**：`present.ToolView` 增 `Title string` 字段与 `Registry.Title(name)` 查询——非空即顶替
+  工具名作标题，未注册视图或 Title 为空回落工具名。分派键仍是工具名，注册方式不变
+- **`repl` 侧重排**：新增 `toolTitle(name, views)` 取显示名（`term.Sanitize` 清洗控制序列后 `TrimSpace`，
+  空则回落工具名），`toolTitleLines` 的内联判据宽度由 `len(name)` 改为 `len(title)`，块形态首行同样是 title；
+  超宽标题按 `width-3` 截断，粘行形态由调用方 `term.Truncate(title+" "+inline, width-3)` 兜住
+- **`views/shell`**：`View()` 改为 `View(shellName string)`，用 `shellTitle` 拼 `name + "$"`（空名给空 Title），
+  两个回调不变
+- **`main`**：`views.Register("run_shell", shellview.View(inv.Name))`，`inv` 是既有的 `shell.Resolve(cfg.Shell)`
+  ——与 `run_shell` 执行器、通知命令、环境段同源解析，不新增配置项、不二次解析。`interactive: true` 仍显示
+  配置的 shell 名（借终端直跑，名字不变）
+- **边界**：只改**标题显示**。工具调用名（`Message.Name`、请求里的 `tools`、`/history` 列表的 `run_shell`、
+  通知文案 `run_shell 等待输入`）一律不动——那是「哪个工具」，与「在哪个 shell 里跑」是两件事
+- **测试**：`repl/toolview_test.go` 新增 `TestToolTitleFromView`（内联与块形态都换名、未注册/空 Title 回落
+  工具名、Title 里的 `\x1b[2K` 被清洗）与 `TestToolTitleTruncated`（超宽标题按宽度截断）；`views/shell/view_test.go`
+  新增 `TestShellTitle`（`vbash`→`vbash$`、带空白、空串回落、`View` 带 Title 与两回调）；既有 golden 的
+  `▸ run_shell` 全部改 `▸ vbash$`（`repl` 的 `testViews()` 复刻 main 装配、传 `vbash`），宽度边界用例的
+  `len("run_shell")` 随之改 `len("vbash$")`。变异复验：去掉 `term.Sanitize`、把 `title` 换回 `name` 两处改动
+  均被新用例逮住（源文件即改即还原）
+- **验收**：`gofmt -l` 干净、`go build ./...`/`go vet ./...`、`go test ./...` 与 `go test -race ./repl/ ./views/... ./render/...`
+  全绿、`make cross` OK；`make build` 后真实 pty 审计 `scripts/render_audit.py` 逐项符合预期，另以临时
+  `shell: bash` 配置核对标题确实变为 `▸ bash$`（脚本已还原）。已知**既有**缺口 1 例不受影响：
+  `clean-interactive-release` 缺 `len=8`（改动前的 HEAD 二进制同样失败，与本次改动无关）
+- **文档**：`README.md`（标题区一节补 shell 名口径）、`docs/design.md`（《标题区参数显示》补 `toolTitle` 与
+  显示名规则、《run_shell》一节改 `vbash$`、分层段 `ToolView{Title,Args,Result}`）、`AGENTS.md`（表现层视图条）、
+  `scripts/render_audit.py`（`screen_has` 的 `▸ run_shell` → `▸ vbash$`）、`scripts/repl_tty_check.sh`（手工核对清单第 4 条）
+
 ## 2026-11-09 test(readline): 测试进程脱离调用方控制终端，常规 `go test` 不再挂死
 
 `go test ./readline` 在 CI / agent 这类「继承了控制终端但没人读它」的环境里会**永久卡死**：

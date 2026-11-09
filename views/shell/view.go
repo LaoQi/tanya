@@ -37,8 +37,19 @@ type tagLine struct {
 }
 
 // View 返回 run_shell 的自带视图：按工具名注册进 present.Registry 后由 repl 消费。
-func View() present.ToolView {
-	return present.ToolView{Args: argsView, Result: resultView}
+// shellName 是实际执行器的名字（配置解析结果，如 vbash/bash/zsh/pwsh/cmd），作为标题显示名（带 `$` 提示符记号）；
+// 为空时标题回落工具名。
+func View(shellName string) present.ToolView {
+	return present.ToolView{Title: shellTitle(shellName), Args: argsView, Result: resultView}
+}
+
+// shellTitle 把 shell 名拼成标题显示名：`vbash$`、`bash$`，与命令行区 `  $ ` 前缀同一提示符记号。
+func shellTitle(shellName string) string {
+	name := strings.TrimSpace(shellName)
+	if name == "" {
+		return ""
+	}
+	return name + "$"
 }
 
 // argsView 渲染 run_shell 参数：cwd 行（显式指定时）、timeout 行（显式指定时）与折行的命令区。

@@ -26,7 +26,7 @@ func renderToolEnd(prof term.Profile, sem theme.Semantics, name, args string, re
 
 func TestRenderToolStart(t *testing.T) {
 	got := RenderToolStart("run_shell", `{"command":"ls -la","timeout":60}`, testViews(), 80)
-	if !strings.Contains(got, "▸ run_shell") || !strings.Contains(got, "ls -la") {
+	if !strings.Contains(got, "▸ vbash$") || !strings.Contains(got, "ls -la") {
 		t.Errorf("got %q", got)
 	}
 	if strings.Contains(got, "⋯") {
@@ -339,7 +339,7 @@ func TestToolViewInteractive(t *testing.T) {
 	if strings.Contains(out, "\x1b[1A") {
 		t.Errorf("交互模式不应上移重绘: %q", out)
 	}
-	if n := strings.Count(out, "▸ run_shell"); n != 1 {
+	if n := strings.Count(out, "▸ vbash$"); n != 1 {
 		t.Errorf("标题应只出现一次，实际 %d 次: %q", n, out)
 	}
 }
@@ -365,7 +365,7 @@ func TestToolViewNonInteractive(t *testing.T) {
 	if strings.Contains(out, "\x1b[1A") {
 		t.Errorf("追加语义不应上移重绘: %q", out)
 	}
-	if n := strings.Count(out, "▸ run_shell"); n != 1 {
+	if n := strings.Count(out, "▸ vbash$"); n != 1 {
 		t.Errorf("标题应只出现一次，实际 %d 次: %q", n, out)
 	}
 }
@@ -416,7 +416,7 @@ func TestRenderToolEndANSIDirectView(t *testing.T) {
 	if !strings.Contains(got, "  \x1b[90m版本行\x1b[0m\n") {
 		t.Errorf("直显区应保留 SGR 原色: %q", got)
 	}
-	if !strings.Contains(got, "\x1b[90m\n▸ run_shell") {
+	if !strings.Contains(got, "\x1b[90m\n▸ vbash$") {
 		t.Errorf("标题行仍应 Dim 框定: %q", got)
 	}
 	pi := strings.Index(got, "版本行")
@@ -442,7 +442,7 @@ func TestRenderToolEndPlainBlockIntegrity(t *testing.T) {
 	if strings.Count(got, "\x1b[0m") != 3 {
 		t.Errorf("两处 Dim 与一处 Info 各一次闭合: %q", got)
 	}
-	if !strings.Contains(got, "\x1b[90m\n▸ run_shell") && !strings.Contains(got, "\x1b[90m▸ run_shell") {
+	if !strings.Contains(got, "\x1b[90m\n▸ vbash$") && !strings.Contains(got, "\x1b[90m▸ vbash$") {
 		t.Errorf("块级包裹应覆盖标题与输出: %q", got)
 	}
 }
@@ -482,10 +482,10 @@ func TestRenderToolStartTimeout(t *testing.T) {
 		args  string
 		want  string
 	}{
-		{"显式 timeout 转块", `{"command":"sleep 5","timeout":90}`, "\n▸ run_shell\n  timeout: 90s\n  $ sleep 5\n"},
-		{"cwd 与 timeout 各一行", `{"command":"ls","cwd":"/tmp","timeout":30}`, "\n▸ run_shell\n  cwd: /tmp\n  timeout: 30s\n  $ ls\n"},
-		{"零值 timeout 不显示", `{"command":"ls -la","timeout":0}`, "\n▸ run_shell ls -la\n"},
-		{"默认省略保持内联", `{"command":"ls -la"}`, "\n▸ run_shell ls -la\n"},
+		{"显式 timeout 转块", `{"command":"sleep 5","timeout":90}`, "\n▸ vbash$\n  timeout: 90s\n  $ sleep 5\n"},
+		{"cwd 与 timeout 各一行", `{"command":"ls","cwd":"/tmp","timeout":30}`, "\n▸ vbash$\n  cwd: /tmp\n  timeout: 30s\n  $ ls\n"},
+		{"零值 timeout 不显示", `{"command":"ls -la","timeout":0}`, "\n▸ vbash$ ls -la\n"},
+		{"默认省略保持内联", `{"command":"ls -la"}`, "\n▸ vbash$ ls -la\n"},
 	}
 	for _, c := range cases {
 		if got := RenderToolStart("run_shell", c.args, testViews(), 80); got != c.want {
@@ -643,18 +643,18 @@ func TestParseArgPairsKeepsOrder(t *testing.T) {
 
 func TestRenderToolStartCwd(t *testing.T) {
 	got := RenderToolStart("run_shell", `{"command":"ls -la","cwd":"/tmp/abc"}`, testViews(), 80)
-	if !strings.HasPrefix(got, "\n▸ run_shell\n  cwd: /tmp/abc\n  $ ls -la\n") {
+	if !strings.HasPrefix(got, "\n▸ vbash$\n  cwd: /tmp/abc\n  $ ls -la\n") {
 		t.Errorf("应为首行工具名、cwd 与命令各占一行: %q", got)
 	}
 	end := RenderToolEndAppend(testSem(), ttyRich(), "run_shell", agent.ToolResult{Text: "ok"}, testViews(), 80, 20)
-	if strings.Contains(end, "▸ run_shell") || strings.Contains(end, "cwd: /tmp/abc") {
+	if strings.Contains(end, "▸ vbash$") || strings.Contains(end, "cwd: /tmp/abc") {
 		t.Errorf("追加式收尾不应重复标题与 cwd 行: %q", end)
 	}
 	if n := strings.Count(got+end, "cwd: /tmp/abc"); n != 1 {
 		t.Errorf("cwd 行应只出现一次，实际 %d 次", n)
 	}
 	plain := RenderToolStart("run_shell", `{"command":"ls -la"}`, testViews(), 80)
-	if want := "\n▸ run_shell ls -la\n"; plain != want {
+	if want := "\n▸ vbash$ ls -la\n"; plain != want {
 		t.Errorf("got %q, want %q", plain, want)
 	}
 	if strings.Contains(plain, "cwd") {
@@ -665,7 +665,7 @@ func TestRenderToolStartCwd(t *testing.T) {
 func TestRenderToolStartCwdWidth(t *testing.T) {
 	long := `{"command":"` + strings.Repeat("y", 300) + `","cwd":"` + strings.Repeat("/seg", 50) + `"}`
 	lines := strings.Split(strings.Trim(RenderToolStart("run_shell", long, testViews(), 80), "\n"), "\n")
-	if len(lines) < 3 || lines[0] != "▸ run_shell" || !strings.HasPrefix(lines[1], "  cwd: ") {
+	if len(lines) < 3 || lines[0] != "▸ vbash$" || !strings.HasPrefix(lines[1], "  cwd: ") {
 		t.Fatalf("显式 cwd 应为「工具名 / cwd / 命令区」块形态: %q", lines)
 	}
 	for _, line := range lines {
@@ -683,12 +683,12 @@ func TestRenderToolStartInline(t *testing.T) {
 		cmd  string
 	}{
 		{"短命令", "ls -la"},
-		{"恰好占满剩余宽度", strings.Repeat("z", 80-3-len("run_shell")-1)},
+		{"恰好占满剩余宽度", strings.Repeat("z", 80-3-len("vbash$")-1)},
 	}
 	for _, c := range cases {
 		args, _ := json.Marshal(map[string]string{"command": c.cmd})
 		got := RenderToolStart("run_shell", string(args), testViews(), 80)
-		if want := "\n▸ run_shell " + c.cmd + "\n"; got != want {
+		if want := "\n▸ vbash$ " + c.cmd + "\n"; got != want {
 			t.Errorf("%s: got %q, want %q", c.name, got, want)
 		}
 	}
@@ -703,12 +703,12 @@ func TestRenderToolStartBlockShape(t *testing.T) {
 		"echo a\necho b",
 		strings.Repeat("中", 100),
 		"cd /tmp && ls\n" + strings.Repeat("y", 300),
-		strings.Repeat("z", 80-3-len("run_shell")) + "w",
+		strings.Repeat("z", 80-3-len("vbash$")) + "w",
 	}
 	for _, cmd := range cmds {
 		args, _ := json.Marshal(map[string]string{"command": cmd})
 		lines := strings.Split(strings.Trim(term.Strip(RenderToolStart("run_shell", string(args), testViews(), 80)), "\n"), "\n")
-		if lines[0] != "▸ run_shell" {
+		if lines[0] != "▸ vbash$" {
 			t.Errorf("块形态首行应只有工具名: %q", lines[0])
 		}
 		var body []string
@@ -755,9 +755,9 @@ func TestToolBlockTitleSingleSpaceAndWidth(t *testing.T) {
 		cmd  string
 		want string
 	}{
-		{"内联", "ls -la", "▸ run_shell ls -la"},
-		{"超长转块", strings.Repeat("z", 300), "▸ run_shell"},
-		{"多行转块", "cat <<'EOF'\nbody\nEOF", "▸ run_shell"},
+		{"内联", "ls -la", "▸ vbash$ ls -la"},
+		{"超长转块", strings.Repeat("z", 300), "▸ vbash$"},
+		{"多行转块", "cat <<'EOF'\nbody\nEOF", "▸ vbash$"},
 	}
 	for _, c := range cases {
 		args, _ := json.Marshal(map[string]string{"command": c.cmd})
@@ -799,7 +799,7 @@ func TestToolBlockSingleWrite(t *testing.T) {
 		t.Errorf("块内容不完整: %q", blocks[0])
 	}
 	got := wc.String()
-	if !strings.Contains(got, "▸ run_shell echo hi") || !strings.Contains(got, "↳ exit 0") || !strings.Contains(got, "hi") {
+	if !strings.Contains(got, "▸ vbash$ echo hi") || !strings.Contains(got, "↳ exit 0") || !strings.Contains(got, "hi") {
 		t.Errorf("块内容不完整: %q", got)
 	}
 }
@@ -818,7 +818,7 @@ func TestToolViewStateFields(t *testing.T) {
 	if !view.justEnded || view.dirty {
 		t.Errorf("工具块结束应置 justEnded 并清 dirty: justEnded=%v dirty=%v", view.justEnded, view.dirty)
 	}
-	if !strings.Contains(buf.String(), "▸ run_shell") {
+	if !strings.Contains(buf.String(), "▸ vbash$") {
 		t.Errorf("TTY 下应输出工具块: %q", buf.String())
 	}
 	if strings.Contains(buf.String(), "\x1b[1A") {
@@ -996,5 +996,52 @@ func TestRenderRetryNoticeSanitizesError(t *testing.T) {
 	}
 	if !strings.Contains(got, "2.0s 后重试（第 2/2 次）") {
 		t.Errorf("应格式化重试计划: %q", got)
+	}
+}
+
+// TestToolTitleFromView 锁住标题显示名：视图的 Title 顶替工具名（内联与块形态都换），
+// 未注册视图或无 Title 时回落工具名，Title 中的控制序列落屏前被清洗。
+func TestToolTitleFromView(t *testing.T) {
+	views := present.NewRegistry()
+	views.Register("sh_like", present.ToolView{
+		Title: "bash$",
+		Args: func(args string, width int) (present.ArgsView, bool) {
+			return present.ArgsView{Inline: args}, true
+		},
+	})
+	if got, want := RenderToolStart("sh_like", "ls -la", views, 80), "\n▸ bash$ ls -la\n"; got != want {
+		t.Errorf("内联标题应换成视图 Title: got %q, want %q", got, want)
+	}
+	block := RenderToolStart("sh_like", strings.Repeat("y", 300), views, 80)
+	if lines := strings.Split(strings.Trim(block, "\n"), "\n"); len(lines) < 1 || lines[0] != "▸ bash$" {
+		t.Errorf("块形态首行应为视图 Title: %q", lines)
+	}
+	if got, want := RenderToolStart("calc", `{"expression":"1+1"}`, views, 80), "\n▸ calc expression: 1+1\n"; got != want {
+		t.Errorf("未注册视图应回落工具名: got %q, want %q", got, want)
+	}
+	views.Register("no_title", present.ToolView{Args: func(args string, width int) (present.ArgsView, bool) {
+		return present.ArgsView{Inline: args}, true
+	}})
+	if got, want := RenderToolStart("no_title", "x", views, 80), "\n▸ no_title x\n"; got != want {
+		t.Errorf("Title 为空应回落工具名: got %q, want %q", got, want)
+	}
+	views.Register("evil_title", present.ToolView{Title: "vb\x1b[2Kash$", Args: func(args string, width int) (present.ArgsView, bool) {
+		return present.ArgsView{Inline: args}, true
+	}})
+	if got := RenderToolStart("evil_title", "ls", views, 80); strings.Contains(got, "\x1b[2K") || !strings.Contains(got, "vbash$") {
+		t.Errorf("标题应清洗控制序列: %q", got)
+	}
+}
+
+// TestToolTitleTruncated 锁住超宽标题按终端宽度截断，不让标题行越界。
+func TestToolTitleTruncated(t *testing.T) {
+	views := present.NewRegistry()
+	views.Register("long_title", present.ToolView{Title: strings.Repeat("w", 200)})
+	line, _, _ := strings.Cut(strings.Trim(RenderToolStart("long_title", "{}", views, 40), "\n"), "\n")
+	if w := term.Width(line); w > 40 {
+		t.Errorf("标题行宽 %d 越界: %q", w, line)
+	}
+	if !strings.HasPrefix(line, "▸ ww") {
+		t.Errorf("应保留标题前缀: %q", line)
 	}
 }

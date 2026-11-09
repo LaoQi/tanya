@@ -548,7 +548,7 @@ SCENARIOS = [
                              "args": json.dumps({"command": "echo timeout-demo", "timeout": 90}, ensure_ascii=False)}]},
             {"content": "命令已执行。\n"},
         ],
-        "screen_has": ["▸ run_shell", "timeout: 90s", "timeout-demo"],
+        "screen_has": ["▸ vbash$", "timeout: 90s", "timeout-demo"],
     },
     {
         "name": "clean-tool-short",
@@ -558,7 +558,7 @@ SCENARIOS = [
             {"tool_calls": [{"name": "run_shell", "args": sh("echo alpha; echo beta")}]},
             {"content": "命令输出 alpha 与 beta 两行。\n"},
         ],
-        "screen_has": ["▸ run_shell", "alpha", "beta", "exit 0"],
+        "screen_has": ["▸ vbash$", "alpha", "beta", "exit 0"],
     },
     {
         "name": "clean-tool-builtin-args",
@@ -579,7 +579,7 @@ SCENARIOS = [
             {"tool_calls": [{"name": "run_shell", "args": sh("seq 1 30; printf 'L%.0s' $(seq 1 300); echo")}]},
             {"content": "输出被截断显示，状态行给出总行数。\n"},
         ],
-        "screen_has": ["▸ run_shell", "共 31 行", "exit 0"],
+        "screen_has": ["▸ vbash$", "共 31 行", "exit 0"],
     },
     {
         "name": "leak-tty-scrollregion",
@@ -601,7 +601,7 @@ SCENARIOS = [
             {"tool_calls": [{"name": "run_shell", "args": sh("printf '\\033[?7l\\033[?25l' > /dev/tty")}]},
             {"content": "命令已执行。\n"},
         ],
-        "screen_has": ["▸ run_shell"],
+        "screen_has": ["▸ vbash$"],
     },
     {
         "name": "clean-reasoning-toggle",
@@ -625,7 +625,7 @@ SCENARIOS = [
             {"tool_calls": [{"name": "run_shell", "args": shi("seq 1 5")}]},
             {"content": "命令已执行。\n"},
         ],
-        "screen_has": ["▸ run_shell", "exit 0", "5 行"],
+        "screen_has": ["▸ vbash$", "exit 0", "5 行"],
     },
     {
         "name": "clean-interactive-long",
@@ -635,7 +635,7 @@ SCENARIOS = [
             {"tool_calls": [{"name": "run_shell", "args": shi("seq 1 60")}]},
             {"content": "命令已执行。\n"},
         ],
-        "screen_has": ["▸ run_shell", "exit 0", "共 60 行"],
+        "screen_has": ["▸ vbash$", "exit 0", "共 60 行"],
     },
     {
         "name": "clean-interactive-release",
@@ -649,7 +649,7 @@ SCENARIOS = [
                              "args": shi("read -s -p 'Password: ' pw; echo \"len=${#pw}\"")}]},
             {"content": "已收到输入。\n"},
         ],
-        "screen_has": ["▸ run_shell", "等待终端输入", "len=8", "exit 0"],
+        "screen_has": ["▸ vbash$", "等待终端输入", "len=8", "exit 0"],
     },
     {
         "name": "clean-history-escape",

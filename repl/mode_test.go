@@ -149,7 +149,7 @@ func TestPlainVerboseKeepsToolText(t *testing.T) {
 	feedAskPath(st, plainProf)
 	st.End()
 	got := out.String()
-	for _, want := range []string{"▸ run_shell echo hi", "hi", "↳ exit 0", "↳ TTFT 300ms", "答案"} {
+	for _, want := range []string{"▸ vbash$ echo hi", "hi", "↳ exit 0", "↳ TTFT 300ms", "答案"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("plain+verbose 应保留纯文本工具痕迹，缺 %q: %q", want, got)
 		}
@@ -160,7 +160,7 @@ func TestPlainVerboseKeepsToolText(t *testing.T) {
 	if strings.Contains(got, "\x1b[1A") {
 		t.Errorf("plain+verbose 不应上移重绘: %q", got)
 	}
-	if n := strings.Count(got, "▸ run_shell echo hi"); n != 1 {
+	if n := strings.Count(got, "▸ vbash$ echo hi"); n != 1 {
 		t.Errorf("追加式工具块标题不应重复（ToolStart 已打出），实际 %d 次: %q", n, got)
 	}
 }
@@ -261,7 +261,7 @@ func TestRichStreamsByteIdentical(t *testing.T) {
 		Result: agent.ToolResult{Meta: &shell.Result{Command: "echo hi", Stdout: []shell.Chunk{{Data: "hi\n"}}, ExitCode: 0}}})
 	view.Handle(agent.Event{Kind: agent.EventResponse, Response: agent.ResponseInfo{Duration: 1200e6}})
 	view.Handle(agent.Event{Kind: agent.EventContent, Text: "答案\n"})
-	want := "\n▸ run_shell echo hi\n  hi\n  ↳ exit 0 · 0ms · 1 行\n  ↳ TTFT 300ms · 1.2s\n\n答案\n"
+	want := "\n▸ vbash$ echo hi\n  hi\n  ↳ exit 0 · 0ms · 1 行\n  ↳ TTFT 300ms · 1.2s\n\n答案\n"
 	if got := out.String(); got != want {
 		t.Errorf("rich 非 TTY 输出应为基线字节\n got %q\nwant %q", got, want)
 	}
