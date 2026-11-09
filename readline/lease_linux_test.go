@@ -262,7 +262,7 @@ func TestBridgeOutputWhileChildAlive(t *testing.T) {
 }
 
 func TestBridgeProductionTTYE2E(t *testing.T) {
-	if os.Getenv("TTY_BRIDGE_E2E") == "" {
+	if os.Getenv(ttyE2EEnv) == "" {
 		t.Skip("需真实 tty: printf 'hello\\n' | script -qec 'TTY_BRIDGE_E2E=1 go test -run TestBridgeProductionTTYE2E -v ./readline' /dev/null")
 	}
 	b := newBridgeTTY(nil)

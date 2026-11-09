@@ -1,3 +1,21 @@
+## 2026-11-09 test(readline): 测试进程脱离调用方控制终端，常规 `go test` 不再挂死
+
+`go test ./readline` 在 CI / agent 这类「继承了控制终端但没人读它」的环境里会**永久卡死**：
+多条用例经 `newStdinLease() → anchorTerminal()` 打开真实 `/dev/tty` 并写光标锚点（`ESC 7`），
+终端输出缓冲填满后 `Write` 阻塞在内核态，连 `-test.timeout` 的 SIGQUIT 栈转储都投递不进去
+（实测：同一用例继承终端时永久卡死，`setsid` 后 0.02s 通过；整包 6s 跑完）。
+
+- **新增 `readline/main_posix_test.go`**：`TestMain` 里 `unix.Setsid()` 让测试进程脱离控制终端。
+  之后 `ctty.Open()` 失败、`anchorTerminal` 返回 nil，普通用例照常跑（`/dev/tty` 相关断言走的都是
+  注入的 fake，不依赖真实设备）。已是会话首进程时 `Setsid` 返回 `EPERM`，容错放行。
+- **真实 tty 用例保留能力**：`TTY_BRIDGE_E2E` 置位时**不脱离**（`ttyE2EEnv` 常量统一置位口径，
+  `lease_linux_test.go` 的 Skip 文案与判定同步改用它），否则 `script` 包出来的真终端反而打不开。
+- **`readline/main_unsupported_test.go`**：其余平台无控制终端概念，只提供空 `TestMain`，
+  避免各平台测试文件重复声明。
+
+结果：`go test ./...` 在无读者终端的环境下从「无界挂死」变为 `readline` 6s 通过（132 PASS / 0 FAIL /
+1 SKIP，跳过的是需要真实 tty 的 `TestBridgeProductionTTYE2E`），`-race` 亦通过。
+
 ## 2026-11-06 feat(config,main): 接入 vbash，run_shell 默认走内置 bash 解释器
 
 `run_shell` 改由 battlelab 的进程内 bash 子集解释器（`vbash`）执行，不再起 `bash -c` 子进程。
