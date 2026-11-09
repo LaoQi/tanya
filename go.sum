@@ -1,7 +1,7 @@
-github.com/LaoQi/battlelab v0.1.1 h1:Rk7p0I/vHrJbSgF3YQ+mOpN+AZCBakMzuiOacC5zkSg=
-github.com/LaoQi/battlelab v0.1.1/go.mod h1:3wsvotIy4uFotJi51SuaYS96KBd6Bt4ar5aYmRq85dk=
-golang.org/x/sys v0.48.0 h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=
-golang.org/x/sys v0.48.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
+github.com/LaoQi/battlelab v0.2.0 h1:iwk+3+SwU3cQtZUrSCpi6Gd9HA/gRejkwp5zAC00WDQ=
+github.com/LaoQi/battlelab v0.2.0/go.mod h1:3wsvotIy4uFotJi51SuaYS96KBd6Bt4ar5aYmRq85dk=
+golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=
+golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
