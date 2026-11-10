@@ -70,6 +70,9 @@ func registerFlags(fs *flag.FlagSet) *cliFlags {
 }
 
 func main() {
+	// 被 run_shell 自举为「会话宿主」时直接进入宿主循环、不返回：
+	// 那是独立会话首进程，负责持有借出的 pty 并 fork 各条命令。
+	shell.RunSessionHostIfRequested()
 	flag.CommandLine.Init("tanya", flag.ExitOnError)
 	maybeReinject()
 	f := registerFlags(flag.CommandLine)
