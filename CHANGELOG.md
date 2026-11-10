@@ -1,3 +1,26 @@
+## 2026-11-10 feat(main): 接入会话宿主自举，`run_shell` interactive 走独立会话进程
+
+配合 battlelab `v0.3.0`：`interactive: true` 的外部命令不再由每条命令各自 `setsid` 抢借出的 pts，
+改由**独立会话宿主进程**承载——宿主是会话首进程、持有那台 pts，各命令只建自己的进程组、按需
+`tcsetpgrp` 拿前台。修掉两个实测故障：多段并发管道报 `Permission denied`（第二段抢 pts 得 `EPERM`），
+以及 `sudo ... < /dev/null`、`cmd | sudo ...` 报「读取密码需要一个终端」（stdin 被重定向的前台命令
+被旧判据误判成后台）。
+
+- **`main` 入口**：`main()` 第一步调用 `shell.RunSessionHostIfRequested()`——被自举为宿主时直接进入
+  宿主循环、不返回。位置在任何业务逻辑、flag 解析、信号接线之前
+- **`integration` 的 `TestMain`** 做同样接线：测试二进制也可能被自举为宿主
+- **新增回归用例**（`integration/vbash_e2e_test.go`）：管道首段/中间段/末段与 stdio 重定向下 `sudo`
+  均能取终端；多段并发管道不再报 `Permission denied`；stdin 被重定向的前台命令仍持有控制终端
+- **依赖**：battlelab `v0.2.0` → `v0.3.0`（含 BREAKING：`ConfigureTTY` 增 `front` 参数、
+  `ConfigureCmd`/`ConfigureGroup` 增 `vbash.CmdState`、interactive 进程树改由宿主承载）。tanya 只碰
+  到 `RunSessionHostIfRequested` 这一处新 API，其余破坏面在库内自洽
+- **自包含性复验**（`44e9fdd` 起的口径）：`GOWORK=off go build/vet/test ./...` 全绿，确认拉的是
+  真实 tag 而不是 `go.work` 里的本地目录——这正是本次事故的成因（`main.go` 调了 `v0.2.0` 里不存在
+  的 API，工作区模式下能编、离了工作区就断）
+
+文档：`AGENTS.md` 与 `docs/design.md`《run_shell》的 vbash 接线段改掉「`interactive: true` **不经
+解释器**、仍走 `runFull`」的过时表述，改为「经解释器 + 会话宿主」；补上入口自举这条硬接线要求。
+
 ## 2026-11-09 feat(repl,present,views,main): 工具标题支持视图自带显示名，`run_shell` 显示为 `vbash$`
 
 工具块标题原先一律是工具名，`run_shell` 于是显示成 `▸ run_shell ls -la`——它实际在哪个 shell 里跑
