@@ -2,7 +2,7 @@ module github.com/LaoQi/tanya
 
 go 1.26.0
 
-require github.com/LaoQi/battlelab v0.3.0
+require github.com/LaoQi/battlelab v0.3.1
 
 require gopkg.in/yaml.v3 v3.0.1
 

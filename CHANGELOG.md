@@ -1,3 +1,21 @@
+## 2026-11-10 chore(deps): battlelab v0.3.0 → v0.3.1
+
+`79a98fa` 的 Windows 修复里，battlelab 侧那三处实现改动（`$(<file)` 路径转换、
+`shortPath`/`globalLabel` 的分隔符归一）只存在于 master，`v0.3.0` tag 不含它们。
+tanya 的 `go.mod` 停在 `v0.3.0`，于是同一份源码在两种构建下行为不同：
+`go.work` 模式走本地目录（含修复），`GOWORK=off` 拉 `v0.3.0`（不含修复）——
+这正是 `31dfc60` 记下并专门守住的口径，本轮又踩了一次。
+
+- battlelab `v0.3.1` 已发布（签名 annotated tag），**无导出符号变化**，纯修复：
+  `vbash/runner.go` 的 `$(<file)` 改走 `hostPath`（并在 `Dir` 为空时保留按进程 cwd
+  解析的旧语义）、`agent/path.go`/`agent/prompt.go` 补 `filepath.ToSlash`
+- `go.sum` 顺带清掉 `v0.2.0`/`v0.3.0` 的陈旧条目
+- 复验自包含性：`GOWORK=off go build/vet/test ./...` 全绿，且确认模块缓存里
+  `battlelab@v0.3.1/vbash/runner.go` 确实含修复代码（不是拉到了旧内容）
+
+验收：`GOWORK=off` 与 `go.work` 两种模式 `go build/vet/test ./...` 全绿、
+`gofmt -l` 干净、`GOOS=windows`/`GOOS=darwin` 交叉编译通过。
+
 ## 2026-11-10 fix: Windows 下 `go test ./...` 全绿（含 2 处真缺陷）
 
 Windows 上有 23 项顶层失败。归因后分两类：真缺陷修实现，测试假设错就按平台分片或加门禁。
