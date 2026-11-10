@@ -453,14 +453,15 @@ func TestNextSessionSwitchesWorkspace(t *testing.T) {
 		t.Fatalf("交接不应报错: %q", got)
 	}
 	text := term.Strip(out.String())
-	if !strings.Contains(text, "工作区已切换: "+initPath(from)+" → "+initPath(dirB)) {
+	if !strings.Contains(text, "工作区已切换: "+homePath(from)+" → "+homePath(dirB)) {
 		t.Errorf("收尾块应打印工作区切换: %q", text)
 	}
 	if a.Workspace() != dirB {
 		t.Fatalf("工作区应为目标: %q", a.Workspace())
 	}
 	dir, ok := a.SessionDir()
-	esc := strings.ReplaceAll(strings.TrimPrefix(dirB, string(filepath.Separator)), string(filepath.Separator), "-")
+	esc := strings.ReplaceAll(strings.TrimPrefix(filepath.ToSlash(dirB), "/"), "/", "-")
+	esc = strings.ReplaceAll(esc, ":", "-")
 	if !ok || dir == before || !strings.Contains(dir, esc) {
 		t.Errorf("新会话应落目标工作区: got %q ok=%v（切换前 %q，目标 %q）", dir, ok, before, dirB)
 	}
@@ -498,7 +499,7 @@ func TestNextSessionWorkspaceFailedAborts(t *testing.T) {
 	r.ask("干活")
 
 	text := term.Strip(errb.String())
-	if !strings.Contains(text, "本次交接未成立") || !strings.Contains(text, initPath(from)) {
+	if !strings.Contains(text, "本次交接未成立") || !strings.Contains(text, homePath(from)) {
 		t.Fatalf("应报告交接未成立并标出当前工作区: %q", text)
 	}
 	if strings.Contains(term.Strip(out.String()), "已移交新会话") {

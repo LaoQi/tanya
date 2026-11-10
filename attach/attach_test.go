@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -189,8 +190,11 @@ func TestListenRemovesStaleSocket(t *testing.T) {
 		t.Fatalf("Serve 应覆盖残留: %v", err)
 	}
 	defer srv.Close()
-	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("socket 权限应为 0600: %v %v", err, fi)
+	if fi, err := os.Stat(path); err != nil {
+		t.Fatalf("socket 应存在: %v", err)
+	} else if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
+		// Windows 上 socket 的 Perm() 恒为 0666（chmod 不生效），只在 posix 校验。
+		t.Fatalf("socket 权限应为 0600: %v", fi)
 	}
 }
 
@@ -294,8 +298,10 @@ func TestListenLongPathFallsBackToTmp(t *testing.T) {
 	if want := filepath.Join(os.TempDir(), fmt.Sprintf("tanya-run-%d", os.Getpid())); filepath.Dir(sock) != want {
 		t.Fatalf("应退到临时目录: %q want %q", sock, want)
 	}
-	if fi, err := os.Stat(sock); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("socket 权限应为 0600: %v %v", err, fi)
+	if fi, err := os.Stat(sock); err != nil {
+		t.Fatalf("socket 应存在: %v", err)
+	} else if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
+		t.Fatalf("socket 权限应为 0600: %v", fi)
 	}
 	c, err := attach.Open(attach.Entry{Sock: sock})
 	if err != nil {

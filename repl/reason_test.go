@@ -46,12 +46,17 @@ func TestReasoningRendersWithSeparators(t *testing.T) {
 	if strings.Contains(got, MsgStatusThinking) {
 		t.Errorf("打开思维链后不应有「思考中」状态行: %q", got)
 	}
-	endAt := strings.Index(got, "─── 思考结束 · ")
+	endAt := strings.Index(got, "─── 思考结束")
 	if endAt < 0 {
 		t.Fatalf("缺下分隔: %q", got)
 	}
-	if !strings.HasPrefix(got[endAt:], "─── 思考结束 · ") || !strings.Contains(got[endAt:], " ───\n") {
+	// 时长段只在耗时 > 0 时出现（reasonSep 的既有语义），极快执行下可能为空；
+	// 无论有无时长，收尾行都必须以 " ───\n" 结束。
+	if !strings.Contains(got[endAt:], " ───\n") {
 		t.Errorf("下分隔形态异常: %q", got[endAt:])
+	}
+	if tail := got[endAt:]; !strings.HasPrefix(tail, "─── 思考结束 · ") && !strings.HasPrefix(tail, "─── 思考结束 ───") {
+		t.Errorf("下分隔应为「思考结束[ · 时长] ───」: %q", tail)
 	}
 	if thinkAt := strings.Index(got, "先想一步"); thinkAt < 0 || thinkAt > endAt {
 		t.Errorf("思维链内容应在上分隔之后、下分隔之前: %q", got)
@@ -116,7 +121,7 @@ func TestReasoningSegmentsReopen(t *testing.T) {
 	if n := strings.Count(got, "─── 思考 ───\n"); n != 2 {
 		t.Errorf("中间出正文后应重开一段: %d\n%q", n, got)
 	}
-	if n := strings.Count(got, "─── 思考结束 · "); n != 2 {
+	if n := strings.Count(got, "─── 思考结束"); n != 2 {
 		t.Errorf("每段都应收尾: %d\n%q", n, got)
 	}
 	if !strings.Contains(got, "第二段") {

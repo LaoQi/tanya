@@ -1,3 +1,38 @@
+## 2026-11-10 fix: Windows 下 `go test ./...` 全绿（含 2 处真缺陷）
+
+Windows 上有 23 项顶层失败。归因后分两类：真缺陷修实现，测试假设错就按平台分片或加门禁。
+**没有为迁就 Windows 放宽实现语义**。
+
+真缺陷（用户可见）：
+
+- **`homePath` 用 `"/"` 判前缀**（`repl/farewell.go`）：Windows 上 home 是 `C:\Users\x`，
+  `home+"/"` 永远匹配不上，于是退出收尾的「会话文件」行从不折叠 `~`，而同路径经 `initPath`
+  在十余处正确折叠——**同一路径两种显示口径**。改为按 `filepath.Separator` 判定，并把 `p == home`
+  单列。顺带删掉 `repl/initflow.go` 里与它等价的重复实现 `initPath`，25 处调用统一到 `homePath`，
+  杜绝后续再次分叉。
+- **`/switch` 补全不认 Windows 绝对路径**（`repl/completer.go`）：`case strings.HasPrefix(prefix, "/")`
+  在 `C:\foo` 上不成立，`splitSwitchPath` 又只按 `/` 切分目录段，于是 Windows 上 `/switch C:\foo`
+  的补全与 ghost 建议**全废**。改用 `filepath.IsAbs`，切分用 `LastIndexAny(p, "/\\")`。
+
+测试侧：
+
+- **行尾**：新增 `.gitattributes`（`* text=auto eol=lf`）。`core.autocrlf=true` 时 `config.example.yaml`
+  检出为 CRLF，与「嵌入文本不含 CR」的断言冲突；这条同时保护 `tanya config` 输出的字节一致性
+- **加平台门禁**：`TestRunTurnCtrlOStream`、`TestRunTurnHotkeyAfterTool`（`hotkeysSupported` 在
+  Windows 为 `false`，用例缺 `t.Skip`）、`TestTakeoverAppendNoticeFailureFailsHandover`
+  （靠 `chmod 0500` 制造写入失败，Windows 不拦）、`TestListenRemovesStaleSocket` 等的 0600 断言
+  （Windows 下 socket `Perm()` 恒 `0666`）、`TestRefCompletionSpaceNames` 的 `"` 文件名
+  （Windows 保留字符）
+- **路径分隔符断言**：`initflow_test.go` 的报告断言写死 `.tanya/sessions`，改用 `initRel()` 按
+  `filepath.Join` 拼；`handoff_test.go` 的 workspace-id 期望改为先 `ToSlash` 再替换并归一 `:`
+- **`os.Chdir` → `t.Chdir`**（`main_test.go` 两处）：`os.Chdir(t.TempDir())` 配 `t.Cleanup` 会因
+  LIFO 顺序「先删 cwd 再切回」而失败（Windows 上目录被占用即报错）
+- **时长段可选**：`reason_test.go` 的 `─── 思考结束 · 1.5s ───` 在极快执行下时长段可能为空
+  （`reasonSep` 本就 `d > 0` 才加），断言放宽为「`思考结束[ · 时长] ───`」两种形态都接受
+
+验收：Windows 上 `GOWORK=off go build/vet/test ./...` 全绿、`gofmt -l` 干净；Linux 全量测试
+（含 `-race`）与 `GOOS=darwin`/`GOOS=windows` 交叉编译同样全绿。
+
 ## 2026-11-10 feat(main): 接入会话宿主自举，`run_shell` interactive 走独立会话进程
 
 配合 battlelab `v0.3.0`：`interactive: true` 的外部命令不再由每条命令各自 `setsid` 抢借出的 pts，

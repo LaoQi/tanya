@@ -18,7 +18,7 @@ func TestSwitchUsageWithoutArg(t *testing.T) {
 		t.Error("/switch 无参不应退出")
 	}
 	got := out.String()
-	if !strings.Contains(got, "用法: /switch") || !strings.Contains(got, initPath(a.Workspace())) {
+	if !strings.Contains(got, "用法: /switch") || !strings.Contains(got, homePath(a.Workspace())) {
 		t.Errorf("无参应打印用法与当前工作区: %q", got)
 	}
 	if errb.String() != "" {
@@ -52,7 +52,7 @@ func TestSwitchCommandSwitchesWorkspace(t *testing.T) {
 	if !ok {
 		t.Fatal("切换后应有会话目录")
 	}
-	wantSwitch := fmt.Sprintf(MsgSwitchDone, initPath(from), initPath(target)) + fmt.Sprintf(MsgSwitchDir, initPath(dir))
+	wantSwitch := fmt.Sprintf(MsgSwitchDone, homePath(from), homePath(target)) + fmt.Sprintf(MsgSwitchDir, homePath(dir))
 	if !strings.HasSuffix(got, wantSwitch) {
 		t.Errorf("切换报告应为结尾: got %q want 后缀 %q", got, wantSwitch)
 	}
@@ -100,7 +100,7 @@ func TestSwitchRetireKeepsOldFile(t *testing.T) {
 	if homePath(dir) == homePath(filepath.Dir(st.Session)) {
 		t.Errorf("切换后会话目录应改变: %q", dir)
 	}
-	if !strings.Contains(got, fmt.Sprintf(MsgSwitchDir, initPath(dir))) {
+	if !strings.Contains(got, fmt.Sprintf(MsgSwitchDir, homePath(dir))) {
 		t.Errorf("报告应含新会话目录 %q: %q", dir, got)
 	}
 }
@@ -120,7 +120,7 @@ func TestSwitchRetireNoSave(t *testing.T) {
 	if !strings.Contains(got, MsgFarewellNoFile) {
 		t.Errorf("不落盘模式应报未写入: %q", got)
 	}
-	wantSwitch := fmt.Sprintf(MsgSwitchDone, initPath(from), initPath(target))
+	wantSwitch := fmt.Sprintf(MsgSwitchDone, homePath(from), homePath(target))
 	if !strings.HasSuffix(got, wantSwitch) {
 		t.Errorf("不落盘时应只有切换报告收尾: got %q want 后缀 %q", got, wantSwitch)
 	}
@@ -179,7 +179,7 @@ func TestSwitchRetireArchivedReadOnly(t *testing.T) {
 	if !ok {
 		t.Fatal("切走后新 store 应可写")
 	}
-	wantSwitch := fmt.Sprintf(MsgSwitchDone, initPath(from), initPath(target)) + fmt.Sprintf(MsgSwitchDir, initPath(dir))
+	wantSwitch := fmt.Sprintf(MsgSwitchDone, homePath(from), homePath(target)) + fmt.Sprintf(MsgSwitchDir, homePath(dir))
 	if !strings.HasSuffix(got, wantSwitch) {
 		t.Errorf("切换报告应为结尾: %q", got)
 	}

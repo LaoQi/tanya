@@ -156,6 +156,9 @@ func TestTurnHotkeyOnWithoutDelta(t *testing.T) {
 }
 
 func TestRunTurnCtrlOStream(t *testing.T) {
+	if !hotkeysSupported {
+		t.Skip("平台不支持思考期热键")
+	}
 	dev := newFakeTerm()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -220,6 +223,9 @@ func TestRunTurnToolBlockRenderedBeforeInvoke(t *testing.T) {
 }
 
 func TestRunTurnHotkeyAfterTool(t *testing.T) {
+	if !hotkeysSupported {
+		t.Skip("平台不支持思考期热键")
+	}
 	dev := newFakeTerm()
 	hit := atomic.Int32{}
 	var n atomic.Int32

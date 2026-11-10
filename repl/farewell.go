@@ -3,6 +3,7 @@ package repl
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -45,7 +46,13 @@ func (r *REPL) farewellData() farewellInfo {
 
 func homePath(p string) string {
 	home, _ := os.UserHomeDir()
-	if home != "" && (p == home || strings.HasPrefix(p, home+"/")) {
+	if home == "" {
+		return p
+	}
+	if p == home {
+		return "~"
+	}
+	if strings.HasPrefix(p, home+string(filepath.Separator)) {
 		return "~" + p[len(home):]
 	}
 	return p

@@ -433,7 +433,7 @@ func (c *completer) candidateBase(prefix string) (base, typedRoot, namePart stri
 		}
 		dirPart, name := splitSwitchPath(rest)
 		base, typedRoot, namePart = home+dirPart, "~"+dirPart, name
-	case strings.HasPrefix(prefix, "/"):
+	case filepath.IsAbs(prefix):
 		dirPart, name := splitSwitchPath(prefix)
 		base, typedRoot, namePart = dirPart, dirPart, name
 	default:
@@ -477,7 +477,7 @@ func (c *completer) switchCandidates(prefix string) []switchCandidate {
 }
 
 func splitSwitchPath(p string) (dirPart, name string) {
-	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+	if i := strings.LastIndexAny(p, "/\\"); i >= 0 {
 		return p[:i+1], p[i+1:]
 	}
 	return "", p

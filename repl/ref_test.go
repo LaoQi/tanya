@@ -3,6 +3,7 @@ package repl
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -163,7 +164,10 @@ func TestRefCompletionSpaceNames(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "my dir"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	files := []string{"a.png", "my file.png", "myfile.png", `we"ird.png`, `we'ird.png`}
+	files := []string{"a.png", "my file.png", "myfile.png", `we'ird.png`}
+	if runtime.GOOS != "windows" {
+		files = append(files, `we"ird.png`)
+	}
 	files = append(files, filepath.Join("my dir", "inner.png"))
 	for _, n := range files {
 		writeFile(t, filepath.Join(dir, n), []byte("x"))
@@ -210,8 +214,11 @@ func TestRefCompletionSpaceNames(t *testing.T) {
 	if !has(`@"my dir/in`, "@my dir/inner.png") {
 		t.Errorf("引号形态下钻: %v", inserts(`@"my dir/in`))
 	}
-	if !has("@we", `@we"ird.png`) || !has("@we", `@we'ird.png`) {
+	if !has("@we", `@we'ird.png`) {
 		t.Errorf("名字含引号字符（非首位）应可补: %v", inserts("@we"))
+	}
+	if runtime.GOOS != "windows" && !has("@we", `@we"ird.png`) {
+		t.Errorf("双引号名字应可补: %v", inserts("@we"))
 	}
 	if got := inserts("a@b"); len(got) != 0 {
 		t.Errorf("邮箱不应触发: %v", got)

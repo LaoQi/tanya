@@ -30,7 +30,7 @@ func runInit(st *streams, sem theme.Semantics, prof term.Profile, cfg *agent.Con
 	if err != nil {
 		return err
 	}
-	st.Print(fmt.Sprintf(MsgInitHead, initPath(cwd)))
+	st.Print(fmt.Sprintf(MsgInitHead, homePath(cwd)))
 	var confirm func() bool
 	if tty != nil {
 		confirm = func() bool { return askIgnore(st, tty) }
@@ -70,27 +70,14 @@ func printInit(st *streams, sem theme.Semantics, prof term.Profile, rep *workspa
 			st.Print(fmt.Sprintf(MsgInitEntryFmt, sem.Dim.With(prof).Sprint(MsgInitTagSkip), path, e.Reason))
 		}
 	}
-	st.Print(fmt.Sprintf(MsgInitSessionFmt, initPath(rep.SessionDir)))
+	st.Print(fmt.Sprintf(MsgInitSessionFmt, homePath(rep.SessionDir)))
 	st.Print(MsgInitHint)
 }
 
 func relPath(base, path string) string {
 	rel, err := filepath.Rel(base, path)
 	if err != nil || strings.HasPrefix(rel, "..") {
-		return initPath(path)
+		return homePath(path)
 	}
 	return rel
-}
-
-func initPath(p string) string {
-	home, err := os.UserHomeDir()
-	if err == nil && home != "" {
-		if p == home {
-			return "~"
-		}
-		if strings.HasPrefix(p, home+string(filepath.Separator)) {
-			return "~" + p[len(home):]
-		}
-	}
-	return p
 }

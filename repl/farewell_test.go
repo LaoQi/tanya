@@ -39,7 +39,7 @@ func TestFarewellTextFull(t *testing.T) {
 	if lines[1] != "用量 45.2k（prompt 40.1k / completion 5.1k）· 缓存 82.29%" {
 		t.Errorf("用量行: %q", lines[1])
 	}
-	if !strings.HasPrefix(lines[2], "会话文件 ") || !strings.HasSuffix(lines[2], file) {
+	if !strings.HasPrefix(lines[2], "会话文件 ") || !strings.HasSuffix(lines[2], homePath(file)) {
 		t.Errorf("文件行应为可用的完整路径（不缩写中间目录）: %q", lines[2])
 	}
 }
@@ -84,7 +84,7 @@ func TestFarewellRichOutput(t *testing.T) {
 	if !strings.Contains(got, "时长 1m30s") {
 		t.Errorf("应含运行时长: %q", got)
 	}
-	if !strings.Contains(got, "会话文件 "+st.Session) {
+	if !strings.Contains(got, "会话文件 "+homePath(st.Session)) {
 		t.Errorf("应含已落盘文件的完整路径: %q", got)
 	}
 }

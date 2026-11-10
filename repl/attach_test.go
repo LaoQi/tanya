@@ -2,6 +2,7 @@ package repl
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -424,6 +425,9 @@ func TestTakeoverForceCancelDrainsStaleInterrupt(t *testing.T) {
 func TestTakeoverAppendNoticeFailureFailsHandover(t *testing.T) {
 	if ctty.IsRoot() {
 		t.Skip("root 下 chmod 不拦截写入")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows 不阻止目录写入权限位")
 	}
 	a := newSessTestAgent(t, t.TempDir())
 	term := newFakeTerm()

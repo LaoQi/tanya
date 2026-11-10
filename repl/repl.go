@@ -321,7 +321,7 @@ func (r *REPL) Run() error {
 	r.started = time.Now()
 	r.st.out.emit(KindDecor, welcomeText()+r.noSaveWarn())
 	if r.takeover != nil {
-		r.st.out.emit(KindNotice, fmt.Sprintf(MsgAttachTakenOverFmt, r.takeover.Session, initPath(r.takeover.Workspace)))
+		r.st.out.emit(KindNotice, fmt.Sprintf(MsgAttachTakenOverFmt, r.takeover.Session, homePath(r.takeover.Workspace)))
 	}
 	r.autoArchivePrompt()
 	r.startAttach()
@@ -435,7 +435,7 @@ func (r *REPL) afterTurn() {
 		r.nextInput = ""
 	}
 	if h.Failed {
-		r.failText(fmt.Sprintf(MsgHandoffFailedFmt, h.Err, initPath(h.Workspace)))
+		r.failText(fmt.Sprintf(MsgHandoffFailedFmt, h.Err, homePath(h.Workspace)))
 		return
 	}
 	r.st.out.emit(KindDecor, handoffText(farewellInfo{
@@ -462,7 +462,7 @@ func (r *REPL) afterTurn() {
 func handoffText(info farewellInfo, h agent.Handoff) string {
 	out := farewellText(info) + fmt.Sprintf(MsgHandoffBlockFmt, h.NewID, strings.Count(h.Summary, "\n")+1)
 	if h.Workspace != h.OldWorkspace {
-		out += fmt.Sprintf(MsgHandoffWsFmt, initPath(h.OldWorkspace), initPath(h.Workspace))
+		out += fmt.Sprintf(MsgHandoffWsFmt, homePath(h.OldWorkspace), homePath(h.Workspace))
 	}
 	return out
 }
@@ -659,7 +659,7 @@ func (r *REPL) handleExport(args []string) {
 		r.failErr(err)
 		return
 	}
-	r.st.out.emit(KindNotice, fmt.Sprintf(MsgExportDone, n, initPath(path)))
+	r.st.out.emit(KindNotice, fmt.Sprintf(MsgExportDone, n, homePath(path)))
 }
 
 func (r *REPL) handleSwitch(args []string) {
@@ -668,7 +668,7 @@ func (r *REPL) handleSwitch(args []string) {
 	}
 	from := r.agent.Workspace()
 	if len(args) == 0 {
-		r.st.out.emitText(KindNotice, fmt.Sprintf(MsgSwitchUsage, initPath(from)))
+		r.st.out.emitText(KindNotice, fmt.Sprintf(MsgSwitchUsage, homePath(from)))
 		return
 	}
 	retired := r.farewellData()
@@ -677,9 +677,9 @@ func (r *REPL) handleSwitch(args []string) {
 		return
 	}
 	to := r.agent.Workspace()
-	out := fmt.Sprintf(MsgSwitchDone, initPath(from), initPath(to))
+	out := fmt.Sprintf(MsgSwitchDone, homePath(from), homePath(to))
 	if dir, ok := r.agent.SessionDir(); ok {
-		out += fmt.Sprintf(MsgSwitchDir, initPath(dir))
+		out += fmt.Sprintf(MsgSwitchDir, homePath(dir))
 	}
 	r.st.out.emit(KindDecor, farewellText(retired))
 	r.st.out.emitText(KindNotice, out)

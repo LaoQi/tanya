@@ -449,13 +449,9 @@ func serveAttach(t *testing.T, ws string, pid int, res attach.Result) *replyHand
 }
 
 func TestRunAttachSelection(t *testing.T) {
-	oldWd, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 	inWs := func(t *testing.T) *config.Config {
 		t.Helper()
-		if err := os.Chdir(t.TempDir()); err != nil {
-			t.Fatal(err)
-		}
+		t.Chdir(t.TempDir())
 		cfg := config.Default()
 		cfg.DataDir = t.TempDir()
 		cfg.SessionMode = "local"
@@ -575,14 +571,10 @@ func TestRunAttachSelection(t *testing.T) {
 }
 
 func TestRunAttachPrune(t *testing.T) {
-	oldWd, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
 	cfg.SessionMode = "local"
-	if err := os.Chdir(t.TempDir()); err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(t.TempDir())
 	ws, _ := os.Getwd()
 	dir := agent.RunDirFor(&cfg.Config, ws)
 
@@ -623,14 +615,10 @@ func TestRunAttachPrune(t *testing.T) {
 }
 
 func TestAttachOpsListAndPruneShareText(t *testing.T) {
-	oldWd, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
 	cfg.SessionMode = "local"
-	if err := os.Chdir(t.TempDir()); err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(t.TempDir())
 	ws, _ := os.Getwd()
 	serveAttach(t, ws, 42101, attach.Result{OK: true, File: "f", Protocol: cfg.ApiProtocol})
 	staleEntry(t, ws, 42102)

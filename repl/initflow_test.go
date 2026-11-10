@@ -46,21 +46,25 @@ func runInitStrip(t *testing.T, mode outMode, tty string) (string, error) {
 	return out.String(), err
 }
 
+func initRel(parts ...string) string {
+	return filepath.Join(append([]string{".tanya"}, parts...)...)
+}
+
 func TestRunInitReportInteractiveYes(t *testing.T) {
 	dir := initWorkdir(t)
 	got, err := runInitStrip(t, modeRich, "y\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(got, "初始化工作区 "+dir+"\n") {
+	if !strings.HasPrefix(got, "初始化工作区 "+homePath(dir)+"\n") {
 		t.Errorf("报告应以工作区开头:\n%s", got)
 	}
 	for _, want := range []string{
 		MsgInitAskIgnore,
-		MsgInitTagNew + "  .tanya/sessions  会话与历史",
-		MsgInitTagNew + "  .tanya/.gitignore  忽略 .tanya/ 全部内容",
+		MsgInitTagNew + "  " + initRel("sessions") + "  会话与历史",
+		MsgInitTagNew + "  " + initRel(".gitignore") + "  忽略 .tanya/ 全部内容",
 		MsgInitTagNew + "  AGENTS.md  项目说明骨架",
-		"  会话目录 " + filepath.Join(dir, ".tanya", "sessions"),
+		"  会话目录 " + homePath(filepath.Join(dir, ".tanya", "sessions")),
 		MsgInitHint,
 	} {
 		if !strings.Contains(got, want) {
@@ -81,7 +85,7 @@ func TestRunInitReportNonInteractive(t *testing.T) {
 	if strings.Contains(got, MsgInitAskIgnore) {
 		t.Errorf("非交互不应提问:\n%s", got)
 	}
-	if want := MsgInitTagSkip + "  .tanya/.gitignore  " + workspace.MsgInitSkipNoTTY; !strings.Contains(got, want) {
+	if want := MsgInitTagSkip + "  " + initRel(".gitignore") + "  " + workspace.MsgInitSkipNoTTY; !strings.Contains(got, want) {
 		t.Errorf("报告缺少 %q:\n%s", want, got)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".tanya", ".gitignore")); !os.IsNotExist(err) {
@@ -98,7 +102,7 @@ func TestRunInitEnterDefaultsYes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := MsgInitTagNew + "  .tanya/.gitignore"; !strings.Contains(got, want) {
+	if want := MsgInitTagNew + "  " + initRel(".gitignore"); !strings.Contains(got, want) {
 		t.Errorf("回车应视为同意并新建忽略文件:\n%s", got)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".tanya", ".gitignore")); err != nil {
@@ -113,7 +117,7 @@ func TestRunInitDeclined(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := MsgInitTagSkip + "  .tanya/.gitignore  " + workspace.MsgInitSkipDeclined; !strings.Contains(got, want) {
+		if want := MsgInitTagSkip + "  " + initRel(".gitignore") + "  " + workspace.MsgInitSkipDeclined; !strings.Contains(got, want) {
 			t.Errorf("%q 应视为拒绝:\n%s", in, got)
 		}
 		if _, err := os.Stat(filepath.Join(dir, ".tanya", ".gitignore")); !os.IsNotExist(err) {
@@ -133,7 +137,7 @@ func TestRunInitEOFDeclined(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if want := MsgInitTagSkip + "  .tanya/.gitignore  " + workspace.MsgInitSkipDeclined; !strings.Contains(got, want) {
+	if want := MsgInitTagSkip + "  " + initRel(".gitignore") + "  " + workspace.MsgInitSkipDeclined; !strings.Contains(got, want) {
 		t.Errorf("EOF 应视为拒绝:\n%s", got)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".tanya", ".gitignore")); !os.IsNotExist(err) {
@@ -157,8 +161,8 @@ func TestRunInitIdempotent(t *testing.T) {
 		t.Errorf("忽略文件已存在时不应再提问:\n%s", again)
 	}
 	for _, want := range []string{
-		MsgInitTagOld + "  .tanya/sessions",
-		MsgInitTagOld + "  .tanya/.gitignore",
+		MsgInitTagOld + "  " + initRel("sessions"),
+		MsgInitTagOld + "  " + initRel(".gitignore"),
 		MsgInitTagOld + "  AGENTS.md",
 	} {
 		if !strings.Contains(again, want) {
@@ -173,7 +177,7 @@ func TestRunInitPlainKeepsReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, MsgInitTagNew+"  .tanya/sessions") {
+	if !strings.Contains(got, MsgInitTagNew+"  "+initRel("sessions")) {
 		t.Errorf("plain 下报告仍应可见:\n%s", got)
 	}
 	if strings.ContainsAny(got, "\x1b") {
