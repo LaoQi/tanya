@@ -326,6 +326,8 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - 落盘：`<timestamp>.jsonl`，每轮结束追加写入新消息（一行一条 Message JSON），记录完整历史（回放/审计用）；回合因中断/错误保留产出时同样落盘（含终止提示行）
 - 落盘原子性：本批消息先编码进内存缓冲再单次追加写入，写入报错或短写时 `Truncate` 回滚到写入前大小，`saved` 游标与文件内容始终一致（重试不会产生重复行/半行）
 - 落盘不做静默重建：**已绑定**到既有会话文件之后（写过 / `/load` / 接管 `adopt` 任一发生，`sessionStore.bound`），追加前先 `Stat` 探测，文件不存在即返回 `MsgSessionFileGone` 错误，**不带 `O_CREATE` 落盘**——文件被外部删除是数据丢失事件，必须暴露给调用方，绝不能伪装成一次成功写入（事故根因之一，见 `CHANGELOG`）。只有全新会话（`/new`、`/fork` 后的首次写入，尚未绑定）才允许创建文件
+- 落盘时间戳：每条消息带 `Message.TS`（毫秒，json key `_ts`，`omitempty`），在消息创建处打点；首行 system 快照不打点（会话级事实，时刻由文件名承载）。`_` 前缀是私有键约定——只落盘、绝不外发，由 battlelab 的 `chatWireMessages` 显式清除。老会话读回为零值，见下条
+- `/history` 显示时间：列表行在序号与角色间插 `15:04:05`，完整渲染的消息头追加 ` · 15:04:05`；**`TS` 零值时不显示**（不渲染占位、不把零值显示成 1970），老会话输出与改造前逐字一致。判据集中在 `historyStamp`，列表与消息头同口径
 - 首行持久化 system prompt 快照（`systemSaved` 标志防重复），`/load` 还原后前缀与当初逐字节一致；旧格式文件（无 system 首行）回退为载入时快照当前 AGENTS.md，且保持不补写；system 行不计入会话条数与摘要
 - 会话列表扫描：`agent.New` 启动时预扫描填充缓存（只读模式不建目录，目录缺失按空处理）；`ListSessions` 按 (mtime,size) 增量刷新，仅重扫变化的文件与归档卷；每文件 `bufio` 逐行计数条数、仅解码至首条 user 消息取摘要；归档卷只读中央目录取条目与描述（见《会话归档与 fork》）
 - 内存历史导出（`/export <路径>`，`Agent.ExportSession`）：会话文件被外部删除/损坏时，进程内存里的 `history` 是唯一幸存副本，本命令把它写成**与原会话文件同构的 jsonl**（首行 system 快照 + 逐条 `Message`，复用 `encodeMessages`），产物可被 `/load` 直接读回。相对路径落在当前工作区。**只读内存**：不触碰会话文件、不改 `saved`/`systemSaved` 游标、不进 history；写盘走 tmp + rename，失败不留半截文件。边界：只在进程存活期间有效（进程退出即内存消失），且不自动回填原会话文件——导出是独立产物，由用户决定如何恢复

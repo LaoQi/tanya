@@ -884,11 +884,24 @@ func historyText(m agent.Message) string {
 	return m.Content
 }
 
+// historyStamp 返回消息的落盘时间（`15:04:05`），供 /history 显示。
+// 老会话没有 `_ts`（零值）时返回空串：不渲染占位、也不把零值显示成 1970，
+// 于是旧会话的 /history 输出与改造前逐字一致。
+func historyStamp(m agent.Message) string {
+	if m.TS <= 0 {
+		return ""
+	}
+	return time.UnixMilli(m.TS).Format("15:04:05")
+}
+
 // historyLine 渲染 /history 列表的一项：截断按终端显示列（cols <= 0 不截断），
 // 列表一项一行，宽度不可知时保持原样而不是按 rune 猜。
 func historyLine(n int, m agent.Message, cols int) string {
 	text := term.OneLine(historyText(m))
 	line := fmt.Sprintf("%3d %-9s %s", n, historyLabel(m), text)
+	if stamp := historyStamp(m); stamp != "" {
+		line = fmt.Sprintf("%3d %s %-9s %s", n, stamp, historyLabel(m), text)
+	}
 	if cols > 0 {
 		line = term.Truncate(line, cols-1)
 	}
@@ -915,6 +928,9 @@ func (r *REPL) printHistoryFull(n int, m agent.Message) {
 // 因此不走 markdown 解析，直接构造 ir.Heading IR。
 func (r *REPL) printHistoryHead(n int, m agent.Message) {
 	head := fmt.Sprintf("#%d %s", n, historyLabel(m))
+	if stamp := historyStamp(m); stamp != "" {
+		head += " · " + stamp
+	}
 	if !r.mdEnabled() {
 		r.st.out.emit(KindNotice, head+"\n")
 		return

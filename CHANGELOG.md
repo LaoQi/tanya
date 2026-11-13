@@ -1,3 +1,21 @@
+## 2026-11-13 feat(repl): `/history` 显示逐条时间戳
+
+会话消息现在带落盘时间（battlelab `f961612` 的 `Message.TS` / `_ts` 毫秒），
+`/history` 把它显示出来：列表形态在序号与角色之间插入 `15:04:05`
+（`  1 14:39:03 user      你好`），完整渲染形态（`/history <n>`、`/history -n`）
+的消息头追加 ` · 14:39:03`。
+
+- **老会话不显示占位**：`TS` 零值（改造前的会话文件）时整列/整段省略，
+  输出与改造前逐字一致——不渲染 `--:--:--`，更不把零值显示成 `1970`。
+  判据集中在 `historyStamp`，列表与消息头共用同一口径。
+- **截断不变**：时间列计入行宽，仍按终端显示列截断（cols-1），
+  `term.Truncate` 负责兜底，超宽时只切行尾。
+
+- 测试：`TestHistoryLineShowsStamp`（带/不带 `_ts` 两种行形态）、
+  `TestHistoryLineStampRespectsWidth`（加列后仍不超宽）、
+  `TestHistoryHeadShowsStamp`（完整渲染带 ` · ` 时间、老会话不带）。
+  两条断言都做过变异验证（把 `TS <= 0` 改成 `< 0` 即报错），不是假绿。
+
 ## 2026-11-10 chore(deps): battlelab v0.3.0 → v0.3.1
 
 `79a98fa` 的 Windows 修复里，battlelab 侧那三处实现改动（`$(<file)` 路径转换、

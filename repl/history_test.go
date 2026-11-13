@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LaoQi/tanya/render/term"
 
@@ -225,5 +226,63 @@ func TestShowHistoryNegativeOne(t *testing.T) {
 	}
 	if strings.Contains(got, "#1 ") || strings.Contains(got, "提问 1") {
 		t.Errorf("不应出现第 1 条: %q", got)
+	}
+}
+
+// 有 `_ts` 时列表行在序号与角色之间插入 `15:04:05`；老会话（TS 零值）行形态逐字不变，
+// 既不显示占位也不把零值渲染成 1970。
+func TestHistoryLineShowsStamp(t *testing.T) {
+	ts := time.Date(2026, 11, 13, 14, 39, 3, 0, time.Local).UnixMilli()
+	stamped := agent.Message{Role: "user", Content: "你好", TS: ts}
+	if got, want := historyLine(1, stamped, 0), "  1 14:39:03 user      你好"; got != want {
+		t.Errorf("带时间戳的行: got %q want %q", got, want)
+	}
+
+	legacy := agent.Message{Role: "user", Content: "你好"}
+	if got, want := historyLine(1, legacy, 0), "  1 user      你好"; got != want {
+		t.Errorf("老会话行应与改造前一致: got %q want %q", got, want)
+	}
+	if got := historyStamp(legacy); got != "" {
+		t.Errorf("零值不应渲染时间: %q", got)
+	}
+}
+
+// 带时间戳的长行仍按终端列宽截断到一行内。
+func TestHistoryLineStampRespectsWidth(t *testing.T) {
+	ts := time.Date(2026, 11, 13, 14, 39, 3, 0, time.Local).UnixMilli()
+	m := agent.Message{Role: "assistant", Content: strings.Repeat("字", 100), TS: ts}
+	line := historyLine(1, m, 40)
+	if w := term.Width(line); w > 39 {
+		t.Errorf("带时间戳的行超宽 %d 列: %q", w, line)
+	}
+}
+
+// 完整渲染（/history n 与 /history -n）的消息头带时间；老会话消息头不带分隔符。
+func TestHistoryHeadShowsStamp(t *testing.T) {
+	dir := t.TempDir()
+	ts := time.Date(2026, 11, 13, 14, 39, 3, 0, time.Local).UnixMilli()
+	seed := fmt.Sprintf("{\"role\":\"user\",\"content\":\"提问\",\"_ts\":%d}\n", ts)
+	a := newSessTestAgent(t, dir) // 先构造，会话目录随之建出
+	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", seed)
+	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
+	if err := a.LoadSession("20260101-100000"); err != nil {
+		t.Fatal(err)
+	}
+	r.showHistory([]string{"1"})
+	if got := out.String(); !strings.Contains(got, "#1 user · 14:39:03") {
+		t.Errorf("消息头应带时间: %q", got)
+	}
+
+	// 老会话（无 _ts）：消息头保持原形态，不出现 ` · ` 分隔符。
+	dir2 := t.TempDir()
+	b := newSessTestAgent(t, dir2) // 先构造，会话目录随之建出
+	seedIntoSessionDir(t, dir2, "20260101-100000.jsonl", historySampleSession(2))
+	r2, out2, _ := newTestREPLAgent(t, b, newFakeTerm())
+	if err := b.LoadSession("20260101-100000"); err != nil {
+		t.Fatal(err)
+	}
+	r2.showHistory([]string{"1"})
+	if got := out2.String(); strings.Contains(got, "#1 user · ") || !strings.Contains(got, "#1 user") {
+		t.Errorf("老会话消息头不应带时间: %q", got)
 	}
 }
