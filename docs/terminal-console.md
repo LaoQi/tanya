@@ -192,7 +192,7 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 ## 7 平台
 
 - **posix/linux**：device 完整——`Keys`/`Sane`/`Pump`、中断归一、`Resize`=SIGWINCH（经 `ctty.OnResize` 收敛）、LendFull=pty 泵。`Hangup` 已删（挂断走 `io.EOF`，从未产出）。
-- **posix/darwin**：同 linux，但 LendFull 不支持（不做 pty 泵；interactive 在 darwin 明确不支持，工具侧报错）。
+- **posix/darwin**：同 linux，但 LendFull 不支持（不做 pty 泵）。系统 shell 的 interactive 借不到终端即报错；vbash 的 interactive 退化为不接终端执行（虚拟 tty 输出只进工具结果，不报错）。
 - **windows**：`Keys`=console mode 映射（**关 `ENABLE_PROCESSED_INPUT`**、开 VT 输入模式，`^C` 与 posix 同走字节路径在 device 归一——与现状实现一致）、`Resize` 暂缺（无 `SIGWINCH` 来源；S4 后 picker 改事件驱动，Windows 会话内缩放不自愈重排——见 `docs/layering-refactor.md` §5）、LendFull=`CONIN$` 直通+掩蔽（capture 不支持，输出直上屏）、LendStdin=null 且**不掩蔽**（`^C` 双方收到，等价中断回合）。未实机验证，验收底线=与现状行为一致。
 - **pipe**（全部非 tty 环境：CI/重定向/全部单测/stub 平台）：读=合成整行 `Key` 事件、无模式、无 `Resize`、中断走信号面——device 一等实现，非降级分支。
 
@@ -200,8 +200,8 @@ L1 device 职责（接口包内私有，各分片一份完整实现）：模式�
 
 | # | 变化 | 说明 |
 |---|---|---|
-| 1 | sudo/ssh/gpg 等隐式交互消失 | 必须 `interactive: true`；漏标时读 stdin 立即 EOF，读 tty 通常立即 `EIO`（继承 Ignore 处置），若链中程序恢复 `SIGTTIN` 默认处置（如 GNU `timeout`）则改为停止、静默挂到超时强杀；工具描述文案同步改（§6） |
-| 2 | 裸读 stdin 的命令（`cat`、`read`） | stdin=`/dev/null`，立即 EOF |
+| 1 | sudo/ssh/gpg 等隐式交互消失 | 必须 `interactive: true`；漏标时（系统 shell 路径）读 stdin 立即 EOF、读 tty 通常立即 `EIO`（继承 Ignore 处置），链中程序恢复 `SIGTTIN` 默认处置则改为停止挂到超时强杀；vbash 路径（2026-11-16 会话宿主架构）读 stdin/读 tty 都在虚拟 tty 上合法等待、无人喂则挂到超时被组杀，写 tty 提示不上屏不进结果；工具描述文案同步改（§6） |
+| 2 | 裸读 stdin 的命令（`cat`、`read`） | 系统 shell 路径 stdin=`/dev/null` 立即 EOF；vbash 路径接虚拟 tty、挂到超时（终端语义，`test -t 0` 为真——2026-11-16 起） |
 | 3 | 普通 `run_shell` 执行期 `^C` | 从「只中断该命令、工具返回、回合继续」变为「中断整个回合并杀子进程组」（§4 规则 1） |
 | 4 | `^Z` 全面无响应 | tanya 自身维持吞没；interactive 子进程被停不再检测，等超时强杀 |
 | 5 | darwin interactive 不支持 | 工具侧明确报错（原为前台直通兜底） |

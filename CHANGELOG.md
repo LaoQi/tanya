@@ -1,3 +1,23 @@
+## 2026-11-17 docs+fix(scripts): 终端行为文档按会话宿主架构改写；审计断言与 read 语义对齐
+
+battlelab fd2d757/65ad2be（会话宿主自建虚拟 pty + 修复包）落地后，终端行为文档多处与实现
+不符，按实测改写；渲染审计的一条断言修正随行（c92ce53）。
+
+- **「漏标 interactive 时写 /dev/tty 的提示不可见」**：旧架构实测**可见且刷屏**（子进程直写
+  真实终端，审计抓流 247KB）；新架构 vbash 路径写 `/dev/tty` 进虚拟 tty，不上屏、也不进结果
+  （探针实测）——README 与 docs/design.md、docs/terminal-console.md 改为如实描述两条路径。
+- **「读 /dev/tty 通常立即 EIO（继承 SIGTTIN/SIGTTOU=Ignore）」**：vbash 路径下命令是虚拟 tty
+  的前台组，读是合法的、只是无人喂输入——挂到工具超时被组杀（实测 `head -c1 < /dev/tty`
+  挂满超时）；EIO/信号继承链语义保留给系统 shell 路径（design.md 的 TTIN/TTOU 段补注）。
+- **宿主模型**：design.md「持有借出的 pts」改为「自建虚拟 pty、stdio 帧协议」；漏接
+  `RunSessionHostIfRequested` 的症状从「interactive 一律失败」改为「所有外部命令失败」。
+- **interactive 呈现**：README 补 ttyRelay 双向泵与桥的哑管道模式（sudo/ssh 关回显端到端
+  生效、密码不上屏）、全屏程序非目标、darwin/借不出终端时 vbash 退化不报错。
+- **clean-interactive-release 断言 len=8 改 len=0**：vbash 的 read 只支持 `-r`，其余选项
+  （含 `-p` 的操作数）静默丢弃，`pw` 恒空——原断言任何架构下都不可能通过（vbash 历史从未
+  支持 `-p`/`-s`），属审计脚本带病出生的假红；场景继续验证「输入到达 read」与「终端释放序」。
+  随 battlelab 65ad2be 复跑渲染审计 17/17 全绿。
+
 ## 2026-11-13 feat(repl): `/history` 显示逐条时间戳
 
 会话消息现在带落盘时间（battlelab `f961612` 的 `Message.TS` / `_ts` 毫秒），

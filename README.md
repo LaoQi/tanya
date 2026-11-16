@@ -258,9 +258,9 @@ TTY 下的状态展示是**追加式**（不重绘、不移动光标，终端被
 
 ### 终端与信号行为
 
-普通命令不被移交终端：tanya 自始至终是控制终端的前台作业，子进程 stdin 接空设备（`/dev/null`）、只继承 stdout/stderr。因此需要应答的程序（`sudo`/`ssh`/`gpg`/`read`）**必须显式 `interactive: true`**——漏标时它们读不到输入：写 `/dev/tty` 的提示不可见；读 `/dev/tty` 通常立即失败（`EIO`——子进程继承 tanya 的 `SIGTTIN/SIGTTOU=Ignore`），但若命令链中的程序把这两个信号恢复默认处置（GNU `timeout` 默认模式即如此），该次读会转成 `SIGTTIN` 停止、静默挂到工具超时或 `^C` 强杀。
+默认 shell（vbash）下普通命令不接触真实终端：tanya 自始至终是真实终端的前台作业；外部命令统一交**会话宿主**执行——宿主是自建虚拟 pty 的会话首进程，命令各建进程组、前台命令按需设为该 pty 的前台组，未重定向的 stdin 就接这台虚拟 tty（`tty`/`test -t 0` 为真）。因此需要应答的程序（`sudo`/`ssh`/`gpg`/`read`）**必须显式 `interactive: true`**——漏标时写 `/dev/tty` 的提示进虚拟 tty，不上屏、也不进结果；读 `/dev/tty` 是合法前台读，只是无人喂输入，于是静默挂到工具超时被组杀。配 `shell: bash` 等系统 shell 时保持旧语义：子进程 stdin 接空设备（`/dev/null`），读 `/dev/tty` 通常立即 `EIO`（子进程继承 tanya 的 `SIGTTIN/SIGTTOU=Ignore`），若命令链中的程序把这两个信号恢复默认处置（GNU `timeout` 默认模式即如此），该次读会转成 `SIGTTIN` 停止、静默挂到超时或 `^C` 强杀。
 
-`interactive: true` 在 Linux 走独立 pty 借出：命令在自己的 pty 中运行，真实 tty 切 raw 由双向泵转，提示与输出实时可见；`^C` 经 pty 行规程投递（`^Z` 在桥接下不挂起子进程）。**借不出即报错**（macOS、无控制终端、已在借出中等场景：`error: interactive 不支持（无法借出终端）`），不再回退成普通执行。Windows 不走 pty：子进程 stdin 接控制台（`CONIN$`）可直接应答、输出直上屏，运行期 tanya 屏蔽自身 `^C`（`Ctrl+Break` 仍可中断），interactive 时去除 PowerShell 的 `-NonInteractive`（Read-Host 可用）。细节见 `docs/interactive-tty.md`、`docs/terminal-console.md` 与 `docs/terminal-caps.md` §8.6。
+`interactive: true` 把虚拟 tty 经双向泵接到真实终端：命令写 `/dev/tty` 的提示实时上屏、用户按键直达，输出同时也进工具结果；真实 tty 切 raw（ISIG 一并关闭），`^C` 作为按键泵进虚拟 tty、由其行规程投给命令的前台组（`^Z` 在桥接下不挂起子进程）；中间的桥 pty 为哑管道模式（无回显、无行缓冲、无信号、输出直通），回显与行编辑完全由虚拟 tty 承担——`sudo`/`ssh` 关掉的回显端到端生效，密码不上屏。全屏交互程序（`top`/`vim` 类）不在支持范围。Linux 下借不出终端（无控制终端等）时 vbash 退化为不接终端执行（提示只进工具结果、不报错）；macOS 的 pty 泵未实现，同此退化；系统 shell 的 interactive **借不出即报错**（`error: interactive 不支持（无法借出终端）`），不再回退成普通执行。Windows 不走 pty：子进程 stdin 接控制台（`CONIN$`）可直接应答、输出直上屏，运行期 tanya 屏蔽自身 `^C`（`Ctrl+Break` 仍可中断），interactive 时去除 PowerShell 的 `-NonInteractive`（Read-Host 可用）。细节见 `docs/interactive-tty.md`、`docs/terminal-console.md` 与 `docs/terminal-caps.md` §8.6。
 
 信号语义：
 
