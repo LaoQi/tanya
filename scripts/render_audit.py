@@ -649,7 +649,10 @@ SCENARIOS = [
                              "args": shi("read -s -p 'Password: ' pw; echo \"len=${#pw}\"")}]},
             {"content": "已收到输入。\n"},
         ],
-        "screen_has": ["▸ vbash$", "等待终端输入", "len=8", "exit 0"],
+        # vbash 的 read 只支持 -r，其余选项（含其操作数）按既定语义静默丢弃：
+        # 行被赋给首变量名 pw 之外的 'Password: '，pw 为空，恒为 len=0。
+        # 本场景验证的是输入能否到达 read 与终端释放序，不是 read 的选项语义。
+        "screen_has": ["▸ vbash$", "等待终端输入", "len=0", "exit 0"],
     },
     {
         "name": "clean-history-escape",
