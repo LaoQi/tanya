@@ -1,3 +1,10 @@
+## 2026-11-17 chore(deps): battlelab v0.3.1 → v0.4.0
+
+升到会话宿主新架构（fd2d757：宿主自建虚拟 pty、stdio 帧协议替代 socketpair/ExtraFiles/
+/proc，vbash 统一单执行路径；65ad2be：非交互终端锚点、relay 收尾死锁与桥回显泄露修复；
+c281c46：文档口径）。行为影响见上一条 docs 条目；tanya 自身零代码改动，
+`GOWORK=off` 全量 build/vet/test 按发布版验证通过，渲染审计 17/17 全绿。
+
 ## 2026-11-17 docs+fix(scripts): 终端行为文档按会话宿主架构改写；审计断言与 read 语义对齐
 
 battlelab fd2d757/65ad2be（会话宿主自建虚拟 pty + 修复包）落地后，终端行为文档多处与实现
