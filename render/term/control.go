@@ -15,6 +15,13 @@ func CursorUp(n int) string {
 	return "\x1b[" + strconv.Itoa(n) + "A"
 }
 
+func CursorDown(n int) string {
+	if n < 1 {
+		return ""
+	}
+	return "\x1b[" + strconv.Itoa(n) + "B"
+}
+
 func CursorForward(n int) string {
 	if n < 1 {
 		return ""

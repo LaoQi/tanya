@@ -276,7 +276,8 @@ func TestPickSessionCancelKey(t *testing.T) {
 	}
 }
 
-func TestPickSessionSizeChangeRedrawsWithoutStaleUp(t *testing.T) {
+// 尺寸变化时必须先擦掉旧块、再在原位重绘：不走这条路则旧块留在屏上（100→60 列实测两份菜单）。
+func TestPickSessionSizeChangeErasesOldBlock(t *testing.T) {
 	c := &pickConsole{
 		sizes: []readline.Size{{Cols: 100, Rows: 32}, {Cols: 60, Rows: 20}},
 		events: []readline.Event{
@@ -294,7 +295,37 @@ func TestPickSessionSizeChangeRedrawsWithoutStaleUp(t *testing.T) {
 	if len(frames)-1 != 3 {
 		t.Fatalf("应有 3 帧（初始/尺寸变化/按键后），实际 %d 帧: %q", len(frames)-1, buf.String())
 	}
-	if re := regexp.MustCompile(`\x1b\[[0-9]*A`); re.MatchString(frames[1]) {
-		t.Errorf("尺寸变化帧不应按旧行数上移光标: %q", frames[1])
+	// 拆出的每一段都是「某次标题之后的输出」：frames[1] 属初始帧之后（= 尺寸变化帧的擦除部分），
+	// frames[2] 属尺寸变化帧之后（= 按键帧的上移部分），frames[3] 是最后一次重绘的行内容。
+	erase := frames[1]
+	if !regexp.MustCompile(`\x1b\[[0-9]+A`).MatchString(erase) {
+		t.Errorf("尺寸变化帧应先按重排行数上移回块首: %q", erase)
+	}
+	if strings.Count(erase, "\x1b[J") < 4 {
+		t.Errorf("尺寸变化帧应逐行擦除旧块（4 行）: %q", erase)
+	}
+	if !strings.HasPrefix(frames[2], "（1/3，") {
+		t.Errorf("尺寸变化后应重绘同一位置的菜单: %q", frames[2])
+	}
+}
+
+// reflowedRows 是「旧块在新宽度下占几行」——变窄后行数变多，按旧行数上移会擦不全。
+func TestPickerReflowedRows(t *testing.T) {
+	p := &sessionPicker{
+		items: testSessions(3),
+		rows:  []string{"标题行", strings.Repeat("a", 100), strings.Repeat("a", 100)},
+		lines: 3,
+		size:  readline.Size{Cols: 100, Rows: 32},
+	}
+	if got := p.reflowedRows(); got != 3 {
+		t.Errorf("100 列下每条 100 字符不折行，应为 3 行，实际 %d", got)
+	}
+	p.size = readline.Size{Cols: 40, Rows: 32}
+	if got := p.reflowedRows(); got != 7 { // 标题 1 + 每行 100 字符按 40 列折成 3 行 ×2
+		t.Errorf("40 列下应重排为 7 行，实际 %d", got)
+	}
+	p.size = readline.Size{Cols: 0, Rows: 0}
+	if got := p.reflowedRows(); got != 3 {
+		t.Errorf("宽度不可知时应退回 p.lines=3，实际 %d", got)
 	}
 }

@@ -126,6 +126,7 @@ func (e *Editor) Readline(prompt string) (string, error) {
 			return "", ErrTakeover
 		}
 		if ev.Kind == EventResize {
+			e.reflow()
 			e.render("")
 			continue
 		}
@@ -430,11 +431,36 @@ func (e *Editor) histNext() {
 	}
 }
 
-func (e *Editor) render(extra string) {
+// line 返回当前编辑行（提示符 + 缓冲 + 幽灵补全）。
+func (e *Editor) line() string {
 	line := e.prompt + string(e.buf)
 	if e.ghost != "" && e.pos == len(e.buf) {
 		line += e.dim.Sprint(e.ghost)
 	}
+	return line
+}
+
+// reflow 按当前尺寸重算绘制块的几何记账（cursorRow = 光标在块内第几行，rowsUsed = 块占几行）。
+//
+// 为什么必须在 EventResize 里先调它：终端缩放时会把已折行的内容按新宽度重新排版，上一帧
+// 按旧宽度算出的 cursorRow/rowsUsed 在新布局下不再成立。沿用旧值去「上移 + 擦除」会擦错行：
+// 变窄使块变高时，上移量偏小、擦不到新增的行，屏上留下一份旧块（100→60 列实测 2 份提示符，
+// 与 bash/readline 的 1 份对照）。这里假定终端会重排已排版内容（tmux、iTerm2、kitty、WezTerm、
+// VTE 系、Windows Terminal 均如此；不重排的终端上变窄时会多擦掉块上方 1–2 行，属已裁定代价，
+// 记档见 docs/design.md《终端输入》）。
+func (e *Editor) reflow() {
+	size, ok := e.con.Size()
+	if !ok || size.Cols <= 0 {
+		return
+	}
+	cur := stringWidth(stripANSI(e.prompt)) + stringWidth(string(e.buf[:e.pos]))
+	rows, curRow, _ := layoutCursor([]rune(stripANSI(e.line())), cur, size.Cols)
+	e.cursorRow = curRow
+	e.rowsUsed = rows + len(e.menu)
+}
+
+func (e *Editor) render(extra string) {
+	line := e.line()
 	cur := stringWidth(stripANSI(e.prompt)) + stringWidth(string(e.buf[:e.pos]))
 	size, ok := e.con.Size()
 	if !ok || size.Cols <= 0 {

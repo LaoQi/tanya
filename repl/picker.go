@@ -29,8 +29,9 @@ const pickerTailReserve = 1
 type sessionPicker struct {
 	items  []agent.SessionInfo
 	cursor int
-	start  int // 窗口首项索引
-	lines  int // 上次重绘占用行数（含标题），即下一次上移的行数
+	start  int      // 窗口首项索引
+	lines  int      // 上次重绘占用行数（含标题），即下一次上移的行数
+	rows   []string // 上次写入的逻辑行（含标题，**未截断**原文），供尺寸变化后按新宽度重算折行高度
 	size   readline.Size
 	done   bool
 	cancel bool
@@ -110,6 +111,8 @@ func (p *sessionPicker) render(out io.Writer) {
 	if p.size.Cols > 0 {
 		title = term.Truncate(title, p.size.Cols-1)
 	}
+	rows := make([]string, 0, win+1)
+	rows = append(rows, title)
 	b.WriteString(term.ClearLineHome() + title + "\r\n")
 	for i := p.start; i < p.start+win; i++ {
 		s := p.items[i]
@@ -118,13 +121,72 @@ func (p *sessionPicker) render(out io.Writer) {
 			mark = p.sem.Ok.With(p.prof).Sprint("> ")
 		}
 		line := fmt.Sprintf(SessRow, mark, s.ID, s.ModTime.Format("01-02 15:04"), s.Msgs, sessSummary(s))
+		rows = append(rows, line) // 存未截断的原文：尺寸变化后要按新宽度重算折行高度
 		if p.size.Cols > 0 {
 			line = term.Truncate(line, p.size.Cols-1)
 		}
 		b.WriteString(term.ClearLineHome() + line + term.ClearLine() + "\r\n")
 	}
+	p.rows = rows
 	p.lines = win + 1
 	fmt.Fprint(out, b.String())
+}
+
+// reflowedRows 报告上一帧的块**按当前宽度重排后**占几行。终端缩放会把已折行的内容重新排版，
+// p.lines 记的是旧宽度下的行数，变窄后实际行数更多——按旧行数上移会擦不全、留下旧块。
+// 宽度不可知（非 TTY）时退回 p.lines（那时每行都不折行，二者相等）。
+func (p *sessionPicker) reflowedRows() int {
+	cols := p.size.Cols
+	if cols <= 0 || len(p.rows) == 0 {
+		return p.lines
+	}
+	total := 0
+	for _, line := range p.rows {
+		n := (term.Width(line) + cols - 1) / cols
+		if n < 1 {
+			n = 1
+		}
+		total += n
+	}
+	return total
+}
+
+// eraseReflowed 擦掉上一帧的整块。
+//
+// 尺寸变化后「旧块在新宽度下占几行」对程序不可知：终端重排已排版内容的手法不统一
+// （tmux 只把超宽的行重新折行、不重排的终端根本不动），程序侧算式只能逼近。因此这里
+// 不追求把行数算准，而是**把块区域整片擦掉**：
+//
+//	上移 rows 进块内 → CSI J 清到屏末 → 再逐行向上擦 rows 次
+//
+// 清到屏末覆盖光标之下、向上擦覆盖光标之上，两段合起来必定盖住块所占的整片区域；
+// 落点偏上或偏下都不影响结果。上移量取「按新宽度重算的重排行数」与旧记账 p.lines 的
+// 较大者，并夹到光标可用行数（p.size.Rows-1），避免被视口夹到顶行。
+func (p *sessionPicker) eraseReflowed(out io.Writer) {
+	rows := p.reflowedRows()
+	if rows < p.lines {
+		rows = p.lines
+	}
+	if limit := p.size.Rows - 1; limit > 0 && rows > limit {
+		rows = limit
+	}
+	if rows <= 0 {
+		return
+	}
+	var b strings.Builder
+	// 落到块内某一行（不必是块首），先把它下方清干净。
+	b.WriteString(term.CursorUp(rows))
+	b.WriteString(term.LineStart())
+	b.WriteString(term.ClearToEOL())
+	// 再逐行向上擦，覆盖落点之上仍属旧块的部分（重排把块拉高时就会多出这些行）。
+	for i := 0; i < rows; i++ {
+		b.WriteString(term.CursorUp(1) + term.ClearToEOL())
+	}
+	// 回到落点：随后的 render 从这里重画，菜单位置与「按 p.lines 上移」的常规帧一致。
+	b.WriteString(term.CursorDown(rows))
+	b.WriteString(term.LineStart())
+	fmt.Fprint(out, b.String())
+	p.lines = 0
 }
 
 func pickSession(con readline.Console, list []agent.SessionInfo, out io.Writer, sem theme.Semantics, prof term.Profile) (idx int, ok bool, keys bool) {
@@ -152,7 +214,7 @@ func pickSession(con readline.Console, list []agent.SessionInfo, out io.Writer, 
 			if size, ok := con.Size(); ok {
 				p.size = size
 			}
-			p.lines = 0 // 尺寸变化：按旧行数上移会错位，放弃锚点另起一块
+			p.eraseReflowed(out) // 先按新宽度重排后的行数擦掉旧块，再在原位重绘
 			p.render(out)
 			continue
 		}
@@ -161,6 +223,9 @@ func pickSession(con readline.Console, list []agent.SessionInfo, out io.Writer, 
 		}
 		if p.done {
 			break
+		}
+		if ev.Kind != readline.EventKey {
+			continue // 空闲/其它事件不改变画面，不必重绘（否则 raw 读的 EventIdle 回环会每 ~100ms 重绘一次）
 		}
 		p.render(out)
 	}

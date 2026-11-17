@@ -64,6 +64,10 @@ def char_width(ch):
     return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
 
 
+def _line_span(line):
+    return sum(char_width(ch) for ch in line) + 1
+
+
 class VT:
     def __init__(self, cols, rows):
         self.cols, self.rows = cols, rows
@@ -79,6 +83,7 @@ class VT:
         self.saved_slots = [(0, 0, False), (0, 0, False)]
         self.slot_owner = [None, None]
         self.sgr_open = False
+        self.prev_was_erase = False
         self.events = {"overwrite": 0, "region_scroll": 0, "cu_clamped": 0}
         self.samples = []
 
@@ -205,6 +210,10 @@ class VT:
                 if m:
                     params, inter, final = m.group(1), m.group(2), m.group(3)
                     self.csi(params, final)
+                    # 紧跟在擦除之后的相对上移属于「逐行擦到顶」的收尾动作：读到顶行即停，
+                    # 被夹到 (0,0) 是预期行为，不算 cu_clamped（那条判据针对的是「上移量算错、
+                    # 整块从屏幕顶部重画」）。
+                    self.prev_was_erase = final in ("J", "K")
                     i = m.end()
                     continue
                 m2 = re.match(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", data[i:])
@@ -226,6 +235,7 @@ class VT:
             if ch == "\r":
                 self.col = 0
                 self.wrap_pending = False
+                self.prev_was_erase = False
             elif ch == "\n":
                 self._down()
                 self.wrap_pending = False
@@ -243,6 +253,7 @@ class VT:
                 self._down()
             else:
                 self.put(ch)
+                self.prev_was_erase = False
             i += 1
 
     def csi(self, params, final):
@@ -250,7 +261,7 @@ class VT:
         first = nums[0] if nums else 0
         if final == "A":
             k = first or 1
-            if k > self.row:
+            if k > self.row and not self.prev_was_erase:
                 self.note("cu_clamped", "上移 %d 行但光标在 %d 行" % (k, self.row))
             self.row = max(0, self.row - k)
             self.wrap_pending = False
@@ -311,6 +322,64 @@ class VT:
                 self.sgr_open = False
             else:
                 self.sgr_open = True
+
+    def resize(self, cols, rows):
+        """按新尺寸重排整屏，模拟会重排已排版内容的终端（tmux / xterm 系 / kitty / VTE…）。
+
+        模型：scrollback + 屏上各行去掉尾部空白后按新列宽重新折行，取末尾 rows 行进屏幕、
+        其余进 scrollback（= 真实终端「内容整体上移、底部补空行」）。光标用「光标前的显示
+        列数」这一单调量换算新坐标，重排前后指向同一处文本。
+
+        刻意只建模「会重排」这一支：本审计断言的是重排终端上的干净程度（tmux/iTerm2/kitty/
+        WezTerm/VTE 系/Windows Terminal 均如此）；不重排的终端上变窄会多擦掉块上方 1–2 行，
+        属已裁定代价，见 docs/design.md《终端输入》。
+        """
+        if cols <= 0 or rows <= 0 or (cols == self.cols and rows == self.rows):
+            return
+        screen = ["".join(c for c in r if c != "") for r in self.grid]
+        logical = [l.rstrip() for l in list(self.scrollback) + screen]
+        # 光标前累计的显示列（每行之间 +1 计换行）
+        cursor_cells = sum(_line_span(l) for l in logical[: self.row])
+        cursor_cells += sum(char_width(ch) for ch in screen[self.row][: self.col])
+        reflowed = []
+        for line in logical:
+            buf, w = "", 0
+            for ch in line:
+                cw = char_width(ch)
+                if w + cw > cols and buf:
+                    reflowed.append(buf)
+                    buf, w = "", 0
+                buf += ch
+                w += cw
+            reflowed.append(buf)
+        # 光标落在重排后的哪一行哪一列
+        new_row, new_col, off = 0, 0, 0
+        for idx, line in enumerate(reflowed):
+            width = sum(char_width(ch) for ch in line)
+            if off <= cursor_cells <= off + width:
+                acc, col = off, 0
+                for ch in line:
+                    if acc >= cursor_cells:
+                        break
+                    acc += char_width(ch)
+                    col += char_width(ch)
+                new_row, new_col = idx, min(cols - 1, col)
+                break
+            off += _line_span(line)
+        else:
+            new_row = max(0, len(reflowed) - 1)
+            new_col = max(0, min(cols - 1, cols - 1))
+        shift = max(0, len(reflowed) - rows)
+        self.cols, self.rows = cols, rows
+        self.grid = [[" "] * cols for _ in range(rows)]
+        self.scrollback = reflowed[:shift]
+        for r, line in enumerate(reflowed[shift:]):
+            for c, ch in enumerate(line[:cols]):
+                self.grid[r][c] = ch
+        self.row = max(0, min(rows - 1, new_row - shift))
+        self.col = new_col
+        self.top, self.bottom = 0, rows - 1
+        self.wrap_pending = False
 
     def dump(self, tail_only=False):
         lines = [] if tail_only else list(self.scrollback)
@@ -413,10 +482,46 @@ SSE_DELAY = 0.0
 
 # ---------------------------------------------------------------- pty 驱动
 
-def drive_keys(fd, inputs):
+def run_inputs(fd, inputs, buf, cols, rows):
+    """逐步执行输入脚本，记下每次改尺寸时已捕获输出的字节偏移。
+
+    返回 marks = [(byte_offset, cols, rows)]。**不切分输出流**：在任意字节位置切分会把
+    多字节字符与转义序列劈断，回放时按整条流 + 偏移标记处理（见 replay_stream）。
+
+    改尺寸前先把已产出的字节排空，使标记尽量落在「上一个输出完整收尾」的位置。
+    """
+    marks = []
     for item in inputs:
-        os.write(fd, item["data"].encode())
-        time.sleep(item.get("wait", 0.6))
+        if "resize" in item:
+            drain_idle(fd, buf)
+            c, r = item["resize"]
+            marks.append((len(buf), c, r))
+            fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", r, c, 0, 0))
+            time.sleep(item.get("wait", 0.8))
+        else:
+            os.write(fd, item["data"].encode())
+            time.sleep(item.get("wait", 0.6))
+    return marks
+
+
+def drain_idle(fd, buf, idle=0.12, cap=0.8):
+    """把当前可读的输出读进 buf，直到连续 idle 秒无输出或累计 cap 秒。"""
+    end = time.time() + cap
+    last = time.time()
+    while time.time() < end:
+        rr, _, _ = select.select([fd], [], [], 0.05)
+        if not rr:
+            if time.time() - last >= idle:
+                return
+            continue
+        try:
+            data = os.read(fd, 65536)
+        except OSError:
+            return
+        if not data:
+            return
+        buf += data
+        last = time.time()
 
 
 def drive(binary, cfg_path, cwd, cols, rows, prompts, timeout, inputs=None):
@@ -435,7 +540,7 @@ def drive(binary, cfg_path, cwd, cols, rows, prompts, timeout, inputs=None):
     last_out = time.time()
     if inputs is not None:
         time.sleep(0.7)
-        drive_keys(fd, inputs)
+        marks = run_inputs(fd, inputs, buf, cols, rows)
         while time.time() < deadline:
             r, _, _ = select.select([fd], [], [], 0.1)
             if not r:
@@ -470,7 +575,7 @@ def drive(binary, cfg_path, cwd, cols, rows, prompts, timeout, inputs=None):
             pass
         os.waitpid(pid, 0)
         os.close(fd)
-        return buf.decode("utf-8", "replace")
+        return bytes(buf), marks
     while time.time() < deadline:
         r, _, _ = select.select([fd], [], [], 0.1)
         if r:
@@ -514,7 +619,7 @@ def drive(binary, cfg_path, cwd, cols, rows, prompts, timeout, inputs=None):
         pass
     os.waitpid(pid, 0)
     os.close(fd)
-    return buf.decode("utf-8", "replace")
+    return bytes(buf), []
 
 # ---------------------------------------------------------------- 场景
 
@@ -715,6 +820,43 @@ SCENARIOS = [
         "screen_has": ["done"],
     },
     {
+        # 输入行在会话内缩放后必须整体重排、不留旧块：变窄使折行行数变多时，按旧行数
+        # 上移会擦不到新增的行，屏上留一份旧提示符（修复前实测 2 份，与 bash 的 1 份对照）。
+        "name": "clean-resize-input",
+        "want": "clean",
+        "inputs": [
+            {"data": "/" + "a" * 250, "wait": 0.8},
+            {"resize": (56, 32), "wait": 1.2},
+            {"data": "b", "wait": 0.5},
+            {"data": "\n", "wait": 1.0},
+            {"data": "/exit\n", "wait": 0.5},
+        ],
+        "steps": [
+            {"content": "回答完成。"},
+        ],
+        # 缩放到 56 列后：旧块按新宽度重排为 5 行，必须原地擦干净再重绘——
+        # 屏上只该剩一份提示符前缀；修复前会留两份（实测「两份提示符块」）。
+        "screen_count": {"~1.8k > /a": 1},
+        "screen_has": ["回答完成"],
+    },
+    {
+        # 选择器在会话内缩放：改尺寸时按「旧块在新宽度下的重排高度」擦除再重绘。
+        # 修复前走的是「放弃锚点另起一块」，旧块留在屏上（实测两份菜单）。
+        "name": "clean-resize-picker",
+        "want": "clean",
+        "sessions": 12,
+        "inputs": [
+            {"data": "/load\n", "wait": 1.5},
+            {"resize": (62, 24), "wait": 1.2},
+            {"data": "\x1b[B", "wait": 0.5},
+            {"data": "q", "wait": 0.8},
+            {"data": "exit\n", "wait": 0.5},
+        ],
+        # 只该剩一份菜单：修复前（放弃锚点另起一块）屏上会留两份「选择会话」标题。
+        "screen_count": {"选择会话": 1},
+        "screen_has": ["20260901-"],
+    },
+    {
         "name": "note-partial-line",
         "want": "note",
         "prompt": "用 run_shell 跑一条命令\n",
@@ -733,6 +875,23 @@ DIAGNOSTIC = ("cursor_restore",)
 def replay(text, cols, rows):
     vt = VT(cols, rows)
     vt.feed(text)
+    return vt
+
+
+def replay_stream(raw, marks, cols, rows):
+    """按整条原始流回放，并在 marks 指定的字节偏移处插入尺寸变化。
+
+    偏移处先对 VT 重排（模拟终端的 reflow），再继续 feed 后续字节——顺序与真实终端一致。
+    按整条流处理是有意的：在字节层切分会劈断多字节字符与 SGR 序列。
+    """
+    vt = VT(cols, rows)
+    pos = 0
+    for offset, c, r in marks:
+        if offset > pos:
+            vt.feed(raw[pos:offset].decode("utf-8", "replace"))
+            pos = offset
+        vt.resize(c, r)
+    vt.feed(raw[pos:].decode("utf-8", "replace"))
     return vt
 
 
@@ -758,22 +917,27 @@ def run_case(binary, case, cols, rows, timeout, dump, raw_dir=""):
         f.write("base_url: http://127.0.0.1:%d/v1\napi_key: probe\napi_protocol: responses\n"
                 "model: probe\ncolors: auto\nsession_mode: local\n" % llm.port)
     try:
-        raw = drive(binary, cfg, tmp, cols, rows, [case.get("prompt", "")], timeout,
-                    inputs=case.get("inputs"))
+        raw_bytes, marks = drive(binary, cfg, tmp, cols, rows, [case.get("prompt", "")], timeout,
+                                 inputs=case.get("inputs"))
     finally:
         llm.close()
         shutil.rmtree(tmp, ignore_errors=True)
+    raw = raw_bytes.decode("utf-8", "replace")
     if raw_dir:
         os.makedirs(raw_dir, exist_ok=True)
         with open(os.path.join(raw_dir, case["name"] + ".raw"), "w", encoding="utf-8") as f:
             f.write(raw)
-    vt = replay(raw, cols, rows)
+    vt = replay_stream(raw_bytes, marks, cols, rows)
     state = vt.state()
     viol = {k: v for k, v in vt.events.items() if v and k not in DIAGNOSTIC}
     diag = {k: v for k, v in vt.events.items() if v and k in DIAGNOSTIC}
     viol.update({k: v for k, v in state.items() if v})
     screen = vt.dump()
     missing = [s for s in case.get("screen_has", []) if s not in screen]
+    for needle, want in case.get("screen_count", {}).items():
+        got = screen.count(needle)
+        if got != want:
+            missing.append("%r 出现 %d 次（应为 %d）" % (needle, got, want))
     if dump:
         print("=" * 20, case["name"], "=" * 20)
         print(vt.dump())

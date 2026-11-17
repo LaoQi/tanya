@@ -108,6 +108,37 @@ func TestEditorRedrawsOnResize(t *testing.T) {
 	}
 }
 
+// 尺寸变化时必须先按新宽度重算记账再重绘：沿用旧记账会在「变窄使块变高」时上移不足、
+// 擦不到新增的行，屏上留一份旧块（100→60 列实测 2 份提示符，对照 bash 为 1 份）。
+func TestEditorReflowBeforeRedraw(t *testing.T) {
+	f := &fakeTerm{out: &bytes.Buffer{}, cols: 20, rows: 24}
+	ed := NewEditor(f)
+	ed.SetOutput(f.out)
+	ed.prompt = "> "
+	ed.buf, ed.pos = []rune(strings.Repeat("a", 30)), 30
+	ed.reflow()
+	// "> "+30 个 a = 32 列，按 20 列折成 2 行；光标在末尾 → 第 2 行第 12 列。
+	if ed.rowsUsed != 2 || ed.cursorRow != 1 {
+		t.Errorf("20 列下应为 2 行、光标在第 2 行，实际 rowsUsed=%d cursorRow=%d", ed.rowsUsed, ed.cursorRow)
+	}
+	ed.menu = []Completion{{Insert: "/a"}, {Insert: "/b"}}
+	ed.reflow()
+	if ed.rowsUsed != 4 {
+		t.Errorf("带 2 行菜单时应记 4 行，实际 %d", ed.rowsUsed)
+	}
+}
+
+// reflow 在尺寸不可知时不应改动记账（管道/非 TTY）。
+func TestEditorReflowNoSize(t *testing.T) {
+	ed, _, _ := newFakeEditor(KeyEvent{Code: KeyCtrlC})
+	ed.con = noSizeTerm{ed.con}
+	ed.cursorRow, ed.rowsUsed = 1, 3
+	ed.reflow()
+	if ed.cursorRow != 1 || ed.rowsUsed != 3 {
+		t.Errorf("尺寸不可知时不应重算: cursorRow=%d rowsUsed=%d", ed.cursorRow, ed.rowsUsed)
+	}
+}
+
 func TestEditorBackspaceAndInsert(t *testing.T) {
 	var evs []KeyEvent
 	evs = append(evs, runes("abc")...)

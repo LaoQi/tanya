@@ -1,3 +1,62 @@
+## 2026-11-17 fix(readline,repl,render/term,scripts,docs): 终端尺寸变化的渲染跟随（缩放后不再残留旧块）
+
+用户报告「缩放终端后输入行有问题」。**问题确认**：收到 `EventResize` 后的重绘用的是**缩放前**记下的
+`cursorRow`/`rowsUsed`/`p.lines`，而终端缩放会把已折行内容按新宽度重新排版——变窄使块变高时上移量
+偏小、擦不到新增的行，屏上留下一份旧块。真机（tmux，会重排窗口内容）实测 100→60/40 列：
+
+| 场景 | 修复前 | 修复后 | bash 对照 |
+|---|---|---|---|
+| 输入行折行（104/130/250/400/700 字符） | **2 份**提示符块 | **1 份** | 1 份 |
+| `/load` picker 打开时缩放（→52/60/70 列） | **2–3 份**菜单 | **1 份** | — |
+| 合并补全菜单打开时缩放 | 旧菜单残留上方 | 干净 | — |
+| 变宽（40→100、60→100） | 1 份（本就正常） | 1 份 | 1 份 |
+
+- **`readline`（编辑器）**：新增 `reflow()`——按当前 `Size()` 重算 `cursorRow`/`rowsUsed`（含菜单行数），
+  在 `EventResize` 分支里**先 reflow 再 `render("")`**；顺带把「当前编辑行」抽成 `line()` 供两处共用。
+- **`repl`（会话选择器）**：`EventResize` 改为 `eraseReflowed()` + `render()`。擦除不依赖「旧块在新宽度下
+  占几行」（这个数对程序不可知：tmux 只把超宽行重新折行、不重排的终端根本不动），而是三段式
+  「上移进块内 → `CSI J` 清到屏末 → 逐行向上擦」再 `CursorDown` 回位——落点偏上偏下都盖住整片块区域；
+  上移量取「重算行数」与旧记账的较大者并夹到 `rows-1`。同时修掉事件循环把 `EventIdle` 也当重绘信号
+  的缺陷：raw 读的 ~100ms 回环使 picker 稳定状态下每 100ms 重绘整块（缩放后实测发出 23 帧、11 KB，
+  修后 1 帧、486 B），现只对 `EventKey` 重绘。
+- **`render/term`**：新增 `CursorDown(n)`（与既有 `CursorUp`/`CursorForward` 同一族原语）。
+- **`scripts/render_audit.py`（R3 回归门）**：审计框架补上「会话内缩放」能力——`run_inputs` 支持
+  `{"resize": (cols, rows)}` 指令（`TIOCSWINSZ` 发真 SIGWINCH）、`replay_stream` 按字节偏移在 VT 上
+  插入重排、`VT.resize` 建模终端 reflow（按新宽度重折、光标用「光标前显示列数」换算、scrollback 参与）；
+  新增断言能力 `screen_count`（子串出现次数）。新增两条门：`clean-resize-input`（输入行，修前报
+  「`~1.8k > /a` 出现 2 次」）、`clean-resize-picker`（选择器，修前报「`选择会话` 出现 2 次」）。
+  `cu_clamped` 判据加一处豁免：**紧跟擦除（`J`/`K`）之后的相对上移**属「逐行擦到顶」的收尾动作，
+  被夹到顶行是预期行为；该豁免不影响原有阶段（负向复验：两条新门撤回修法均变红）。
+- **取舍**：实现假定终端会重排已排版内容（tmux、iTerm2、kitty、WezTerm、VTE 系、Windows Terminal 均如此）；
+  不重排的终端上变窄会多擦掉块上方 1–2 行——相对「必然留一份旧块」是更小的代价，记档于
+  `docs/design.md`《终端输入》。
+- **未涉及**：回合内 markdown 折行宽度仍在回合开始时定格（`turn.width`），流式期间缩放不跟随——
+  属独立课题，本次未改。
+- **测试**：`readline/editor_test.go` 新增 `TestEditorReflowBeforeRedraw`（20 列下 32 列内容记 2 行、
+  带 2 行菜单记 4 行）与 `TestEditorReflowNoSize`（尺寸不可知不改记账）；`repl/picker_test.go` 把旧的
+  `TestPickSessionSizeChangeRedrawsWithoutStaleUp`（断言「不得上移」——正是本次要修的错误行为）改为
+  `TestPickSessionSizeChangeErasesOldBlock`，并新增 `TestPickerReflowedRows`（100/40 列与宽度不可知三种口径）。
+- **验收**：`gofmt -l` 干净、`go build`/`vet ./...`、`go test ./...` 全绿、`go test -race ./readline/ ./repl/`
+  通过、`GOOS=darwin|windows go build` 与 `make cross` 通过、`render_audit` **19 PASS / 0 FAIL**
+  （17 旧 + 2 新）；真机 tmux 复核（52/60/70 列三档 + A/B 双二进制对照 + 变宽与只改高度两个方向）。
+- **文档**：`docs/design.md`《终端输入》尺寸变化条重写、`docs/repl-status-append.md` P5 行更新。
+
+## 2026-11-17 fix(tools/shell): 输出窗口切点对齐 UTF-8 边界（修 `/history` 里的残缺汉字）
+
+`run_shell` 的输出头尾窗口按**字节**切，切点落在多字节字符中间就把一个汉字劈成两半；posix 的
+`DecodeOutput` 是恒等函数，半个字符于是原样进 tool 消息、进 history、进会话文件
+（`json.Marshal` 落盘成 U+FFFD）。`/history` 列表与全文回放都逐字节复制正文，不修非法字节，
+残缺汉字因此直接上屏——这是「切头信息时没按 UTF-8 切」的表象，**成因不在 tanya 的渲染侧**。
+
+- **修法在 battlelab**（同批条目）：`streamCapture` 新增 `runeBoundary`/`rollTail`，head 满额时
+  尾部残缺序列整体移交 tail 开头、tail 滚动切点对齐 rune 边界；字节上限语义不变。
+- **tanya 侧零代码改动**：`historyLine`/`printHistoryFull` 的清洗链（`term.OneLine`/`term.Sanitize`）
+  本就按字节透传，源头修好即恢复完整。**不给渲染侧加非法字节过滤**——那是掩盖源头的第二道防线，
+  且已落盘的 U+FFFD 是合法字符，过滤也无从还原。
+- **实证**：本机会话库里 37 个文件含 U+FFFD、24 处紧邻 CJK（`本节点只读镜�`、`M11 上的临��`）。
+- **验收**：`go build/vet/test ./...` 全绿、`make cross` OK、`make build` + 渲染审计 17/17。
+- **未发版**（用户口径）：`go.mod` 仍指 battlelab v0.4.0，按工作区联调生效。
+
 ## 2026-11-17 chore(deps): battlelab v0.3.1 → v0.4.0
 
 升到会话宿主新架构（fd2d757：宿主自建虚拟 pty、stdio 帧协议替代 socketpair/ExtraFiles/
