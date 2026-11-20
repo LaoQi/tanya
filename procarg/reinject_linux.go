@@ -7,8 +7,11 @@ import (
 	"syscall"
 )
 
-// Flag 是携带工作区目录的选项名（tanya -C <dir>）。
+// Flag 是携带工作区目录的短选项名（tanya -C <dir>）。
 const Flag = "C"
+
+// LongFlag 是同一选项的长名（tanya --workspace <dir>），与 Flag 等价。
+const LongFlag = "workspace"
 
 // Reinject 把当前工作区写进进程 argv 后重启自身，使 ps 显示的命令行可直接复跑。
 // 已注入、取不到 cwd/exe、exec 失败时一律返回 false，调用方按原名继续运行。

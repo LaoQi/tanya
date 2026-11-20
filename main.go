@@ -51,21 +51,27 @@ type cliFlags struct {
 	noSave      *bool
 	plain       *bool
 	verbose     *bool
+	resume      *bool
 }
 
 // registerFlags 登记全部命令行选项（main 与用法测试共用同一份定义）。
 func registerFlags(fs *flag.FlagSet) *cliFlags {
 	f := &cliFlags{}
 	f.showVersion = fs.Bool("v", false, repl.FlagVersion)
+	fs.BoolVar(f.showVersion, "version", false, repl.FlagVersion)
 	f.workspace = fs.String(procarg.Flag, "", repl.FlagWorkspace)
+	fs.StringVar(f.workspace, "workspace", "", repl.FlagWorkspace)
 	f.configPath = fs.String("c", "", repl.FlagConfig)
-	f.sessionMode = fs.String("m", "", repl.FlagMode)
+	fs.StringVar(f.configPath, "config", "", repl.FlagConfig)
+	f.sessionMode = fs.String("session-mode", "", repl.FlagMode)
 	f.model = fs.String("model", "", repl.FlagModel)
 	f.noSave = fs.Bool("n", false, repl.FlagNoSave)
 	fs.BoolVar(f.noSave, "no-save", false, repl.FlagNoSave)
 	f.plain = fs.Bool("p", false, repl.FlagPlain)
 	fs.BoolVar(f.plain, "plain", false, repl.FlagPlain)
 	f.verbose = fs.Bool("verbose", false, repl.FlagVerbose)
+	f.resume = fs.Bool("r", false, repl.FlagResume)
+	fs.BoolVar(f.resume, "resume", false, repl.FlagResume)
 	return f
 }
 
@@ -86,6 +92,10 @@ func main() {
 	}
 
 	cmd, rest := repl.ParseCommand(flag.Args())
+	if err := validateResumeFlag(cmd, *f.resume); err != nil {
+		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
+		exitNow(1)
+	}
 	mode, err := repl.ParseMode(*f.plain, *f.verbose)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, repl.MsgErrLineFmt+"\n", err)
@@ -221,6 +231,21 @@ func main() {
 		st.FailErr("", err)
 		exitNow(1)
 	}
+	var resumeID string
+	if *f.resume && cmd == repl.CmdREPL {
+		res, id, err := resumeSession(cfg, a, st)
+		if err != nil {
+			st.FailErr("", err)
+			exitNow(1)
+		}
+		if res != nil {
+			takeover = res
+		}
+		resumeID = id
+		if takeover != nil {
+			resumeID = ""
+		}
+	}
 	if takeover != nil {
 		if err := a.AdoptSession(takeover.File); err != nil {
 			st.FailErr("", err)
@@ -264,6 +289,9 @@ func main() {
 	opts := []repl.Option{repl.WithStreams(st), repl.WithProfile(prof), repl.WithToolViews(views), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithConsole(con)}
 	if takeover != nil {
 		opts = append(opts, repl.WithTakeover(*takeover))
+	}
+	if resumeID != "" {
+		opts = append(opts, repl.WithResume(resumeID))
 	}
 	r, err := repl.NewREPL(a, "", opts...)
 	if err != nil {
@@ -602,6 +630,9 @@ func maybeReinject() {
 	if v, ok := lookupFlag(fs, procarg.Flag); ok && v != "" {
 		return
 	}
+	if v, ok := lookupFlag(fs, procarg.LongFlag); ok && v != "" {
+		return
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return
@@ -670,13 +701,40 @@ func envSection(inv shell.Invocation) string {
 	return b.String()
 }
 
-// writeUsage 打印用法：模式段为固定文案，选项段由 flag 包按定义清单生成。
-func writeUsage(w io.Writer, fs *flag.FlagSet) {
+// usageRow 是帮助屏的一行：spec 是写法（常用者合并长短名、不常用者只写长名）与占位符，desc 是描述。
+type usageRow struct{ spec, desc string }
+
+// usageRows 是帮助屏的选项清单（手排：常用选项的长短名合并成一行，不常用选项只有长名）。
+// 与 registerFlags 的对应关系由 main_test 的「每个已登记选项都出现在用法里」守护。
+var usageRows = []usageRow{
+	{"-c, --config <path>", repl.FlagConfig},
+	{"-C, --workspace <dir>", repl.FlagWorkspace},
+	{"--session-mode <mode>", repl.FlagMode},
+	{"--model <name>", repl.FlagModel},
+	{"-n, --no-save", repl.FlagNoSave},
+	{"-p, --plain", repl.FlagPlain},
+	{"--verbose", repl.FlagVerbose},
+	{"-r, --resume", repl.FlagResume},
+	{"-v, --version", repl.FlagVersion},
+}
+
+// writeUsage 打印用法：模式段为固定文案，选项段按 usageRows 手排（描述列按显示宽度对齐）。
+func writeUsage(w io.Writer, _ *flag.FlagSet) {
 	fmt.Fprint(w, repl.UsageHead)
-	old := fs.Output()
-	fs.SetOutput(w)
-	defer fs.SetOutput(old)
-	fs.PrintDefaults()
+	col := 0
+	for _, r := range usageRows {
+		if n := term.Width(r.spec); n > col {
+			col = n
+		}
+	}
+	col += 2
+	for _, r := range usageRows {
+		pad := col - term.Width(r.spec)
+		if pad < 1 {
+			pad = 1
+		}
+		fmt.Fprintf(w, "  %s%s%s\n", r.spec, strings.Repeat(" ", pad), r.desc)
+	}
 }
 
 // notifyRunOptions 是 notify_cmd 的执行上下文：与 run_shell 同源——同一工作区（随 /switch 跟随）、
@@ -738,4 +796,68 @@ func (c consoleForShell) LendFull(cmd *exec.Cmd, capture io.Writer) (shell.Lease
 		return nil, err
 	}
 	return l.(shell.Lease), err
+}
+
+// validateResumeFlag 校验 --resume 的适用模式：它是启动即载入会话的 REPL 行为，
+// 与 ask/config/attach 三种子命令互斥（attach 本身就是指定接管目标）。
+func validateResumeFlag(cmd repl.Cmd, resume bool) error {
+	if !resume {
+		return nil
+	}
+	if cmd == repl.CmdREPL || cmd == repl.CmdInit {
+		return nil
+	}
+	return errors.New(repl.FlagResumeMode)
+}
+
+// resumeSession 实现 --resume：先定会话（mtime 最新的活动会话），再查它是否被别的实例持有。
+// 无候选返回空 id（开新会话）；被持有则走 attach 路径接管，返回接管结果。
+func resumeSession(cfg *config.Config, a *agent.Agent, st printer) (*attach.Result, string, error) {
+	list, err := a.ListSessions()
+	if err != nil {
+		return nil, "", err
+	}
+	target, ok := repl.PickLast(list)
+	if !ok {
+		return nil, "", nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, "", err
+	}
+	rows, err := attach.Snapshot(agent.RunDirFor(&cfg.Config, cwd))
+	if err != nil {
+		return nil, "", err
+	}
+	holders := repl.SessionHolders(rows, target.ID)
+	switch len(holders) {
+	case 0:
+		if err := a.LoadSession(target.ID); err != nil {
+			return nil, "", err
+		}
+		return nil, target.ID, nil
+	case 1:
+	default:
+		return nil, "", fmt.Errorf(repl.FlagResumeManyFmt, target.ID, len(holders))
+	}
+	if a.NoSave() {
+		return nil, "", fmt.Errorf(repl.FlagResumeNoSaveFmt, target.ID)
+	}
+	res, listed, err := runAttach(cfg, repl.AttachArgs{PID: holders[0].PID}, st)
+	if err != nil {
+		// 竞态：快照时还活着、到接管时已退出。此时没有并发写者，与「无人持有」同态，
+		// 回落直接载入而不是让用户重跑一次命令。
+		if !attach.Alive(holders[0]) {
+			if lerr := a.LoadSession(target.ID); lerr != nil {
+				return nil, "", lerr
+			}
+			st.Print(fmt.Sprintf(repl.FlagResumeGoneFmt+"\n", target.ID))
+			return nil, target.ID, nil
+		}
+		return nil, "", err
+	}
+	if listed || res == nil {
+		return nil, "", errors.New(repl.MsgAttachNone)
+	}
+	return res, "", nil
 }

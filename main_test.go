@@ -428,8 +428,13 @@ func (h *replyHandler) Takeover(force bool, peer attach.Peer, reply func(attach.
 	_ = reply(h.res)
 }
 
-// serveAttach 在 ws 的 run 目录里以 pid 起一个立即应答 res 的活实例。
+// serveAttach 在 ws 的 run 目录里以 pid 起一个立即应答 res 的活实例（不带会话归属）。
 func serveAttach(t *testing.T, ws string, pid int, res attach.Result) *replyHandler {
+	return serveAttachSession(t, ws, pid, "", res)
+}
+
+// serveAttachSession 同上，但注册项带上会话 id（--resume 需要按会话找到持有者）。
+func serveAttachSession(t *testing.T, ws string, pid int, session string, res attach.Result) *replyHandler {
 	t.Helper()
 	cfg := config.Default()
 	cfg.SessionMode = "local"
@@ -441,7 +446,7 @@ func serveAttach(t *testing.T, ws string, pid int, res attach.Result) *replyHand
 	}
 	t.Cleanup(func() { _ = srv.Close() })
 	if err := attach.WriteEntry(dir, attach.Entry{
-		PID: pid, Sock: srv.SockPath(), State: attach.StateIdle, Started: time.Now(),
+		PID: pid, Sock: srv.SockPath(), State: attach.StateIdle, Started: time.Now(), Session: session,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -733,5 +738,208 @@ func TestLookupFlag(t *testing.T) {
 	}
 	if _, ok := lookupFlag(fs, "no-such-flag"); ok {
 		t.Error("未登记的选项应返回 false")
+	}
+}
+func TestValidateResumeFlag(t *testing.T) {
+	cases := []struct {
+		cmd    repl.Cmd
+		resume bool
+		ok     bool
+	}{
+		{repl.CmdREPL, true, true},
+		{repl.CmdInit, true, true},
+		{repl.CmdAsk, true, false},
+		{repl.CmdConfig, true, false},
+		{repl.CmdAttach, true, false},
+		{repl.CmdAsk, false, true},
+	}
+	for _, c := range cases {
+		err := validateResumeFlag(c.cmd, c.resume)
+		if (err == nil) != c.ok {
+			t.Errorf("validateResumeFlag(%v, %v) err=%v, want ok=%v", c.cmd, c.resume, err, c.ok)
+		}
+	}
+	if err := validateResumeFlag(repl.CmdAsk, true); err == nil || !strings.Contains(err.Error(), repl.FlagResumeMode) {
+		t.Errorf("互斥文案不符: %v", err)
+	}
+}
+
+func TestResumeFlagRegistered(t *testing.T) {
+	fs := flag.NewFlagSet("tanya", flag.ContinueOnError)
+	f := registerFlags(fs)
+	if f.resume == nil {
+		t.Fatal("应登记 -r/--resume")
+	}
+	for _, name := range []string{"resume", "config", "workspace", "session-mode", "version", "no-save", "plain", "verbose", "model"} {
+		if fs.Lookup(name) == nil {
+			t.Errorf("应登记长名 %q", name)
+		}
+	}
+	// 常用选项保留短名；session-mode 不常用故只留长名。
+	for _, name := range []string{"c", "C", "n", "p", "r", "v"} {
+		if fs.Lookup(name) == nil {
+			t.Errorf("常用选项应保留短名 %q", name)
+		}
+	}
+	if fs.Lookup("m") != nil {
+		t.Error("session-mode 不常用，不应再有 -m 短名")
+	}
+	var buf bytes.Buffer
+	writeUsage(&buf, fs)
+	got := buf.String()
+	for _, name := range []string{"-r, --resume", "--config", "--workspace", "--session-mode", "--version"} {
+		if !strings.Contains(got, name) {
+			t.Errorf("用法应列出 %s:\n%s", name, got)
+		}
+	}
+}
+
+// lastWorkspace 造一个空的本地工作区（会话落 <ws>/.tanya/sessions）。
+func lastWorkspace(t *testing.T) (*config.Config, *agent.Agent) {
+	t.Helper()
+	ws := t.TempDir()
+	t.Chdir(ws)
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	cfg.SessionMode = "local"
+	cfg.ConfigPath = filepath.Join(cfg.DataDir, "config.yaml")
+	a, err := agent.New(&cfg.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg, a
+}
+
+func TestResumeLastNoSessions(t *testing.T) {
+	cfg, a := lastWorkspace(t)
+	res, id, err := resumeSession(cfg, a, &capturePrinter{})
+	if err != nil || res != nil || id != "" {
+		t.Fatalf("无会话应静默开新会话: res=%v id=%q err=%v", res, id, err)
+	}
+}
+
+func TestResumeLastLoadsNewest(t *testing.T) {
+	cfg, a := lastWorkspace(t)
+	dir, ok := a.SessionDir()
+	if !ok {
+		t.Fatal("应有会话目录")
+	}
+	write := func(id string, age time.Duration) {
+		path := filepath.Join(dir, id+".jsonl")
+		if err := os.WriteFile(path, []byte(`{"role":"user","content":"x"}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mt := time.Now().Add(-age)
+		if err := os.Chtimes(path, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("20261119-100000", time.Hour)   // 更新的 id
+	write("20260918-100000", time.Minute) // 更新的 mtime
+
+	res, id, err := resumeSession(cfg, a, &capturePrinter{})
+	if err != nil || res != nil {
+		t.Fatalf("应直接载入: res=%v err=%v", res, err)
+	}
+	if id != "20260918-100000" {
+		t.Fatalf("应按 mtime 选老 id 的会话，得到 %q", id)
+	}
+	if got := a.SessionID(); got != "20260918-100000" {
+		t.Errorf("Agent 应已载入该会话，得到 %q", got)
+	}
+}
+
+func TestResumeLastTakesOverHolder(t *testing.T) {
+	cfg, a := lastWorkspace(t)
+	dir, _ := a.SessionDir()
+	sess := "20260918-100000"
+	path := filepath.Join(dir, sess+".jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"x"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ws, _ := os.Getwd()
+	h := serveAttachSession(t, ws, os.Getpid()+10000, sess, attach.Result{
+		OK: true, File: path, Protocol: cfg.ApiProtocol, Session: sess, Workspace: ws,
+	})
+	res, id, err := resumeSession(cfg, a, &capturePrinter{})
+	if err != nil {
+		t.Fatalf("接管应成功: %v", err)
+	}
+	if res == nil || res.File != path {
+		t.Fatalf("应返回接管结果: %+v", res)
+	}
+	if id != "" {
+		t.Errorf("接管时不应再走载入报告，得到 id=%q", id)
+	}
+	if n := atomic.LoadInt32(&h.n); n != 1 {
+		t.Errorf("应发起一次接管，实际 %d", n)
+	}
+}
+
+func TestResumeLastNoSaveHolderRefused(t *testing.T) {
+	ws := t.TempDir()
+	t.Chdir(ws)
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	cfg.SessionMode = "local"
+	cfg.ConfigPath = filepath.Join(cfg.DataDir, "config.yaml")
+	a, err := agent.New(&cfg.Config, agent.NoSave(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := "20260918-100000"
+	// -n 下 Agent.SessionDir() 按设计返回 false，用同口径的 SessionDirFor 算落点后手工备一个会话。
+	dir := agent.SessionDirFor(&cfg.Config, ws)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, sess+".jsonl"), []byte(`{"role":"user","content":"x"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	serveAttachSession(t, ws, os.Getpid()+10001, sess, attach.Result{OK: true, Protocol: cfg.ApiProtocol})
+	rows, err := attach.Snapshot(agent.RunDirFor(&cfg.Config, ws))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repl.SessionHolders(rows, sess)) != 1 {
+		t.Fatalf("宿主注册项应可见: %+v", rows)
+	}
+	if _, _, err := resumeSession(cfg, a, &capturePrinter{}); err == nil || !strings.Contains(err.Error(), "落盘") {
+		t.Errorf("-n 下命中持有者应报错: %v", err)
+	}
+}
+
+func TestResumeLastManyHolders(t *testing.T) {
+	cfg, a := lastWorkspace(t)
+	dir, _ := a.SessionDir()
+	sess := "20260918-100000"
+	if err := os.WriteFile(filepath.Join(dir, sess+".jsonl"), []byte(`{"role":"user","content":"x"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ws, _ := os.Getwd()
+	serveAttachSession(t, ws, os.Getpid()+10002, sess, attach.Result{OK: true, Protocol: cfg.ApiProtocol})
+	serveAttachSession(t, ws, os.Getpid()+10003, sess, attach.Result{OK: true, Protocol: cfg.ApiProtocol})
+	_, _, err := resumeSession(cfg, a, &capturePrinter{})
+	if err == nil || !strings.Contains(err.Error(), "2 个实例") {
+		t.Fatalf("多持有者应报错列出: %v", err)
+	}
+}
+
+// TestWorkspaceLongFlagSuppressesReinject 钉住 --workspace 与 -C 同权：
+// 已用长名指定工作区时不应再注入一次（否则 argv 会出现两份目录）。
+func TestWorkspaceLongFlagSuppressesReinject(t *testing.T) {
+	if procarg.LongFlag != "workspace" {
+		t.Fatalf("长名应为 workspace，得到 %q", procarg.LongFlag)
+	}
+	fs := flag.NewFlagSet("tanya", flag.ContinueOnError)
+	registerFlags(fs)
+	if err := fs.Parse([]string{"--workspace", "/tmp/x"}); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := lookupFlag(fs, procarg.LongFlag); !ok || v != "/tmp/x" {
+		t.Errorf("长名取值 = (%q, %v)", v, ok)
+	}
+	if v, ok := lookupFlag(fs, procarg.Flag); !ok || v != "/tmp/x" {
+		t.Errorf("长短名应共享同一变量，短名取值 = (%q, %v)", v, ok)
 	}
 }

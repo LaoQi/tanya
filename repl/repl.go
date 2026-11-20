@@ -43,6 +43,7 @@ type REPL struct {
 	started       time.Time
 	nextPending   bool
 	nextInput     string
+	resumeID      string
 
 	attachSrv     *attach.Server
 	attachDir     string
@@ -69,6 +70,7 @@ type options struct {
 	reasoning bool
 	notifier  Notifier
 	takeover  *attach.Result
+	resumeID  string
 	maxLines  int
 }
 
@@ -110,6 +112,12 @@ func WithTheme(name string, palette map[string]string) Option {
 // WithTakeover 注入接管结果：本进程是从另一实例接管的会话，启动时报告一行。
 func WithTakeover(res attach.Result) Option {
 	return func(o *options) { o.takeover = &res }
+}
+
+// WithResume 注入 -r/--resume 命中的会话 id：启动时报告「已载入会话 X」，
+// 且必须在自动归档之前（Run 里紧跟欢迎屏）。
+func WithResume(id string) Option {
+	return func(o *options) { o.resumeID = id }
 }
 
 func WithToolOutputLines(n int) Option {
@@ -173,7 +181,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, takeover: o.takeover, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
+	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, takeover: o.takeover, resumeID: o.resumeID, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
 	r.prof = o.prof
 	r.rend = render.NewThemedRenderer(r.prof, sch.MD)
 	ed.SetStyles(sem.Dim.With(r.prof), sem.Accent.With(r.prof))
@@ -322,6 +330,10 @@ func (r *REPL) Run() error {
 	r.st.out.emit(KindDecor, welcomeText()+r.noSaveWarn())
 	if r.takeover != nil {
 		r.st.out.emit(KindNotice, fmt.Sprintf(MsgAttachTakenOverFmt, r.takeover.Session, homePath(r.takeover.Workspace)))
+	}
+	if r.resumeID != "" {
+		r.st.out.emit(KindNotice, r.loadNotice(r.resumeID))
+		r.warnLegacyPrompt()
 	}
 	r.autoArchivePrompt()
 	r.startAttach()

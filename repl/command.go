@@ -29,32 +29,31 @@ func ParseAttachArgs(arg string) (AttachArgs, error) {
 	var out AttachArgs
 	fields := strings.Fields(arg)
 	for i := 0; i < len(fields); i++ {
-		f := fields[i]
+		name, val, hasVal := splitAttachArg(fields[i])
 		switch {
-		case f == "--list" || f == "-l":
+		case name == "list" || name == "l":
 			out.List = true
-		case f == "--force" || f == "-f":
+		case name == "force" || name == "f":
 			out.Force = true
-		case f == "--prune":
+		case name == "prune":
 			out.Prune = true
-		case f == "--pid" || strings.HasPrefix(f, "--pid="):
-			v := strings.TrimPrefix(f, "--pid=")
-			if f == "--pid" {
+		case name == "pid":
+			if !hasVal {
 				i++
 				if i >= len(fields) {
 					return AttachArgs{}, errors.New(MsgAttachUsage)
 				}
-				v = fields[i]
+				val = fields[i]
 			}
-			if err := setAttachPID(&out, v); err != nil {
+			if err := setAttachPID(&out, val); err != nil {
 				return AttachArgs{}, err
 			}
-		case isDigits(f):
-			if err := setAttachPID(&out, f); err != nil {
+		case isDigits(fields[i]):
+			if err := setAttachPID(&out, fields[i]); err != nil {
 				return AttachArgs{}, err
 			}
 		default:
-			return AttachArgs{}, fmt.Errorf(MsgAttachBadArg, f)
+			return AttachArgs{}, fmt.Errorf(MsgAttachBadArg, fields[i])
 		}
 	}
 	switch {
@@ -66,6 +65,21 @@ func ParseAttachArgs(arg string) (AttachArgs, error) {
 		return AttachArgs{}, errors.New(MsgAttachPruneConflict)
 	}
 	return out, nil
+}
+
+// splitAttachArg 把 attach 子命令的一个参数拆成名字与可选值：
+// 单横线与双横线等价（-list 与 --list 同义，与主 flag 层「去横线后按名字匹配」一致），
+// 值可写成 --pid=123 或 --pid 123。
+func splitAttachArg(f string) (name, val string, hasVal bool) {
+	if !strings.HasPrefix(f, "-") {
+		return "", "", false
+	}
+	body := strings.TrimPrefix(f, "-")
+	body = strings.TrimPrefix(body, "-")
+	if eq := strings.IndexByte(body, '='); eq >= 0 {
+		return body[:eq], body[eq+1:], true
+	}
+	return body, "", false
 }
 
 func setAttachPID(out *AttachArgs, v string) error {

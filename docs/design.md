@@ -73,9 +73,10 @@ $ ps -eo pid,args
 - `tanya init`：新工作区脚手架，建 `<cwd>/.tanya/sessions/`、询问后建 `<cwd>/.tanya/.gitignore`（内容 `*`）、缺口时建 `<cwd>/AGENTS.md` 骨架，随后与普通模式无异地进入 REPL（见下节）
 - `tanya config`：把内置默认配置示例原样打到 stdout（见下节）
 - `tanya attach`：接管同一工作区里正在运行的实例（对方平滑退出、本进程接手该会话），选项写在子命令之后（裸 pid `N` 或 `--pid N` / `--force` / `--list`，`repl.ParseAttachArgs`）——本进程的常规启动流程照旧，只是先完成发现与接管，再把会话接管过来（见《接管运行中的实例》）
-- 全局参数：`-c <path>` 指定配置文件、`-m local/global/auto` 会话存储模式、`--model <name>` 覆盖本次运行的模型、`-n` / `--no-save` 只读会话（见《会话与上下文》存储小节）
-- 模型来源优先级：`--model` > env `TANYA_MODEL` > 配置文件 `model`。`main.applyModel(cfg, v)` 在 `config.Load` 之后、`repl.CmdInit` 与 `agent.New` 之前生效（与 `-m` 覆盖 `cfg.SessionMode` 同一段），故 REPL / `ask` / `init` 三入口一致；`v` 经 `strings.TrimSpace` 后为空即视为未指定、保持下层取值（与 `-c ""` 走默认路径同风格），非空值不预校验（与 `/model`、`agent_custom set model` 一致，有效性由 `Config.Validate()` 与首次请求暴露）。只改进程内配置、不写配置文件，运行期仍可被 `/model` 覆盖；`-m` 已属会话存储模式，故本选项无短形式（`-model` 与 `--model` 等价）
-- 用法文本（`-h`/`--help`，选项解析出错时同款）：`repl.UsageHead`（用法行 + 四个入口的模式段 + `选项:` 标题）拼接 flag 包按定义清单生成的选项段，由 `main.writeUsage(w, fs)` 组装（`fs.SetOutput` 用 defer 还原）、`flag.Usage` 在 `flag.Parse` 前指向它（输出仍走 stderr，`-h`/`--help` 由 flag 包以 0 退出）；选项定义抽到 `main.registerFlags(fs)`，`main` 的 `flag.CommandLine` 与用法测试的独立 FlagSet 共用同一份清单。模式段的描述列按**显示宽度**手排（CJK 记 2 列，源码列宽与终端列宽不等），`repl/messages_test.go` 以 `term.Width` 断言四行描述起始列一致、并断言 `ParseCommand` 认识的子命令在用法里都有行；`main_test.go` 断言输出以 `UsageHead` 开头且每个已登记选项名都出现（新增选项不会漏进帮助）。`ask`/`init`/`config` 参数出错时仍只报各自的 `Msg*Usage` 单行，不打印整份用法
+- 全局参数：**常用者有短名、长名两种写法**——`-c`/`--config <path>` 指定配置文件、`-C`/`--workspace <dir>` 指定工作区（见《`-C <目录>`》）、`-n`/`--no-save` 只读会话（见《会话与上下文》存储小节）、`-p`/`--plain` 输出档、`-r`/`--resume` 启动即恢复最近会话（见《`-r`/`--resume`》）、`-v`/`--version` 显示版本；**不常用者只有长名**——`--session-mode local/global/auto` 会话存储模式、`--model <name>` 覆盖本次运行的模型、`--verbose`（须与 `--plain` 同用，故无短名）
+- **参数形态约定（2026-11-20 收敛）**：**常用的**给短名，在 `main.registerFlags` 里与长名成对注册（`fs.Bool` + `fs.BoolVar` / `fs.String` + `fs.StringVar` 指向同一变量）；**不常用的只留长名**，单注册一处。常用度依据真实使用量（文档与历史会话里的实际调用），不凭感觉：`-c`/`-C`/`-n`/`-p`/`-v` 频繁手敲，`--session-mode` 在文档仅 3 处、历史会话零使用，故 `-m` 短名已撤销。`flag` 包把 `--x` 归一为 `-x`，故**已注册名**的两种横线写法都能跑（`-config` 也可用）——这是 `flag` 固有行为、不作为宣传口径，帮助屏与文档一律按「短名单横线、长名双横线」书写；`attach` 子命令的 `repl.ParseAttachArgs` 走同一规则（`splitAttachArg` 去横线后按名字匹配，故 `-list`/`--list`、`-pid=1`/`--pid=1` 等价）。帮助屏不再是 `flag.PrintDefaults` 的逐条输出（那会把成对注册的同一选项打成两行、长短名也不成对），改由 `main.usageRows` 手排：同选项合并成一行 `-c, --config <path>`、描述列按显示宽度对齐，`writeUsage` 只拼 `repl.UsageHead` 与该表
+- 模型来源优先级：`--model` > env `TANYA_MODEL` > 配置文件 `model`。`main.applyModel(cfg, v)` 在 `config.Load` 之后、`repl.CmdInit` 与 `agent.New` 之前生效（与 `--session-mode` 覆盖 `cfg.SessionMode` 同一段），故 REPL / `ask` / `init` 三入口一致；`v` 经 `strings.TrimSpace` 后为空即视为未指定、保持下层取值（与 `-c ""` 走默认路径同风格），非空值不预校验（与 `/model`、`agent_custom set model` 一致，有效性由 `Config.Validate()` 与首次请求暴露）。只改进程内配置、不写配置文件，运行期仍可被 `/model` 覆盖；`--session-mode` 已占「模式」语义，故本选项无短形式（`-model` 与 `--model` 等价）
+- 用法文本（`-h`/`--help`，选项解析出错时同款）：`repl.UsageHead`（用法行 + 五个入口的模式段 + `选项:` 标题）拼接 `main.usageRows` 手排的选项段，由 `main.writeUsage(w, fs)` 组装、`flag.Usage` 在 `flag.Parse` 前指向它（输出仍走 stderr，`-h`/`--help` 由 flag 包以 0 退出）；选项定义抽到 `main.registerFlags(fs)`，`main` 的 `flag.CommandLine` 与用法测试的独立 FlagSet 共用同一份清单。模式段的描述列按**显示宽度**手排（CJK 记 2 列，源码列宽与终端列宽不等），`repl/messages_test.go` 以 `term.Width` 断言四行描述起始列一致、并断言 `ParseCommand` 认识的子命令在用法里都有行；`main_test.go` 断言输出以 `UsageHead` 开头且每个已登记选项名都出现（新增选项不会漏进帮助）。`ask`/`init`/`config` 参数出错时仍只报各自的 `Msg*Usage` 单行，不打印整份用法
 - Ctrl+C 中断进行中的请求（context 取消，导致 API 错误直接暴露）：REPL 与 `ask` 单发统一走 `signal.Notify(SIGINT)`（`repl.InterruptContext`），要求终端 `ISIG` 开启——readline 侧每回合开始前做终端状态自愈（`Console.Sane()`）保证该项成立；**命令执行期间终端前台恒在 tanya**（普通命令 stdin 为空设备、不借终端，见《run_shell》），故 `^C` 一律落在 tanya 的中断面：即取消本回合并杀子进程组（借出期 `interactive: true` 则由子进程独占 `^C`）
 
 ### ask 单发（外部调用向）
@@ -87,10 +88,10 @@ $ ps -eo pid,args
 新工作区（通常既无 `.tanya/` 也无 `AGENTS.md`）的一次性脚手架，之后与普通 REPL **完全无二**：不改提示符、不加斜杠命令、不改运行期行为。只作用于启动目录，不做项目探测、不调模型、不碰 `~/.config/tanya/*`。
 
 - 四项动作，逐项幂等、永不覆盖既有文件：建 `<cwd>/.tanya/sessions/`（0755）→ 建 `<cwd>/.tanya/README`（目录用途说明，0644）→ 询问后建 `<cwd>/.tanya/.gitignore`（`*\n`，0644）→ 缺 `AGENTS.md` 时建骨架（`# <目录名>` + `## 项目说明` + `## 构建与测试` 两小节 + 生成标记注释，0644）
-- `.tanya/README` 的用途：把目录可辨识性做进工作区（内容述明由 tanya 创建、勿删，并列出 `sessions/`/`archive/`/`run/` 各存什么）——事故的直接诱因是 agent 把无说明的 `.tanya/` 误认作自己的实验脚手架，属**预防**手段（不治抢救能力，那由「落盘不做静默重建」与 `/export` 承担）；用 `ensureFile` 建、既有文件一律不覆盖（用户可自行改写）；与 `.tanya/` 标记一致，`global`/`-m global` 下亦照建（会话实际落全局 data_dir，但工作区标记仍在）
-- **顺序不变量**：`main` 在配置与 `-m` 覆盖之后、`agent.New` 之前调用 `repl.RunInit`。`.tanya/` 既是会话落点、也是 `session_mode: auto` 的判定依据（`resolveSessionDir` 的 `isDir(cwd/.tanya)`），先建后 New 才知道本次启动要落本地工作区，首个会话即写入 `<cwd>/.tanya/sessions/`；同一次构造里 `promptBuilder` 也随即读到新生成的 AGENTS.md（进入本次会话 system 快照，`/new` 时重读）
+- `.tanya/README` 的用途：把目录可辨识性做进工作区（内容述明由 tanya 创建、勿删，并列出 `sessions/`/`archive/`/`run/` 各存什么）——事故的直接诱因是 agent 把无说明的 `.tanya/` 误认作自己的实验脚手架，属**预防**手段（不治抢救能力，那由「落盘不做静默重建」与 `/export` 承担）；用 `ensureFile` 建、既有文件一律不覆盖（用户可自行改写）；与 `.tanya/` 标记一致，`global`/`--session-mode global` 下亦照建（会话实际落全局 data_dir，但工作区标记仍在）
+- **顺序不变量**：`main` 在配置与 `--session-mode` 覆盖之后、`agent.New` 之前调用 `repl.RunInit`。`.tanya/` 既是会话落点、也是 `session_mode: auto` 的判定依据（`resolveSessionDir` 的 `isDir(cwd/.tanya)`），先建后 New 才知道本次启动要落本地工作区，首个会话即写入 `<cwd>/.tanya/sessions/`；同一次构造里 `promptBuilder` 也随即读到新生成的 AGENTS.md（进入本次会话 system 快照，`/new` 时重读）
 - 忽略文件走交互确认：`ctty.Open()` 打开 `/dev/tty` 成功才提问（`是否…？[Y/n]`，**空行/直接回车默认同意**，`y`/`yes` 为真，`n`/`no` 与其它输入为拒；读到 EOF 且无内容（如 `^D`）亦为拒，避免无输入时误建），失败即非交互（管道调用、无控制终端、Windows stub）不提问也不创建，报告里以 `MsgInitSkipNoTTY` 说明并给出手动命令；用户拒绝为 `MsgInitSkipDeclined`。既有 `.gitignore` 时不再提问
-- 报告：`repl.RunInit` 编排（头行 → 询问 → `agent.InitWorkspace` → 条目与会话目录行 + 一行提示），走 `st.Print`（KindNotice，plain 下仍可见），标记着色只用 `sem.Ok`/`sem.Dim`；条目路径相对工作区显示，头行与会话目录经 `initPath` 做 `~` 归约（不用提示符的 `shortPath` 缩写，避免报错路径被压缩）；`SessionDir` 取自 `resolveSessionDir(cfg, cwd)`，与 `agent.New` 同函数同输入，显式 `-m global` 时如实报告 global 落点（`.tanya/` 标记照建）
+- 报告：`repl.RunInit` 编排（头行 → 询问 → `agent.InitWorkspace` → 条目与会话目录行 + 一行提示），走 `st.Print`（KindNotice，plain 下仍可见），标记着色只用 `sem.Ok`/`sem.Dim`；条目路径相对工作区显示，头行与会话目录经 `initPath` 做 `~` 归约（不用提示符的 `shortPath` 缩写，避免报错路径被压缩）；`SessionDir` 取自 `resolveSessionDir(cfg, cwd)`，与 `agent.New` 同函数同输入，显式 `--session-mode global` 时如实报告 global 落点（`.tanya/` 标记照建）
 - 失败即中止：任一项创建失败（`AGENTS.md` 是目录、`sessions` 是文件、写入出错）返回 `MsgInitFailFmt` 错误，`main` 打印后以 1 退出、不进 REPL；幂等使重试安全
 - CLI：`tanya init` 无参数（带多余参数报 `MsgInitUsage`），`-n` 只读会话与 init 不冲突（骨架照建，会话不写盘）；`repl.ParseCommand` 统一解析 `ask`/`init`/`config`，未知首 token 保持旧行为（忽略并进 REPL）
 
@@ -101,6 +102,18 @@ $ ps -eo pid,args
 - 执行位置：`main` 在 `-v` 之后、`config.Load` 之前分支返回——不读配置文件、不探测终端、不装信号，配置文件损坏或缺失、无控制终端、被重定向时同样可用；无参数（带多余参数报 `MsgConfigUsage`、以 1 退出，对齐 `init`）
 - 不提供写文件开关（覆盖语义与目录创建规则不值当）、不与 `init` 联动自动生成 `config.yaml`、不探测已有配置；需要落盘就是 shell 重定向
 - 示例中的显式键是「文档也是默认值」，由根包 `main_test.go` 与 `config.Default()` 逐项比对守护（全部显式键含 `api_key`，`data_dir` 允许 `~` 写法、比对前展开，另以 `yaml.Node` 取示例顶层键集合断言无漏比对的新增显式键）；示例里注释掉的项（`api_protocol`/`theme`/`auto_archive` 等）保持代码默认值，不参与比对
+
+### `-r`/`--resume`：启动即恢复最近会话（`main.resumeSession` + `repl.PickLast`，2026-11-20）
+
+一次命令接上上次的上下文，省掉「启动 → `/load` → 选中」三步。**候选口径**：当前工作区的**活动会话**（归档卷不参与——卷内 entry 的 `ModTime` 取自 zip entry，与活动文件不同源，且载入后是只读态），按 **`ModTime` 降序**、同 mtime 再按 id 降序取第一个（`repl.PickLast`）。
+
+- **为什么按 mtime 而不是 id**：id 是「最近**创建**」，mtime 是「最近**动过**」。`/load` 回到老会话续聊、或 `attach` 接管后继续之后，两者立刻分叉（实测：新会话 id 更大、老会话 mtime 更新）；`-r` 的语义是「回到上次干活的地方」，故取 mtime。代价是与 `/load` 列表（id 降序）顺序不一致，属已知取舍。
+- **零额外探测开销**：`ModTime` 是 `sessionStore.refreshActive` 里 `e.Info()` 的副产品，本来就要取（它还是缓存失效键 `{mtime,size}` 的一半）；`SessionInfo.ModTime` 早已填好。实测排序增量在 200 会话时 39 µs（按 id 为 6 µs），相对启动期既有全量扫描（66 ms）可忽略。
+- **三条出口**：①无候选 → 静默开新会话（不报错、不打提示）；②目标无活体持有者 → `Agent.LoadSession` 载入；③目标被另一实例持有 → **走现有 attach 路径接管**（`runAttach` 带 `--pid`），对方平滑退出、本进程续写同一文件。
+- **顺序不变量**：先定会话、再查持有者。反过来（先排除有实例的再取最新）会选错——A 拿着旧会话 S1、S2 更新但无人持有时应载入 S2，而非接管 A。
+- **报告时机**：载入时由 `Run` 在欢迎屏之后、`autoArchivePrompt()` **之前**打 `已载入会话 <id>`（`WithResume` 注入 id）——先载入再自动归档，恢复的会话才稳定落在 `Exclude` 面上；接管时复用既有 `MsgAttachTakenOverFmt`（「已接管会话 X（来自另一进程 · 工作区）」），不再追加载入行。
+- **互斥与边角**：`-r`/`--resume` 只适用于交互 REPL（与 `ask`/`config`/`attach` 互斥，`main.validateResumeFlag`；`init` 允许——先脚手架再载入，同一条 REPL 路径）；`-r -n` 且目标被持有 → 报错（接管必须落盘）；持有者多于一个 → 报错列出（对齐 attach「不自动选择」的既有纪律）；**竞态回落**：快照判定有持有者、到接管时对方已退出（`attach.Alive` 为假）→ 直接载入并提示一行（此时无并发写者，与「无人持有」同态），其余接管错误照常抛出。
+- **不改 battlelab**：`SessionInfo.ModTime`、`ListSessions`、`RunDirFor`、`attach.Snapshot` 全部现成，改动集中在 `main` 与 `repl`。
 
 ## LLM 接入
 
@@ -320,7 +333,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 - workspace 目录是会话数据落点，其下固定为并列的 `sessions/`（活动会话）与 `archive/`（归档卷）：
   - `local`：workspace 目录 = `<工作区>/.tanya/`（.tanya 本身即项目隔离，不叠加 workspace-id）
   - `global`：workspace 目录 = `<data_dir>/workspaces/<workspace-id>/`（`data_dir` 默认 `~/.local/share/tanya`），workspace-id 由工作区路径派生（可读路径转义 + 8 位短哈希）
-- 存储模式（CLI `-m` > env `TANYA_SESSION_MODE` > 配置 `session_mode`，默认 auto）：`auto` 为「工作区存在 `.tanya/` → local，否则 global」；两侧落点由 `resolveWorkspaceDirs(cfg, 工作区) (sessions, archive)` 单点推导，`agent.New`/`SwitchWorkspace`（工作区装配）只创建 `sessions`（`archive` 由归档动作按需创建）
+- 存储模式（CLI `--session-mode` > env `TANYA_SESSION_MODE` > 配置 `session_mode`，默认 auto）：`auto` 为「工作区存在 `.tanya/` → local，否则 global」；两侧落点由 `resolveWorkspaceDirs(cfg, 工作区) (sessions, archive)` 单点推导，`agent.New`/`SwitchWorkspace`（工作区装配）只创建 `sessions`（`archive` 由归档动作按需创建）
 - 旧布局不兼容（2026-09-17）：`global_session` 配置项与 `<root>/<workspace-id>/` 目录形态已废弃，代码不含兼容读取/迁移路径，旧目录由用户自行删除
 - 只读会话（`-n` / `--no-save`）：由 CLI 经 `agent.New(cfg, agent.NoSave(true))` 传入，`Config` 无对应字段，配置文件与 env 均无法开启；`ask` 单发与 REPL 通用。读路径全部保留（启动预扫描、`ListSessions`、`LoadSession` 照常，既有会话不会被截断或改写），写路径在 `sessionStore.append` 首行（`disabled`）返回 nil 被整体关闭（覆盖成功/中断/错误三条路径）；`MkdirAll(store.dir)` 在只读模式下跳过，目录缺失时 `store.refresh` 按空列表处理不报错。内存 history 照常维护（中断保留语义不变），进程退出即丢。REPL 启动时在欢迎屏下方以语义色 `Warn` 打一行 `MsgNoSaveWarn`（`REPL.noSaveWarn`，agent 为 nil 或可写时不输出），`ask` 静默；归档只读态（`frozen`）是另一维度的只读，见《会话归档与 fork》
 - 落盘：`<timestamp>.jsonl`，每轮结束追加写入新消息（一行一条 Message JSON），记录完整历史（回放/审计用）；回合因中断/错误保留产出时同样落盘（含终止提示行）

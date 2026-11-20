@@ -246,7 +246,7 @@ const (
 	FlagWorkspace = "工作区目录（默认当前目录；启动时自动注入，ps 里可直接复制复跑）"
 
 	MsgBadWorkspaceDirFmt = "无效工作区 %q: %v"
-	FlagMode              = "会话存储模式 local/global/auto（默认 auto）"
+	FlagMode              = "会话存储模式 local/global/auto（默认 auto；无短名）"
 	FlagModel             = "本次运行使用的模型（默认取配置 model / TANYA_MODEL）"
 	FlagNoSave            = "会话只读：不写入会话文件（历史会话仍可列出与载入）"
 	FlagPlain             = "纯文本输出：无颜色/无动画/无工具块与状态行，stdout 只留答案与命令反馈（供父代理解析）"
@@ -254,6 +254,11 @@ const (
 
 	MsgVerboseRequiresPlain = "--verbose 需与 --plain 同用"
 	FlagVersion             = "显示版本号并退出"
+	FlagResume              = "恢复当前工作区最近使用的会话（按修改时间）；该会话在另一实例中则直接接管，无会话则开新会话"
+	FlagResumeMode          = "-r/--resume 只适用于交互 REPL（不能与 ask/config/attach 同用）"
+	FlagResumeNoSaveFmt     = "-r/--resume 命中的会话 %s 正在另一实例中运行，接管需要落盘：不能与 -n/--no-save 同用"
+	FlagResumeManyFmt       = "-r/--resume 命中的会话 %s 被 %d 个实例同时持有，请用 tanya attach --pid 指定"
+	FlagResumeGoneFmt       = "实例已退出，直接载入会话 %s"
 
 	MsgAttachUsage         = "用法: tanya attach [N] [--pid N] [--force] [--list] [--prune]\n"
 	MsgAttachBadPID        = "无效 pid %q"

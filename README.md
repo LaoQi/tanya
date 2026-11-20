@@ -86,17 +86,22 @@ tanya ask "问题"      # 单发模式（默认纯文本+verbose：无状态行�
 tanya init            # 新工作区脚手架：建 .tanya/ 与 AGENTS.md 骨架，随后进入 REPL
 tanya config          # 输出内置默认配置示例（含注释），可重定向为配置文件
 tanya attach          # 接管同一工作区里正在运行的实例（对方平滑退出，本进程继续该会话）
+tanya -r              # 恢复当前工作区最近使用的会话（按修改时间，同 --resume）；它在别的实例里则直接接管
 tanya -n              # 只读会话：可载入历史，不写入
 tanya -n ask "问题"   # 单发且不写入会话历史
-tanya -c x.yaml       # 指定配置文件
-tanya -C ~/proj       # 指定工作区（启动时注入到 argv，ps 里可直接复制复跑）
-tanya -m local        # 会话存到当前目录 .tanya/
+tanya -c x.yaml       # 指定配置文件（同 --config）
+tanya -C ~/proj       # 指定工作区（同 --workspace；启动时注入到 argv，ps 里可直接复制复跑）
+tanya --session-mode local  # 会话存到当前目录 .tanya/（不常用，无短名）
 tanya --model gpt-5   # 本次运行使用指定模型（只影响本次进程，不写配置文件）
-tanya -p              # 纯文本输出：无颜色/状态行/工具块，stdout 只留答案与命令反馈
+tanya -p              # 纯文本输出：无颜色/状态行/工具块，stdout 只留答案与命令反馈（同 --plain）
 tanya -p --verbose    # 纯文本输出但保留工具块与状态行（仍无颜色与光标控制）
-tanya -v              # 显示版本号
-tanya -h              # 用法：四种运行模式与全局选项（--help 同）
+tanya -v              # 显示版本号（同 --version）
+tanya -h              # 用法：五种运行模式与全局选项（--help 同）
 ```
+
+选项**常用者长短名成对、两写法等价**：`-c`/`--config`、`-C`/`--workspace`、`-n`/`--no-save`、`-p`/`--plain`、`-r`/`--resume`、`-v`/`--version`；不常用者只留长名：`--session-mode`、`--model`、`--verbose`。`attach` 子命令同理（`-l`/`--list`、`-f`/`--force`、`--pid`/`--prune`）。
+
+`-r`/`--resume` 的取法是**按修改时间**挑最近一个活动会话（不是按 id）：用 `/load` 回到老会话续聊过之后，`-r` 回到的是那个老会话。没有可打开的会话就照常开新会话；若该会话正在同一工作区的另一个实例里跑着，则直接接管那个实例（对方平滑退出，本进程续写同一会话文件）。
 
 `-C <目录>` 是**真实生效的参数**（启动时切到该目录一次，此后不再 chdir），仅 Linux 上的交互 REPL 会自动注入当前目录，使 `ps` 显示的命令行合法可执行：
 
@@ -112,7 +117,7 @@ $ ps -eo pid,args
 
 启动安全检查：以 root（euid 0）运行直接报错退出（stderr 一行，退出码 1），`ask`/`init`/`config`/`-v` 在 root 下同样被拒；容器等确实需要 root 的场景设 `TANYA_ALLOW_ROOT=1` 放行（只认精确值 `1`，静默放行）。`-h`/`--help` 与用法报错不受影响，Windows 无此检查。
 
-会话存储模式（`-m` 参数 / 配置项 `session_mode` / env `TANYA_SESSION_MODE`，优先级从高到低）：
+会话存储模式（`--session-mode` 参数 / 配置项 `session_mode` / env `TANYA_SESSION_MODE`，优先级从高到低）：
 
 | 模式 | 会话目录 |
 |---|---|
