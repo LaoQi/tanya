@@ -1,3 +1,22 @@
+## 2026-11-22 chore(deps): battlelab v0.4.0 → v0.5.0
+
+上游三条提交（`edb667f`、`40dda4c`、`adc9231`）发版为 **v0.5.0**。
+
+**① `vbash.Handler` 契约变更（BREAKING，`adc9231`）**：签名加一个 `hostPath` 参数
+`func(ctx, r, hostPath string, argv []string, io) (int, error)`；同时删掉注入 `Handler` 时
+`lookPath`/`resolveExternal` 的短路，宿主侧只 `exec` 不再做 PATH 查找与形态转换。
+**tanya 侧零代码改动**——本仓不注入 `vbash.Handler`，库内唯一消费方是 `tools/shell`，
+故 BREAKING 不传导到前台。行为上此版顺带修掉 Windows 上「外部命令一律报会话宿主不可用」
+（根因是协议传了解释器内部 POSIX 形态路径，宿主 `exec.Cmd.Dir` 解不出目录），
+以及命令起不来时白等 2s 握手超时（现直接取退出码 127 并回报 `command not found`，约 3ms）。
+
+**② vbash 新增 `command` 内建（`40dda4c`）**：`-p`/`-v`/`-V` 与执行态。
+**③ `tools/shell` 输出窗口切点对齐 UTF-8 边界（`edb667f`）**：不再把多字节字符劈成半个，
+终端侧看到的是完整字符，渲染层无需额外兜底。
+
+**验收**（`GOWORK=off`，即完全按发布版而非工作区路径）：`go build ./...`、`go vet ./...`、
+`go test ./...` 全绿；`make build` + `scripts/render_audit.py` 19/19 PASS、0 FAIL。
+
 ## 2026-11-20 feat(main,repl,docs): `-r`/`--resume` 启动即恢复最近会话 + 命令行参数形态收敛（常用留短名、不常用只留长名）
 
 用户要求：新增一个命令行参数，用于快速打开最后一个会话；评估后发现「已有参数形态并不一致」，一并收敛。
