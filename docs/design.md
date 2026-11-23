@@ -153,18 +153,24 @@ OpenAI 兼容 Chat Completions API（`/chat/completions`，SSE 流式），一�
 
 OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses API 标准为参照**（OpenAI 兼容但不完整遵守 OpenAI：不支持/不依赖 `include`、`encrypted_content`），切换核心动机是思维链保持：
 
-- **请求构造**：`messages[0]`(system) → 顶层 `instructions`；历史 `Message` 确定性映射为 input items——user/assistant 文本 → `message` item（content 分段 `input_text`/`output_text`）、assistant `tool_calls` → `function_call` item、tool 结果 → `function_call_output` item、assistant `ReasoningItems` → `reasoning` item（content 为明文 `reasoning_text`，输出在关联的 function_call/message 之前；`Content` 为空的 reasoning item 跳过不回传）。工具定义为内部 chat 嵌套形状，此处拍平为 `{type:"function",name,description,parameters}`。`reasoning_effort` → `reasoning.effort`；设置后 `temperature` 不发送（同 chat 协议）。
-- **固定参数**：`store: false`。不携带 `include` / `encrypted_content` / reasoning `summary`（DeepSeek 均不支持）。
-- **流式解析**：只解析 `data:` 行按 JSON `type` 分发。`response.output_text.delta` 驱动 onDelta 并置 `hasDelta`；最终 Message 以 `response.completed`（及 `response.incomplete`）事件的 `response.output[]` 终态构建——`message` 拼接 Content（收到过 text delta 则整体跳过，未收到才从 message items 拼接 output_text 补齐）、`function_call` → ToolCalls（call_id/args 整体取用）、`reasoning` → `ReasoningItems`（`id` + 明文 `content`，取终态 `reasoning_text` 原文拼接）。`response.failed`/`error` 事件返回错误。
+- **请求构造**：`messages[0]`(system) → 顶层 `instructions`；历史 `Message` 确定性映射为 input items——user/assistant 文本 → `message` item（content 分段 `input_text`/`output_text`）、assistant `tool_calls` → `function_call` item、tool 结果 → `function_call_output` item、assistant `ReasoningItems` → `reasoning` item（**形态随来源**：`FromSummary` 为假时正文放 `content[].reasoning_text`，为真时放 `summary[].summary_text`，另一侧显式给空数组；输出在关联的 function_call/message 之前；`Content` 为空的 reasoning item 跳过不回传）。工具定义为内部 chat 嵌套形状，此处拍平为 `{type:"function",name,description,parameters}`。`reasoning_effort` → `reasoning.effort`；设置后 `temperature` 不发送（同 chat 协议）。
+- **固定参数**：`store: false`。不携带 `include` / `encrypted_content`（DeepSeek 不支持）。
+- **思维链两种形态（上游按厂商分派，必须都收）**：同一份终态 reasoning item，正文可能在 `content[].reasoning_text`（**明文形态**：GLM / DeepSeek / LongCat），也可能在 `summary[].summary_text`（**摘要形态**：Kimi / 火山方舟 / opencode），另一侧通常为空数组。流式事件名随之分派：`response.reasoning_text.*` 对应明文，`response.reasoning_summary_text.*` 对应摘要（外加 `response.reasoning_summary_part.*` 段内边界，不参与收尾）。
+- **流式解析**：只解析 `data:` 行按 JSON `type` 分发。`response.output_text.delta` 驱动 onDelta 并置 `hasDelta`；最终 Message 以 `response.completed`（及 `response.incomplete`）事件的 `response.output[]` 终态构建——`message` 拼接 Content（收到过 text delta 则整体跳过，未收到才从 message items 拼接 output_text 补齐）、`function_call` → ToolCalls（call_id/args 整体取用）、`reasoning` → `ReasoningItems`（`id` + 正文 + `FromSummary` 形态标记；正文**优先取明文** `reasoning_text`——它比摘要完整——明文侧为空才回落 `summary_text`）。终态缺 reasoning item 但收到过 delta 时，用 delta 的本地累积兜底补一条（否则这次思考既不落盘也不回传）。`response.failed`/`error` 事件返回错误。
 - **usage 映射**：`input_tokens`→PromptTokens、`output_tokens`→CompletionTokens、`input_tokens_details.cached_tokens`→`CacheHit()` 既有通道、`output_tokens_details.reasoning_tokens`→`Usage.ReasoningTokens`。
 - **404 提示**：第三方端点不支持时错误文案附带切换 `api_protocol: chat` 的指引。
 
-**思维链回传（实现红线：内容保真，兼收缓存收益）**：reasoning `content` 随会话 jsonl 明文持久化，后续请求**原样回传**（取 `response.completed` 终态、不做任何截断/改写/规范化），以维持 DeepSeek 前缀缓存命中——history 段逐字节稳定即可命中「用户输入结束/模型输出结束」位置的缓存前缀单元；会话经 `/load` 恢复后仅需同目录同环境（env 段在 `agent.New` 构造期定格、进程内逐字节不变）即可命中。jsonl 序列化 HTML 转义（`\u00xx`）只在磁盘表示，读回还原，不影响请求构造。
+**思维链回传（内容保真，形态随来源）**：reasoning `content` 随会话 jsonl 明文持久化，后续请求**原样回传**（取 `response.completed` 终态、不做任何截断/改写/规范化），并沿用收到时的形态（`from_summary` 标记，缺省为明文形态，旧会话天然向后兼容）。
+
+形态必须原样，不能归一化：摘要形态塞进 `content` 会被上游以 `input[].summary: expected an array` 拒收；反之把明文塞进 `summary` 则丢失原文。两种形态实测均被接受的验证（2026-11-23）：火山方舟 / Kimi 走摘要，GLM 走明文，各自回传后均正常续接。
+
+多轮工具调用场景下，回传 reasoning 的实际收益是**思考延续**而非缓存：实测（2026-11-23）回传与不回传的 `cached_tokens` 都是 256，前缀缓存命中与否与此无关；差别在 `reasoning_tokens`——摘要形态供应商回传后思考照常进行（实测单轮 26），不回传则静默降级为 0（DeepSeek 系不报错、只掉质量）。因此本项按「正确性」而非「省 token」来守。jsonl 序列化 HTML 转义（`\u00xx`）只在磁盘表示，读回还原，不影响请求构造。
 
 ### 协议无关约束
 
 - `Message` 为内部规范格式（含 `ReasoningItems`），会话 jsonl 直接持久化，旧会话（无 reasoning 字段）双协议均可回放
 - `ReasoningItems` 为两协议共用的内部思维链表示：responses 回传为独立 reasoning item（`ID` 空时省略 `id` 字段，兼容 chat 侧落盘的思维链），chat 回传为 assistant 消息的 `reasoning_content` 字符串（多 item 顺序拼接）
+- `ReasoningItem.FromSummary` / jsonl 键 `from_summary`：该条思维链的来源形态（`true` = 上游 `summary[].summary_text`，缺省 `false` = `content[].reasoning_text`）。只对 responses 线有意义，chat 线落盘的条目一律为 `false`；旧会话文件无此键 → 按明文形态回传，与历史行为一致
 - `/models` 列表（GET `/models`）与协议无关，按 id 排序返回，供 `/model` 命令与补全
 - HTTP/SSE 公共骨架（`llm_http.go`）：`endpoint`/`newRequest`/`do`/`streamSSE`/`scanSSE` 为两协议共用——POST + 四 header、状态码非 200 时读 4096 字节 body 包成类型化 `httpError`（`Error()` 即 `MsgAPIStatus` 格式）、`data:` 前缀与 `[DONE]` 终止、scanner 错误包 `MsgReadStream`。协议差异只剩 URL 路径、请求体结构、事件分派与 404 hint（responses 独有，在 `responsesStream` 里以 `errors.As` 判定后转换）
 

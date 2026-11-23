@@ -1,3 +1,14 @@
+## 2026-11-23 chore(deps): battlelab v0.5.0 → v0.5.1（responses 思维链形态兼容）
+
+上游 `d8c6ee4` 发版为 **v0.5.1**，修 responses 协议只认明文 `reasoning_text`、
+把摘要形态（`summary[].summary_text`）整段丢弃的缺陷——此前会话 jsonl 中约九成的
+reasoning item 只剩 `id`、正文为空（摘要派供应商：Kimi / 火山方舟 / opencode）。
+
+- `ReasoningItem` 增 `FromSummary`（jsonl 键 `from_summary`）：回传形态随来源，
+  不归一化（摘要塞进 `content` 会被上游拒收）。旧会话无该键 → 明文形态，向后兼容
+- 两形态都收，明文优先、为空才回落摘要；终态缺 reasoning item 时用 delta 累积兜底
+- 本仓只有文档同步（`docs/design.md` 的请求构造、流式解析、回传三处口径），无代码改动
+
 ## 2026-11-22 chore(deps): battlelab v0.4.0 → v0.5.0
 
 上游三条提交（`edb667f`、`40dda4c`、`adc9231`）发版为 **v0.5.0**。
