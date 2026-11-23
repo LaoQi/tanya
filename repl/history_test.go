@@ -286,3 +286,91 @@ func TestHistoryHeadShowsStamp(t *testing.T) {
 		t.Errorf("老会话消息头不应带时间: %q", got)
 	}
 }
+func TestHistoryLineShowsThinkMark(t *testing.T) {
+	plain := agent.Message{Role: "assistant", Content: "回复"}
+	with := agent.Message{Role: "assistant", Content: "回复", ReasoningItems: []agent.ReasoningItem{
+		{ID: "rs_1", Content: "先想", FromSummary: true},
+	}}
+	got := historyLine(1, with, 0)
+	if !strings.Contains(got, "≡2字") {
+		t.Errorf("列表行应标思维链字数: %q", got)
+	}
+	if !strings.HasSuffix(got, "回复") {
+		t.Errorf("标记应在正文之前: %q", got)
+	}
+	if strings.Contains(historyLine(1, plain, 0), "≡") {
+		t.Error("无思维链的消息不应有标记")
+	}
+}
+
+func TestHistoryLineNoThinkMarkForEmptyContent(t *testing.T) {
+	m := agent.Message{Role: "assistant", Content: "回复", ReasoningItems: []agent.ReasoningItem{{ID: "rs_1"}}}
+	if got, want := historyLine(1, m, 0), "  1 assistant 回复"; got != want {
+		t.Errorf("正文为空的旧条目不应有标记: got %q want %q", got, want)
+	}
+}
+
+func TestShowHistoryFullRendersReasoning(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	seed := `{"role":"user","content":"问题"}` + "\n" +
+		`{"role":"assistant","content":"回答","reasoning_items":[{"id":"rs_1","content":"先查代码","from_summary":true}]}` + "\n"
+	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", seed)
+	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
+	if err := a.LoadSession("20260101-100000"); err != nil {
+		t.Fatal(err)
+	}
+	if r.showReasoning {
+		t.Fatal("默认开关应为关闭，本用例验证历史回看不依赖它")
+	}
+	out.Reset()
+	r.showHistory([]string{"2"})
+	got := term.Strip(out.String())
+	for _, want := range []string{"─── 思考 ───", "先查代码", "─── 思考结束 ───", "回答"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("全文应含 %q: %q", want, got)
+		}
+	}
+	if strings.Index(got, "先查代码") > strings.Index(got, "回答") {
+		t.Errorf("思维链应排在正文之前: %q", got)
+	}
+}
+
+func TestShowHistoryFullSkipsEmptyReasoning(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	seed := `{"role":"assistant","content":"回答","reasoning_items":[{"id":"rs_1"}]}` + "\n"
+	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", seed)
+	r, out, _ := newTestREPLAgent(t, a, newFakeTerm())
+	if err := a.LoadSession("20260101-100000"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	r.showHistory([]string{"1"})
+	got := term.Strip(out.String())
+	if strings.Contains(got, "思考") {
+		t.Errorf("正文为空的旧条目不应渲染思维链段: %q", got)
+	}
+}
+
+func TestShowHistoryReasoningPlainMode(t *testing.T) {
+	dir := t.TempDir()
+	a := newSessTestAgent(t, dir)
+	seed := `{"role":"assistant","content":"回答","reasoning_items":[{"content":"先查代码"}]}` + "\n"
+	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", seed)
+	out, errb := &syncBuf{}, &syncBuf{}
+	st := NewStreams(out, errb, modePlain)
+	r, err := NewREPL(a, "› ", WithStreams(st), WithProfile(ttyRich()), WithToolViews(testViews()), WithConsole(newFakeTerm()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.LoadSession("20260101-100000"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	r.showHistory([]string{"1"})
+	got := term.Strip(out.String())
+	if !strings.Contains(got, "先查代码") {
+		t.Errorf("plain 档也应在 /history 里看到思维链: %q", got)
+	}
+}

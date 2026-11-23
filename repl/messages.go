@@ -111,6 +111,7 @@ const (
 	MsgTotalMsgs        = "共 %d 条消息\n"
 	MsgTotalMsgsTailFmt = "共 %d 条消息（仅显示最近 %d 条）\n"
 	MsgCallLabel        = "[调用 %s]"
+	MsgHistoryThinkMark = "≡%d字"
 	MsgLegacyHint       = "提示: 旧版本会话已冻结历史环境信息；建议 /new 开启新会话\n"
 )
 

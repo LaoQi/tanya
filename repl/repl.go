@@ -906,10 +906,33 @@ func historyStamp(m agent.Message) string {
 	return time.UnixMilli(m.TS).Format("15:04:05")
 }
 
+func historyThinkText(m agent.Message) string {
+	var b strings.Builder
+	for _, item := range m.ReasoningItems {
+		b.WriteString(item.Content)
+	}
+	return b.String()
+}
+
+func historyThinkMark(m agent.Message) string {
+	text := strings.TrimSpace(historyThinkText(m))
+	if text == "" {
+		return ""
+	}
+	return fmt.Sprintf(MsgHistoryThinkMark, len([]rune(text)))
+}
+
 // historyLine 渲染 /history 列表的一项：截断按终端显示列（cols <= 0 不截断），
 // 列表一项一行，宽度不可知时保持原样而不是按 rune 猜。
 func historyLine(n int, m agent.Message, cols int) string {
 	text := term.OneLine(historyText(m))
+	if mark := historyThinkMark(m); mark != "" {
+		if text == "" {
+			text = mark
+		} else {
+			text = mark + " " + text
+		}
+	}
 	line := fmt.Sprintf("%3d %-9s %s", n, historyLabel(m), text)
 	if stamp := historyStamp(m); stamp != "" {
 		line = fmt.Sprintf("%3d %s %-9s %s", n, stamp, historyLabel(m), text)
@@ -922,6 +945,7 @@ func historyLine(n int, m agent.Message, cols int) string {
 
 func (r *REPL) printHistoryFull(n int, m agent.Message) {
 	r.printHistoryHead(n, m)
+	r.printHistoryReasoning(m)
 	if m.Role == "assistant" && m.Content != "" {
 		r.printRendered(m.Content)
 	} else if text := historyText(m); text != "" {
@@ -934,6 +958,23 @@ func (r *REPL) printHistoryFull(n int, m agent.Message) {
 	for _, tc := range m.ToolCalls {
 		r.st.out.emitText(KindToolBlock, fmt.Sprintf("→ %s %s\n", tc.Function.Name, tc.Function.Arguments))
 	}
+}
+
+func (r *REPL) printHistoryReasoning(m agent.Message) {
+	text := historyThinkText(m)
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	if !r.mdEnabled() {
+		r.st.out.emit(KindNotice, reasonRuleLeft+MsgReasonHead+reasonRuleRight+"\n")
+		r.st.out.emitText(KindNotice, text+"\n")
+		return
+	}
+	r.print(reasonSep(r.sem, r.prof, MsgReasonHead, 0), KindReasoning)
+	for _, blk := range mdBlocks(text, r.view.width()) {
+		r.print(r.rend.Block(blk), KindReasoning)
+	}
+	r.print(reasonSep(r.sem, r.prof, MsgReasonTail, 0), KindReasoning)
 }
 
 // printHistoryHead 把消息头（#N 角色）按一级标题渲染——`#` 与序号连写不构成 markdown 标题语法，

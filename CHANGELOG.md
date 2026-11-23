@@ -1,3 +1,16 @@
+## 2026-11-23 feat(repl): `/history` 显示思维链（列表标记 + 全文分段）
+
+上游 v0.5.1 起会话 jsonl 的 `reasoning_items` 已带正文与形态，但 `/history` 只渲染
+`Content`/`Images`/`ToolCalls`——落盘有、回看不到。本次补上回看展示。
+
+- 列表行：assistant 条目在正文前标 `≡<字数>字`；正文为空的老条目不标
+- 全文视图（`/history <n>`、`0`、`-n`、`all`）：消息头之后、正文之前渲染一段思维链，
+  复用 `─── 思考 ───` / `─── 思考结束 ───` 分隔（历史无时长，下分隔不带时长）
+- 口径：`show_reasoning` 开关**不参与**——`/history` 是显式索要，与实时上屏是两件事；
+  rich 档走 `KindReasoning` + markdown 管线，plain 档退化为纯文本
+- 老会话（正文为空）整段不输出，与回传跳过空 reasoning item 的口径一致
+- `docs/design.md` 补口径，`repl/history_test.go` 新增 5 个用例
+
 ## 2026-11-23 chore(deps): battlelab v0.5.0 → v0.5.1（responses 思维链形态兼容）
 
 上游 `d8c6ee4` 发版为 **v0.5.1**，修 responses 协议只认明文 `reasoning_text`、
