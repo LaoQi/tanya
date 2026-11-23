@@ -76,7 +76,7 @@ notify_cmd: /path/to/hook {kind} {title} {content}          # 自写脚本，按
 
 `theme` 配置项（env `TANYA_THEME`）选择内置配色主题，REPL 内 `/theme` 可运行时切换；`colors`（auto/on/off）控制是否着色；`palette` 可覆盖单个语义色。可用主题与色名见 `config.example.yaml`。
 
-`responses` 协议以思维链回传为核心特性（参照 DeepSeek Responses API 标准，OpenAI 兼容但不完整遵守 OpenAI）：响应中的 reasoning item 的明文思维链 `content` 随会话保存并在后续请求中原样回传，保持多轮工具调用间推理链完整；请求固定 `store: false`，不携带 `include`/`encrypted_content` 等 OpenAI 特有字段。回传内容须逐字节一致（不截断、不改写），以保证 DeepSeek 前缀缓存命中。`chat` 协议下同一能力经 `delta.reasoning_content` 捕获、随会话落盘，并在后续请求中折叠为 assistant 消息的顶层 `reasoning_content` 字段回传（DeepSeek 思考模式携带 `tools` 时官方要求历史推理链完整回传）。
+`responses` 协议以思维链回传为核心特性（OpenAI Responses API 兼容形态，各供应商实现不完全一致）：响应中的 reasoning item 正文随会话保存并在后续请求中原样回传，保持多轮工具调用间推理链完整。正文按上游分两派——明文 `content[].reasoning_text`（GLM / DeepSeek / LongCat）与摘要 `summary[].summary_text`（Kimi / 火山方舟 / Opencode），落盘时记来源形态（`from_summary`）、回传时原样还原，两侧都显式给 `summary` 数组（缺失会被部分上游以 `input[].summary: expected an array` 拒收）；请求固定 `store: false`，不携带 `include`/`encrypted_content` 等 OpenAI 专有字段（故对 OpenAI 官方 Responses API 的推理模型不完整支持）。回传内容须逐字节一致（不截断、不改写）。`chat` 协议下同一能力经 `delta.reasoning_content` 捕获、随会话落盘，并在后续请求中折叠为 assistant 消息的顶层 `reasoning_content` 字段回传（DeepSeek 思考模式携带 `tools` 时官方要求历史推理链完整回传）。
 
 ## 使用
 

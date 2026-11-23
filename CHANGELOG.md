@@ -1,3 +1,17 @@
+## 2026-11-24 docs: 思维链两形态的兼容面口径复核
+
+对上游 `d8c6ee4` 的兼容面做了一轮实测复核（网关 6 条线），上游据此修正了两处口径与一处
+兜底形态缺陷（见 battlelab CHANGELOG 2026-11-24）。本仓同步文档，无代码改动：
+
+- `README.md`《LLM 接入》与 `docs/design.md`《思维链回传》改为精确口径：正文分明文/摘要两派，
+  硬约束是 reasoning item 的 `summary` 键必须存在且为数组（唯一 400 路径），文本侧错配上游宽容
+- `docs/design.md` 流式解析补一句：delta 兜底按明文/摘要两桶累积，明文优先、只有摘要桶非空才标
+  `FromSummary`
+- `docs/design.md` 收益段改为复核结论：回传与不回传的 `reasoning_tokens` 差别不显著，只有
+  空占位明显更低，空正文条目因此跳过不回传
+- 说明 `store: false` 且不回传 `encrypted_content` 意味着对 OpenAI 官方 Responses API 的推理
+  模型不完整支持（未接入未测）
+
 ## 2026-11-23 feat(repl): `/history` 只保留完整渲染里的思维链段，列表不加标记
 
 `45b70d4` 在列表行给带思维链的 assistant 条目标了 `≡<字数>字`。回看场景实际用不到
@@ -29,8 +43,8 @@
 reasoning item 只剩 `id`、正文为空（摘要派供应商：Kimi / 火山方舟 / opencode）。
 
 - `ReasoningItem` 增 `FromSummary`（jsonl 键 `from_summary`）：回传形态随来源，
-  不归一化（摘要塞进 `content` 会被上游拒收）。旧会话无该键 → 明文形态，向后兼容
-- 两形态都收，明文优先、为空才回落摘要；终态缺 reasoning item 时用 delta 累积兜底
+  不归一化（硬约束是 `summary` 键必须存在，缺失会被 Opencode 线以 `input[].summary: expected an array` 拒收）。旧会话无该键 → 明文形态，向后兼容
+- 两形态都收，明文优先、为空才回落摘要；终态缺 reasoning item 时用 delta 累积兜底（按形态分桶）
 - 本仓只有文档同步（`docs/design.md` 的请求构造、流式解析、回传三处口径），无代码改动
 
 ## 2026-11-22 chore(deps): battlelab v0.4.0 → v0.5.0
