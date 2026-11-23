@@ -1,3 +1,10 @@
+## 2026-11-24 chore(deps): battlelab v0.5.2 → v0.6.0（思维链回传双写）
+
+上游 `af78be2` 发版为 **v0.6.0**（BREAKING：删除公开字段 `ReasoningItem.FromSummary`；
+`responses` 线 reasoning item 回传改为 `content` / `summary` 双写 + 上游 `id` 原样带回）。
+本仓代码已在 `4078125` 同批适配，本次只有依赖升级（`go.mod` / `go.sum`），无代码改动。
+实测与决策记录见 `battlelab/docs/reasoning-replay.md`。
+
 ## 2026-11-24 docs(test): 思维链回传改为双写 + 原样 id，删除对 `FromSummary` 的引用
 
 上游按 `battlelab/docs/reasoning-replay.md` 的实测与决策，把 `responses` 线的 reasoning item 回传改为
