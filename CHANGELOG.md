@@ -1,3 +1,17 @@
+## 2026-11-24 docs(test): 思维链回传改为双写 + 原样 id，删除对 `FromSummary` 的引用
+
+上游按 `battlelab/docs/reasoning-replay.md` 的实测与决策，把 `responses` 线的 reasoning item 回传改为
+**正文双写**（`content[].reasoning_text` 与 `summary[].summary_text` 各一份同文）、上游 `id` 原样带回、
+不带 `status`，并**删除公开字段 `ReasoningItem.FromSummary`**（上游 BREAKING，待发 v0.6.0）。本仓同步：
+
+- `repl/history_test.go`：去掉 `FromSummary` 构造；保留含 `from_summary` 的旧 jsonl 字面量，作为
+  「旧会话键被忽略、照常渲染」的回归守护
+- `docs/design.md`《LLM 接入》：请求构造 / 流式解析 / 《思维链回传》小节改为双写口径；原「形态必须原样，
+  不能归一化」段整段重写（其前提已被实测推翻）；字段表删 `FromSummary` 条目
+- `README.md`《LLM 接入》同步口径
+
+`go.mod` 仍指 v0.5.2：本地经 `go.work` 用工作区代码；上游发 v0.6.0 后另条 `chore(deps)` 升级。
+
 ## 2026-11-24 chore(deps): battlelab v0.5.1 → v0.5.2（思维链兜底形态修正）
 
 上游 `b3f6b3d` 发版为 **v0.5.2**：delta 兜底改为明文/摘要两桶累积（混发两派时取明文、

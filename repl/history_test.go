@@ -288,7 +288,7 @@ func TestHistoryHeadShowsStamp(t *testing.T) {
 }
 func TestHistoryLineHasNoThinkMark(t *testing.T) {
 	with := agent.Message{Role: "assistant", Content: "回复", ReasoningItems: []agent.ReasoningItem{
-		{ID: "rs_1", Content: "先想", FromSummary: true},
+		{ID: "rs_1", Content: "先想"},
 	}}
 	if got, want := historyLine(1, with, 0), "  1 assistant 回复"; got != want {
 		t.Errorf("列表行不应带思维链标记: got %q want %q", got, want)
@@ -302,6 +302,7 @@ func TestHistoryLineHasNoThinkMark(t *testing.T) {
 func TestShowHistoryFullRendersReasoning(t *testing.T) {
 	dir := t.TempDir()
 	a := newSessTestAgent(t, dir)
+	// 旧会话里的 from_summary 键（2026-11-23 引入、次日撤回）应被忽略：条目照常加载与渲染。
 	seed := `{"role":"user","content":"问题"}` + "\n" +
 		`{"role":"assistant","content":"回答","reasoning_items":[{"id":"rs_1","content":"先查代码","from_summary":true}]}` + "\n"
 	seedIntoSessionDir(t, dir, "20260101-100000.jsonl", seed)
