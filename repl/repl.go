@@ -914,25 +914,10 @@ func historyThinkText(m agent.Message) string {
 	return b.String()
 }
 
-func historyThinkMark(m agent.Message) string {
-	text := strings.TrimSpace(historyThinkText(m))
-	if text == "" {
-		return ""
-	}
-	return fmt.Sprintf(MsgHistoryThinkMark, len([]rune(text)))
-}
-
 // historyLine 渲染 /history 列表的一项：截断按终端显示列（cols <= 0 不截断），
 // 列表一项一行，宽度不可知时保持原样而不是按 rune 猜。
 func historyLine(n int, m agent.Message, cols int) string {
 	text := term.OneLine(historyText(m))
-	if mark := historyThinkMark(m); mark != "" {
-		if text == "" {
-			text = mark
-		} else {
-			text = mark + " " + text
-		}
-	}
 	line := fmt.Sprintf("%3d %-9s %s", n, historyLabel(m), text)
 	if stamp := historyStamp(m); stamp != "" {
 		line = fmt.Sprintf("%3d %s %-9s %s", n, stamp, historyLabel(m), text)

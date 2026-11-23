@@ -1,3 +1,14 @@
+## 2026-11-23 feat(repl): `/history` 只保留完整渲染里的思维链段，列表不加标记
+
+`45b70d4` 在列表行给带思维链的 assistant 条目标了 `≡<字数>字`。回看场景实际用不到
+这个标记（列表维持"一条消息一行"的粒度更整齐），撤掉，只保留 `/history <n>` /
+`0` / `-n` / `all` 完整渲染里的思维链段（消息内 `─── 思考 ───` 分隔，`show_reasoning`
+不参与判定）。
+
+- 列表行恢复为 `序号 [时间] 角色 正文`，带与不带思维链同形
+- 删除 `MsgHistoryThinkMark`、`historyThinkMark`；`historyThinkText` 仅供完整渲染使用
+- 测试改为 `TestHistoryLineHasNoThinkMark`（守护列表不回归标记）
+
 ## 2026-11-23 feat(repl): `/history` 显示思维链（列表标记 + 全文分段）
 
 上游 v0.5.1 起会话 jsonl 的 `reasoning_items` 已带正文与形态，但 `/history` 只渲染

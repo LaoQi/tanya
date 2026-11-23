@@ -286,27 +286,16 @@ func TestHistoryHeadShowsStamp(t *testing.T) {
 		t.Errorf("老会话消息头不应带时间: %q", got)
 	}
 }
-func TestHistoryLineShowsThinkMark(t *testing.T) {
-	plain := agent.Message{Role: "assistant", Content: "回复"}
+func TestHistoryLineHasNoThinkMark(t *testing.T) {
 	with := agent.Message{Role: "assistant", Content: "回复", ReasoningItems: []agent.ReasoningItem{
 		{ID: "rs_1", Content: "先想", FromSummary: true},
 	}}
-	got := historyLine(1, with, 0)
-	if !strings.Contains(got, "≡2字") {
-		t.Errorf("列表行应标思维链字数: %q", got)
+	if got, want := historyLine(1, with, 0), "  1 assistant 回复"; got != want {
+		t.Errorf("列表行不应带思维链标记: got %q want %q", got, want)
 	}
-	if !strings.HasSuffix(got, "回复") {
-		t.Errorf("标记应在正文之前: %q", got)
-	}
-	if strings.Contains(historyLine(1, plain, 0), "≡") {
-		t.Error("无思维链的消息不应有标记")
-	}
-}
-
-func TestHistoryLineNoThinkMarkForEmptyContent(t *testing.T) {
-	m := agent.Message{Role: "assistant", Content: "回复", ReasoningItems: []agent.ReasoningItem{{ID: "rs_1"}}}
-	if got, want := historyLine(1, m, 0), "  1 assistant 回复"; got != want {
-		t.Errorf("正文为空的旧条目不应有标记: got %q want %q", got, want)
+	legacy := agent.Message{Role: "assistant", Content: "回复", ReasoningItems: []agent.ReasoningItem{{ID: "rs_1"}}}
+	if got, want := historyLine(1, legacy, 0), "  1 assistant 回复"; got != want {
+		t.Errorf("旧条目行形态: got %q want %q", got, want)
 	}
 }
 
