@@ -1,3 +1,15 @@
+## 2026-11-25 chore(deps): battlelab v0.6.0 → v0.7.0（Windows 路径形态闭环）
+
+上游 `56ea278` 发版为 **v0.7.0**（BREAKING，仅 Windows）：`pwd`、`$PWD`/`$OLDPWD`、`cd -`、`~`、
+`command -v|-V`、`export`|`set` 列表改为宿主形态正斜杠（`C:/Users/x`，原为 `/c/Users/x`）；
+`run_shell` 的 `Result.Cwd` 改用 `filepath.ToSlash`；出站方向 `argv[1:]` 真转换、`/tmp` 映射
+`%TEMP%`、子进程 `PATH` 逐段 `;` 拼接、`cwd` 参数接受 `/d/…` 形态。
+
+本仓**无需代码适配**：`Result.Cwd` 只被 `views/shell` 原样回显（`TrimSpace`），不做路径拼接。
+本次只有依赖升级（`go.mod`/`go.sum`），无代码改动；`GOWORK=off go build/vet ./...` 通过。
+上游逐项决策见 `issue/vbash-windows-path-design.md`（状态已转「已实施」），行为清单见
+battlelab `CHANGELOG.md` 同日条目。
+
 ## 2026-11-24 chore(deps): battlelab v0.5.2 → v0.6.0（思维链回传双写）
 
 上游 `af78be2` 发版为 **v0.6.0**（BREAKING：删除公开字段 `ReasoningItem.FromSummary`；
