@@ -1,3 +1,19 @@
+## 2026-11-27 chore(deps,docs): battlelab v0.7.0 → v0.8.0（生命周期钩子 + 强制复位 + `Client` 与请求形态解耦）
+
+上游 `b832725` 发版为 **v0.8.0**（`master` 与 tag 均已推到 origin），本次跨三个提交：
+
+- **生命周期钩子 `WithHooks`**（`7c9db1b`）：八个切点、只认接口实现、无返回值不参与控制流
+- **钩子 ctx 携带 `Agent`**（`d909467`）：`agent.FromContext(ctx)`，钩子里取实例不必再靠闭包捕获
+- **外部强制复位 `Agent.ForceHandoff`**（`e089c70`，含 **BREAKING**）：`Client` 只留链路，请求形态由调用方逐次给出——`NewClient(cfg)`、`Request(ctx, LLMRequest{Messages, Tools}, sink)`，`ChatStream` 撤销
+
+前两项的消费者本仓已在 P3 落地（`repl.HandoffHint` = `BeforeRequest` 钩子 + `SessionHook`，实例取自 `FromContext`），当时靠 `go.work` 联调；本次只把 `go.mod` 追平发布版，**无需代码适配**——本仓只用 `agent.Agent`（`agent.WithTools` 装配工具），不引用 `Client`/`LLMRequest`。
+
+**文档同步**（被本次 BREAKING 与更早的「工具迁进库」打成过期的几处）：`AGENTS.md` 重试条、`docs/design.md`《请求重试》标题与正文的 `Client.ChatStream` 改 `Client.Request`（并注明 `Request` 内部单次发送叫 `exchange`）；`docs/design.md` 工具段两处「`assembleTools` 合成清单 + `toolRegistry.defs()` 在 `NewClient` 构造期注入」改为现状「`tools.Standard` 装配 → `agent.WithTools` 交给 `Agent` → 库在每次请求里以 `LLMRequest.Tools` 带出」（后一处其实随工具迁进库就过期了，本轮一并更正）。
+
+**升级方式**：新 tag 的 sumdb 记录尚未缓存（`goproxy.cn` 的 `/sumdb` 回 404、`sum.golang.org` 直连超时），与上一轮同因，故用 `GOFLAGS=-mod=mod GOSUMDB=off GOPROXY=direct go get github.com/LaoQi/battlelab@v0.8.0`；`go.sum` 哈希按模块内容计算，与 ivan 各自独立算出的 `h1:` 相同。
+
+**验证**（均 `GOWORK=off`，走发布版）：`go mod verify`、`go build ./...`、`go vet ./...`、`go test ./...`（16 包）全绿；`make build`、`make cross`（darwin + windows vet 与测试编译）通过；`python3 scripts/render_audit.py` **19 PASS / 0 FAIL**。推 tag 之前另用临时 `replace` 指向本地库做过同口径预验证（`go.mod` 已复原、无留痕）。
+
 ## 2026-11-26 refactor(repl): 上下文交接提醒迁到 `BeforeRequest` 钩子（`repl.HandoffHint`）
 
 提醒原先由 `REPL.runPrompt` 在回合入口调一次 `checkHandoffHint`：判据绑在"回合开始"这一刻，
