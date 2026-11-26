@@ -26,29 +26,33 @@ type UI struct {
 }
 
 type Config struct {
-	agent.Config `yaml:",inline"`
-	UI           `yaml:",inline"`
-	Shell        string `yaml:"shell"`
-	Path         string `yaml:"-"`
+	agent.Config      `yaml:",inline"`
+	UI                `yaml:",inline"`
+	Shell             string `yaml:"shell"`
+	HandoffHintTokens int    `yaml:"handoff_hint_tokens"`
+	Path              string `yaml:"-"`
 }
 
 var Version = "dev"
 
 const DefaultShell = "vbash"
 
+const MsgBadHandoffHintFmt = "handoff_hint_tokens 不能为负（%d）；0 表示关闭，留空用默认值"
+
 const (
-	DefaultLocalDir         = ".tanya"
-	UserAgentProduct        = "tanya"
-	UserAgentURL            = "https://github.com/LaoQi/tanya"
-	DefaultToolOutputLines  = 20
-	DefaultMaxRetries       = 2
-	maxRetriesLimit         = 20
-	DefaultImageDetail      = "low"
-	DefaultTheme            = "nord"
-	DefaultSessionMode      = "auto"
-	DefaultDataDirSuffix    = ".local/share/tanya"
-	DefaultConfigPathSuffix = ".config/tanya/config.yaml"
-	GlobalAgentsSuffix      = ".config/tanya/AGENTS.md"
+	DefaultLocalDir          = ".tanya"
+	UserAgentProduct         = "tanya"
+	UserAgentURL             = "https://github.com/LaoQi/tanya"
+	DefaultToolOutputLines   = 20
+	DefaultMaxRetries        = 2
+	maxRetriesLimit          = 20
+	DefaultImageDetail       = "low"
+	DefaultTheme             = "nord"
+	DefaultSessionMode       = "auto"
+	DefaultDataDirSuffix     = ".local/share/tanya"
+	DefaultConfigPathSuffix  = ".config/tanya/config.yaml"
+	GlobalAgentsSuffix       = ".config/tanya/AGENTS.md"
+	DefaultHandoffHintTokens = 196000
 )
 
 // UserAgent 组装出站 UA（与 -v 同源的版本号）。
@@ -89,8 +93,9 @@ func Default() *Config {
 			ArchiveThreshold: agent.DefaultArchiveThreshold,
 			ArchiveKeep:      agent.DefaultArchiveKeep,
 		},
-		Path:  defaultConfigPath(),
-		Shell: DefaultShell,
+		Path:              defaultConfigPath(),
+		Shell:             DefaultShell,
+		HandoffHintTokens: DefaultHandoffHintTokens,
 		UI: UI{
 			Theme:           DefaultTheme,
 			ToolOutputLines: DefaultToolOutputLines,
@@ -175,6 +180,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.MaxRetries < 0 || cfg.MaxRetries > maxRetriesLimit {
 		cfg.MaxRetries = DefaultMaxRetries
+	}
+	if cfg.HandoffHintTokens < 0 {
+		return nil, fmt.Errorf(MsgBadHandoffHintFmt, cfg.HandoffHintTokens)
 	}
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = UserAgent(Version)

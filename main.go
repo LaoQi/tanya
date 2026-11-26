@@ -286,7 +286,7 @@ func main() {
 		st.FailErr("", err)
 		exitNow(1)
 	}
-	opts := []repl.Option{repl.WithStreams(st), repl.WithProfile(prof), repl.WithToolViews(views), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithConsole(con)}
+	opts := []repl.Option{repl.WithStreams(st), repl.WithProfile(prof), repl.WithToolViews(views), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithHandoffHint(cfg.HandoffHintTokens), repl.WithConsole(con)}
 	if takeover != nil {
 		opts = append(opts, repl.WithTakeover(*takeover))
 	}

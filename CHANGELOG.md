@@ -1,3 +1,27 @@
+## 2026-11-26 feat(repl,config): 上下文交接提醒（`handoff_hint_tokens`）
+
+长任务实施时上下文攒到窗口边缘才被迫处理，此前只靠 `system_prompt.md` 那行判据（模型自觉、常常靠不住）。
+新增**一处**自动提醒，沿用 ivan 的两档思路但只取建议档、**不做任何强制**（tanya 是交互前台，主导权在用户）：
+
+- `config` 新增顶层字段 `handoff_hint_tokens`（仅 yaml、默认 `196000`、`0` = 关闭；负值启动报错），
+  `config.example.yaml` / `tanya config` 输出、根包默认值比对测试同批更新
+- 口径 `contextUsed = max(Stats.ContextTokens, Stats.Est)`：实报是最近一次请求的 prompt tokens（偏小），
+  `Est` 是整条 history 的本地估算，取大者更早提醒；判据与提示文案同源
+- 触发点在 `REPL.runPrompt` 的非 `continue` 分支入口：达到阈值即 `AppendNotice` 注入一条 user 事实行
+  （本轮请求就带上，不额外发请求、不自动补轮），并打一行 `KindNotice` 说明已注入；`/next` 路径跳过
+- 每会话只提醒一次，`/new`、`/load`、`/switch`、`/fork` 与交接成功后经 `resetHandoffHint()` 重新武装
+  （刻意不挂在 `refreshState` 上：`setBusy` 每回合都调它会误清）
+- 不做：第二档强制档、停止续跑、`hops` 诊断、确认阻塞、预算/暂停闸门——这些是 ivan 的无人值守语义
+- `ask` 单发不经 `repl` 故不参与；归档只读态不可对话天然不触发；注入 append-only，system 快照与 history
+  前缀不动，prompt cache 不受影响；`-n` 下注入内存生效、不落盘
+
+**测试**（`repl/handoffhint_test.go` 8 例）：口径取大者四组边界、注入位置（提示排在用户输入之前）、
+同会话不重复注入、`/new` 后重新武装、`0` = 关闭、未达阈值不注入、`/next` 路径跳过、`-n` 下注入且无会话文件、
+`plain` 面提示行照常可见（属命令反馈）。`go build/vet ./...`、`go test ./...` 全绿。
+文档：`README.md`《会话交接》加自动提醒条、`docs/design.md`《会话交接》加同小节、`AGENTS.md` 交接约束补一句。
+
+**规划档迁出**：本功能的剩余分期（库侧生命周期钩子 → tanya/ivan 迁移）横跨三仓，原记在 `docs/todos.md` 已移出本仓，现为工作区根目录的 `todos.md`（工作区级本地计划，可跨仓；根目录不受版本控制故仍不入库）；`.gitignore` 里那行 `todos.md` 随之删除。
+
 ## 2026-11-25 chore(deps): battlelab v0.6.0 → v0.7.0（Windows 路径形态闭环）
 
 上游 `56ea278` 发版为 **v0.7.0**（BREAKING，仅 Windows）：`pwd`、`$PWD`/`$OLDPWD`、`cd -`、`~`、

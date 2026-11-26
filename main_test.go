@@ -64,6 +64,7 @@ func TestConfigExampleMatchesDefaults(t *testing.T) {
 		{"tool_output_lines", strconv.Itoa(got.ToolOutputLines), strconv.Itoa(want.ToolOutputLines)},
 		{"max_retries", strconv.Itoa(got.MaxRetries), strconv.Itoa(want.MaxRetries)},
 		{"shell", got.Shell, want.Shell},
+		{"handoff_hint_tokens", strconv.Itoa(got.HandoffHintTokens), strconv.Itoa(want.HandoffHintTokens)},
 	}
 	covered := make(map[string]bool, len(checks))
 	for _, c := range checks {

@@ -63,6 +63,12 @@ session_mode: auto
 # 同时作为 /archive 无参时的默认保留数量
 # auto_archive_keep: 16
 
+# 上下文交接提醒阈值（仅 yaml，0 = 关闭）：会话上下文取「最近一次请求实报 prompt tokens」与「本地估算」的较大值
+# 达到该值后，在下一轮请求前向模型注入一条交接建议（提示用 next_session 收尾转段），同一会话只提醒一次，
+# /new、/load、/switch、/fork 与交接换会话后重新计；只提醒、不拦请求，是否交接由模型与用户决定
+# 默认 196000：按所用模型的上下文窗口调整（如 128K 窗口可设 96000，1M 窗口可设 800000）
+handoff_hint_tokens: 196000
+
 # 终端配色：auto（默认，跟随终端能力与 NO_COLOR）/ on（强制开色）/ off（强制纯文本）
 # colors: auto
 # 内置配色主题（影响语义色/提示符/markdown 标题与代码色，REPL 内 /theme 可切换）：
