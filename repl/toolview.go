@@ -347,6 +347,10 @@ func (v *toolView) statusOn() bool { return v.prof.TTY && v.st.out.allows(KindSt
 // Stop 收尾进行中的心跳（幂等）：无进行中的心跳时不写任何字节。
 func (v *toolView) Stop() { v.heart.stop() }
 
+// Waiting 恢复「等待响应」心跳：回合中途插入提示行（钩子投来的行）后用它接上，
+// 免得该次请求的等待期没有状态行。
+func (v *toolView) Waiting() { v.heart.start(statusWaiting, v.statusOn()) }
+
 // Content 输出正文（原 REPL.print 的语义）：停心跳、若上一块是工具块先补空行、跟踪行尾状态。
 func (v *toolView) Content(kind Kind, text string) {
 	if text == "" {

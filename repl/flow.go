@@ -118,6 +118,18 @@ func (t *turn) Handle(e agent.Event) {
 	}
 }
 
+// hint 渲染钩子在回合内投来的一行（提示行 / 注入失败的错误行）：先收掉等待心跳，
+// 写完再接上，避免状态行与提示行互相覆盖。
+func (t *turn) hint(l hintLine) {
+	t.r.view.Stop()
+	if l.isErr {
+		t.f.st.err.emitText(KindError, l.text)
+	} else {
+		t.f.emit(KindNotice, l.text)
+	}
+	t.r.view.Waiting()
+}
+
 // reasonOn 报告思维链是否上屏：开关打开且当前输出档可显示（见 reasonVisible）。
 func (t *turn) reasonOn() bool {
 	return t.r.showReasoning && t.r.reasonVisible()

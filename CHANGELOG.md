@@ -1,3 +1,38 @@
+## 2026-11-26 refactor(repl): 上下文交接提醒迁到 `BeforeRequest` 钩子（`repl.HandoffHint`）
+
+提醒原先由 `REPL.runPrompt` 在回合入口调一次 `checkHandoffHint`：判据绑在"回合开始"这一刻，
+工具轮内到阈值要等下一轮，去重/复位散在 REPL 的 6 处复位调用里。改为 battlelab 的生命周期钩子。
+
+- `repl/handoffhint.go` 重写：`HandoffHint` 同时实现 `agent.BeforeRequestHook`（判 `contextUsed(Stats())`
+  达阈 → `AppendNotice` → 投一行屏幕提示）与 `agent.SessionHook`（任一会话边界重新武装）。实例经
+  `agent.FromContext(ctx)` 取 Agent（battlelab 同批新增），**不再需要闭包捕获**
+- **装配顺序**：`NewHandoffHint(tokens)` → `agent.New(…, agent.WithHooks(hint))` → `repl.NewREPL(…, repl.WithHandoffHint(hint))`；
+  `WithHandoffHint` 由收 `int` 改为收钩子对象（`nil` = 不接表现层），`main.go` 在 `tokens > 0` 时才造钩子
+- **屏幕行经回合通道渲染**：钩子跑在 agent 的回合 goroutine，而渲染与 `» 等待响应` 心跳只在 REPL goroutine，
+  故 `runTurn` 每回合给钩子绑 `post(text, isErr)`：投进本回合的事件通道并等 ack，REPL 按序渲染
+  (`Stop` → 提示行 → `Waiting`)，顺序落在 `EventRequestStart` 之后、请求构造之前。不新增 `agent.Event` 种类
+- **删掉 `REPL.hintTokens`/`hintDone`/`resetHandoffHint` 及 6 处调用**（`/new`、`/load`、`/fork`、`/switch`、
+  交接后、交互式载入）——复位改由 `SessionEvent` 自动完成；`runPrompt` 只留
+  `hint.mute(cont || nextPending)` 表达 `/next` 轮与交接续跑轮不提醒
+- **行为变化（均为预期）**：①注入位置从"用户输入之前"移到"用户输入之后"（`BeforeRequest` 在 user 消息入 history 后）；
+  ②屏幕行从"回合前"移到"回合内首个 `EventRequestStart` 之后"（观感：空行 → 心跳收掉 → 提示行 → 心跳接上）；
+  ③**工具轮内也能注入**（阈值在 tool 轮后达到时，提示落在 tool 结果之后、下一次请求之前）；
+  ④单发 `tanya ask` 仍不参与（钩子只在 REPL 回合绑定通道时才注入）；⑤中断/报错回滚只回滚内存，
+  已落盘的事实行会留在会话文件里（重载可见）；⑥阈值的 `Est` 口径略大一个用户输入的量
+- **测试**：`repl/handoffhint_test.go` 改造为「钩子 → agent → REPL」的真实装配顺序（新增
+  `newHintREPL`/`newHintREPLMode` 辅助，`warmHint` 改操作钩子阈值），8 例按新注入位置调整断言；
+  新增 `TestHandoffHintInjectsInsideToolRound`（mock 首轮返回 `tool_call` + `usage.prompt_tokens=5000`：
+  history 为「输入 → 带 tool_calls 的 assistant → tool → 注入 → 回答」，且第二次请求末尾就是注入行）与
+  `TestHandoffHintInactiveOutsideREPLTurn`（只注册钩子、直接 `a.Ask` 不注入也不记 `done`）；
+  `/new` 复位改断言钩子的 `fired()`（锁 `SessionEvent` 自动复位，不再依赖 REPL 显式调用）
+- **验收**：`gofmt -l` 干净、`go build ./...`/`go vet ./...`/`go test ./...` 全绿、`go test -race ./repl/` 通过、
+  `make cross` OK、`scripts/render_audit.py` 全部 PASS。**真机 pty 冒烟**（`make build` + 假 LLM）：
+  ① `handoff_hint_tokens: 1` 首轮即达阈——`» 等待响应 0s` → `上下文约 474 tokens 达提醒阈值 1，已向模型注入交接建议…`
+  → `» 等待响应 0s` → 正文，无残留半行；② `/next` 轮不提醒（`未生成交接摘要` 之后的普通轮照常提醒一次）；
+  ③ 工具轮内注入（阈值 2000、首轮 fake 返回 `run_shell` + `usage 5000`）：提示行落在工具块之后、第二次请求之前
+- **文档**：新增 `docs/handoff-hint.md`（定位/钩子职责/回合通道渲染理由/行为变化 a–g/边界/测试/落地记录）、
+  `docs/design.md`《上下文交接提醒》重写、`AGENTS.md`（交接条 + 文档清单）
+
 ## 2026-11-26 feat(repl,config): 上下文交接提醒（`handoff_hint_tokens`）
 
 长任务实施时上下文攒到窗口边缘才被迫处理，此前只靠 `system_prompt.md` 那行判据（模型自觉、常常靠不住）。

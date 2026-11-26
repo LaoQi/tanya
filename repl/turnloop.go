@@ -11,12 +11,20 @@ type turnInKind uint8
 
 const (
 	inAgent turnInKind = iota + 1
+	inHint
 	inDone
 )
+
+// hintLine 是钩子在回合内投来的一行：屏幕提示（isErr 假）或注入失败的错误行。
+type hintLine struct {
+	text  string
+	isErr bool
+}
 
 type turnIn struct {
 	kind turnInKind
 	ev   agent.Event
+	hint hintLine
 	ack  chan struct{}
 	err  error
 }
@@ -65,6 +73,24 @@ func (r *REPL) startHotkeys() (<-chan readline.KeyEvent, func()) {
 
 func (r *REPL) runTurn(ctx context.Context, in string, t *turn, cont bool) error {
 	ch := make(chan turnIn, 64)
+	if r.hint != nil {
+		// 钩子在 agent 的回合 goroutine 上跑，渲染只在 REPL goroutine（心跳状态行同处），
+		// 故提示行经本回合的通道排队——顺序落在 EventRequestStart 之后、请求构造之前。
+		r.hint.render(func(text string, isErr bool) bool {
+			ack := make(chan struct{})
+			select {
+			case ch <- turnIn{kind: inHint, hint: hintLine{text: text, isErr: isErr}, ack: ack}:
+			case <-ctx.Done():
+				return false
+			}
+			select {
+			case <-ack:
+			case <-ctx.Done():
+			}
+			return true
+		})
+		defer r.hint.render(nil)
+	}
 	sink := agent.Sinks(sinkWrap{ch: ch, ctx: ctx}.Emit, notifySink{r: r}.Emit)
 	go func() {
 		defer close(ch)
@@ -84,6 +110,11 @@ func (r *REPL) runTurn(ctx context.Context, in string, t *turn, cont bool) error
 			switch in.kind {
 			case inAgent:
 				t.Handle(in.ev)
+				if in.ack != nil {
+					close(in.ack)
+				}
+			case inHint:
+				t.hint(in.hint)
 				if in.ack != nil {
 					close(in.ack)
 				}

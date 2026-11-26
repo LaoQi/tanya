@@ -221,12 +221,19 @@ func main() {
 		st.FailErr("", err)
 		exitNow(1)
 	}
+	var hint *repl.HandoffHint
+	var hooks []agent.Hook
+	if cfg.HandoffHintTokens > 0 {
+		hint = repl.NewHandoffHint(cfg.HandoffHintTokens)
+		hooks = append(hooks, hint)
+	}
 	a, err = agent.New(&cfg.Config,
 		agent.NoSave(*f.noSave),
 		agent.WithTools(list...),
 		agent.WithSystemPrompt(systemBase(inv)),
 		agent.WithGlobalAgentsPath(config.GlobalAgentsPath()),
-		agent.WithAttachOps(attachOps{runDir: func() (string, bool) { return a.RunDir() }}))
+		agent.WithAttachOps(attachOps{runDir: func() (string, bool) { return a.RunDir() }}),
+		agent.WithHooks(hooks...))
 	if err != nil {
 		st.FailErr("", err)
 		exitNow(1)
@@ -286,7 +293,7 @@ func main() {
 		st.FailErr("", err)
 		exitNow(1)
 	}
-	opts := []repl.Option{repl.WithStreams(st), repl.WithProfile(prof), repl.WithToolViews(views), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithHandoffHint(cfg.HandoffHintTokens), repl.WithConsole(con)}
+	opts := []repl.Option{repl.WithStreams(st), repl.WithProfile(prof), repl.WithToolViews(views), repl.WithTermFacts(termFacts), repl.WithTheme(cfg.Theme, cfg.Palette), repl.WithShowReasoning(cfg.ShowReasoning), repl.WithNotifier(notifier), repl.WithToolOutputLines(cfg.ToolOutputLines), repl.WithHandoffHint(hint), repl.WithConsole(con)}
 	if takeover != nil {
 		opts = append(opts, repl.WithTakeover(*takeover))
 	}

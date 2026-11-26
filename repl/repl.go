@@ -43,8 +43,7 @@ type REPL struct {
 	started       time.Time
 	nextPending   bool
 	nextInput     string
-	hintTokens    int
-	hintDone      bool
+	hint          *HandoffHint
 	resumeID      string
 
 	attachSrv     *attach.Server
@@ -61,20 +60,20 @@ type REPL struct {
 }
 
 type options struct {
-	st         *streams
-	prof       term.Profile
-	views      *present.Registry
-	con        readline.Console
-	facts      TermFacts
-	factsSet   bool
-	themeName  string
-	palette    map[string]string
-	reasoning  bool
-	notifier   Notifier
-	takeover   *attach.Result
-	resumeID   string
-	maxLines   int
-	hintTokens int
+	st        *streams
+	prof      term.Profile
+	views     *present.Registry
+	con       readline.Console
+	facts     TermFacts
+	factsSet  bool
+	themeName string
+	palette   map[string]string
+	reasoning bool
+	notifier  Notifier
+	takeover  *attach.Result
+	resumeID  string
+	maxLines  int
+	hint      *HandoffHint
 }
 
 type Option func(*options)
@@ -127,9 +126,10 @@ func WithToolOutputLines(n int) Option {
 	return func(o *options) { o.maxLines = n }
 }
 
-// WithHandoffHint 注入上下文交接提醒阈值（0 = 关闭；判定与文案都在 repl）。
-func WithHandoffHint(tokens int) Option {
-	return func(o *options) { o.hintTokens = tokens }
+// WithHandoffHint 注入上下文交接提醒钩子（nil = 关闭；钩子须同时注册给 agent.WithHooks）。
+// REPL 负责给它接上回合渲染通道，屏幕提示行因此与事件同序。
+func WithHandoffHint(h *HandoffHint) Option {
+	return func(o *options) { o.hint = h }
 }
 
 // Semantics 按主题名与 palette 覆盖计算语义色集合；主题名非法时回落 default。
@@ -189,7 +189,7 @@ func NewREPL(a *agent.Agent, promptTpl string, opts ...Option) (*REPL, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, takeover: o.takeover, resumeID: o.resumeID, hintTokens: o.hintTokens, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
+	r := &REPL{agent: a, ed: ed, con: con, keys: keys, showReasoning: o.reasoning, notifier: o.notifier, st: o.st, takeover: o.takeover, resumeID: o.resumeID, hint: o.hint, promptTpl: promptTpl, prompt: tpl, sch: sch, sem: sem, palette: o.palette}
 	r.prof = o.prof
 	r.rend = render.NewThemedRenderer(r.prof, sch.MD)
 	ed.SetStyles(sem.Dim.With(r.prof), sem.Accent.With(r.prof))
@@ -426,8 +426,9 @@ func (r *REPL) ask(q string) {
 func (r *REPL) continueTurn() { r.runPrompt("", true) }
 
 func (r *REPL) runPrompt(in string, cont bool) {
-	if !cont && !r.nextPending {
-		r.checkHandoffHint()
+	if r.hint != nil {
+		// /next 命令轮与交接后的续跑轮不提醒（判据与提示都留在钩子里）。
+		r.hint.mute(cont || r.nextPending)
 	}
 	r.con.Sane()
 	ctx, done := InterruptContext(r.con)
@@ -461,7 +462,6 @@ func (r *REPL) afterTurn() {
 		r.failText(fmt.Sprintf(MsgHandoffFailedFmt, h.Err, homePath(h.Workspace)))
 		return
 	}
-	r.resetHandoffHint()
 	r.st.out.emit(KindDecor, handoffText(farewellInfo{
 		session:  h.OldID,
 		duration: time.Since(r.started),
@@ -536,7 +536,6 @@ func (r *REPL) handleCommand(line string) bool {
 		r.st.out.emit(KindNotice, helpText)
 	case "/new":
 		r.agent.NewSession()
-		r.resetHandoffHint()
 		r.st.out.emit(KindNotice, MsgNewSession)
 		r.refreshState()
 	case "/switch":
@@ -546,7 +545,6 @@ func (r *REPL) handleCommand(line string) bool {
 			if err := r.agent.LoadSession(parts[1]); err != nil {
 				r.failErr(err)
 			} else {
-				r.resetHandoffHint()
 				r.st.out.emit(KindNotice, r.loadNotice(parts[1]))
 				r.warnLegacyPrompt()
 				r.refreshState()
@@ -660,7 +658,6 @@ func (r *REPL) handleFork() {
 	if r.agent.NoSave() {
 		out += MsgForkNoSave
 	}
-	r.resetHandoffHint()
 	r.st.out.emit(KindNotice, out)
 	r.refreshState()
 }
@@ -709,7 +706,6 @@ func (r *REPL) handleSwitch(args []string) {
 		out += fmt.Sprintf(MsgSwitchDir, homePath(dir))
 	}
 	r.st.out.emit(KindDecor, farewellText(retired))
-	r.resetHandoffHint()
 	r.st.out.emitText(KindNotice, out)
 	r.started = time.Now()
 	r.rebindAttach()
@@ -1029,7 +1025,6 @@ func (r *REPL) loadSessionInteractive() {
 		r.failErr(err)
 		return
 	}
-	r.resetHandoffHint()
 	r.st.out.emit(KindNotice, r.loadNotice(list[idx].ID))
 	r.warnLegacyPrompt()
 	r.refreshState()
