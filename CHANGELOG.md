@@ -1,3 +1,31 @@
+## 2026-11-27 style(repl): 交接提醒的屏幕行删掉括注
+
+`MsgHandoffHintFmt` 尾部「（是否交接由模型与用户决定）」删掉，屏幕行只剩事实：
+
+```
+上下文约 196.0k tokens 达提醒阈值 196.0k tokens，已向模型注入交接建议
+```
+
+理由：这行只是进程内给人看的事实行（`KindNotice`，无颜色无前缀），写不写都不改变行为——
+真要否决，用户直接说一句比读这行括注更省事；注入给模型的 `MsgHandoffHintNoticeFmt` 一字未动。
+
+- `repl/messages.go`：仅改 `MsgHandoffHintFmt` 常量
+- `repl/handoffhint_test.go`：`TestHandoffHintInjectsOncePerSession` 增加「屏幕行不含该括注」断言，防文案回退
+- 验证：`gofmt -l` 干净、`go build ./...`、`go vet ./...`、`go test ./...` 全绿
+
+## 2026-11-27 docs(prompt): 内置提示词说明交接阈值由系统提醒（模型不必自己查用量）
+
+`system_prompt.md` 末行在「交接」那句后补一截：**不需要主动探查上下文用量，到达阈值系统会自动提醒**。
+措辞对齐 `ivan/prompt/system_prompt.md` 的同义句（「上下文用量不用自己查，接近上限会自动提醒」）。
+
+- 依据：阈值提醒本就由 `repl.HandoffHint`（`BeforeRequest` 钩子）负责——达 `handoff_hint_tokens` 时
+  `AppendNotice` 注入事实行（`MsgHandoffHintNoticeFmt`）并投一行屏幕提示，每个会话边界自动重新武装。
+  提示词里没写这件事，模型容易反复调 `agent_custom get usage`/`stat` 自检用量，白烧上下文
+- 只改文案与测试：`main_test.go` 新增 `TestSystemPromptDisclaimsContextProbe` 锁定这两句
+  （既有 `TestSystemPromptHasDestructiveOpGuard` 保持不动）
+- 生效方式：文案经 `//go:embed` 编译期嵌入，需 `make build` 重出二进制；运行中的 REPL 不受影响
+- 验证：`gofmt -l` 干净、`go vet ./...`、`go test ./...` 全绿（含 `-run TestSystemPrompt` 三例）
+
 ## 2026-11-27 chore(deps,docs): battlelab v0.7.0 → v0.8.0（生命周期钩子 + 强制复位 + `Client` 与请求形态解耦）
 
 上游 `b832725` 发版为 **v0.8.0**（`master` 与 tag 均已推到 origin），本次跨三个提交：

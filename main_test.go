@@ -213,6 +213,14 @@ func TestSystemPromptHasDestructiveOpGuard(t *testing.T) {
 	t.Error("护栏不应使用所有权断言（已被行为指令取代）")
 }
 
+func TestSystemPromptDisclaimsContextProbe(t *testing.T) {
+	for _, want := range []string{"不需要主动探查上下文用量", "到达阈值系统会自动提醒"} {
+		if !strings.Contains(systemPromptFile, want) {
+			t.Errorf("内置提示词缺少交接阈值说明 %q", want)
+		}
+	}
+}
+
 func TestSystemBaseAppendsEnvAfterPrompt(t *testing.T) {
 	inv, err := shell.Resolve("")
 	if err != nil {

@@ -98,7 +98,7 @@ const (
 	MsgHandoffNone          = "未生成交接摘要，本回合按普通对话处理\n"
 	MsgHandoffReadOnlyFmt   = "当前为归档只读会话（%s）；交接请先用 /fork 开新会话\n"
 	MsgHandoffHintNoticeFmt = "系统提示：本会话上下文约 %s tokens（提醒阈值 %s）。建议在本阶段收尾后调用 next_session 交接进度（summary 写清已完成内容、关键结论与下一步）；若目标马上就能完成，可先把当前步骤做完再交接。"
-	MsgHandoffHintFmt       = "上下文约 %s tokens 达提醒阈值 %s，已向模型注入交接建议（是否交接由模型与用户决定）\n"
+	MsgHandoffHintFmt       = "上下文约 %s tokens 达提醒阈值 %s，已向模型注入交接建议\n"
 	MsgHandoffHintFailedFmt = "注入交接建议失败: %v\n"
 	MsgSwitchDone           = "已切换工作区：%s → %s\n"
 	MsgSwitchDir            = "新会话目录: %s\n"

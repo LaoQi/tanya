@@ -102,6 +102,9 @@ func TestHandoffHintInjectsOncePerSession(t *testing.T) {
 	if got := strings.Count(term.Strip(out.String()), "已向模型注入交接建议"); got != 1 {
 		t.Errorf("屏幕提示应只出现一次，实为 %d: %q", got, out.String())
 	}
+	if strings.Contains(out.String(), "是否交接由模型与用户决定") {
+		t.Error("提示行不带括注（已精简，是否交接无需在屏幕上声明）")
+	}
 	if errb.String() != "" {
 		t.Errorf("不应有错误输出: %q", errb.String())
 	}
