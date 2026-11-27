@@ -21,7 +21,6 @@ import (
 
 	"github.com/LaoQi/battlelab/agent"
 	"github.com/LaoQi/battlelab/ctty"
-	"github.com/LaoQi/battlelab/tools/shell"
 	"github.com/LaoQi/tanya/attach"
 	"github.com/LaoQi/tanya/config"
 	"github.com/LaoQi/tanya/procarg"
@@ -183,15 +182,10 @@ func TestRootRefusalMatrix(t *testing.T) {
 }
 
 func TestEnvSectionNoCwdAndGolden(t *testing.T) {
-	inv := shell.Invocation{Argv: []string{"/bin/bash", "-c"}, Name: "bash", Kind: shell.KindPosix}
-	got := envSection(inv)
+	got := envSection()
 	want := "# 环境\n" +
 		"OS: " + runtime.GOOS + "/" + runtime.GOARCH + "\n" +
-		"SHELL: bash\n"
-	if ctty.Supported {
-		want += "TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）\n"
-	}
-	want += "TIMEOUT: 默认 60s（interactive 时 300s），上限 900s\n" +
+		"TIMEOUT: 默认 60s（interactive 时 300s），上限 900s\n" +
 		"OUTPUT: stdout/stderr 头尾各 30KB，中间截断\n"
 	if got != want {
 		t.Errorf("envSection 全串不匹配:\n got %q\nwant %q", got, want)
@@ -213,20 +207,8 @@ func TestSystemPromptHasDestructiveOpGuard(t *testing.T) {
 	t.Error("护栏不应使用所有权断言（已被行为指令取代）")
 }
 
-func TestSystemPromptDisclaimsContextProbe(t *testing.T) {
-	for _, want := range []string{"不需要主动探查上下文用量", "到达阈值系统会自动提醒"} {
-		if !strings.Contains(systemPromptFile, want) {
-			t.Errorf("内置提示词缺少交接阈值说明 %q", want)
-		}
-	}
-}
-
 func TestSystemBaseAppendsEnvAfterPrompt(t *testing.T) {
-	inv, err := shell.Resolve("")
-	if err != nil {
-		t.Skipf("当前环境无可解析 shell: %v", err)
-	}
-	base := systemBase(inv)
+	base := systemBase()
 	if !strings.HasPrefix(base, strings.TrimRight(systemPromptFile, "\n")) {
 		t.Error("内置提示词应在基座最前")
 	}

@@ -1,3 +1,45 @@
+## 2026-11-27 chore(deps): battlelab v0.8.0 → v0.8.1（工具描述精简）
+
+上游 `38274ce` 发版为 **v0.8.1**（master 与 tag 均已推 origin）。**无 API 变更**，只改三处工具描述：
+`run_shell` 的 `interactive` 参数去掉 pty/CONIN$ 实现细节、等待动画与重复的超时说明；`next_session` 的
+`continue`/`workspace` 语义只在 `params` 里说一次；`agent_custom` 的 `action`/`key` 语义同理。
+
+本仓只升 `go.mod`/`go.sum`，无代码适配。**升级方式**：新 tag 的 sumdb 记录尚未缓存（与上一轮同因），
+用 `GOFLAGS=-mod=mod GOSUMDB=off GOPROXY=direct go get github.com/LaoQi/battlelab@v0.8.1`。
+
+**验证**（`GOWORK=off` 走发布版）：`go mod verify`、`go build ./...`、`go vet ./...`、`go test ./...`（16 包）全绿。
+
+## 2026-11-27 fix(prompt): 提示词精简——环境段 5 行 → 3 行，`system_prompt.md` 10 行 → 8 行
+
+原则：**工具描述已经承载的事实不在系统提示里重复**（模型两处都读，重复只会加误导面与 token）。
+
+**环境段删两行**
+
+- `SHELL:` 删：shell 名已由 `run_shell` 的工具描述给出（`在 linux 内置 bash 解释器中执行命令…`，随 `shell`
+  配置动态生成，含探测到的可用程序清单与 vbash 的构造边界/替代写法），环境段再报一次是同源重复。
+  删后 `envSection()` 不再收 `shell.Invocation`，`systemBase()` 一并去参（`inv` 仍供 `shellview` 渲染工具块标题）
+- `TTY:` 删：原 `TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）` 是 2026-09-09 随
+  `interactive` 参数引入的（当时普通命令 `cmd.Stdin` 直通 `/dev/tty` 并移交前台组）。2026-09-27 控制台层 S5
+  下线该形态——普通命令 stdin 改空设备、不移交前台，只有 `interactive: true` 才借 pty——前提已不成立；
+  且字面读作「要给用户看就得写 `/dev/tty`」，那是绕过工具结果、插进 tanya 渲染帧的旁路
+  （`docs/repl-status-append.md` 整章即此类事故），正路是 `interactive: true`（工具描述已写全）
+
+**`system_prompt.md` 删两处重复**
+
+- 「通过 run_shell 工具读取文件、执行命令、修改代码…」与「文件操作（ls、rg、find、cat 等）优先通过 run_shell
+  执行」：`run_shell` 描述结尾已有「读文件、搜索、文本处理等系统操作都用它」，而模型也没有第二条执行通道
+  （工具清单里仅 `run_shell` 能执行），这类「必须用某工具」的约束没有可绕之路，属空话，整句删除。
+  首行的「（兼容 Pi/opencode）」与「通过工具完成用户交给的任务」同轮删掉——前者是历史来源注记，
+  后者是目标复述，都不改变模型行为
+- 「操作文件时明确显示路径」：工具块本就显示命令与 cwd，这句是噪音
+
+**测试与文档**：`main_test.go` 只同步 env golden —— 全串比对本来就覆盖增删行，不另加「不含某句」的断言
+（文案取舍是一次性决定，写成测试只会把决定固化成枷锁，拦不住真问题），并删掉本文件同日前一条
+`docs(prompt)` 加的 `TestSystemPromptDisclaimsContextProbe` —— 同属把文案固化的断言；`docs/design.md`《系统提示头部（env 段）》
+行数/样例/定位/组装/事实源五处 + 《系统提示与缓存友好》的内置提示词条补 2026-11-27 精简记录，SHELL/TTY 各留
+历史注记；`AGENTS.md` 注入基座条、`README.md` 环境段条同步。
+验证：`gofmt -l` 干净、`go build ./...`、`go vet ./...`、`go test ./...` 全绿。
+
 ## 2026-11-27 style(repl): 交接提醒的屏幕行删掉括注
 
 `MsgHandoffHintFmt` 尾部「（是否交接由模型与用户决定）」删掉，屏幕行只剩事实：

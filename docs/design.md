@@ -418,7 +418,7 @@ OpenAI Responses API 兼容格式（`/responses`），**以 DeepSeek Responses A
 ## 系统提示与缓存友好
 
 - 组装规则：**基座**（`main` 组装：内置默认提示词原文 `system_prompt.md` + 空行 + 环境段；`//go:embed` 编译期嵌入，构造时经 `agent.WithSystemPrompt` 注入）+ 全局 `~/.config/tanya/AGENTS.md`（存在时）+ 工作区 `./AGENTS.md`（存在时）。各 AGENTS 段以 `# 全局说明`/`# 项目说明` 标题分隔，文件缺失/空白跳过，分隔空行仅在前段非空时补（空基座下首段直接起步、不留前导空行，仅库用法可达）。`agent` 不再内置文本，配置项 `system_prompt` 早已移除，故内容仍不可配、改后需重新编译
-- 内置提示词内容（2026-10-21 补护栏）：除角色与工作习惯外，含三条操作纪律——`.tanya/` 的用途说明（`sessions/`/`archive/`/`run/` 各存什么，陈述事实而非禁令）、破坏性操作单独一步执行并检查回显、路径用途不明时先查看再动手。起因是 `.tanya/` 被误认作实验脚手架而遭递归删除的事故；护栏治诱因、不治损失（损失侧由「落盘不做静默重建」与 `/export` 兜住），内容由 `main_test.go` 的 `TestSystemPromptHasDestructiveOpGuard` 守护
+- 内置提示词内容（2026-10-21 补护栏）：除角色与工作习惯外，含三条操作纪律——`.tanya/` 的用途说明（`sessions/`/`archive/`/`run/` 各存什么，陈述事实而非禁令）、破坏性操作单独一步执行并检查回显、路径用途不明时先查看再动手。起因是 `.tanya/` 被误认作实验脚手架而遭递归删除的事故；护栏治诱因、不治损失（损失侧由「落盘不做静默重建」与 `/export` 兜住），内容由 `main_test.go` 的 `TestSystemPromptHasDestructiveOpGuard` 守护。**2026-11-27 精简（10 行 → 8 行）**：删掉与 `run_shell` 工具描述重复的两处——「通过 run_shell 读文件/执行命令/改代码」与「文件操作优先通过 run_shell 执行」（工具描述结尾已写「读文件、搜索、文本处理等系统操作都用它」），以及「操作文件时明确显示路径」（工具块本就显示命令与 cwd）；首行的「（兼容 Pi/opencode）」与「通过工具完成用户交给的任务」同轮删除（历史来源注记 + 目标复述，不改行为）；测试只同步 env golden，不为文案取舍加「不含某句」的断言（一次性决定不固化成枷锁）
 - 职责边界：**环境段归 `main`**（`main.systemBase` 拼「提示词 + 环境段」一次注入），`agent` 侧**无任何 env 概念**——agent 只管在注入基座后追加两层 AGENTS.md 并冻结快照，与其「通用 agent 核心」定位一致（不感知 shell、工作区）。环境段详见《系统提示头部》
 - 快照机制：注入文本在 `promptBuilder` 构造期归一化（`\r\n`→`\n`、去尾部换行），保证注入字节确定；**快照为空则不写 system 行**（与 `loadFrom` 的「首行 system 且非空才算快照」对称，空提示词的库用法不会在文件里留下空快照行，载入时按当前配置重建）——`/new` 与 `/load` 时刻读取 AGENTS.md 组装快照；会话进行中零文件 IO，快照冻结；旧格式会话（system 首行含历史环境段）原样保留并标记，`/load` 时提示 `/new`
 - 缓存收益：history 全程 append-only，system 在本进程内逐字节恒定，同一会话内请求前缀不变，prompt cache 逐轮全量命中；`/new` 时 AGENTS.md 未变则 system 前缀跨会话命中。env 段自 2026-09-14 起在装配期定格、2026-09-24 起随基座并入 `main` 注入（此前的 `WORKSPACE` 行是 system 内唯一会自行变化的输入，已随 2026-09-14 收口删除）；`/switch` 换工作区时工具描述随新工作区重建，而 system 不再变化（env 段已不含工作区事实，见《系统提示头部》）
@@ -613,24 +613,23 @@ repl 输出侧测试方法（输出收敛方案阶段 0-4 建立；流式期热�
 
 ## 系统提示头部（env 段）
 
-- 定位：只注入模型无法廉价自探的最小事实集——平台事实与 shell 执行契约；工具清单不注入 prompt（function calling 已完整提供），工具版本/分支/目录列表等易变信息模型可按需自探，一律不预注入
-- 组装：**由 `main` 组装**——`main.systemBase(inv)` = `systemPromptFile`（内置提示词原文）+ 空行 + `envSection(inv)`（`inv` 为 `shell.Resolve(cfg.Shell)` 的结果），经 `agent.WithSystemPrompt` 注入为 agent 的**基座**；`agent` 侧无 env 段概念（无 `Agent.env` / `runtimePrompt` / `envSection` / `EnvReporter`），`promptBuilder.build()` 只在基座后追加两层 AGENTS.md
+- 定位：只注入模型无法廉价自探的最小事实集——平台事实与执行契约（shell 名、可用程序与交互语义已由 `run_shell` 的工具描述承载，不在此重复）；工具清单不注入 prompt（function calling 已完整提供），工具版本/分支/目录列表等易变信息模型可按需自探，一律不预注入
+- 组装：**由 `main` 组装**——`main.systemBase()` = `systemPromptFile`（内置提示词原文）+ 空行 + `envSection()`（纯函数，不接收 shell 信息），经 `agent.WithSystemPrompt` 注入为 agent 的**基座**；`agent` 侧无 env 段概念（无 `Agent.env` / `runtimePrompt` / `envSection` / `EnvReporter`），`promptBuilder.build()` 只在基座后追加两层 AGENTS.md
 - 段序：`system_prompt.md` → `# 环境`（紧随内置提示词）→ `# 全局说明（~/.config/tanya/AGENTS.md）` → `# 项目说明（AGENTS.md）`
 - 生命周期：基座在 `main` 构造期算一次、随 `Options.systemPrompt` 定格进 `promptBuilder`，并**进快照**（写入会话首行 system）；`/load` 时随首行还原（不再重算），`/new`/`/switch` 复用同一份注入基座
 - 为何定格：system 位于序列化后的 messages/instructions 之前，其任何字节变化都击穿其后全部 history 与 tools 的缓存前缀（实测量化见 battlelab 的 `docs/cache-probe.md`）。新增字段的准入红线：只收构造期确定的事实，永不引入请求期/TTL 类输入（定格是**进程内**稳定性要求，跨版本无此约束，见《系统提示与缓存友好》）
-- 输出格式（5 行紧凑键值，全部源自构造期事实；同一次构造字节级确定）：
+- 输出格式（3 行紧凑键值，全部源自构造期事实；同一次构造字节级确定）：
 
   ```
   # 环境
   OS: linux/amd64
-  SHELL: bash
-  TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）
   TIMEOUT: 默认 60s（interactive 时 300s），上限 900s
   OUTPUT: stdout/stderr 头尾各 30KB，中间截断
   ```
 
 - **无 CWD 行**（2026-09-24）：`agent` 作为通用 agent 核心不应感知工作区，且 `/switch` 换工作区后 system 前缀本就不该改写（CWD 若在 system 内，切区即击穿缓存前缀）；工作区绝对路径改由模型按需自探（`pwd`）、或从提示符 `{cwd}` / 工具结果获得
-- 事实源单一：OS 行取 `runtime.GOOS`/`GOARCH`（main）；SHELL 行取 `shell.Invocation.Name`（与 `run_shell` 工具描述同源，只报 shell 名、不描述调用形态）；TIMEOUT/OUTPUT 两行由 `tools/shell` 导出常量（`TimeoutSec`/`InteractiveTimeoutSec`/`TimeoutLimit`/`MaxOutput`）程序化生成；TTY 行固定契约文案，无第二份硬编码描述
-- 平台条件：`TTY:` 行仅在 `ctty.Supported`（linux/darwin）为真时输出，不宣称不存在的 /dev/tty 能力
+- 事实源单一：OS 行取 `runtime.GOOS`/`GOARCH`（main）；TIMEOUT/OUTPUT 两行由 `tools/shell` 导出常量（`TimeoutSec`/`InteractiveTimeoutSec`/`TimeoutLimit`/`MaxOutput`）程序化生成
+- **SHELL 行已删（2026-11-27）**：shell 名已由 `run_shell` 工具描述给出（`在 linux 内置 bash 解释器中执行命令…`，随配置动态生成，还附带可用程序清单与 vbash 的构造边界），环境段再报一次纯属同源重复；删除后 `envSection` 不再需要 `shell.Invocation` 参数。
+- **TTY 行已删（2026-11-27）**：原 `TTY: 交互提示须写入 /dev/tty 才可见（stdout/stderr 被工具捕获）` 是 2026-09-09 随 `interactive` 参数引入的（当时普通命令 stdin 直通 `/dev/tty` 并移交前台组）。2026-09-27 控制台层 S5 下线该形态后此行的前提已不成立，且字面读作「要给用户看就得写 `/dev/tty`」——那是绕过工具结果、扰乱渲染的旁路（见 `docs/repl-status-append.md`），真正的正路是 `interactive: true`（`run_shell` 工具描述已完整覆盖）。故整行删除，环境段只留平台与执行契约事实
 - 取舍：环境事实定格在进程启动时刻（换机需重启进程）；目录内容、分支、工具版本等项目事实一律不注入，由模型按需自探（`ls`/`git rev-parse` 等）
 - 可测性：main 侧 golden（`main_test.go` `TestEnvSectionNoCwdAndGolden` / `TestSystemBaseAppendsEnvAfterPrompt`）；agent 侧 `TestSystemPromptIsInjectedBase`（system 等于注入基座）+ `TestEnvStableInSession`（会话期间快照冻结守卫）
